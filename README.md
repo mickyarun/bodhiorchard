@@ -2,566 +2,43 @@
 
 # Bodhiorchard&trade;
 
-### Agent-Driven Development — the modern alternative to sprint, scrum, and agile
+### From conversation to production, with twelve AI agents.
 
-**The open-source reference implementation. From conversation to production, every phase powered by 12 intelligent agents working alongside humans.**
-
-Self-hosted on your hardware. Your data stays local. Inference engine is your choice — Claude Code today, Ollama and OpenAI next.
-
-**🌳 [bodhiorchard.ai](https://bodhiorchard.ai/)** — the methodology, the videos, the screenshots.
+**The open-source alternative to sprint, scrum & agile — self-hosted, AI-engine-agnostic, and built so your data never leaves your machine.**
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Website](https://img.shields.io/badge/website-bodhiorchard.ai-2E7D32.svg)](https://bodhiorchard.ai/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688.svg)](https://fastapi.tiangolo.com)
 [![Vue 3](https://img.shields.io/badge/Vue.js-3-4FC08D.svg)](https://vuejs.org)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-336791.svg)](https://www.postgresql.org)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED.svg)](https://www.docker.com)
 
-[Website](https://bodhiorchard.ai/) | [Getting Started](#getting-started) | [How It Runs](#how-it-runs) | [AI Engines](#ai-engines) | [AI Agents](#ai-agents) | [Manifesto](#the-manifesto) | [API](#api) | [FAQ](#faq) | [License](#license)
+[Website](https://bodhiorchard.ai/) · [Quick Start](#quick-start) · [Why Bodhiorchard](#why-bodhiorchard) · [The Twelve Agents](#the-twelve-agents) · [Docs](#documentation) · [FAQ](#faq)
+
+<a href="https://youtu.be/OxoqBI7BNxU"><img src="https://img.youtube.com/vi/OxoqBI7BNxU/maxresdefault.jpg" width="70%" alt="Bodhiorchard demo — the Living Tree, your org as a tended orchard"></a>
+
+**[▶ Watch the demo](https://youtu.be/OxoqBI7BNxU)** — your organization as a living, tended orchard.
 
 </div>
 
 ---
 
-<div align="center">
+**Bodhiorchard** is the open-source reference implementation of **Agent-Driven Development (ADD)** — a software development methodology where twelve specialised AI agents handle the busywork (specs, estimates, test plans, triage, retrospectives) and humans keep the decisions that matter. It works as a **self-hosted Jira alternative** for the full lifecycle: intake → spec → design → development → testing → deploy → retrospective. The data plane stays on your hardware; inference runs on [Claude Code](https://docs.anthropic.com/en/docs/claude-code) today, with Ollama and OpenAI next.
 
-### 📺 Watch the demo
+> **Less process. More shipped.** The full methodology lives at [bodhiorchard.ai](https://bodhiorchard.ai/).
 
-<a href="https://youtu.be/OxoqBI7BNxU"><img src="https://img.youtube.com/vi/OxoqBI7BNxU/maxresdefault.jpg" width="80%" alt="Inside the virtual world"></a>
+## Quick Start
 
-**[▶ Inside the virtual world](https://youtu.be/OxoqBI7BNxU)** — the Living Tree, your org as a tended orchard.
-
-**More walkthroughs:** [Setup](https://youtu.be/ot-BmKxRgRA) &nbsp;·&nbsp; [Slack triage & MCP tools](https://youtu.be/i8kZdcL1bME) &nbsp;·&nbsp; [Requirements & estimation](https://youtu.be/YBwdTes0Fno) &nbsp;·&nbsp; [Design phase & agent prompts](https://youtu.be/lV71qhmfzzw) &nbsp;·&nbsp; [Development & retrospective](https://youtu.be/YjRihN_SKaw)
-
-</div>
-
----
-
-## Screenshots
-
-**The platform** — what AI agents drive end-to-end:
-
-| Living Tree dashboard | BUD board | Feature registry |
-|---|---|---|
-| ![Living Tree dashboard](docs/images/livingtree.png) | ![BUD board](docs/images/board.png) | ![Feature registry](docs/images/Feature.png) |
-
-**The gamification layer** — the Skill Agent rebuilds developer profiles nightly. Skills compound, badges unlock, and the leaderboard reflects shipped value, not ticket count:
-
-| Skill profile | XP progression | Leaderboard | Unlocks |
-|---|---|---|---|
-| ![Developer skill profile](docs/images/skills.png) | ![XP progression](docs/images/gamification.png) | ![Leaderboard](docs/images/LeaderBoard.png) | ![Unlocks](docs/images/unlocks.png) |
-
----
-
-## What is Bodhiorchard?
-
-Bodhiorchard is the **open-source reference implementation of Agent-Driven Development** — a modern way to build software that replaces sprint planning, scrum ceremonies, and agile ritual with twelve specialised AI agents working alongside humans across every phase of the lifecycle. The methodology drops *what was meant to help but became the work* (story points, planning poker, status meetings, retrospective theatre) and keeps *what actually matters* (clear specs, codebase context, accurate cycle-time predictions, real-time learning). Bodhiorchard runs self-hosted on your hardware so the data plane never leaves your machine; the agents run today on [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) for codebase-aware reasoning and the **Anthropic direct API** for lightweight non-codebase calls, with [**Ollama**](https://ollama.com) (fully air-gapped), the **OpenAI** direct API, and **OpenAI Codex** on the near-term roadmap.
-
-### The Problem
-
-Traditional Agile tools create busywork: manual ticket creation, estimation poker, status updates, retrospective meetings, and scattered documentation across Jira, Confluence, Notion, and Slack. Developers spend more time managing work than doing work.
-
-### The Solution
-
-Bodhiorchard replaces human busywork with AI automation while keeping humans in control of decisions that matter:
-
-| Phase | Agile / Scrum | Agent-Driven Development (Bodhiorchard) |
-|---|---|---|
-| **Intake** | Ticket in Jira, manual triage, sprint planning | Chat message → Triage Agent analyses, finds duplicates, estimates capacity |
-| **Estimation** | Story points, planning poker, team debate | AI-PERT + Monte Carlo simulation — per-phase dates with P50 / P70 / P85 confidence, factoring developer skill profiles, backlog depth, and workload |
-| **Specification** | PM writes BUD manually, reviews in meetings | BUD Agent drafts spec with codebase context, enterprise rules, prior art |
-| **Design** | Designer creates in Figma, hands off specs | AI generates wireframes; Designer reviews, edits, and advances to Tech Architecture |
-| **Tech Arch** | Architect writes design doc, reviews in meetings | AI generates tech plan; Tech Lead reviews; Smart Assignment Agent suggests developer |
-| **Development** | Dev picks up ticket, starts from scratch | Best-fit dev assigned by AI, implements from tech plan, human reviews code |
-| **Testing** | QA writes test cases manually, runs regression | Auto-generated test plan (unit, integration, e2e, perf, security, UAT) |
-| **QA & UAT** | QA writes test cases, manual handoff | QA approves / refines automation plan, executes manual tests, signs off for UAT |
-| **Deployment** | Release train, manual status updates | Status Agent auto-detects PR merges; BUD becomes a Feature on deploy |
-| **Bug Mgmt** | Manual triage, reassign in standup | External bugs reopen Features, auto-classified, restart flow from triage |
-| **Knowledge** | Confluence pages go stale, tribal knowledge | Learning Agent captures patterns; knowledge auto-syncs from code |
-| **Skills** | Manager intuition, annual reviews | Skill Agent rebuilds daily from git / BUD / bug history, recommends assignments |
-| **Retrospective** | Biweekly meeting, action items forgotten | Learning Agent auto-generates retrospective on every deployment |
-
----
-
-## The Manifesto
-
-Agent-Driven Development has its own manifesto. Eight principles, deliberately echoing the Agile Manifesto's "X over Y" structure — these are what an agent-driven team chooses when the trade-off is real.
-
-| We value… | …over |
-|---|---|
-| **AI-generated first drafts** | blank-page paralysis |
-| **Cycle time predictions** | story points & planning poker |
-| **Continuous learning** | post-mortems after the damage |
-| **Human decisions** | human busywork |
-| **Living knowledge** | stale Confluence pages |
-| **BUD as single source of truth** | scattered tickets & docs |
-| **Skills that grow with the team** | static role assignments |
-| **Auto-healing quality loops** | manual bug triage |
-
-> The full methodology — phase-by-phase flow, AI-vs-Human role split, knowledge architecture — lives at **[bodhiorchard.ai](https://bodhiorchard.ai/)**.
-
----
-
-## Key Features
-
-### BUD (Business Understanding Document) — Single Source of Truth
-
-Every feature lives in one **BUD** — spec, tech spec, test plan, acceptance criteria, and full history. Replaces scattered Jira tickets, Google Docs, and Notion pages.
-
-```
-BUD Lifecycle: bud -> design -> tech_arch -> development -> testing -> uat -> prod -> closed
-                                                                                |
-                                                                      discarded (any time)
-```
-
-- Markdown-based with separate sections for spec, tech spec, and test plan
-- Vector-indexed for semantic search by all agents
-- Full history: stage transitions, assignees, reopens, linked bugs
-- Auto-numbered per organization (BUD-001, BUD-002, ...)
-
-### Living Tree Dashboard
-
-A **3D interactive visualization** of your organization rendered as a living tree:
-
-- **Trunk** = Organization
-- **Limbs** = Repositories
-- **Branches** = Code communities (auto-detected)
-- **Leaves** = Recent files (color = "freshness" from git activity)
-
-Hover for developer details, click for drill-down, watch the tree grow as your codebase evolves.
-
-### AI-PERT + Monte Carlo Estimation
-
-Story points and planning poker replaced with probabilistic, per-phase delivery dates.
-
-- AI generates optimistic, likely, and pessimistic estimates (PERT) for each BUD phase.
-- **10,000 Monte Carlo simulations** produce **P50 / P70 / P85** confidence dates.
-- Estimates factor in developer skill profiles, current backlog depth, and team workload.
-
-> **Example prediction.** *Feature:* Notification Redesign (complexity 3/5). *Developer:* Alice (backend 0.92, frontend 0.35). *Go-live:* 70% by Apr 25 · 85% by May 2.
-
-### Smart Quality Loops
-
-Auto-healing bug management that prevents quality debt from accumulating.
-
-- **Bug threshold** — complexity × multiplier, configurable per org; when exceeded, auto-reassignment fires.
-- **Auto-reassignment** — original dev moves to bug review, QA rotates to the next waiting BUD.
-- **Feature reopening** — production bugs reopen the originating Feature and restart the flow from triage.
-- **Auto-classification** — each bug is tagged "missed feature" vs "development bug", driving different fix paths.
-- **Knowledge capture** — every fix adds to the knowledge base so the same bug class doesn't recur.
-
-### Backlog Intelligence
-
-Smart backlog management driven by data, not gut feelings.
-
-- **Capacity-aware triage** deprioritises or defers items based on real-time team capacity.
-- **Dynamic reassignment** shuffles work as business demand shifts.
-- **Customer priority scoring** — ARR + severity + tier drives ordering automatically.
-- **Best-fit developer** recommendations from the Skill Agent.
-- **Real-time utilisation** — per-developer capacity tracking keeps workloads balanced.
-
-### Knowledge That Grows — 4-Layer Architecture
-
-A 4-layer knowledge architecture replaces stale wikis with living, auto-synced knowledge.
-
-| Layer | Source | Sync cadence |
-|---|---|---|
-| **1. Git repos** | Source code + per-repo `CLAUDE.md` | Every 15 minutes |
-| **2. Agent skills** | Org standards, design guidelines, API patterns | On change |
-| **3. Central DB** | BUDs, enterprise rules, architecture decisions | Real-time |
-| **4. Vector search** | Semantic search across all of the above | Auto-indexed |
-
-**Why this beats Confluence:** auto-synced from source (not hand-maintained), semantically searchable (not keyword search), always current (daily staleness detection), and integrated into every agent prompt so agents always have the latest context.
-
-### Developer Skill Profiling
-
-Automatic skill tracking from git history — no manual profile updates:
-
-- Per-developer, per-module expertise scores (0-1.0)
-- **Bus factor alerts** — modules touched by only one person, flagging knowledge concentration risk
-- Intelligent task routing based on expertise match + capacity
-- Daily profile rebuilds from git commits, BUD assignments, and bug fixes
-
-### Slack-Native Feature Intake
-
-Submit features directly from Slack. The Triage Agent conducts a structured interview:
-
-1. User posts in `#feature-requests`
-2. AI asks clarifying questions in a thread
-3. Checks for duplicates via vector search
-4. Estimates complexity from codebase analysis
-5. Suggests priority with capacity check
-6. PM approves in the Bodhiorchard UI
-7. BUD Agent generates the full specification
-
-### Multi-Repo Code Intelligence
-
-Powered by an in-tree code-graph indexer (`backend/app/services/code_indexer/`)
-built on the MIT-licensed [graphify](https://github.com/safishamsi/graphify)
-library — tree-sitter parsing → NetworkX graph → Leiden community detection:
-
-- Scan repositories to build a per-repo knowledge graph of code relationships
-- Auto-synthesize feature descriptions from code clusters
-- Cross-repo feature deduplication and merging
-- Semantic search across all indexed code and documentation
-- Impact / blast-radius queries via the `code_*` MCP tool group
-
-### AI-engine-agnostic with first-class MCP
-
-Bodhiorchard runs an **MCP server** that exposes BUD-lifecycle writes (`create_bud`, `update_bud`, `write_bud_design`), feature-registry reads/writes, team-context queries, design-system metadata, the code-graph impact tool group, and granular TODO claim/complete — all to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and any MCP-compatible client. Today's flagship engine is Claude Code; the Anthropic direct API handles lightweight non-codebase agents; Ollama, OpenAI, and OpenAI Codex are next. See [AI Engines](#ai-engines) for the full tool list, auth modes, and the `~/.claude.json` registration snippet.
-
-### Bring your own AI — external-LLM mode
-
-Prefer to draft your PRD / design / tech spec with **your own** local AI? Toggle "Auto-generate" off when creating a BUD, then connect Claude Desktop / Cursor / Continue to the read-only remote MCP endpoint and paste the finished spec back into the section editors. Tokens are scoped, expiring, individually revocable, rate-limited, and audited. See **[MCP-REMOTE.md](MCP-REMOTE.md)** for the full setup, client config snippets, and threat model.
-
-### Enterprise-Grade Security
-
-- **Multi-tenant isolation** — all queries scoped to organization
-- **RBAC** with 9 built-in roles and granular permissions
-- **AES encryption at rest** for GitHub PATs, Slack tokens, and secrets
-- **JWT authentication** with refresh tokens
-- **Audit trail** — every agent action logged with full context
-
-### What AI handles vs what humans handle
-
-The point of the agents is not to replace human judgement — it's to absorb the busywork so humans can focus on the calls that actually matter.
-
-| 🤖 AI handles | 🧑 Humans handle |
-|---|---|
-| Intake analysis & duplicate detection | Review and advance decisions at every phase |
-| BUD drafting with codebase context | Code review & architecture choices |
-| Design scope & tech plan generation | Visual design in preferred tools |
-| Test case generation (automation + manual) | Business trade-offs & prioritisation |
-| Bug-to-BUD linking & threshold monitoring | Quality validation & UAT sign-off |
-| Status tracking & stakeholder updates | Reassignment review & override |
-| Pattern recognition & retrospectives | Knowledge curation & enterprise rules |
-| Skill profiling & assignment recommendations |  |
-| Knowledge sync (code → docs → vector DB) |  |
-| AI-PERT estimation with Monte Carlo intervals |  |
-| Smart developer assignment based on skills & capacity |  |
-
----
-
-## How It Runs
-
-Bodhiorchard splits cleanly into two planes so you can pick how much of it lives on your hardware.
-
-### The data plane is always local
-
-Postgres + pgvector, every BUD, the embeddings index, the scanned repos, the agent skills, and the audit log all sit on your machine. Nothing in this plane ever calls home — even when you choose cloud inference, the data the agents reason over stays on your hardware.
-
-### Inference is your call
-
-Three first-class modes, three reasons to pick each:
-
-- **Local Claude Code** — point Bodhiorchard at a host `claude login` session. Pro / Max flat-rate, no per-token bills, codebase-aware.
-- **Cloud Claude via API key** — paste an `sk-ant-…` into **Settings → AI Configuration → Claude Code**. Pay-per-token, recommended for evaluators and CI.
-- **Anthropic direct API** — for the lightweight non-codebase agents (Triage, Bug-Linker, Standup). Lower latency and lower per-call cost than going through Claude Code.
-
-See [AI Engines](#ai-engines) for the engine-by-engine breakdown.
-
-### One-machine self-host
-
-A single laptop or Mac Mini runs the whole platform — frontend, backend, multiplayer, Postgres, Redis. A **Cloudflare Tunnel** optionally exposes just the Slack / GitHub webhook endpoints without putting the rest of the stack online. This makes Bodhiorchard a credible **self-hosted Jira alternative** for teams that don't want to live on per-seat SaaS.
-
-### What you get
-
-- **Lower cost than per-seat SaaS** — no platform-compute bills; pay only for whichever inference engine you wire up (or flat-rate if you're on a Claude subscription).
-- **Lower energy footprint** — a Mac Mini idles around 10W vs hundreds of watts for cloud VMs.
-- **Data residency by default** — code, BUDs, embeddings, and knowledge stay on your hardware even when inference is in the cloud.
-
-### System diagram
-
-```
-  Your Machine (Laptop / Mac Mini)
-  ┌────────────────────────────────────────────────────────────┐
-  │                                                            │
-  │  ┌──────────────┐  ┌──────────────┐  ┌─────────────────┐  │
-  │  │  Vue 3 SPA   │  │  FastAPI     │  │  Claude Code    │  │
-  │  │  (Frontend)   │──│  (Backend)   │──│  (AI Engine)    │  │
-  │  └──────────────┘  └──┬───┬───┬───┘  └────────┬────────┘  │
-  │                       │   │   │                │           │
-  │          ┌────────────┘   │   └──────────┐     │ MCP       │
-  │          │                │              │     │ (MCP tools)│
-  │  ┌───────▼────┐  ┌────────▼──┐  ┌────────▼──────┐ │         │
-  │  │ PostgreSQL │  │  Redis    │  │ Ollama / OpenAI│ │         │
-  │  │ + pgvector │  │  Cache    │  │ (coming soon)  │ │         │
-  │  └────────────┘  └───────────┘  └────────────────┘ │         │
-  │                                                            │
-  └──────────────────────┬─────────────────────────────────────┘
-                         │ Cloudflare Tunnel (optional)
-                         │
-             ┌───────────▼───────────┐
-             │  Internet             │
-             │  ├─ Slack webhooks    │
-             │  ├─ GitHub webhooks   │
-             │  └─ Cloud LLM APIs   │
-             └───────────────────────┘
-```
-
----
-
-## AI Engines
-
-Bodhiorchard is **AI-engine-agnostic**. The agent layer is engine-independent — adding a new engine is API rewiring only, no deployment changes. Today: Claude Code + the Anthropic direct API. Next: Ollama (air-gapped), OpenAI, OpenAI Codex.
-
-### Today — Claude Code (codebase-aware agents)
-
-Codebase-aware agent runs (BUD spec, Tech Plan, Implementation, Code Review) are executed by the Claude Code CLI, which gives agents file access, shell tool-use, and direct access to Bodhiorchard's MCP server.
-
-**Why Claude Code (and not just the raw API):**
-
-- **Codebase awareness out of the box** — Claude Code already knows how to read files, run shell commands, and edit code; Bodhiorchard reuses that surface area instead of re-implementing it.
-- **Token-efficient by default** — agent prompts use Anthropic prompt caching, structured tool-use, and incremental context loading. The cost per BUD stays low even on long sessions.
-- **One runtime, two billing models** — point Bodhiorchard at an Anthropic API key (pay-per-token) **or** at a host `claude login` session backed by a Claude Pro / Max subscription (flat-rate). Same agents either way.
-
-**Authentication modes:**
-
-| Mode | When the org uses this | Where the credential lives |
-|---|---|---|
-| `api_key` | Full Docker deployments, or any host that doesn't have a Claude subscription | `sk-ant-…` key encrypted in Postgres (Fernet AES-128) and pushed into the backend's process env on save |
-| `hybrid_host` | Hybrid deployments where the developer already runs `claude` interactively | Host's existing `claude login` session — nothing stored in the database |
-
-The backend auto-detects which mode is available (via `/.dockerenv`) and the Settings page only surfaces the option that actually works for that deployment.
-
-### Today — Anthropic direct API (lightweight non-codebase agents)
-
-Triage, Bug-Linker, and Standup don't need to read files — they reason over chat messages, bug reports, and aggregated activity. For those, Bodhiorchard skips Claude Code and calls the Anthropic API directly. Lower latency, lower per-call cost, same `sk-ant-…` key (configured at **Settings → AI Configuration → Anthropic API**).
-
-### Coming soon
-
-| Engine | Status |
-|---|---|
-| **Ollama** (fully local, free, air-gapped) | Planned |
-| **OpenAI** API (GPT-4o / 4 / 3.5) | Planned |
-| **OpenAI Codex** | In development |
-
-These will appear as additional presets in the AI Configuration page — API rewiring only, no deployment changes.
-
-### MCP server — the tools Bodhiorchard exposes to Claude Code
-
-Bodhiorchard runs an MCP server on `:8001` (HTTP) with a `stdio` bridge for desktop clients. The tools split into six groups. Every call is JWT-scoped to the calling user's organisation, audited, and rate-limited.
-
-**BUD lifecycle (write path)** — how agents and the UI create and advance BUDs:
-
-| Tool | Purpose | Typical caller |
-|---|---|---|
-| `create_bud` | Create a new BUD from a chat request, intake interview, or external trigger. Returns the BUD id + slug used by every later call. | Triage Agent (Slack/Teams intake), UI "New BUD" button, external MCP clients drafting their own spec |
-| `update_bud` | Patch any field on an existing BUD — status transitions, assignee changes, priority bumps, spec edits. | BUD Agent (spec generation), Status Agent (PR-merge → status), human reviewers |
-| `write_bud` | Replace a full BUD markdown section (spec / tech spec / test plan / acceptance criteria). | BUD Agent, Tech Plan Agent, Test Plan Agent — each owns a section |
-| `get_bud_by_id` | Fetch a single BUD by id with all sections + full history. | Anywhere a deep-link lands an agent on a specific BUD |
-| `get_bud_context` | Retrieve nearby / related BUDs for codebase-aware drafting (vector search + same-repo siblings). | BUD Agent during draft, agents avoiding duplicate work |
-| `write_bud_design` | Save Design Agent output — wireframes, design notes, Figma links. | Design Agent, Designer reviewing/editing |
-| `get_bud_designs` | List the design artefacts already attached to a BUD. | Design Agent (avoid re-generating), Tech Plan Agent (read design intent) |
-| `get_bud_plan` | Fetch the implementation plan + file-level TODOs for a BUD. | Implementation runs, Smart Assignment Agent, developers via `claude` |
-| `takeover_todo` / `complete_todo` | Claim a specific TODO item and mark it done. Enables a developer (or AI) to atomically pick up granular work. | Implementation Agent, IDE-side coding assistants pairing with Bodhiorchard |
-
-**Feature registry (post-deploy)** — what shipped, deduplicated, knowledge-base searchable:
-
-| Tool | Purpose |
-|---|---|
-| `get_features` | List shipped features across the org with filters (repo, area, owner, recency). |
-| `get_pending_features` | Next batch of code-cluster candidates waiting for synthesis into Features. |
-| `write_synthesis_feature` | Save a feature description synthesised from a code-cluster. |
-| `write_feature_registry` | Promote a BUD to a permanent Feature on deploy. |
-| `check_feature_exists` | Dedup check before creating — vector + name lookup. |
-| `search_bugs` | Find related bugs for a feature (powers the bug-linker threshold path). |
-
-**Team & design system context** — what agents need to know about people and projects:
-
-| Tool | Purpose |
-|---|---|
-| `get_team_context` | Per-org team snapshot: people, skill profiles, capacity, current assignments. Used by Triage, Smart Assignment, Standup. |
-| `list_design_systems` / `get_design_system` | Project design-system metadata (Vuetify theme, tokens, component patterns) that Design Agent consumes when drafting wireframes. |
-| `post_slack_message` | Send a thread reply or DM from an agent run. Used by Triage during intake interviews and by Status / Standup for stakeholder updates. |
-| `get_prompt` | Fetch a versioned agent prompt template from the org's prompt registry. Lets agents stay in sync when prompts are tuned. |
-
-**Code graph (`code_*` tool group)** — impact / blast-radius queries powered by the in-tree code-graph indexer (`backend/app/services/code_indexer/`):
-
-| Tool | Purpose |
-|---|---|
-| `code_impact` | Upstream / downstream BFS from a symbol — *what breaks if I change this?* |
-| `code_query` | Substring search across symbol labels + file paths. |
-| `code_context` | 360° on a single symbol: attributes, callers, callees, file. |
-| `code_community` | List nodes/files in one auto-detected cluster. |
-| `code_god_nodes` | Top-N highest-degree hubs — refactoring candidates. |
-| `code_stats` | Graph stats + language extension distribution. |
-
-**Hooks & activity** — `dev_activity` ingests Claude Code hook events for the Standup Agent's daily aggregation, and `agent_activity` records when an agent run starts/ends for the audit trail.
-
-> The full MCP server is in `backend/app/mcp/`. Each handler lives in `handlers_*.py`; the JSON-schema for every tool is defined alongside it. Auth, rate-limiting, and the audit pipeline are in `backend/app/mcp/{auth,audit,streamable}.py`.
-
-### Registering Bodhiorchard's MCP server in your own Claude Code
-
-Add an entry to `~/.claude.json` (or use `claude mcp add`):
-
-```json
-{
-  "mcpServers": {
-    "bodhiorchard": {
-      "type": "http",
-      "url": "http://localhost:8001/mcp"
-    }
-  }
-}
-```
-
-Restart Claude Code and the `bodhiorchard__*` tools will appear in tool-use. Pair this with the [Claude Code skills](https://docs.anthropic.com/en/docs/claude-code/skills) that ship in `backend/app/agents/skills/` to drive Bodhiorchard's agents from a regular `claude` session on your laptop.
-
----
-
-## AI Agents
-
-Bodhiorchard ships with **12 specialized agents**, each triggered automatically and connected to each other:
-
-### Intake & Planning
-
-| Agent | Trigger | What It Does |
-|---|---|---|
-| **Triage Agent** | Chat / Slack event | Interviews users, checks capacity, finds duplicates, estimates complexity, suggests priority |
-| **BUD Agent** | PM approval | Generates full BUD with codebase context, enterprise rules, prior art, and competitor analysis |
-
-### Design & Development
-
-| Agent | Trigger | What It Does |
-|---|---|---|
-| **Design Agent** | BUD approved | Scopes UI/UX requirements, generates component breakdowns and interaction specs |
-| **Tech Plan Agent** | BUD enters Tech Arch | Creates file-level implementation TODOs with architecture analysis and dependency mapping |
-| **Smart Assignment Agent** | Tech plan approved | Suggests best-fit developer from per-module skill profiles (0–1.0) and real-time capacity; manager reviews if present, otherwise auto-assigns |
-| **Status Agent** | GitHub webhook | Detects PR merges, infers status from branches, moves BUD folders, notifies stakeholders |
-| **Standup Agent** | Daily cron (08:30) | Aggregates git/PR/bug/chat activity into daily summaries with risk flag detection |
-
-### Testing & Quality
-
-| Agent | Trigger | What It Does |
-|---|---|---|
-| **Test Plan Agent** | Dev complete | Auto-generates Playwright e2e, unit/integration tests, manual UAT cases, and security tests |
-| **Bug Linker Agent** | New bug filed | Links bugs to BUDs via vector search, monitors thresholds, triggers reassignment |
-| **Reassignment Agent** | Bug threshold exceeded | Reassigns devs to bug review, rotates QA |
-| **Yield-offer flow** | Higher-priority BUD has no free slot | Offers the developer holding a lower-priority BUD a chance to yield it; rebalancing is always opt-in (Accept / Reject). No background rebalancer. |
-
-### Post-Deploy & Continuous
-
-| Agent | Trigger | What It Does |
-|---|---|---|
-| **Learning Agent** | BUD deployed | Cycle time analysis, estimate vs actual comparison, pattern matching, retrospective generation |
-| **Skill Agent** | Daily cron (02:00) | Rebuilds skill profiles from git/BUD/bug history, scores 0-1.0, detects bus factor risks |
-
-Every agent logs actions to an audit trail, uses the organization's configured LLM provider, and can be monitored in the UI.
-
----
-
-## Architecture
-
-### Tech Stack
-
-**Backend**
-- Python 3.12+ / FastAPI / SQLAlchemy 2.0 (async)
-- PostgreSQL 16 with pgvector for vector search
-- Redis for caching and job queues
-- fastembed for local embeddings (BAAI/bge-small-en-v1.5 by default)
-- Alembic for database migrations
-- structlog for structured JSON logging
-
-**Frontend**
-- Vue 3 (Composition API) / TypeScript 5.3
-- Vuetify 3 (Material Design component library)
-- Pinia for state management
-- PlayCanvas for the 3D Living Tree dashboard and multiplayer world (Rapier3D physics)
-- Axios with auth interceptor
-
-**AI & Infrastructure**
-- Claude Code as the sole AI engine today (authenticated via API key in Full Docker, or host `claude login` in Hybrid)
-- Docker + Docker Compose on a local machine or Mac Mini
-- Cloudflare Tunnel for exposing webhooks to Slack / GitHub / internet
-- Anthropic direct API live for non-codebase agents; Ollama / OpenAI / Codex integrations planned (see [AI Engines → Coming soon](#ai-engines))
-
-### Project Structure
-
-```
-bodhiorchard/
-├── backend/
-│   ├── app/
-│   │   ├── api/v1/          # REST API endpoints
-│   │   ├── agents/          # AI agent orchestration & skill definitions
-│   │   ├── core/            # Auth, security, dependencies
-│   │   ├── mcp/             # Model Context Protocol server
-│   │   ├── models/          # SQLAlchemy ORM models
-│   │   ├── repositories/    # Data access layer (org-scoped)
-│   │   ├── schemas/         # Pydantic request/response DTOs
-│   │   └── services/        # Business logic (LLM, scanning, synthesis)
-│   ├── alembic/             # Database migrations
-│   ├── entrypoint.sh        # Runs migrations then uvicorn
-│   └── Dockerfile           # Multi-stage production build
-│
-├── frontend/
-│   ├── src/
-│   │   ├── views/           # Page components
-│   │   ├── components/      # Reusable UI (tree visualization, cards)
-│   │   ├── stores/          # Pinia state management
-│   │   ├── types/           # TypeScript interfaces
-│   │   └── data/            # Shared data (agent definitions)
-│   └── package.json
-│
-├── multiplayer/             # Colyseus multiplayer server (TypeScript)
-├── scripts/                 # setup.sh, wait-for-postgres.sh
-├── docker-compose.yml       # Full stack: postgres + redis + backend + fe + mp
-├── docker-compose.infra.yml # Contributor infra only: postgres + redis
-├── package.json             # npm workspaces + dev scripts (root)
-├── BODHIORCHARD-ARCHITECTURE.md  # Comprehensive architecture spec (8400+ lines)
-├── AGENTS.md                # Agent capabilities documentation
-├── CHANGELOG.md             # Release notes
-└── LICENSE                  # Apache-2.0
-```
-
----
-
-## Getting Started
-
-Bodhiorchard ships in **two deployment modes**. Pick the one that matches how you want to run it — the product is identical, only the process boundary between your host and the containers changes.
-
-| Mode | What runs in Docker | What runs on your host | Claude auth |
-|---|---|---|---|
-| **Full Docker** | postgres, redis, **backend**, multiplayer, frontend | nothing | Anthropic API key (entered in Settings → AI Configuration) |
-| **Hybrid** | postgres, redis only (infra) | backend, multiplayer, frontend via `npm run dev` | The host's existing `claude login` session (Claude Pro/Max subscription) |
-
-**Pick Full Docker** for a one-command "evaluator" setup, a dedicated Mac-mini deployment, or any case where you'd rather pay-per-token via Anthropic's API than wire up a Claude subscription. **Pick Hybrid** if you already run `claude` interactively on your laptop and want agents to use that same flat-rate subscription, or you want hot-reload for development.
-
-### Fastest: one command with `npx` (no clone, no build)
-
-The quickest way to try Bodhiorchard. The [`bodhiorchard`](https://www.npmjs.com/package/bodhiorchard) npm package pulls prebuilt images from Docker Hub and runs the full Full-Docker stack — you don't clone the repo or build anything.
+The fastest path — no clone, no build. Needs only **Docker (running)** and **Node.js 18+**:
 
 ```bash
-npx bodhiorchard init     # detect ports, generate secrets, pull images
+npx bodhiorchard init     # detect ports, generate secrets, pull prebuilt images
 cd bodhiorchard
-npx bodhiorchard start     # start everything and open the setup wizard
+npx bodhiorchard start    # start the stack and open the setup wizard
 ```
 
-Needs only **Docker (running)** and **Node.js 18+**. If Postgres (5432) or Redis (6379) — or an app port — is already in use, the installer detects it and asks whether to **remap to a free port** or **reuse the existing service**. When the stack is healthy it opens **http://localhost:3000/setup**; finish there (organization, admin account, AI provider, repositories). No keys are entered on the command line.
+The wizard opens at **http://localhost:3000/setup** — finish there (organization, admin account, AI provider, repositories). `bodhiorchard stop` brings it down; your data volumes persist.
 
-Manage the stack with these commands (run from the install directory):
-
-| Command | What it does |
-|---|---|
-| `bodhiorchard init [name]` | Scaffold the install: resolve ports, generate secrets, pull images |
-| `bodhiorchard start` | Start the stack and open the setup wizard |
-| `bodhiorchard stop` | Stop the stack — **containers come down, your data volumes are kept** |
-| `bodhiorchard status` | Show container status and the access URLs |
-| `bodhiorchard logs [service]` | Follow logs (optionally for one service) |
-| `bodhiorchard update [--tag X.Y.Z]` | Pull newer images and restart |
-| `bodhiorchard reset` | Stop **and delete all data volumes** (destructive) |
-
-To stop everything when you're done, run `bodhiorchard stop` (your database and cloned repos persist; `bodhiorchard start` brings it back up). It's the same stack as **Full Docker mode** below — just pulled instead of built. Use the `git clone` paths below if you want to build from source or run in **Hybrid** mode.
-
-### Prerequisites
-
-- **Full Docker**: Docker Desktop ≥ 4.20 (everything else is in containers)
-- **Hybrid**: Docker + Node.js 18+ + Python 3.12+ + a host-installed, already-logged-in [Claude Code CLI](https://code.claude.com/docs/en/setup)
-- Windows: use WSL2 for either mode
-- (Optional) Cloudflare account for tunnel — needed for Slack/GitHub webhooks
-
-### Full Docker mode (one command)
+Prefer to build from source?
 
 ```bash
 git clone https://github.com/mickyarun/bodhiorchard.git
@@ -569,276 +46,183 @@ cd bodhiorchard
 docker compose up
 ```
 
-Open **http://localhost:3000**. Postgres, Redis, backend, multiplayer, and frontend all start together. Migrations run automatically on backend startup. First build takes ~5 min (the backend image installs git, Node.js 20, and the `@anthropic-ai/claude-code` npm package); subsequent runs are instant.
-
-Once the UI is up:
-
-1. Complete first-time setup (org name, admin user, source repo path).
-2. Go to **Settings → AI Configuration → Claude Code**.
-3. Choose **API key (Full Docker)**, paste an `sk-ant-…` key from [console.anthropic.com](https://console.anthropic.com/settings/keys), and **Save**.
-4. Click **Test connection** — it should report the CLI version and a successful round-trip.
-
-The key is encrypted (Fernet AES-128) in Postgres and pushed into the backend's process env on save, so every subsequent agent run inherits it. No compose-level env var required.
-
-### Hybrid mode (hot reload)
+Already running `claude` on your laptop? **Hybrid mode** reuses your Claude Pro/Max login instead of an API key:
 
 ```bash
-git clone https://github.com/mickyarun/bodhiorchard.git
-cd bodhiorchard
-npm install        # frontend + multiplayer deps via workspaces
-npm run setup      # Python venv, .env files, infra, migrations
-npm run dev        # backend + frontend + multiplayer, one terminal
+npm install && npm run setup && npm run dev
 ```
 
-- **Frontend**: http://localhost:3000 (Vite, hot reload)
-- **Backend**: http://localhost:8000/docs (FastAPI, `--reload`)
-- **Multiplayer**: ws://localhost:2567 (Colyseus)
+→ All three paths, the full `bodhiorchard` CLI command list, prerequisites, mode-switching, and a ready-made demo dataset: **[Deployment Guide](docs/deployment.md)**
 
-Only `postgres` and `redis` run in Docker (via `docker-compose.infra.yml`). The backend process inherits your shell environment — including whatever `claude login` has authenticated on your host — so agent runs use your Claude subscription automatically. In **Settings → AI Configuration → Claude Code**, leave the auth mode on **Hybrid / host login** (the default).
+## Why Bodhiorchard
 
-All three host processes run in a single terminal with color-coded logs. Ctrl-C stops them; `npm run stop` tears down the infra containers.
-
-### Switching between modes
-
-The database is the same shape either way, so you can swap modes against the same data. Stop the current mode first (`Ctrl-C` + `npm run stop` for Hybrid, `docker compose down` for Full Docker), then start the other. The stored `claude_auth_mode` on your organization determines which path agent runs take — update it in Settings when you switch.
-
-### Try the included examples
-
-Bodhiorchard pairs with **TaskFlow** — four deliberately wired-together sample repos that exercise cross-repo feature detection, skill profiling, BUD generation, and PR-merge feature reconciliation without you needing to wire up your own codebase:
-
-- `taskflow-api` — FastAPI backend (auth, tasks, notifications, billing)
-- `taskflow-web` — Vue + Vuetify frontend that calls into the API
-- `taskflow-worker` — async job worker (reminders, invoice generation)
-- `taskflow-qa` — Playwright BDD test suite
-
-The four repos share four features (Auth, Tasks, Notifications, Billing) implemented across them by four fictional developers, so the very first scan produces cross-repo features rather than four disconnected copies.
-
-The example repos are tracked **independently** at [`github.com/mickyarun/taskflow-*`](https://github.com/mickyarun?tab=repositories&q=taskflow) — they are NOT bundled into this repo. (The PR-merge testing flow merges PRs into them constantly, which would otherwise pollute the parent repo's `git status`.) The bootstrap script clones them on first run.
-
-**1. Bootstrap** (one-time, ~1 min — clones the four repos from GitHub and rebuilds their synthetic per-author commit history):
-
-```bash
-cd examples
-bash setup-git-history.sh
-```
-
-The script uses `gh repo clone` when available, falling back to `git clone` over SSH. To clone from a fork instead, export `BODHIORCHARD_EXAMPLES_OWNER=<your-username>` before running.
-
-**2. In the Bodhiorchard UI, add the four repos under Settings → Repositories:**
-
-```
-/absolute/path/to/examples/taskflow-api
-/absolute/path/to/examples/taskflow-web
-/absolute/path/to/examples/taskflow-worker
-/absolute/path/to/examples/taskflow-qa
-```
-
-Map each to its `main` branch.
-
-**3. Click "Full Rescan"** in the Repositories settings. The scan finishes in ~1–2 minutes on a Mac Mini and you should see:
-
-- **~4–6 cross-repo features** in the Feature Registry (Authentication, Tasks, Notifications, Billing, Reminders) — each one linked to the repos that actually implement it, not four separate copies per repo.
-- **Skill profiles for 4 developers** under Settings → Developers, with per-module scores derived from the synthetic git history.
-- **A populated Living Tree dashboard** — one limb per repo, branches per feature, leaves coloured by git freshness.
-- **A pre-written `BUD-001-tech-spec.md`** alongside the example repos you can paste into a new BUD via the UI to watch a realistic spec drive Tech Plan → Implementation.
-
-The TaskFlow repos are intentionally small (Vue 3 frontend, FastAPI + worker backends; ~6 commits per author) so the whole loop completes fast enough to demo. Read [`examples/README.md`](examples/README.md) for the full feature map, SQL verification queries, and author-to-skill mapping.
-
-You can also use the example repos to exercise the **PR-merge feature-reconcile flow**: open a PR on (e.g.) `mickyarun/taskflow-web`, merge it, and watch the backend's `webhook_logs` row transition from `pending` to `running` to `done` as the Redis-stream consumer processes the merge. The affected feature's `last_seen_sha` advances to the merge SHA and any new fetch calls materialise as BACKEND junctions in `feature_to_repo`.
-
-### Environment Variables
-
-| Variable | Description | Default |
-|---|---|---|
-| `DATABASE_URL` | PostgreSQL connection | `postgresql+asyncpg://bodhiorchard:bodhiorchard@localhost:5432/bodhiorchard` |
-| `SECRET_KEY` | JWT signing key | `change-me-in-production` |
-| `ENCRYPTION_KEY` | AES key for secrets at rest (used to encrypt the Claude API key, Slack tokens, GitHub private keys) | (generated) |
-| `ANTHROPIC_API_KEY` | Optional process-level fallback for Claude auth. Ignored when an org-level key is configured in Settings. | (unset) |
-| `EMBEDDING_PROVIDER` | Embedding provider (local ONNX via [fastembed](https://github.com/qdrant/fastembed)) | `fastembed` |
-| `EMBEDDING_MODEL` | Embedding model | `BAAI/bge-small-en-v1.5` (384-d) |
-| `EMBEDDING_DIMENSIONS` | Vector dimensions (must match `EMBEDDING_MODEL`) | `384` |
-| `REDIS_URL` | Redis connection | `redis://localhost:6379` |
-| `SLACK_BOT_TOKEN` | Slack bot token | (optional) |
-| `GITHUB_PAT` | GitHub personal access token | (optional) |
-
----
-
-## API
-
-Bodhiorchard exposes three programmable surfaces. All three run on the same host as the backend.
-
-| Surface | Port | What it's for |
-|---|---|---|
-| **REST** | `:8000/api/v1` | Day-to-day CRUD: BUDs, orgs, repos, skills, triage, Slack/GitHub webhooks. FastAPI; interactive docs at [/docs](http://localhost:8000/docs) (Swagger) and [/redoc](http://localhost:8000/redoc). |
-| **MCP** | `:8001/mcp` | Tools for Claude Code and other MCP clients — BUD lifecycle writes, feature registry, code graph, team context. Full list under [AI Engines](#ai-engines). |
-| **WebSocket** | `:8000/ws/jobs/{job_id}` | Live progress for async jobs (repo scans, BUD generation, etc.). Frontend uses `useJobSocket`; CLI consumers can use `wscat`. |
-
-### Key REST endpoints
-
-| Endpoint | Description |
+| | |
 |---|---|
-| `POST /api/v1/auth/login` | JWT authentication |
-| `GET /api/v1/buds` | List BUD documents |
-| `POST /api/v1/buds` | Create a new BUD |
-| `GET /api/v1/dashboard/tree-data` | 3D Living-Tree visualization data |
-| `GET /api/v1/skills/profiles` | Developer skill profiles |
-| `POST /api/v1/skills/scan` | Trigger repository scan (returns `202` + `job_id`) |
-| `GET /api/v1/triage-sessions` | Triage approval queue |
-| `POST /api/v1/slack/events` | Slack webhook handler |
+| 🤖 **AI drafts, you decide** | Agents write the specs, tech plans, and test cases. Humans review, edit, and approve at every phase — judgement stays human. |
+| 🎯 **Predictions, not poker** | AI-PERT + 10,000 Monte Carlo simulations give P50/P70/P85 delivery dates per phase — factoring skill profiles, backlog, and workload. No story points. |
+| 📄 **One BUD per feature** | A single living document (spec + tech spec + test plan + history) replaces tickets scattered across Jira, Confluence, Notion, and Slack. |
+| 🌱 **Knowledge that stays current** | Auto-synced from code, vector-indexed, and fed into every agent prompt. No stale wiki pages. |
 
-### Example: create a BUD via `curl`
+### Old way vs Agent-Driven Development
 
-```bash
-curl -X POST http://localhost:8000/api/v1/buds \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Add export-to-PDF on the dashboard",
-    "stage": "bud",
-    "summary": "Users want to share weekly dashboard snapshots with leadership."
-  }'
+| Phase | Scrum / Agile | Bodhiorchard |
+|---|---|---|
+| **Intake** | Jira ticket, manual triage, sprint planning | Slack message → Triage Agent interviews, dedupes, estimates |
+| **Estimation** | Story points, planning poker | Probabilistic per-phase dates with confidence intervals |
+| **Specification** | PM writes docs, reviews in meetings | BUD Agent drafts with codebase context; PM approves |
+| **Development** | Dev picks a ticket, starts from scratch | Best-fit dev auto-suggested from skill profiles; implements from a file-level tech plan |
+| **Testing** | QA writes cases manually | Auto-generated unit / integration / e2e / security / UAT plans |
+| **Deployment** | Release train, manual status updates | Status Agent detects PR merges; BUD becomes a shipped Feature |
+| **Retrospective** | Biweekly meeting, action items forgotten | Learning Agent auto-generates one on every deployment |
+
+## Screenshots
+
+| Living Tree dashboard | BUD board | Feature registry |
+|---|---|---|
+| ![Living Tree dashboard](docs/images/livingtree.png) | ![BUD board](docs/images/board.png) | ![Feature registry](docs/images/Feature.png) |
+
+The gamification layer rebuilds developer skill profiles nightly — skills compound, badges unlock, and the leaderboard reflects shipped value, not ticket count:
+
+| Skill profile | XP progression | Leaderboard | Unlocks |
+|---|---|---|---|
+| ![Developer skill profile](docs/images/skills.png) | ![XP progression](docs/images/gamification.png) | ![Leaderboard](docs/images/LeaderBoard.png) | ![Unlocks](docs/images/unlocks.png) |
+
+**More walkthroughs:** [Setup](https://youtu.be/ot-BmKxRgRA) · [Slack triage & MCP tools](https://youtu.be/i8kZdcL1bME) · [Requirements & estimation](https://youtu.be/YBwdTes0Fno) · [Design phase](https://youtu.be/lV71qhmfzzw) · [Development & retrospective](https://youtu.be/YjRihN_SKaw)
+
+## How it works
+
+Every feature lives in one **BUD** (Business Understanding Document) that moves through the lifecycle, with an agent driving each phase and a human gate between phases:
+
+```
+bud → design → tech_arch → development → testing → uat → prod → closed
+                                                              ↳ discarded (any time)
 ```
 
-### Async-job pattern
+- **Slack-native intake** — post in `#feature-requests`, the Triage Agent interviews you in-thread, checks duplicates via vector search, and queues for PM approval.
+- **Multi-repo code intelligence** — a tree-sitter code-graph indexer scans your repos, detects feature clusters across them, and answers blast-radius queries ("what breaks if I change this?").
+- **Smart quality loops** — production bugs auto-link to the originating BUD; threshold breaches trigger reassignment; every fix feeds the knowledge base.
+- **Developer skill profiling** — per-module expertise scores rebuilt nightly from git history, with bus-factor alerts and best-fit assignment.
+- **Living knowledge** — git repos, agent skills, the central DB, and vector search stay auto-synced and feed every agent prompt.
+- **Enterprise-grade security** — multi-tenant isolation, RBAC with 9 roles, AES encryption at rest, JWT auth, full audit trail.
 
-Long-running operations (repo scans, embedding builds, BUD generation) return `202 Accepted` with a `job_id`. Subscribe to `ws://localhost:8000/ws/jobs/{job_id}` for progress events instead of polling the REST endpoint.
+## The Twelve Agents
 
----
+| Agent | What it does |
+|---|---|
+| **Triage** | Interviews requesters in Slack, checks capacity, finds duplicates, estimates complexity |
+| **BUD** | Drafts the full spec with codebase context, enterprise rules, and prior art |
+| **Design** | Scopes UI/UX requirements, generates component breakdowns and interaction specs |
+| **Tech Plan** | Creates file-level implementation TODOs with architecture and dependency analysis |
+| **Smart Assignment** | Suggests the best-fit developer from skill profiles and real-time capacity |
+| **Status** | Detects PR merges via GitHub webhooks, advances BUD status, notifies stakeholders |
+| **Standup** | Aggregates git/PR/bug/chat activity into daily summaries with risk flags |
+| **Test Plan** | Auto-generates e2e, unit/integration, manual UAT, and security test cases |
+| **Bug Linker** | Links incoming bugs to BUDs via vector search, monitors quality thresholds |
+| **Reassignment** | Rotates developers to bug review when thresholds are exceeded |
+| **Learning** | Analyses cycle time vs estimates and writes the retrospective on every deploy |
+| **Skill** | Rebuilds developer skill profiles nightly from git, BUD, and bug history |
+
+Every agent action is audited and reviewable in the UI. Triggers, hand-offs, and capabilities: **[AGENTS.md](AGENTS.md)**.
+
+## The Manifesto
+
+Eight principles, deliberately echoing the Agile Manifesto's "X over Y" structure:
+
+| We value… | …over |
+|---|---|
+| **AI-generated first drafts** | blank-page paralysis |
+| **Cycle time predictions** | story points & planning poker |
+| **Continuous learning** | post-mortems after the damage |
+| **Human decisions** | human busywork |
+| **Living knowledge** | stale wiki pages |
+| **BUD as single source of truth** | scattered tickets & docs |
+| **Skills that grow with the team** | static role assignments |
+| **Auto-healing quality loops** | manual bug triage |
+
+## Architecture
+
+**Stack:** FastAPI + SQLAlchemy 2.0 (async) on Python 3.12 · Vue 3 + Vuetify + PlayCanvas (3D) · Colyseus multiplayer · PostgreSQL 16 + pgvector · Redis · local ONNX embeddings (fastembed).
+
+```
+backend/     FastAPI — REST API, 12 agents, MCP server, code-graph indexer
+frontend/    Vue 3 SPA — BUD board, Living Tree 3D dashboard, settings
+multiplayer/ Colyseus server — shared 3D world state
+shared/      World layout consumed by frontend + multiplayer
+examples/    TaskFlow demo repos (cross-repo feature detection)
+```
+
+The agent layer is engine-independent: Claude Code runs the codebase-aware agents, the Anthropic direct API handles lightweight ones, and Ollama / OpenAI / Codex are next — adding an engine is API rewiring only. Bodhiorchard also runs its own **MCP server** so Claude Code (or any MCP client) can drive the BUD lifecycle, query the code graph, and read team context.
+
+## Documentation
+
+| Doc | What's inside |
+|---|---|
+| [Deployment Guide](docs/deployment.md) | npx installer, Full Docker vs Hybrid setup, system diagram, TaskFlow demo dataset |
+| [AI Engines & MCP Server](docs/ai-engines.md) | Engine roadmap, auth modes, full MCP tool reference, client registration |
+| [API Reference](docs/api.md) | REST endpoints, WebSocket jobs, environment variables |
+| [AGENTS.md](AGENTS.md) | Per-agent capabilities and triggers |
+| [BODHIORCHARD-ARCHITECTURE.md](BODHIORCHARD-ARCHITECTURE.md) | The full architecture spec |
+| [MCP-REMOTE.md](MCP-REMOTE.md) | Bring-your-own-AI via the remote MCP endpoint |
 
 ## FAQ
 
 ### What is Agent-Driven Development?
 
-**Agent-Driven Development (ADD)** is a way of building software where specialised AI agents — not humans running status meetings — drive every phase of the lifecycle: intake, spec, design, tech architecture, implementation, testing, UAT, deployment, retrospective. Humans review, decide, and steer; agents do the drafting, the cross-referencing, the routine analysis, and the busywork. ADD positions itself in the same slot Agile occupied in 2001: a methodology that absorbs the lessons of the previous era (Waterfall's rigidity for Agile; Agile's ceremony overhead for ADD) and reorganises the work around the new capabilities available — in this case, capable AI agents. Bodhiorchard is the open-source reference implementation; the methodology itself is described in detail at [bodhiorchard.ai](https://bodhiorchard.ai/) and is free to adopt with or without Bodhiorchard.
+A methodology where specialised AI agents — not humans running status meetings — drive every phase of the software lifecycle, while humans review, decide, and steer. It sits in the slot Agile occupied in 2001: a reorganisation of work around new capabilities. The methodology is free to adopt with or without Bodhiorchard — see [bodhiorchard.ai](https://bodhiorchard.ai/).
 
 ### Is Bodhiorchard a self-hosted Jira alternative?
 
-Yes — for the workflow layer (intake → spec → design → tech arch → development → testing → UAT → deploy → retrospective). Bodhiorchard is the open-source reference implementation of Agent-Driven Development, which sits between IDE-side AI coding assistants (Tabby, Continue, Cursor) and traditional PM tools (Jira, Linear, Plane). It is especially relevant to teams looking for an **Atlassian DC alternative** — Atlassian is sunsetting new self-hosted Jira licences in March 2026 with full shutdown in 2029.
+Yes — for the full workflow layer (intake through retrospective). It's especially relevant for teams affected by Atlassian sunsetting self-hosted Jira licences (new licences end March 2026, full shutdown 2029).
 
 ### Does my code leave my machine?
 
-The **data plane is always local** — Postgres, embeddings, BUDs, scanned repos, and the audit log all sit on your hardware. Only the **LLM prompts** leave your machine, and only when you choose a cloud inference mode (Anthropic API key or Anthropic direct API). For fully air-gapped operation, wait for the planned Ollama preset.
+The data plane — Postgres, embeddings, BUDs, scanned repos, audit log — is always local. Only LLM prompts leave, and only when you choose cloud inference. Fully air-gapped operation arrives with the Ollama preset.
 
-### Can I run Bodhiorchard without an Anthropic subscription?
+### Do I need a Claude subscription?
 
-Yes — paste an Anthropic API key (pay-per-token, billed by Anthropic) into Settings and the agents run via Claude Code's CLI plus the Anthropic direct API. If you already have a Claude Pro / Max subscription on your host, the Hybrid deployment mode inherits that `claude login` session and you pay the flat subscription rate, no per-token bills.
+No. Either paste an Anthropic API key (pay-per-token) or, if you do have Claude Pro/Max, run Hybrid mode and the agents inherit your flat-rate `claude login` session.
 
-### How does Bodhiorchard compare to Tabby, Continue, or Cursor?
+### How is this different from Cursor, Tabby, or Continue?
 
-Those are **IDE-side AI coding assistants** — they help an individual developer write code. Bodhiorchard is the **orchestration + project-management layer above them**: it ingests requests, drafts BUDs, predicts cycle time with AI-PERT, routes work to the best-fit developer, generates test plans, links bugs back to the originating BUD, and runs the retrospective. You can pair them — write code with Tabby / Cursor in your IDE while Bodhiorchard runs the lifecycle around it.
+Those are IDE-side coding assistants for an individual developer. Bodhiorchard is the orchestration and project-management layer above them — intake, specs, estimation, assignment, test plans, bug linking, retrospectives. Pair them freely.
 
-### How does Bodhiorchard compare to GitHub Copilot Workspace?
+### How does it compare to GitHub Copilot Workspace?
 
-Copilot Workspace is cloud-only and GitHub-bound — your code, planning artefacts, and history live in GitHub's cloud. Bodhiorchard is **self-hosted, repo-agnostic, and AI-engine-agnostic**. You can point it at GitHub, GitLab, or a self-hosted Git server, and you can swap inference engines without re-deploying.
-
-### Does Bodhiorchard work on Windows?
-
-Yes — via **WSL2** for both deployment modes. Full Docker mode runs the whole stack inside WSL2 with no Windows host dependencies; Hybrid mode runs the host processes inside WSL2 with the infra containers backing them.
+Copilot Workspace is cloud-only and GitHub-bound. Bodhiorchard is self-hosted, repo-agnostic (GitHub, GitLab, self-hosted Git), and AI-engine-agnostic.
 
 ### What does "BUD" mean?
 
-**BUD = Business Understanding Document.** Every feature lives in one BUD — spec, tech spec, test plan, acceptance criteria, and full history, all in markdown. It replaces the scattered combination of Jira tickets + Confluence pages + Google Docs + Notion that most teams end up with.
+**Business Understanding Document** — one markdown document per feature holding spec, tech spec, test plan, acceptance criteria, and full history.
 
-### What's the licence? Can I use Bodhiorchard commercially?
+### Can I use it commercially?
 
-**Apache License 2.0** — yes, commercial use is allowed, including embedding in proprietary products. Contributions require **DCO sign-off** (`git commit -s`); see [CONTRIBUTING.md](CONTRIBUTING.md). For deeper commercial-licence terms with proprietary integrations and support, reach out to the maintainer.
+Yes — **Apache 2.0**, including embedding in proprietary products. Contributions require DCO sign-off (`git commit -s`). Commercial licences with support are available separately from the maintainer.
 
----
+### Does it run on Windows?
 
-## Integrations
-
-| Integration | Status | Description |
-|---|---|---|
-| **Claude Code** | Core | AI backbone — runs codebase-aware agents via MCP (BUD lifecycle writes, feature registry, code graph). API key in Full Docker, host `claude login` in Hybrid. |
-| **Slack** | Supported | Feature intake, triage conversations, notifications (via Cloudflare Tunnel) |
-| **GitHub** | Supported | PR merge detection, branch status, deploy-key cloning of private repos |
-| **Ollama** | Coming soon | Local LLM inference — free, private, no API keys needed |
-| **Anthropic API** | Supported | Direct Claude API for non-codebase agents (bypasses Claude Code MCP) |
-| **OpenAI API** | Coming soon | Alternative cloud LLM provider |
-| **OpenAI Codex** | In development | Code-specialized agent tasks |
-| **Figma** | Planned | Design review capture via MCP |
-| **Linear** | Planned | Bidirectional sync |
-
----
+Yes, via WSL2 in either deployment mode.
 
 ## Roadmap
 
-### Phase 1 (Current)
-- [x] Core platform (auth, multi-tenant, RBAC)
-- [x] BUD lifecycle management
-- [x] Feature registry with vector search
-- [x] Repository scanning and code intelligence
-- [x] Developer skill profiling
-- [x] 3D tree dashboard visualization
-- [x] Slack-native triage intake
-- [x] MCP server with BUD-lifecycle writes, feature registry, code-graph tools
-- [x] 12 AI agent definitions
-
-### Phase 2 (Next)
-- [ ] Agent execution engine (autonomous agent runs)
-- [ ] Real-time Slack bot conversations
-- [ ] GitHub webhook processing pipeline
-- [ ] Automated test generation from BUDs
-- [ ] CI/CD integration
-
-### Phase 3 (Future)
-- [ ] Multi-org marketplace
-- [ ] Custom agent builder
-- [ ] Analytics and reporting dashboards
-- [ ] Mobile companion app
-- [ ] Plugin ecosystem
-
----
+- **Shipped** — core platform (auth, multi-tenant, RBAC), BUD lifecycle, feature registry with vector search, repo scanning + code intelligence, skill profiling, 3D Living Tree, Slack-native triage, MCP server, 12 agent definitions, `npx bodhiorchard` installer
+- **Next** — autonomous agent execution engine, real-time Slack bot conversations, GitHub webhook pipeline, automated test generation, CI/CD integration
+- **Future** — multi-org marketplace, custom agent builder, analytics dashboards, mobile companion, plugin ecosystem
 
 ## Contributing
 
-We welcome contributions! Please read our contributing guidelines before submitting a pull request.
-
-### Development Setup
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run linting: `ruff check . --fix && ruff format .` (backend) / `npm run lint` (frontend)
-5. Run type checking: `mypy app/` (backend) / `npx vue-tsc --noEmit` (frontend)
-6. Commit your changes
-7. Push to your branch and open a Pull Request
-
-### Contributor sign-off (DCO)
-
-By contributing to this project, you agree to license your contribution under the Apache License, Version 2.0, and you certify your right to do so under the [Developer Certificate of Origin](https://developercertificate.org/). All commits must be signed off with `git commit -s` — see [CONTRIBUTING.md](CONTRIBUTING.md).
-
----
-
-## License
-
-Bodhiorchard&trade; is licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full text and [NOTICE](NOTICE) for attribution and independence declarations.
-
-Commercial licenses with additional support and proprietary integrations may be made available separately — contact the maintainer.
+Contributions welcome — fork, branch, lint (`ruff` / `vue-tsc`), and open a PR. All commits need DCO sign-off (`git commit -s`); see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Why "Bodhiorchard"?
 
-<div align="center">
-<em>"The purpose of technology is not to keep humans chained to screens, but to set them free."</em>
-</div>
+**Bodhi** (Sanskrit: "awakening") is what the Buddha attained under the Bodhi tree. An **orchard** is a grove tended with intention so it can bear fruit. The software industry builds tools to make life better, yet the process of building them consumes our lives — ceremonies, status updates, and busywork that were meant to help but became the work itself.
 
-<br>
+Bodhiorchard exists because **AI should give humans their time back**. The agents are the orchardists: they water, prune, and tend the soil so the trees can grow and the humans who planted them can step back and enjoy the harvest.
 
-**Bodhi** (Sanskrit/Pali: "awakening, enlightenment") is the state of understanding that the Buddha attained under the Bodhi tree. **Orchard** is a cultivated grove &mdash; trees tended with intention so they can bear fruit.
+*Build well. Then go outside.*
 
-The name carries a deeper belief about what AI should do for us.
+## License
 
-The software industry has a paradox: we build tools to make life better, but the process of building them consumes our lives. Developers work late nights. PMs spend weekends writing specs. Teams sit through hours of ceremonies — standups, sprint planning, retrospectives, estimation poker — rituals that were meant to help but became the work itself.
-
-Bodhiorchard exists because **AI should give humans their time back**.
-
-Not to write more code. Not to ship faster. But to reclaim the hours lost to busywork — so a developer can leave at 5pm and take their kid to the park. So a PM can spend their morning thinking deeply about what users need instead of copy-pasting Jira tickets. So a team lead can mentor junior engineers instead of chasing status updates across five tools.
-
-The 3D tree dashboard isn't just a visualization — it's the philosophy made visible. Your organization is a living orchard. Each repository is a tree. Each feature is a branch. The AI agents are the orchardists: they water, they prune, they tend the soil. They do the repetitive labor so the trees can grow naturally and bear fruit, and the humans who planted them can step back, breathe, and enjoy the harvest they've built.
-
-The Bodhi tree is where awakening happened — not through more effort, but through stillness and clarity. Bodhiorchard is an invitation to build software the same way: let the machines handle the noise, so humans can focus on what actually matters.
-
-Build well. Then go outside.
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ---
 
@@ -846,10 +230,8 @@ Build well. Then go outside.
 
 **Built by [Arun Rajkumar](https://github.com/mickyarun)**
 
-If Bodhiorchard helps your team, give it a star and spread the word.
+If Bodhiorchard helps your team, give it a ⭐ and spread the word.
 
-<sub>&copy; 2025-2026 Arun Rajkumar. Bodhiorchard&trade; is a trademark of Arun Rajkumar.</sub>
-
-<sub>Independent open-source project — not affiliated with any employer or client.</sub>
+<sub>&copy; 2025-2026 Arun Rajkumar. Bodhiorchard&trade; is a trademark of Arun Rajkumar.<br>Independent open-source project — not affiliated with any employer or client.</sub>
 
 </div>
