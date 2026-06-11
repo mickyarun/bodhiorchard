@@ -31,6 +31,8 @@ export class RaceRoomState extends Schema {
   @type("string") hostUserId = ""
   @type("string") hostName = ""
   @type("uint16") distanceM = 0
+  /** Track layout — 'straight' or 'circuit' (one lap of `distanceM`). */
+  @type("string") trackShape = "straight"
 
   /** `lobby` → `countdown` → `running` → `finished`. Matches shared RacePhase. */
   @type("string") phase = "lobby"

@@ -107,12 +107,16 @@ class RaceResultRepository:
         distance_m: int,
         limit: int,
     ) -> list[LeaderboardRow]:
-        """Fastest finishers for one distance, org-scoped.
+        """Top-N fastest finishes for one distance, org-scoped.
 
-        Uses the composite index `(org_id, distance_m, finish_time_ms)` via
-        the ORDER BY + LIMIT shape. DNFs (finish_time_ms IS NULL) are
-        excluded from the leaderboard — they appear only in per-user PR
-        views, which aren't part of this milestone.
+        Every race result is its own row — a log of the fastest runs, not
+        a highscore table of personal bests. Two finishes from the same
+        player legitimately occupy two slots if both rank in the top N.
+        The composite index `(org_id, distance_m, finish_time_ms)` drives
+        the ORDER BY + LIMIT directly.
+
+        DNFs (`finish_time_ms IS NULL`) are excluded — they appear only in
+        per-user PR views, which aren't part of this milestone.
         """
         stmt = (
             select(

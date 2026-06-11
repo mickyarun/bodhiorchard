@@ -572,14 +572,14 @@ async function applyDecisions(): Promise<void> {
 
 <style scoped>
 .project-item {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgb(var(--v-theme-rule));
   border-radius: 8px;
   transition: border-color 0.15s ease, background-color 0.15s ease;
   min-height: 40px;
 }
 .project-item:hover {
-  border-color: rgba(255, 255, 255, 0.2);
-  background-color: rgba(255, 255, 255, 0.03);
+  border-color: rgba(var(--v-theme-primary), 0.5);
+  background-color: rgb(var(--v-theme-surface-bright));
 }
 .project-item--selected {
   border-color: rgb(var(--v-theme-primary));

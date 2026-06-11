@@ -17,7 +17,7 @@
 <template>
   <div class="d-flex flex-column align-center">
     <v-icon icon="mdi-source-repository" size="48" color="primary" class="mb-4" />
-    <h2 class="text-h5 font-weight-bold mb-2">Repositories</h2>
+    <h2 class="text-h5 font-weight-bold bo-display mb-2">Repositories</h2>
     <p class="text-body-2 text-medium-emphasis mb-6 text-center" style="max-width: 560px;">
       Point to the repos you want to work with. Bodhiorchard uses Claude Code to
       auto-detect developer skills, extract existing features, and build full

@@ -19,7 +19,7 @@
     <!-- Header -->
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
-        <div class="text-h5 font-weight-bold">Skill Profiles</div>
+        <div class="text-h5 font-weight-bold bo-display">Skill Profiles</div>
         <div class="text-body-2 text-medium-emphasis">
           Developer expertise extracted from git history
         </div>
@@ -47,16 +47,7 @@
         style="max-width: 360px;"
       />
       <v-spacer />
-      <v-btn-toggle v-model="viewMode" density="compact" mandatory variant="outlined" divided>
-        <v-btn value="developers" size="small">
-          <v-icon icon="mdi-account-outline" size="16" class="mr-1" />
-          By Developer
-        </v-btn>
-        <v-btn value="modules" size="small">
-          <v-icon icon="mdi-cube-outline" size="16" class="mr-1" />
-          By Module
-        </v-btn>
-      </v-btn-toggle>
+      <AppPillToggle v-model="viewMode" :options="VIEW_MODE_OPTIONS" size="sm" />
     </div>
 
     <!-- Loading -->
@@ -230,6 +221,12 @@
 import { ref, computed, onMounted } from 'vue'
 import { useSkillsStore } from '@/stores/skills'
 import type { ModuleSkill } from '@/types'
+import AppPillToggle from '@/components/common/AppPillToggle.vue'
+
+const VIEW_MODE_OPTIONS: { label: string; value: 'developers' | 'modules' }[] = [
+  { label: 'By Developer', value: 'developers' },
+  { label: 'By Module', value: 'modules' },
+]
 
 const store = useSkillsStore()
 
@@ -341,18 +338,18 @@ onMounted(() => {
 }
 
 .profile-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: border-color 0.15s ease;
+  border: 1px solid rgb(var(--v-theme-rule));
+  transition: border-color var(--dur-short, 150ms) var(--ease-out, ease);
 }
 
 .profile-card:hover {
-  border-color: rgba(var(--v-theme-primary), 0.3);
+  border-color: rgba(var(--v-theme-primary), 0.45);
 }
 
 .module-row {
   padding: 8px 12px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--v-theme-surface-bright));
 }
 
 .module-title {

@@ -20,19 +20,11 @@
          screens (iPad portrait / small laptops) so controls don't
          wrap to a second row and chew up canvas vertical space. -->
     <div class="dashboard-view__header d-flex align-center ga-3 px-4 py-3">
-      <div class="text-h6 font-weight-bold mr-2">Dashboard</div>
+      <div class="text-h6 font-weight-bold bo-display mr-2">Dashboard</div>
 
-      <!-- View mode toggle -->
-      <v-btn-toggle v-model="viewMode" density="compact" mandatory variant="outlined" divided>
-        <v-btn value="tree" size="small">
-          <v-icon icon="mdi-pine-tree" size="16" class="mr-1" />
-          Garden
-        </v-btn>
-        <v-btn value="graph" size="small">
-          <v-icon icon="mdi-graph-outline" size="16" class="mr-1" />
-          Graph
-        </v-btn>
-      </v-btn-toggle>
+      <!-- View mode toggle — branded pill segmented control (green track,
+           active pill) per the design system. -->
+      <AppPillToggle v-model="viewMode" :options="VIEW_MODE_OPTIONS" size="sm" />
 
       <!-- Stat chips -->
       <v-chip v-if="displayData" size="small" variant="tonal" color="primary" prepend-icon="mdi-seed-outline">
@@ -41,7 +33,7 @@
       <v-chip v-if="displayData" size="small" variant="tonal" color="success" prepend-icon="mdi-leaf">
         {{ displayData.total_features }} Features
       </v-chip>
-      <v-chip v-if="displayData" size="small" variant="tonal" color="purple" prepend-icon="mdi-account-group-outline">
+      <v-chip v-if="displayData" size="small" variant="tonal" color="info" prepend-icon="mdi-account-group-outline">
         {{ displayData.members.length }} Members
       </v-chip>
       <v-chip v-if="displayData && displayData.threats.length > 0" size="small" variant="tonal" color="error" prepend-icon="mdi-bug-outline">
@@ -191,6 +183,7 @@ import TreeContent from './TreeContent.vue'
 import GraphContent from './GraphContent.vue'
 import SetupChecklist from '@/components/SetupChecklist.vue'
 import StandupPanel from '@/components/standup/StandupPanel.vue'
+import AppPillToggle from '@/components/common/AppPillToggle.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -198,6 +191,10 @@ const store = useDashboardStore()
 
 // ─── View Mode ───────────────────────────────────
 
+const VIEW_MODE_OPTIONS: { label: string; value: 'tree' | 'graph' }[] = [
+  { label: 'Garden', value: 'tree' },
+  { label: 'Graph', value: 'graph' },
+]
 const viewMode = ref<'tree' | 'graph'>('tree')
 const graphHasSelection = ref(false)
 const treeContentRef = ref<InstanceType<typeof TreeContent> | null>(null)
@@ -375,6 +372,9 @@ onUnmounted(() => {
   overflow-y: hidden;
   scrollbar-width: thin;
   -webkit-overflow-scrolling: touch;
+  /* Hairline separates the control bar from the canvas below. */
+  border-bottom: 1px solid rgb(var(--v-theme-rule));
+  background: rgb(var(--v-theme-background));
 }
 
 .dashboard-view__header > * {

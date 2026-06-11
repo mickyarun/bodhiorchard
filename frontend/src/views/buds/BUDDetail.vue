@@ -18,9 +18,15 @@
   <div class="bud-detail-layout">
     <!-- Main content area -->
     <div class="bud-main" :class="{ 'chat-open': chatOpen }">
-      <!-- Loading -->
-      <div v-if="budStore.loading" class="d-flex justify-center py-12">
-        <v-progress-circular indeterminate color="primary" />
+      <!-- Loading — a skeleton that mirrors the page's shape (title, tab
+           row, body) reads as "the page is forming" rather than a lone
+           spinner that users misread as a hang. The global route bar in
+           AppLayout already covers the preceding lazy-chunk download. -->
+      <div v-if="budStore.loading" class="pa-6">
+        <v-skeleton-loader type="heading" class="mb-2" />
+        <v-skeleton-loader type="text" width="35%" class="mb-6" />
+        <v-skeleton-loader type="button@5" class="mb-6" />
+        <v-skeleton-loader type="paragraph@4" />
       </div>
 
       <!-- Error -->
@@ -1277,20 +1283,33 @@ async function handlePriorityChange(priority: BUDPriority): Promise<void> {
   padding: 24px 32px 48px;
 }
 
-/* ── Tabs + Toolbar row ────────────────────────── */
+/* ── Tabs + Toolbar row ────────────────────────────────────────────────
+   The phase strip is the spine of the document view, so it sticks to the
+   top of the scroll: scroll a long section and the phase nav + section
+   toolbar stay reachable. Paper background + token hairline so it reads as
+   a workbench section-nav, with the panel below sharing its border. */
 .tabs-toolbar-row {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  gap: 12px;
+  padding-top: 4px;
+  background: rgb(var(--v-theme-background));
+  border: 1px solid rgb(var(--v-theme-rule));
+  border-bottom: none;
+  border-radius: var(--radius-card, 10px) var(--radius-card, 10px) 0 0;
+  padding-inline: 8px;
   margin-bottom: 0;
 }
 
 /* ── Content panel ─────────────────────────────── */
 .section-content-panel {
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  border: 1px solid rgb(var(--v-theme-rule));
   border-top: none;
-  border-radius: 0 0 8px 8px;
+  border-radius: 0 0 var(--radius-card, 10px) var(--radius-card, 10px);
   background: rgb(var(--v-theme-surface));
   min-height: 300px;
 }

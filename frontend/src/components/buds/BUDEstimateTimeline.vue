@@ -233,15 +233,15 @@ function formatBufferDays(days: number | null | undefined): string {
 <style scoped>
 .estimate-timeline {
   padding: 12px 16px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgb(var(--v-theme-rule));
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgb(var(--v-theme-surface-bright));
 }
 
 .range-track {
   position: relative;
   height: 4px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgb(var(--v-theme-rule));
   border-radius: 2px;
   margin: 24px 0 4px;
 }
@@ -260,7 +260,7 @@ function formatBufferDays(days: number | null | undefined): string {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.3);
+  background: rgb(var(--v-theme-on-surface-variant));
   transform: translateX(-50%);
 }
 
@@ -291,7 +291,7 @@ function formatBufferDays(days: number | null | undefined): string {
 }
 
 .complexity-dot.empty {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgb(var(--v-theme-rule));
 }
 
 .phase-stepper {
@@ -312,14 +312,14 @@ function formatBufferDays(days: number | null | undefined): string {
 }
 
 .phase-step:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--v-theme-surface-bright));
 }
 
 .phase-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.15);
+  background: rgb(var(--v-theme-rule));
   margin: 0 auto 4px;
 }
 
@@ -342,7 +342,7 @@ function formatBufferDays(days: number | null | undefined): string {
   left: 50%;
   width: 100%;
   height: 2px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgb(var(--v-theme-rule));
 }
 
 .phase-step--done .phase-connector {

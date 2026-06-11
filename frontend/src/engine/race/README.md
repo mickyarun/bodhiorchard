@@ -19,9 +19,10 @@ await engine.init(container, {
   scene: {
     distanceM: 100,              // or 200 — only these two are allowed
     racerCount: 4,               // 2..10
+    trackShape: 'straight',      // or 'circuit' (one lap; distance = circumference)
     cameraMode: 'participant',   // or 'spectator'
     racers: [{ id, name, config, laneIndex }, ...],
-    leaderProvider: () => leaderX,
+    leaderProvider: () => leaderArcM,
   },
 })
 
@@ -34,17 +35,28 @@ engine.destroy()
 
 ## Architecture
 
-- `TrackBuilder` / `Ground` / `FinishArch` accept `{ distanceM, trackWidthM }`
-  at build time; nothing is hardcoded. Track width scales with `racerCount ×
-  LANE_WIDTH_M` so a 2-racer sprint and a 10-racer dash share the same code
-  path.
-- `RaceCamera` (participant) follows the leader. `RaceCameraOverhead`
-  (spectator) is a fixed-position top-down camera — no per-frame work.
-  `RaceScene` picks one at build time based on `cameraMode`.
+- `TrackProjection` maps the physics' 1-D `positionM` scalar onto world
+  space: `StraightProjection` (arc = X, lateral = Z) or
+  `CircuitProjection` (wraps `@shared/race/LoopPath`; arc curves around a
+  fixed-length organic loop, wrapping past one lap on multi-lap races).
+  Avatars, pads, hurdles and the chase camera all place themselves
+  through it.
+- `RaceSceneTrack.buildTrackAssembly` owns the per-shape surface stack:
+  straight → `TrackBuilder` / `Ground` / `FinishArch` / `DecorBuilder`;
+  circuit → `CircuitTrackBuilder` (loop ribbons via `RibbonMesh` over `LoopPath`) +
+  ring-sized ground + arch at arc = circumference. Track width scales
+  with `racerCount × LANE_WIDTH_M` so a 2-racer sprint and a 10-racer
+  dash share the same code path.
+- `RaceCamera` (participant) chases the tracked racer along the travel
+  tangent. `RaceCameraOverhead` (spectator) is a fixed camera — over the
+  straight midpoint, or over the circuit's centre at a height that fits
+  the ring. `RaceScene` picks one at build time based on `cameraMode`.
 - `RacerAvatar` is the KayKit-backed avatar per racer; its kinematics are
-  driven by the client each frame via `RaceScene.setRacerKinematics`.
+  driven by the client each frame via `RaceScene.setRacerKinematics`,
+  with the anim graph state machine split into `RacerAvatarAnim`.
 - Physics lives in `@shared/race/RacePhysics` — pure TS, imported by both
   `RaceRoom` (server authority) and the frontend tests. No framework.
+  It is shape-agnostic: on a circuit the scalar is arc length.
 
 ## Flow
 

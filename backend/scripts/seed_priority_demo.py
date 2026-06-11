@@ -30,6 +30,8 @@ keeps the demo set the same size. Run once and explore the UI.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+
 import httpx
 
 API_BASE = "http://localhost:8000/api/v1"
@@ -74,10 +76,8 @@ async def main() -> None:
         prior = [b for b in r.json() if b.get("title", "").startswith("[DEMO]")]
         for b in prior:
             if b["status"] not in ("closed", "discarded"):
-                try:
+                with contextlib.suppress(httpx.HTTPStatusError):
                     await patch_bud(client, b["id"], status="discarded")
-                except httpx.HTTPStatusError:
-                    pass
         print(f"Pre-flight: discarded {len(prior)} prior [DEMO] BUDs.")
 
         # ── 1. Four BUDs in bud phase at each priority ────────────
@@ -91,8 +91,13 @@ async def main() -> None:
         # in the development column. Created in an order that does NOT
         # match priority so the toggle visibly reorders them.
         print("\n[2] Creating development-phase BUDs (mixed priority order):")
-        dev_set = [("P2", "demo p2-a"), ("P0", "demo p0-hot"), ("P3", "demo p3-low"),
-                   ("P1", "demo p1-high"), ("P2", "demo p2-b")]
+        dev_set = [
+            ("P2", "demo p2-a"),
+            ("P0", "demo p0-hot"),
+            ("P3", "demo p3-low"),
+            ("P1", "demo p1-high"),
+            ("P2", "demo p2-b"),
+        ]
         for prio, label in dev_set:
             b = await create_bud(client, f"[DEMO] {label}", prio)
             patched = await patch_bud(client, b["id"], status="development")

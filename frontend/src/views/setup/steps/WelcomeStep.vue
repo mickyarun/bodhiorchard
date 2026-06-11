@@ -22,7 +22,7 @@
       color="primary"
       class="mb-4"
     />
-    <h1 class="text-h4 font-weight-bold mb-2">
+    <h1 class="text-h4 font-weight-bold bo-display mb-2">
       Welcome to Bodhiorchard
     </h1>
     <p class="text-body-1 text-medium-emphasis mb-8" style="max-width: 520px;">

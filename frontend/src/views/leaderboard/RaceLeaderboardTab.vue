@@ -22,22 +22,13 @@
     />
 
     <div v-else-if="entries.length === 0" class="pa-6 text-center text-medium-emphasis">
-      No race results yet at {{ distance }} m. Invite a colleague from the garden to start one!
+      No circuit results yet at {{ lapLabel(distance) }}. Invite a colleague from the garden to start one!
     </div>
 
     <template v-else>
-      <!-- Podium -->
-      <div v-if="entries.length >= 3" class="podium mb-6">
-        <div class="podium__slot podium__slot--silver">
-          <PodiumCard :row="entries[1]" :rank="2" />
-        </div>
-        <div class="podium__slot podium__slot--gold">
-          <PodiumCard :row="entries[0]" :rank="1" />
-        </div>
-        <div class="podium__slot podium__slot--bronze">
-          <PodiumCard :row="entries[2]" :rank="3" />
-        </div>
-      </div>
+      <div class="lb-content">
+      <!-- Podium — shared with the XP tab. -->
+      <LeaderboardPodium v-if="entries.length >= 3" :entries="podiumEntries" class="mb-6" />
 
       <!-- Full ranked list -->
       <v-card color="surface">
@@ -59,19 +50,27 @@
               {{ row.userName }}
             </v-list-item-title>
             <v-list-item-subtitle class="text-caption">
-              {{ formatRaceTime(row.finishTimeMs ?? 0) }} · {{ row.distanceM }} m · {{ relativeDate(row.finishedAt) }}
+              {{ lapLabel(row.distanceM) }} · {{ relativeDate(row.finishedAt) }}
             </v-list-item-subtitle>
+            <template #append>
+              <span class="bo-display font-weight-bold race-time">
+                {{ formatRaceTime(row.finishTimeMs ?? 0) }}
+              </span>
+            </template>
           </v-list-item>
         </v-list>
       </v-card>
+      </div>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, watch } from 'vue'
-import { useRaceLeaderboardStore, type RaceLeaderboardRow } from '@/stores/raceLeaderboard'
+import { computed, onMounted, watch } from 'vue'
+import { useRaceLeaderboardStore } from '@/stores/raceLeaderboard'
 import { formatRaceTime } from '@/engine/race/formatTime'
+import { lapLabel } from '@shared/race/RaceConstants'
+import LeaderboardPodium, { type PodiumEntry } from '@/components/leaderboard/LeaderboardPodium.vue'
 
 const props = defineProps<{
   distance: 100 | 200
@@ -115,53 +114,33 @@ function relativeDate(iso: string): string {
   return days === 1 ? 'yesterday' : `${days} days ago`
 }
 
-const PodiumCard = defineComponent({
-  props: {
-    row: { type: Object as () => RaceLeaderboardRow, required: true },
-    rank: { type: Number, required: true },
-  },
-  setup(props) {
-    return () => h('div', { class: 'podium-card' }, [
-      h('div', { class: 'podium-card__medal' }, MEDALS[props.rank - 1]),
-      h('div', { class: 'podium-card__name text-body-2 font-weight-bold' }, props.row.userName),
-      h('div', { class: 'podium-card__time text-h6 font-weight-bold' },
-        formatRaceTime(props.row.finishTimeMs ?? 0)),
-      h('div', { class: 'podium-card__distance text-caption text-medium-emphasis' },
-        `${props.row.distanceM} m`),
-    ])
-  },
-})
+// Top-3 mapped to the shared podium. The finish time is a neutral metric
+// (not a reward), so it uses the 'ink' figure kind; distance is the meta.
+const podiumEntries = computed<PodiumEntry[]>(() =>
+  entries.value.slice(0, 3).map(row => ({
+    name: row.userName,
+    figure: formatRaceTime(row.finishTimeMs ?? 0),
+    figureKind: 'ink',
+    meta: `${row.distanceM} m`,
+  })),
+)
 </script>
 
 <style scoped>
-.podium {
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  gap: 12px;
+/* Focused centred column — matches the XP tab so race results don't
+   stretch edge-to-edge with the finish time marooned on the far right. */
+.lb-content {
+  max-width: 820px;
+  margin: 0 auto;
 }
-.podium__slot { display: flex; justify-content: center; }
-.podium__slot--gold { align-self: flex-start; }
-.podium__slot--silver { align-self: center; }
-.podium__slot--bronze { align-self: flex-end; }
 
-.podium-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 20px 28px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 2px solid rgba(255, 255, 255, 0.08);
-  min-width: 160px;
-  gap: 6px;
+.race-time {
+  color: rgb(var(--v-theme-on-surface));
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
 }
-.podium__slot--gold .podium-card {
-  border-color: rgba(255, 215, 0, 0.35);
-  background: rgba(255, 215, 0, 0.05);
-  min-width: 180px;
-}
-.podium-card__medal { font-size: 36px; line-height: 1; }
+
+/* Podium markup + styles live in components/leaderboard/LeaderboardPodium.vue. */
 
 .lb-row__rank { min-width: 36px; text-align: center; margin-right: 8px; }
 .lb-row__medal { font-size: 20px; }

@@ -19,7 +19,7 @@
     <!-- Header -->
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
-        <div class="text-h5 font-weight-bold">BUD Board</div>
+        <div class="text-h5 font-weight-bold bo-display">BUD Board</div>
         <div class="text-body-2 text-medium-emphasis">
           {{ filteredCount }} of {{ budStore.buds.length }} document{{ budStore.buds.length !== 1 ? 's' : '' }}
         </div>
@@ -51,6 +51,22 @@
           clearable
           single-line
           class="board-filter-assignee"
+        />
+        <v-select
+          v-model="teamFilter"
+          :items="teamOptions"
+          item-title="label"
+          item-value="value"
+          :placeholder="teamFilterPlaceholder"
+          :disabled="teamOptions.length === 0"
+          prepend-inner-icon="mdi-account-group-outline"
+          density="compact"
+          variant="solo-filled"
+          flat
+          hide-details
+          clearable
+          single-line
+          class="board-filter-team"
         />
         <v-select
           v-model="priorityFilter"
@@ -141,19 +157,18 @@
           :key="status"
           class="board-column"
         >
-          <!-- Column header -->
-          <div class="column-header d-flex align-center justify-space-between pa-3 mb-2">
-            <div class="d-flex align-center ga-2">
-              <v-chip
-                :color="BUD_STATUS_COLORS[status]"
-                size="x-small"
-                variant="flat"
-                label
-              >
-                {{ filteredBudsByStatus[status]?.length || 0 }}
-              </v-chip>
-              <span class="text-body-2 font-weight-medium">{{ BUD_STATUS_LABELS[status] }}</span>
-            </div>
+          <!-- Column header — a ruled section head (Workbench rhythm):
+               uppercase tracked label + a flat count badge, hairline beneath. -->
+          <div class="column-header d-flex align-center justify-space-between pb-2 mb-3">
+            <span class="column-title">{{ BUD_STATUS_LABELS[status] }}</span>
+            <v-chip
+              :color="BUD_STATUS_COLORS[status]"
+              size="x-small"
+              variant="flat"
+              label
+            >
+              {{ filteredBudsByStatus[status]?.length || 0 }}
+            </v-chip>
           </div>
 
           <!-- Cards -->
@@ -161,9 +176,9 @@
             <v-card
               v-for="bud in filteredBudsByStatus[status]"
               :key="bud.id"
-              class="bud-card pa-4 mb-2 cursor-pointer"
+              class="bud-card pa-4 mb-2"
               color="surface"
-              @click="openBUD(bud.id)"
+              :to="`/buds/${bud.id}`"
             >
               <!-- Row 1: BUD number + priority chip + complexity dots -->
               <div class="d-flex align-center justify-space-between mb-1">
@@ -395,6 +410,7 @@ import { useNotificationStore } from '@/stores/notifications'
 import { storeToRefs } from 'pinia'
 import { useAgentSkillsStore, type AgentType, type AgentSkill } from '@/stores/agentSkills'
 import { useSettingsStore } from '@/stores/settings'
+import { useTeamsStore } from '@/stores/teams'
 import { BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_PRIORITIES } from '@/types'
 import type { BUDStatus, BUDPriority } from '@/types'
 import { usePhaseOrder } from '@/composables/usePhaseOrder'
@@ -418,6 +434,7 @@ const router = useRouter()
 const budStore = useBUDStore()
 const skillsStore = useAgentSkillsStore()
 const settingsStore = useSettingsStore()
+const teamsStore = useTeamsStore()
 
 const nameFilter = ref('')
 // Sentinel value (string, not null) for the "Unassigned" option — v-select's
@@ -425,7 +442,37 @@ const nameFilter = ref('')
 const UNASSIGNED = '__unassigned__'
 const assigneeFilter = ref<string | null>(null)
 const priorityFilter = ref<BUDPriority | null>(null)
+const teamFilter = ref<string | null>(null)
 const sortByPriority = ref(false)
+
+// Team filter options + placeholder. When no teams exist yet, the
+// dropdown is disabled with a placeholder pointing at Settings →
+// Teams so the user knows where to configure them.
+const teamOptions = computed(() =>
+  teamsStore.activeTeams.map(t => ({ value: t.id, label: t.name })),
+)
+const teamFilterPlaceholder = computed(() =>
+  teamOptions.value.length === 0
+    ? 'No teams configured — Settings → Teams'
+    : 'All teams',
+)
+
+// Lazy-load the selected team's full member list (the summary list
+// doesn't carry members). The filter computed waits until detail is
+// in the store before narrowing — otherwise the board would briefly
+// show "no matches" while the fetch resolves.
+watch(teamFilter, async (id) => {
+  if (id && !teamsStore.detailsById[id]) {
+    await teamsStore.fetchTeam(id)
+  }
+})
+
+const selectedTeamMemberIds = computed(() => {
+  if (!teamFilter.value) return null
+  const detail = teamsStore.detailsById[teamFilter.value]
+  if (!detail) return new Set<string>()  // still loading; show nothing
+  return new Set(detail.members.map(m => m.user_id))
+})
 
 // Dropdown options derived from the currently-loaded buds so we only show
 // assignees that actually exist on the board. "Unassigned" is appended
@@ -454,9 +501,10 @@ const filteredBudsByStatus = computed<Record<string, typeof budStore.buds>>(() =
   const q = nameFilter.value?.trim().toLowerCase() ?? ''
   const assignee = assigneeFilter.value
   const priority = priorityFilter.value
+  const teamMembers = selectedTeamMemberIds.value
   const sort = sortByPriority.value
   const grouped = budStore.budsByStatus
-  if (!q && !assignee && !priority && !sort) return grouped
+  if (!q && !assignee && !priority && !teamMembers && !sort) return grouped
   const numericQ = q.replace(/^bud-?/, '').replace(/^0+/, '')
   const out: Record<string, typeof budStore.buds> = {}
   for (const status of Object.keys(grouped)) {
@@ -464,6 +512,12 @@ const filteredBudsByStatus = computed<Record<string, typeof budStore.buds>>(() =
       if (assignee === UNASSIGNED && bud.assignee_id) return false
       if (assignee && assignee !== UNASSIGNED && bud.assignee_id !== assignee) return false
       if (priority && bud.priority !== priority) return false
+      // Team filter: show only BUDs whose current assignee is in the
+      // selected team. Unassigned BUDs are excluded by design — if
+      // nobody owns it, there's no team to attribute it to.
+      if (teamMembers !== null) {
+        if (!bud.assignee_id || !teamMembers.has(bud.assignee_id)) return false
+      }
       if (!q) return true
       if (bud.title?.toLowerCase().includes(q)) return true
       const num = String(bud.bud_number)
@@ -564,6 +618,10 @@ onMounted(() => {
   // column shows. Without this fetch a cold page load uses the default
   // (UAT enabled) regardless of what the org has saved.
   if (!settingsStore.connectionsLoaded) settingsStore.fetchConnections()
+  // Team summaries power the board's Team filter dropdown. Cheap
+  // single-page list; member detail is lazy-loaded only when the user
+  // actually picks a team.
+  if (teamsStore.teams.length === 0) teamsStore.fetchTeams(false)
 })
 
 // Re-fetch the BUD list when a job-completion notification arrives.
@@ -581,10 +639,6 @@ watch(
     }
   },
 )
-
-function openBUD(id: string): void {
-  router.push(`/buds/${id}`)
-}
 
 async function createBUD(): Promise<void> {
   if (!newTitle.value.trim()) return
@@ -686,9 +740,17 @@ function deadlineColor(deadline: string): string {
   flex-shrink: 0;
 }
 
+/* Ruled section head, not a filled box — reads as a column boundary. */
 .column-header {
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 8px;
+  border-bottom: 1px solid rgb(var(--v-theme-rule));
+}
+
+.column-title {
+  font-size: var(--text-xs, 0.8rem);
+  font-weight: 600;
+  letter-spacing: var(--tracking-label, 0.08em);
+  text-transform: uppercase;
+  color: rgb(var(--v-theme-on-surface-variant));
 }
 
 .column-cards {
@@ -696,12 +758,15 @@ function deadlineColor(deadline: string): string {
 }
 
 .bud-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: border-color 0.15s ease;
+  border: 1px solid rgb(var(--v-theme-rule));
+  border-radius: var(--radius-card, 10px);
+  transition: border-color var(--dur-short, 150ms) var(--ease-out, ease),
+              transform var(--dur-short, 150ms) var(--ease-out, ease);
 }
 
 .bud-card:hover {
-  border-color: rgba(var(--v-theme-primary), 0.4);
+  border-color: rgba(var(--v-theme-primary), 0.55);
+  transform: translateY(-2px);
 }
 
 .complexity-dot {
@@ -716,15 +781,15 @@ function deadlineColor(deadline: string): string {
 }
 
 .dot-empty {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgb(var(--v-theme-rule));
 }
 
 .board-filters :deep(.v-field) {
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 8px;
+  background: rgb(var(--v-theme-surface-bright));
+  border-radius: var(--radius-input, 8px);
 }
 .board-filters :deep(.v-field--focused) {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--v-theme-surface-light));
 }
 .board-filter-search {
   width: 260px;

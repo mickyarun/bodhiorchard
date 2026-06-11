@@ -72,13 +72,9 @@ defineProps<{
 .kpi {
   position: relative;
   padding: 14px 16px;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  border: 1px solid rgb(var(--v-theme-rule));
   border-radius: 12px;
-  background: linear-gradient(
-    180deg,
-    rgba(var(--v-theme-surface-variant), 0.18) 0%,
-    rgba(var(--v-theme-surface-variant), 0.06) 100%
-  );
+  background: rgb(var(--v-theme-surface));
   overflow: hidden;
 }
 
@@ -90,7 +86,6 @@ defineProps<{
   width: 3px;
   height: 100%;
   background: rgb(var(--v-theme-primary));
-  opacity: 0.55;
 }
 
 .kpi--sparse::before {
@@ -107,10 +102,13 @@ defineProps<{
 }
 
 .kpi-value {
-  font-size: 28px;
-  font-weight: 500;
+  font-family: var(--font-display, 'Bricolage Grotesque', sans-serif);
+  font-size: 2rem;
+  font-weight: 600;
   line-height: 1.1;
+  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
+  margin-top: 2px;
 }
 
 .kpi-value--warn {

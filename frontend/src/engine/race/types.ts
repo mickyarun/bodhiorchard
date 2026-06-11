@@ -21,6 +21,22 @@
 
 export type RaceMode = 'solo' | 'live'
 
+/**
+ * Per-frame avatar driving state derived from the authoritative server
+ * snapshot. One object instead of a tail of positional booleans so call
+ * sites stay readable as flags accumulate.
+ */
+export interface RacerKinematics {
+  positionM: number
+  velocityMps: number
+  /** Sprint or boost window active — drives the run animation. */
+  isSprinting: boolean
+  /** Jump window active — drives the hop arc. */
+  isAirborne: boolean
+  /** Hurdle knockdown active — drives the fall / get-up animation. */
+  isKnockedDown: boolean
+}
+
 export interface RaceInitOptions {
   mode: RaceMode
   /** Required when mode === 'live'. Ignored in solo mode. */

@@ -344,22 +344,7 @@
                   <div class="field col-12">
                     <div class="d-flex align-center justify-space-between">
                       <label class="field-label">Prompt</label>
-                      <v-btn-toggle
-                        v-model="previewMode"
-                        mandatory
-                        density="compact"
-                        variant="outlined"
-                        divided
-                      >
-                        <v-btn value="edit" size="x-small" class="text-none">
-                          <v-icon start size="13">mdi-pencil-outline</v-icon>
-                          Edit
-                        </v-btn>
-                        <v-btn value="preview" size="x-small" class="text-none">
-                          <v-icon start size="13">mdi-eye-outline</v-icon>
-                          Preview
-                        </v-btn>
-                      </v-btn-toggle>
+                      <AppPillToggle v-model="previewMode" :options="PREVIEW_MODE_OPTIONS" size="sm" />
                     </div>
                     <v-textarea
                       v-if="previewMode === 'edit'"
@@ -531,6 +516,12 @@ import {
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import CustomSkillDialog from './CustomSkillDialog.vue'
+import AppPillToggle from '@/components/common/AppPillToggle.vue'
+
+const PREVIEW_MODE_OPTIONS: { label: string; value: 'edit' | 'preview' }[] = [
+  { label: 'Edit', value: 'edit' },
+  { label: 'Preview', value: 'preview' },
+]
 
 const store = useAgentSkillsStore()
 
@@ -1053,14 +1044,14 @@ onMounted(() => {
 }
 
 .prompt-editor :deep(.v-field) {
-  background: rgba(0, 0, 0, 0.18);
+  background: rgb(var(--v-theme-background));
 }
 
 .preview-content {
   max-height: 540px;
   overflow-y: auto;
   padding: 16px 18px;
-  background: rgba(0, 0, 0, 0.18);
+  background: rgb(var(--v-theme-background));
   border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
   border-radius: 8px;
   font-size: 13.5px;
@@ -1082,7 +1073,7 @@ onMounted(() => {
   font-size: 0.87em;
 }
 .preview-content :deep(pre) {
-  background: rgba(0, 0, 0, 0.32);
+  background: rgb(var(--v-theme-background));
   border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
   border-radius: 6px;
   padding: 12px 16px;

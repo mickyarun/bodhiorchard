@@ -20,7 +20,7 @@
     <div class="settings-header pa-6 pb-4">
       <div class="d-flex align-center justify-space-between">
         <div>
-          <div class="text-h5 font-weight-bold">Design Systems</div>
+          <div class="text-h5 font-weight-bold bo-display">Design Systems</div>
           <div class="text-body-2 text-medium-emphasis">
             Extract and manage design tokens from your tracked repositories
           </div>
@@ -70,20 +70,30 @@
         </v-btn>
       </div>
 
-      <!-- Cards -->
+      <!-- Cards — each one shows the extracted palette as swatches, so the
+           card *is* a preview of the design system, not just a description. -->
       <div v-else class="d-flex flex-column ga-4">
         <v-card
           v-for="ds in dsStore.items"
           :key="ds.id"
-          variant="outlined"
+          color="surface"
+          rounded="lg"
           class="ds-card"
         >
-          <v-card-text>
-            <div class="d-flex align-center ga-3 mb-3">
-              <v-icon icon="mdi-palette-outline" size="20" color="secondary" />
-              <span class="text-body-1 font-weight-medium flex-grow-1">
-                {{ ds.repo_name || 'Unknown Repository' }}
-              </span>
+          <div class="ds-card__body">
+            <!-- Header: icon · repo + summary · badges · timestamp -->
+            <div class="d-flex align-center ga-3">
+              <v-avatar size="36" rounded="md" class="ds-card__icon">
+                <v-icon icon="mdi-palette-outline" size="20" color="secondary" />
+              </v-avatar>
+              <div class="flex-grow-1" style="min-width: 0">
+                <div class="text-body-1 font-weight-medium text-truncate">
+                  {{ ds.repo_name || 'Unknown Repository' }}
+                </div>
+                <div class="text-caption text-medium-emphasis">
+                  {{ extractSummary(ds.content) }}
+                </div>
+              </div>
               <v-chip
                 v-if="ds.is_default"
                 color="primary"
@@ -103,61 +113,61 @@
               >
                 CUSTOMISED
               </v-chip>
-              <span class="text-caption text-medium-emphasis">
-                Extracted {{ formatRelative(ds.extracted_at) }}
+              <span class="text-caption text-medium-emphasis flex-shrink-0">
+                {{ formatRelative(ds.extracted_at) }}
               </span>
             </div>
 
-            <div class="text-body-2 text-medium-emphasis mb-4">
-              {{ extractSummary(ds.content) }}
+            <!-- Palette swatches — the actual extracted colours -->
+            <div v-if="extractColors(ds.content).length" class="ds-swatches">
+              <span
+                v-for="(c, i) in extractColors(ds.content)"
+                :key="`${c}-${i}`"
+                class="ds-swatch"
+                :style="{ background: c }"
+                :title="c"
+              />
             </div>
+          </div>
 
-            <div class="d-flex ga-2">
-              <v-btn
-                variant="text"
-                size="small"
-                @click="previewItem = ds; previewDialog = true"
-              >
-                <v-icon start size="15">mdi-eye-outline</v-icon>
-                Preview
-              </v-btn>
-              <v-btn
-                variant="text"
-                size="small"
-                @click="openCustomise(ds)"
-              >
-                <v-icon start size="15">mdi-pencil-outline</v-icon>
-                Customise
-              </v-btn>
-              <v-btn
-                variant="text"
-                size="small"
-                :loading="extractingId === ds.id"
-                @click="reExtract(ds)"
-              >
-                <v-icon start size="15">mdi-refresh</v-icon>
-                Re-extract
-              </v-btn>
-              <v-btn
-                v-if="!ds.is_default"
-                variant="text"
-                size="small"
-                @click="dsStore.setDefault(ds.id)"
-              >
-                <v-icon start size="15">mdi-star-outline</v-icon>
-                Set Default
-              </v-btn>
-              <v-spacer />
-              <v-btn
-                variant="text"
-                size="small"
-                color="error"
-                @click="deleteTarget = ds; confirmDelete = true"
-              >
-                <v-icon size="15">mdi-delete-outline</v-icon>
-              </v-btn>
-            </div>
-          </v-card-text>
+          <!-- Action footer with a top hairline -->
+          <div class="ds-card__actions">
+            <v-btn variant="text" size="small" @click="previewItem = ds; previewDialog = true">
+              <v-icon start size="15">mdi-eye-outline</v-icon>
+              Preview
+            </v-btn>
+            <v-btn variant="text" size="small" @click="openCustomise(ds)">
+              <v-icon start size="15">mdi-pencil-outline</v-icon>
+              Customise
+            </v-btn>
+            <v-btn
+              variant="text"
+              size="small"
+              :loading="extractingId === ds.id"
+              @click="reExtract(ds)"
+            >
+              <v-icon start size="15">mdi-refresh</v-icon>
+              Re-extract
+            </v-btn>
+            <v-btn
+              v-if="!ds.is_default"
+              variant="text"
+              size="small"
+              @click="dsStore.setDefault(ds.id)"
+            >
+              <v-icon start size="15">mdi-star-outline</v-icon>
+              Set Default
+            </v-btn>
+            <v-spacer />
+            <v-btn
+              variant="text"
+              size="small"
+              color="error"
+              icon="mdi-delete-outline"
+              density="comfortable"
+              @click="deleteTarget = ds; confirmDelete = true"
+            />
+          </div>
         </v-card>
       </div>
     </div>
@@ -397,6 +407,22 @@ function extractSummary(content: string): string {
   return parts.length > 0 ? parts.join(' · ') : 'Design system extracted'
 }
 
+// Pull the actual extracted hex colours so the card can render them as
+// swatches — a design-system card should show the design.
+function extractColors(content: string): string[] {
+  const matches = content.match(/#[0-9a-fA-F]{6}\b/g) || []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const m of matches) {
+    const key = m.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(m)
+    if (out.length >= 12) break
+  }
+  return out
+}
+
 function renderMarkdown(md: string): string {
   if (!md) return ''
   const raw = marked.parse(md, { async: false }) as string
@@ -416,7 +442,39 @@ function renderMarkdown(md: string): string {
 }
 
 .ds-card {
-  border-color: rgba(var(--v-theme-on-surface), 0.08) !important;
+  border: 1px solid rgb(var(--v-theme-rule));
+  overflow: hidden;
+}
+
+.ds-card__body {
+  padding: 18px 20px;
+}
+
+.ds-card__icon {
+  background: rgba(var(--v-theme-secondary), 0.14);
+}
+
+.ds-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.ds-swatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  border: 1px solid rgb(var(--v-theme-rule));
+  flex-shrink: 0;
+}
+
+.ds-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-top: 1px solid rgb(var(--v-theme-rule));
 }
 
 .ds-card .v-btn {

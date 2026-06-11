@@ -43,6 +43,7 @@ from app.schemas.setup import (
 )
 from app.services.claude_env import (
     AUTH_MODE_HOST,
+    AUTH_MODE_SUBSCRIPTION,
     VALID_AUTH_MODES,
 )
 from app.services.claude_runner import test_claude_connection
@@ -261,14 +262,27 @@ async def check_claude_with_credentials(
             detail=f"auth_mode must be one of {sorted(VALID_AUTH_MODES)}",
         )
 
+    # Subprocess-scoped credential override — never touches os.environ.
+    if body.auth_mode == AUTH_MODE_SUBSCRIPTION:
+        token = (body.oauth_token or "").strip()
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="oauth_token is required when auth_mode is 'subscription'",
+            )
+        # Clear any inherited ANTHROPIC_API_KEY (empty value → dropped by
+        # build_claude_env) so a compose-level key can't shadow the token and
+        # make the test pass against the wrong credential.
+        return await test_claude_connection(
+            env_extra={"CLAUDE_CODE_OAUTH_TOKEN": token, "ANTHROPIC_API_KEY": ""}
+        )
+
     api_key = (body.api_key or "").strip()
     if not api_key:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="api_key is required when auth_mode is 'api_key'",
         )
-
-    # Subprocess-scoped override — never touches os.environ.
     return await test_claude_connection(env_extra={"ANTHROPIC_API_KEY": api_key})
 
 

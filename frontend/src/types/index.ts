@@ -857,21 +857,25 @@ export const BUG_STATUS_COLORS: Record<BugStatusValue, string> = {
   open: 'error',
   'in-progress': 'warning',
   resolved: 'success',
-  closed: 'grey',
-  blocked: 'purple',
+  closed: 'muted', // theme token, not raw Material grey
+  blocked: 'info', // theme token, not raw Material purple
 }
 
+// Lifecycle colours grouped by stage-type rather than ten clashing Material
+// hues — keeps the kanban on the forest design system and tells the
+// plan → build → validate → ship story at a glance. All values are theme
+// tokens (see assets/styles/tokens.css), so they track light/dark.
 export const BUD_STATUS_COLORS: Record<BUDStatus, string> = {
-  'bud': 'brown',
-  'design': 'teal',
-  'tech_arch': 'deep-purple',
-  'development': 'primary',
-  'code_review': 'indigo',
-  'testing': 'purple',
-  'uat': 'orange',
-  'prod': 'success',
-  'closed': 'blue-grey',
-  'discarded': 'grey',
+  'bud': 'muted', // seed / backlog — not started
+  'design': 'info', // plan
+  'tech_arch': 'info', // plan
+  'development': 'primary', // build
+  'code_review': 'primary', // build
+  'testing': 'warning', // validate
+  'uat': 'warning', // validate
+  'prod': 'success', // shipped
+  'closed': 'muted', // archived
+  'discarded': 'error', // killed
 }
 
 // ── Job Queue Types ───────────────────────────────────────────────
@@ -947,6 +951,15 @@ export interface RaceInviteMeta {
   hostUserId?: string
   hostName?: string
   distanceM?: number
+  /**
+   * Set when the host is reading their own bell after an invitee
+   * declined. Presence of this field flips the row from an actionable
+   * invite into a passive "X declined" entry — frontend uses it to
+   * hide the Decline button so the host can't decline their own race
+   * back at themselves.
+   */
+  declinedBy?: string
+  declinedByName?: string
 }
 
 export interface AppNotification {

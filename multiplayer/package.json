@@ -5,8 +5,8 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc",
-    "start": "ts-node src/main.ts",
-    "start:dev": "ts-node-dev --watch \"src/**/*\" --respawn --transpile-only src/main.ts",
+    "start": "npm run start:dev",
+    "start:dev": "ts-node-dev --watch \"src,../shared\" --respawn --transpile-only src/main.ts",
     "start:prod": "node dist/main.js",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -21,6 +21,6 @@
     "ts-node": "^10.9.0",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.4.0",
-    "vitest": "^1.6.1"
+    "vitest": "^3.2.6"
   }
 }

@@ -35,5 +35,19 @@ export class RacerState extends Schema {
   @type("uint32") finishTimeMs = 0
   @type("boolean") isMoving = false
   @type("uint32") sprintUntilMs = 0
+  /** Stamina normalised to [0, 1]. HUD bars read directly. */
+  @type("number") staminaPct = 1
+  /** Round-ms when the boost-pad window ends; boosted iff elapsed < this. */
+  @type("uint32") boostUntilMs = 0
+  /** Round-ms when the jump's airborne window ends; drives the jump arc. */
+  @type("uint32") jumpUntilMs = 0
+  /** Round-ms when the racer gets up from a hurdle knockdown; drives the fall anim. */
+  @type("uint32") knockdownUntilMs = 0
   @type("boolean") connected = false
+  /**
+   * True for server-driven dev-mode test bots (userId `bot-<n>`). Bots
+   * live only inside the room — lobby, sim, podium — and are filtered
+   * out of the backend results POST (their ids aren't real users).
+   */
+  @type("boolean") isBot = false
 }

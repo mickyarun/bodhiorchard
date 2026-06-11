@@ -23,7 +23,7 @@
       alt="Bodhiorchard"
       class="bodhiorchard-logo"
     />
-    <span v-if="showText" class="font-weight-bold" :class="titleClass" style="letter-spacing: -0.5px;">
+    <span v-if="showText" class="bo-wordmark font-weight-bold" :class="titleClass">
       <span class="text-primary">Bodhi</span><span class="text-on-background">orchard</span>
     </span>
   </div>

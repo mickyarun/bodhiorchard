@@ -18,7 +18,7 @@
   <v-container class="py-6" fluid>
     <div class="d-flex align-center ga-2 mb-6">
       <v-icon icon="mdi-account-circle" size="28" />
-      <div class="text-h5 font-weight-bold">My Profile</div>
+      <div class="text-h5 font-weight-bold bo-display">My Profile</div>
       <v-spacer />
       <v-btn
         variant="tonal"

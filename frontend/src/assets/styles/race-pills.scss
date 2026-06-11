@@ -1,0 +1,95 @@
+/*
+ * Copyright 2025-2026 Arun Rajkumar
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Pill buttons for the race app's CTA rows. Shared across lobby panel,
+ * cancel-race dialog, and invite-more dialog so the silhouette stays in
+ * lockstep — change the radius or padding once and every surface picks
+ * it up. Variants encode hierarchy, not status semantics:
+ *
+ *   --host    Gold accent. Host-only primary action (Invite more).
+ *   --ghost   Neutral. Low-stakes exits / cancel-the-cancel.
+ *   --danger  Red accent. Destructive confirm (Cancel race).
+ *
+ * Kept outside Vuetify's <v-btn> on purpose: the uppercase / letter-
+ * spaced eyebrow language is part of the race chrome and v-btn fights
+ * it (its own letter-spacing + density rules). Pure CSS + a <button>
+ * element gives the race surfaces a consistent typographic voice.
+ */
+
+.cta__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s, color 0.18s, transform 0.18s;
+}
+
+.cta__pill:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.cta__pill:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+/* Host primary-ish: golden accent matches the HOST badge + the
+   yellow status text in the page eyebrow. */
+.cta__pill--host {
+  color: #ffd75e;
+  background: rgba(255, 215, 94, 0.08);
+  border: 1px solid rgba(255, 215, 94, 0.32);
+}
+.cta__pill--host:hover:not(:disabled) {
+  background: rgba(255, 215, 94, 0.16);
+  border-color: rgba(255, 215, 94, 0.55);
+  color: #fff1c0;
+}
+
+/* Ghost: neutral pill for low-stakes exits. Same pill silhouette so
+   the two buttons read as a pair, even when the host one is hidden. */
+.cta__pill--ghost {
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.cta__pill--ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.24);
+  color: #fff;
+}
+
+/* Danger: red accent for destructive confirms (cancel race, etc.).
+   Saturation tuned to match the host gold's eye-weight so the two
+   pills feel balanced when paired with a ghost cancel. */
+.cta__pill--danger {
+  color: #ff8a80;
+  background: rgba(255, 138, 128, 0.08);
+  border: 1px solid rgba(255, 138, 128, 0.32);
+}
+.cta__pill--danger:hover:not(:disabled) {
+  background: rgba(255, 138, 128, 0.16);
+  border-color: rgba(255, 138, 128, 0.55);
+  color: #ffb3ab;
+}

@@ -25,6 +25,18 @@
 export type RacePhase = 'lobby' | 'countdown' | 'running' | 'finished'
 
 /**
+ * Track layout chosen by the host at race-create time.
+ *
+ * Physics treats `positionM` as a 1-D scalar either way: on a straight
+ * track it's the world X, on a circuit it's the arc length along the
+ * loop centreline. The loop has a fixed length; the race distance is
+ * `lapCount × loop length`, so `positionM` climbs past one loop on a
+ * multi-lap race. Only renderers map the scalar to world space, via
+ * `LoopPath` (the circuit's organic closed loop).
+ */
+export type TrackShape = 'straight' | 'circuit'
+
+/**
  * Finish ranking entry for a single racer. Produced by
  * RacePhysics.checkFinish on the server; mirrored to clients via the
  * Colyseus schema; consumed by both the client HUD and (later) the

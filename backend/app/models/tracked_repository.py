@@ -63,6 +63,11 @@ class TrackedRepository(BaseModel):
     __tablename__ = "tracked_repositories"
     __table_args__ = (
         UniqueConstraint("org_id", "path", name="uq_tracked_repo_org_path"),
+        # ``(id, org_id)`` is the composite-FK target ``team_repos``
+        # references so a team's repo MUST belong to the team's own
+        # org. ``id`` is already unique (PK); this constraint only
+        # adds the unique index PG requires for the composite FK.
+        UniqueConstraint("id", "org_id", name="uq_tracked_repo_id_org"),
         Index("ix_tracked_repo_org_status", "org_id", "status"),
     )
 

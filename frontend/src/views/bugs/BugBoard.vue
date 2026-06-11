@@ -19,7 +19,7 @@
     <!-- Header -->
     <div class="d-flex align-center mb-5">
       <div>
-        <div class="text-h5 font-weight-bold">Bugs</div>
+        <div class="text-h5 font-weight-bold bo-display">Bugs</div>
         <div class="text-body-2 text-medium-emphasis">
           {{ bugsStore.boardTotal }} bug{{ bugsStore.boardTotal !== 1 ? 's' : '' }}
           <span class="ml-2">— {{ scopeLabel }}</span>
@@ -92,18 +92,16 @@
           :key="status"
           class="board-column"
         >
-          <div class="column-header d-flex align-center justify-space-between pa-3 mb-2">
-            <div class="d-flex align-center ga-2">
-              <v-chip
-                :color="BUG_STATUS_COLORS[status]"
-                size="x-small"
-                variant="flat"
-                label
-              >
-                {{ bugsStore.board[status]?.length || 0 }}
-              </v-chip>
-              <span class="text-body-2 font-weight-medium">{{ BUG_STATUS_LABELS[status] }}</span>
-            </div>
+          <div class="column-header d-flex align-center justify-space-between pb-2 mb-3">
+            <span class="column-title">{{ BUG_STATUS_LABELS[status] }}</span>
+            <v-chip
+              :color="BUG_STATUS_COLORS[status]"
+              size="x-small"
+              variant="flat"
+              label
+            >
+              {{ bugsStore.board[status]?.length || 0 }}
+            </v-chip>
           </div>
 
           <draggable
@@ -420,8 +418,14 @@ watch(scope, (val) => {
   max-width: 320px;
 }
 .column-header {
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgb(var(--v-theme-rule));
+}
+.column-title {
+  font-size: var(--text-xs, 0.8rem);
+  font-weight: 600;
+  letter-spacing: var(--tracking-label, 0.08em);
+  text-transform: uppercase;
+  color: rgb(var(--v-theme-on-surface-variant));
 }
 .column-cards {
   min-height: 80px;
@@ -429,7 +433,7 @@ watch(scope, (val) => {
   padding: 4px;
 }
 .bug-card {
-  border-left: 3px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid rgb(var(--v-theme-rule));
 }
 .cursor-pointer { cursor: pointer; }
 </style>

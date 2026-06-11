@@ -25,7 +25,7 @@
     <div class="race-hud">
       <div class="race-hud__timer">
         <div class="race-hud__timer-value">{{ timerLabel }}</div>
-        <div class="race-hud__timer-unit">s · {{ snapshot.distanceM }}m</div>
+        <div class="race-hud__timer-unit">s · {{ lapLabel(snapshot.distanceM) }}</div>
       </div>
       <ol class="race-hud__racers">
         <li
@@ -35,12 +35,17 @@
             'race-hud__racer--self': r.userId === selfUserId,
             'race-hud__racer--finished': r.finished,
             'race-hud__racer--sprinting': isSprinting(r),
+            'race-hud__racer--boosted': isBoosted(r),
+            'race-hud__racer--down': isKnockedDown(r),
           }"
         >
           <span class="race-hud__rank">{{ r.finished ? placeFor(r.userId) : '·' }}</span>
           <span class="race-hud__name">{{ r.name }}</span>
-          <div class="race-hud__bar">
-            <div class="race-hud__bar-fill" :style="{ width: progressPct(r) + '%' }" />
+          <div class="race-hud__bars">
+            <div class="race-hud__bar">
+              <div class="race-hud__bar-fill" :style="{ width: progressPct(r) + '%' }" />
+            </div>
+            <RacerStaminaBar v-if="!r.finished" :stamina-pct="r.staminaPct" />
           </div>
           <span class="race-hud__distance">{{ r.finished ? finishedLabel(r) : r.positionM.toFixed(0) + 'm' }}</span>
         </li>
@@ -53,7 +58,8 @@
     </div>
 
     <div v-if="isParticipant" class="controls-hint">
-      Hold <kbd>W</kbd> or <kbd>↑</kbd> to move · tap <kbd>Shift</kbd> to sprint
+      Hold <kbd>W</kbd> or <kbd>↑</kbd> to move · tap <kbd>Shift</kbd> to sprint ·
+      <kbd>Space</kbd> to jump hurdles
     </div>
 
     <TouchControls
@@ -65,13 +71,14 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { COUNTDOWN_MS } from '@shared/race/RaceConstants'
+import { COUNTDOWN_MS, lapLabel } from '@shared/race/RaceConstants'
 import { parseCharacterModel } from '@/engine/characters/CharacterConfig'
 import { useAuthStore } from '@/stores/auth'
 import { RaceEngine } from '@/engine/race'
 import type { RacePhase } from '@shared/race/types'
 import type { RaceRoomClientLike, RaceStateSnapshot } from '@/multiplayer/RaceRoomClient'
 import TouchControls from '@/components/touch/TouchControls.vue'
+import RacerStaminaBar from '@/components/race/RacerStaminaBar.vue'
 import { useTouchDevice } from '@/composables/useTouchDevice'
 
 const { isTouch } = useTouchDevice()
@@ -120,6 +127,14 @@ function isSprinting(r: { sprintUntilMs: number }): boolean {
   return props.snapshot.runningElapsedMs < r.sprintUntilMs
 }
 
+function isBoosted(r: { boostUntilMs: number }): boolean {
+  return props.snapshot.runningElapsedMs < r.boostUntilMs
+}
+
+function isKnockedDown(r: { knockdownUntilMs: number }): boolean {
+  return props.snapshot.runningElapsedMs < r.knockdownUntilMs
+}
+
 function placeFor(userId: string): string {
   const p = props.snapshot.placings.find(x => x.racerId === userId)
   return p ? `#${p.place}` : '·'
@@ -154,9 +169,17 @@ watch(
   (racers) => {
     const eng = engine.value
     if (!eng) return
+    const now = props.snapshot.runningElapsedMs
     for (const r of racers) {
-      const sprinting = props.snapshot.runningElapsedMs < r.sprintUntilMs
-      eng.setRacerKinematics(r.userId, r.positionM, r.velocityMps, sprinting)
+      eng.setRacerKinematics(r.userId, {
+        positionM: r.positionM,
+        velocityMps: r.velocityMps,
+        // A boost window drives the run animation just like a sprint —
+        // the avatar is moving faster than walk either way.
+        isSprinting: now < r.sprintUntilMs || now < r.boostUntilMs,
+        isAirborne: now < r.jumpUntilMs,
+        isKnockedDown: now < r.knockdownUntilMs,
+      })
       if (r.finished && !finishedSeen.has(r.userId)) {
         finishedSeen.add(r.userId)
         eng.setRacerFinished(r.userId, true)
@@ -182,6 +205,7 @@ async function buildEngine(): Promise<boolean> {
       scene: {
         distanceM: props.snapshot.distanceM,
         racerCount: racers.length,
+        trackShape: props.snapshot.trackShape,
         cameraMode: props.isParticipant ? 'participant' : 'spectator',
         racers,
         // Participants see their own avatar — camera sticks to the current
@@ -230,6 +254,11 @@ function onKeyDown(ev: KeyboardEvent): void {
   } else if (isSprintKey(ev)) {
     // Tap-to-sprint — each keydown counts as a tap, including auto-repeat.
     props.client.sendSprintTap()
+  } else if (isJumpKey(ev)) {
+    // Block page scroll; ignore auto-repeat so holding Space is one jump
+    // (the server's jump cooldown is the authoritative limiter anyway).
+    ev.preventDefault()
+    if (!ev.repeat) props.client.sendJump()
   }
 }
 
@@ -249,6 +278,10 @@ function isMoveKey(ev: KeyboardEvent): boolean {
 
 function isSprintKey(ev: KeyboardEvent): boolean {
   return ev.key === 'Shift' || ev.code === 'ShiftLeft' || ev.code === 'ShiftRight'
+}
+
+function isJumpKey(ev: KeyboardEvent): boolean {
+  return ev.code === 'Space'
 }
 
 function installKeyHandlers(): void {
@@ -337,6 +370,16 @@ function removeKeyHandlers(): void {
 .race-hud__racers li.race-hud__racer--sprinting .race-hud__bar-fill {
   background: linear-gradient(90deg, #ffd75e, #ff6b4a);
 }
+.race-hud__racers li.race-hud__racer--boosted .race-hud__bar-fill {
+  background: linear-gradient(90deg, #5ef2ff, #2bb8ff);
+  box-shadow: 0 0 8px rgba(94, 242, 255, 0.7);
+}
+.race-hud__racers li.race-hud__racer--down .race-hud__bar-fill {
+  background: linear-gradient(90deg, #ff8d7a, #d84444);
+}
+.race-hud__racers li.race-hud__racer--down .race-hud__name {
+  color: #ff9d8a;
+}
 .race-hud__racers li.race-hud__racer--finished {
   background: rgba(80, 200, 120, 0.12);
 }
@@ -364,8 +407,17 @@ function removeKeyHandlers(): void {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.7);
 }
-.race-hud__bar {
+/* Wraps progress + stamina bars so they share grid column 2 / row 2
+   and stack with a tight gap. Keeping the wrapper grid-positioned (not
+   the individual bars) means future bars (boost charge, hurdle warning)
+   slot in without touching the row grid. */
+.race-hud__bars {
   grid-column: 2 / 3;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.race-hud__bar {
   height: 6px;
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.1);

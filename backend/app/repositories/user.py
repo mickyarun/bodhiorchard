@@ -18,6 +18,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import Select, and_, case, func, or_, select, true
+from sqlalchemy import delete as sql_delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -26,7 +27,7 @@ from app.models.developer_xp import DeveloperXP
 from app.models.role import Role, RoleScopeType
 from app.models.skill_profile import SkillProfile
 from app.models.user import OrgToUser, User, UserEmailAlias, UserRole
-from app.repositories.base import BaseRepository, SelectT
+from app.repositories.base import BaseRepository, SelectT, rowcount
 
 
 def _effective_role_case(base_role_alias: Any) -> Any:
@@ -185,6 +186,35 @@ class UserRepository(BaseRepository[User]):
         if row is None:
             return None
         return (row[0], _role_from_name(row[1]))
+
+    async def list_in_org_by_ids_with_role(
+        self, org_id: uuid.UUID, user_ids: list[uuid.UUID]
+    ) -> list[tuple[User, UserRole | None, str | None]]:
+        """Bulk-fetch users by id with their effective role + role_name.
+
+        Returns triples ``(user, effective_role, role_name)``: ``role`` is
+        the canonical :class:`UserRole` resolved through the same SYSTEM /
+        CUSTOM → base_role rules as :meth:`list_active_with_role`; the
+        second string is the raw role row name so a custom "Senior PM"
+        renders distinctly from the inherited "pm" UserRole. Empty input
+        short-circuits without a query. Order is unspecified; callers
+        sort as needed.
+        """
+        if not user_ids:
+            return []
+        base_role = aliased(Role)
+        stmt = (
+            select(User, _effective_role_case(base_role), Role.name)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .outerjoin(Role, Role.id == OrgToUser.role_id)
+            .outerjoin(base_role, base_role.id == Role.base_role_id)
+            .where(
+                OrgToUser.org_id == org_id,
+                User.id.in_(user_ids),
+            )
+        )
+        result = await self._db.execute(stmt)
+        return [(row[0], _role_from_name(row[1]), row[2]) for row in result.all()]
 
     async def list_active_with_role(self, org_id: uuid.UUID, role: UserRole) -> list[User]:
         """Active org members **explicitly** assigned a role whose identity equals ``role``.
@@ -711,6 +741,63 @@ class UserRepository(BaseRepository[User]):
         alias = UserEmailAlias(user_id=user_id, org_id=org_id, email=email)
         self._db.add(alias)
         return alias
+
+    async def rebind_aliases_to_target(
+        self,
+        org_id: uuid.UUID,
+        target_user_id: uuid.UUID,
+        emails: set[str],
+    ) -> int:
+        """Force every alias row for ``emails`` in ``org_id`` to point at
+        ``target_user_id``.
+
+        Used by member-merge to claim emails that may already be attached
+        to a previously-merged-away user. Plain ``add_email_alias`` skips
+        on ``(org_id, email)`` conflict and leaves the stale row in place;
+        this primitive does delete-then-insert so the most recent merge
+        wins.
+
+        Not atomic against a concurrent ``add_email_alias`` for the same
+        ``(org_id, email)`` at default ``READ COMMITTED``: an interleaved
+        insert between the DELETE and the INSERT here would surface as
+        an ``IntegrityError`` on flush. Callers must serialize merges
+        (the merge-members handler is one-admin-at-a-time in practice;
+        no batch caller exists today).
+        """
+        if not emails:
+            return 0
+        await self._db.execute(
+            sql_delete(UserEmailAlias).where(
+                UserEmailAlias.org_id == org_id,
+                UserEmailAlias.email.in_(emails),
+            )
+        )
+        for email in emails:
+            self._db.add(UserEmailAlias(user_id=target_user_id, org_id=org_id, email=email))
+        await self._db.flush()
+        return len(emails)
+
+    async def delete_alias(
+        self,
+        org_id: uuid.UUID,
+        user_id: uuid.UUID,
+        email: str,
+    ) -> bool:
+        """Remove an alias row only if it currently points at ``user_id``.
+
+        ``user_id`` is part of the WHERE clause (not just ``org_id, email``)
+        so that an admin on a stale page cannot delete a row that has
+        since been reassigned to a different member by someone else.
+        """
+        result = await self._db.execute(
+            sql_delete(UserEmailAlias).where(
+                UserEmailAlias.org_id == org_id,
+                UserEmailAlias.user_id == user_id,
+                UserEmailAlias.email == email,
+            )
+        )
+        await self._db.flush()
+        return (rowcount(result) or 0) > 0
 
     async def create_stub_member(
         self,

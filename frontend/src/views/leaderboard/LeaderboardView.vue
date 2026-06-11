@@ -18,7 +18,7 @@
   <v-container class="py-6" fluid>
     <div class="d-flex align-center mb-4">
       <v-icon icon="mdi-trophy" color="secondary" size="28" class="mr-2" />
-      <div class="text-h5 font-weight-bold">Leaderboard</div>
+      <div class="text-h5 font-weight-bold bo-display">Leaderboard</div>
       <v-spacer />
       <v-chip
         v-if="activeTab === 'xp'"
@@ -32,8 +32,8 @@
 
     <v-tabs v-model="activeTab" color="primary" density="comfortable" class="mb-4">
       <v-tab value="xp">XP</v-tab>
-      <v-tab value="race-100">Race 100 m</v-tab>
-      <v-tab value="race-200">Race 200 m</v-tab>
+      <v-tab value="race-100">Circuit · 1 lap</v-tab>
+      <v-tab value="race-200">Circuit · 2 laps</v-tab>
     </v-tabs>
 
     <v-window v-model="activeTab">
@@ -47,21 +47,9 @@
 
     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4" />
 
-    <!-- Podium — top 3 with staggered height -->
-    <div v-if="entries.length >= 3" class="podium mb-8">
-      <!-- 2nd place (left, shorter) -->
-      <div class="podium__slot podium__slot--silver">
-        <PodiumCard :entry="entries[1]" :rank="2" :is-me="entries[1].user_id === currentUserId" />
-      </div>
-      <!-- 1st place (center, tallest) -->
-      <div class="podium__slot podium__slot--gold">
-        <PodiumCard :entry="entries[0]" :rank="1" :is-me="entries[0].user_id === currentUserId" />
-      </div>
-      <!-- 3rd place (right, shortest) -->
-      <div class="podium__slot podium__slot--bronze">
-        <PodiumCard :entry="entries[2]" :rank="3" :is-me="entries[2].user_id === currentUserId" />
-      </div>
-    </div>
+    <div class="lb-content">
+    <!-- Podium — top 3, shared with the race tabs. -->
+    <LeaderboardPodium v-if="entries.length >= 3" :entries="podiumEntries" class="mb-8" />
 
     <!-- Full ranked list (all members) -->
     <v-card color="surface">
@@ -109,24 +97,25 @@
           </v-list-item-subtitle>
 
           <template #append>
-            <span class="text-body-1 font-weight-bold" style="color: rgb(var(--v-theme-secondary));">
+            <span class="text-body-1 font-weight-bold bo-display" style="color: rgb(var(--v-theme-gold));">
               {{ entry.total_xp.toLocaleString() }}
             </span>
           </template>
         </v-list-item>
       </v-list>
     </v-card>
+    </div>
       </v-window-item>
     </v-window>
   </v-container>
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, ref } from 'vue'
-import type { LeaderboardEntry } from '@/types'
+import { computed, onMounted, ref } from 'vue'
 import { useXPStore } from '@/stores/xp'
 import { useAuthStore } from '@/stores/auth'
 import RaceLeaderboardTab from './RaceLeaderboardTab.vue'
+import LeaderboardPodium, { type PodiumEntry } from '@/components/leaderboard/LeaderboardPodium.vue'
 
 const activeTab = ref<'xp' | 'race-100' | 'race-200'>('xp')
 
@@ -161,82 +150,34 @@ function initials(name: string): string {
   return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?'
 }
 
+// Top-3 mapped to the shared podium's shape. XP is the reward figure (gold);
+// the level line is the meta.
+const podiumEntries = computed<PodiumEntry[]>(() =>
+  entries.value.slice(0, 3).map(e => ({
+    name: e.name,
+    figure: `${e.total_xp.toLocaleString()} XP`,
+    figureKind: 'gold',
+    meta: `${LEVEL_ICONS[e.level_name] || '🌱'} Lv.${e.level}`,
+    isMe: e.user_id === currentUserId.value,
+  })),
+)
+
 onMounted(async () => {
   await xpStore.fetchLeaderboard()
   loading.value = false
 })
-
-// Inline PodiumCard component (small, only used here)
-const PodiumCard = defineComponent({
-  props: {
-    entry: { type: Object as () => LeaderboardEntry, required: true },
-    rank: { type: Number, required: true },
-    isMe: { type: Boolean, default: false },
-  },
-  setup(props) {
-    return () => h('div', {
-      class: ['podium-card', props.isMe && 'podium-card--me'],
-    }, [
-      h('div', { class: 'podium-card__medal' }, MEDALS[props.rank - 1]),
-      h('div', { class: 'podium-card__name text-body-2 font-weight-bold' }, props.entry.name),
-      h('div', { class: 'podium-card__level text-caption' },
-        `${LEVEL_ICONS[props.entry.level_name] || '🌱'} Lv.${props.entry.level}`),
-      h('div', {
-        class: 'podium-card__xp text-h6 font-weight-bold',
-        style: 'color: rgb(var(--v-theme-secondary))',
-      }, `${props.entry.total_xp.toLocaleString()} XP`),
-    ])
-  },
-})
 </script>
 
 <style scoped>
-/* ─── Podium ──────────────────────────── */
-.podium {
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  gap: 12px;
+/* Focused centred column — keeps the board from stretching edge-to-edge on
+   wide viewports (which marooned the XP value far to the right). */
+.lb-content {
+  max-width: 820px;
+  margin: 0 auto;
 }
 
-.podium__slot { display: flex; justify-content: center; }
-.podium__slot--gold { align-self: flex-start; }
-.podium__slot--silver { align-self: center; }
-.podium__slot--bronze { align-self: flex-end; }
-
-.podium-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 20px 28px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 2px solid rgba(255, 255, 255, 0.08);
-  min-width: 160px;
-  gap: 6px;
-}
-
-.podium-card--me {
-  box-shadow: 0 0 0 2px rgba(var(--v-theme-primary), 0.4);
-}
-
-.podium__slot--gold .podium-card {
-  border-color: rgba(255, 215, 0, 0.35);
-  background: rgba(255, 215, 0, 0.05);
-  padding: 24px 32px;
-  min-width: 180px;
-}
-.podium__slot--silver .podium-card {
-  border-color: rgba(192, 192, 192, 0.25);
-  background: rgba(192, 192, 192, 0.04);
-}
-.podium__slot--bronze .podium-card {
-  border-color: rgba(205, 127, 50, 0.25);
-  background: rgba(205, 127, 50, 0.04);
-}
-
-.podium-card__medal { font-size: 36px; line-height: 1; }
-.podium-card__level { color: rgba(255, 255, 255, 0.5); }
+/* Podium markup + styles now live in components/leaderboard/LeaderboardPodium.vue
+   (shared with the race tabs). */
 
 /* ─── List Rows ───────────────────────── */
 .lb-row__rank {
@@ -253,16 +194,17 @@ const PodiumCard = defineComponent({
 
 .lb-row__bar {
   flex: 1;
-  max-width: 120px;
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.06);
+  max-width: 200px;
+  height: 5px;
+  border-radius: var(--radius-pill, 999px);
+  background: rgb(var(--v-theme-rule));
   overflow: hidden;
 }
+/* Growth → harvest: leaf-green ramps to gold as XP fills. */
 .lb-row__bar-fill {
   height: 100%;
-  border-radius: 2px;
-  background: linear-gradient(90deg, rgb(var(--v-theme-primary)), rgb(var(--v-theme-secondary)));
-  transition: width 0.4s ease;
+  border-radius: var(--radius-pill, 999px);
+  background: linear-gradient(90deg, rgb(var(--v-theme-primary)), rgb(var(--v-theme-gold)));
+  transition: width var(--dur-long, 360ms) var(--ease-out, ease);
 }
 </style>

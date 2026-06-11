@@ -290,7 +290,7 @@ defineExpose({
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  color: #ef5350;
+  color: rgb(var(--v-theme-error));
   font-size: 14px;
   text-align: center;
   z-index: 10;

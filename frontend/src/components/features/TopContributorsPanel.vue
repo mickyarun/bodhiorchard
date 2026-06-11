@@ -76,8 +76,8 @@ function avatarColor(name: string): string {
   gap: 18px;
   padding: 12px 16px;
   border-radius: 10px;
-  background: rgba(0, 0, 0, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgb(var(--v-theme-surface-bright));
+  border: 1px solid rgb(var(--v-theme-rule));
   flex-wrap: wrap;
   margin-bottom: 18px;
 }
@@ -88,7 +88,7 @@ function avatarColor(name: string): string {
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: rgba(255, 255, 255, 0.65);
+  color: rgb(var(--v-theme-on-surface-variant));
   font-weight: 600;
   flex-shrink: 0;
 }
@@ -120,13 +120,13 @@ function avatarColor(name: string): string {
 }
 .contrib-row__name {
   font-size: 0.82rem;
-  color: rgba(255, 255, 255, 0.92);
+  color: rgb(var(--v-theme-on-surface));
   font-weight: 500;
   line-height: 1.2;
 }
 .contrib-row__stats {
   font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgb(var(--v-theme-on-surface-variant));
   line-height: 1.2;
 }
 .contrib-row__dot {

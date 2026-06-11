@@ -60,9 +60,25 @@ const listeners: Map<string, Set<(data: unknown) => void>> = new Map()
 
 function buildWsUrl(): string {
   const token = localStorage.getItem(TOKEN_KEY)
+  const encoded = encodeURIComponent(token ?? '')
+
+  // When `VITE_API_BASE_URL` is set, axios talks directly to that
+  // backend; the WS must reach the SAME backend, otherwise real-time
+  // pushes are published by one process and consumed by another — the
+  // exact split-brain that surfaces as "notifications only show after
+  // refresh." Mirrors the same env-takes-precedence pattern used by
+  // `resolveColyseusUrl()`. Falls back to the page-origin proxy when
+  // unset so prod / ngrok / Tailscale Serve deployments keep working.
+  const envBase = import.meta.env.VITE_API_BASE_URL
+  if (typeof envBase === 'string' && envBase.length > 0) {
+    const apiBase = envBase.replace(/\/+$/, '')
+    const wsBase = apiBase.replace(/^http(s?):/, 'ws$1:')
+    return `${wsBase}/v1/ws?token=${encoded}`
+  }
+
   const loc = window.location
   const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${loc.host}/api/v1/ws?token=${encodeURIComponent(token ?? '')}`
+  return `${proto}//${loc.host}/api/v1/ws?token=${encoded}`
 }
 
 function clearReconnectTimer(): void {

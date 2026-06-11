@@ -22,7 +22,7 @@
       </div>
 
       <v-card color="surface" class="pa-8 w-100" max-width="420">
-        <div class="text-h5 font-weight-bold mb-1 text-center">Welcome back</div>
+        <div class="text-h5 font-weight-bold bo-display mb-1 text-center">Welcome back</div>
         <div class="text-body-2 text-medium-emphasis text-center mb-6">
           Sign in to your Bodhiorchard account
         </div>
@@ -128,7 +128,7 @@ async function handleLogin(): Promise<void> {
     } else if (!authStore.user?.character_model) {
       router.push({ name: 'character-select' })
     } else {
-      router.push({ name: 'methodology' })
+      router.push({ name: 'dashboard' })
     }
   }
 }

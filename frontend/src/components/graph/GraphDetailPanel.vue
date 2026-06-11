@@ -268,23 +268,25 @@ const panelTitle = computed(() => {
 
 function healthColor(health: string): string {
   const map: Record<string, string> = {
-    thriving: 'success', healthy: 'info', dormant: 'grey', wilted: 'warning',
+    thriving: 'success', healthy: 'info', dormant: 'muted', wilted: 'warning',
   }
-  return map[health] ?? 'grey'
+  return map[health] ?? 'muted'
 }
 
 function statusColor(status: string): string {
   const map: Record<string, string> = {
-    planned: 'blue', in_progress: 'orange', implemented: 'green',
+    planned: 'info', in_progress: 'warning', implemented: 'success',
   }
-  return map[status] ?? 'grey'
+  return map[status] ?? 'muted'
 }
 
+// Hex (not a CSS var) because these tint :style backgrounds — kept on the
+// design palette: info / warning / success / muted.
 function statusDotColor(status: string): string {
   const map: Record<string, string> = {
-    planned: '#42A5F5', in_progress: '#FFA726', implemented: '#66BB6A',
+    planned: '#45AADE', in_progress: '#F1AA57', implemented: '#61C568',
   }
-  return map[status] ?? '#9E9E9E'
+  return map[status] ?? '#808982'
 }
 
 function formatStatus(status: string): string {
@@ -416,7 +418,7 @@ const members = computed<SkilledMember[]>(() => {
 }
 
 .feature-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--v-theme-surface-bright));
 }
 
 .code-path {

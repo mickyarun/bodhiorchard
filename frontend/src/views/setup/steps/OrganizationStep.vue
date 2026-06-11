@@ -21,7 +21,7 @@
         <v-icon icon="mdi-domain" size="24" />
       </v-avatar>
       <div>
-        <div class="text-h5 font-weight-bold">Organization</div>
+        <div class="text-h5 font-weight-bold bo-display">Organization</div>
         <div class="text-body-2 text-medium-emphasis">Set up your workspace</div>
       </div>
     </div>

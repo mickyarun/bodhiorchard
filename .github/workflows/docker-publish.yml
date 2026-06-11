@@ -1,0 +1,90 @@
+name: Publish Docker images
+
+# Builds and pushes the prebuilt images the `bodhiorchard` npm installer pulls.
+# These are expensive multi-arch builds, so they publish only on a deliberate
+# git tag: `git tag v1.2.3 && git push origin v1.2.3`. Can also be dispatched
+# manually for a specific version.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version to publish (e.g. 1.2.3)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    # Only the repo that owns the bodhiorchard Docker Hub namespace publishes.
+    # Forks skip this job cleanly instead of double-publishing or erroring.
+    if: github.repository == 'mickyarun/bodhiorchard'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            image: mickyarun/bodhiorchard-backend
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+            build_args: ""
+          - name: frontend
+            image: mickyarun/bodhiorchard-frontend
+            # Context is the repo root: the frontend image copies shared/.
+            context: .
+            dockerfile: ./frontend/Dockerfile
+            build_args: |
+              VITE_API_BASE_URL=/api
+          - name: multiplayer
+            image: mickyarun/bodhiorchard-multiplayer
+            # Context is the repo root: the multiplayer image copies shared/.
+            context: .
+            dockerfile: ./multiplayer/Dockerfile
+            build_args: ""
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve version (tag without leading v)
+        id: ver
+        # On a tag push the ref is the tag (e.g. v1.2.3); on manual dispatch use
+        # the input. Pass through env, never inline into the shell, to avoid
+        # workflow command injection.
+        env:
+          RAW_REF: ${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.tag }}
+        run: echo "version=${RAW_REF#v}" >> "$GITHUB_OUTPUT"
+
+      # QEMU lets the amd64 runner emulate arm64 so Apple Silicon users get a
+      # native image. The backend leg is slow because it bakes the embedding
+      # model under emulation — acceptable since this only runs on release.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ matrix.image }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ steps.ver.outputs.version }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: ${{ matrix.build_args }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

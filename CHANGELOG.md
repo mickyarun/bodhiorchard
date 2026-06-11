@@ -5,6 +5,13 @@ All notable changes to Bodhiorchard will be documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0](https://github.com/mickyarun/bodhiorchard/compare/v1.0.1...v1.1.0) (2026-06-09)
+
+
+### Features
+
+* **cli:** add npx installer that pulls images and runs the stack ([#226](https://github.com/mickyarun/bodhiorchard/issues/226)) ([da8eaae](https://github.com/mickyarun/bodhiorchard/commit/da8eaaed89e863135d1cb4ef9adc33cda4048334))
+
 ## [Unreleased]
 
 ## [0.1.0] - 2026-05-11

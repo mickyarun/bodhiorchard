@@ -17,7 +17,7 @@
 <template>
   <v-dialog :model-value="modelValue" max-width="540" @update:model-value="$emit('update:modelValue', $event)">
     <v-card color="surface" class="pa-6">
-      <div class="text-h6 font-weight-bold mb-4">Report a Bug</div>
+      <div class="text-h6 font-weight-bold bo-display mb-4">Report a Bug</div>
 
       <v-text-field
         v-model="title"

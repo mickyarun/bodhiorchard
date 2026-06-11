@@ -42,10 +42,12 @@ from app.services.job_queue import (
     JOB_JIRA_ENRICH,
     JOB_JIRA_IMPORT,
     JOB_REPO_BULK_ONBOARD,
+    JOB_SKILL_RERUN,
     JOB_TRIAGE,
     register_job_type,
 )
 from app.services.job_repo_bulk_clone import handle_bulk_onboard_job
+from app.services.job_skill_rerun import handle_skill_rerun_job
 
 # Re-export all handlers so existing imports continue to work
 __all__ = [
@@ -110,3 +112,8 @@ def setup_job_handlers() -> None:
 
     # Bulk GitHub-App repo onboard (Settings → Code "Bulk import" tab)
     register_job_type(JOB_REPO_BULK_ONBOARD, handle_bulk_onboard_job, worker_count=1)
+
+    # Settings → Code "Danger Zone" skill rerun. Serial: the handler
+    # writes ``skill_profiles`` org-wide and would race with itself if
+    # an admin double-clicked the button.
+    register_job_type(JOB_SKILL_RERUN, handle_skill_rerun_job, worker_count=1)

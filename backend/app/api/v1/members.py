@@ -20,7 +20,7 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
@@ -174,10 +174,18 @@ async def list_members(
 
 
 class MemberDirectoryEntry(BaseModel):
-    """Minimal member row — just enough to populate an invite dialog."""
+    """Minimal member row — just enough to populate an invite dialog.
+
+    Email is included to disambiguate same-name members in pickers (orgs
+    routinely have multiple "Arun" / "Alice" / etc. seeded for testing or
+    sharing first names). The plain `/members` page already exposes email
+    to every org member, so including it here is consistent visibility,
+    not a new disclosure.
+    """
 
     id: uuid.UUID
     name: str
+    email: EmailStr
 
 
 @router.get("/members/directory", response_model=list[MemberDirectoryEntry])
@@ -185,18 +193,21 @@ async def list_member_directory(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[MemberDirectoryEntry]:
-    """Lightweight member directory — {id, name} per active org member.
+    """Lightweight member directory — {id, name, email} per active org member.
 
     Unlike `/members`, this endpoint has no permission gate beyond "must be
     authenticated + in an org" so non-admin features (race invites, @-mentions)
-    can populate their member pickers without requiring `team:manage`. It
-    returns the strict minimum: no email, no role, no presence.
+    can populate their member pickers without requiring `team:manage`.
     """
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
     user_repo = UserRepository(db, org_id=org.id)
     users = await user_repo.list_with_membership(org.id)
-    return [MemberDirectoryEntry(id=u.id, name=u.name or "") for u in users if u.is_active]
+    return [
+        MemberDirectoryEntry(id=u.id, name=u.name or "", email=u.email)
+        for u in users
+        if u.is_active
+    ]
 
 
 @router.patch(
@@ -588,15 +599,14 @@ async def merge_members(
     sp_repo = SkillProfileRepository(db, org_id=org.id)
     transferred = await sp_repo.transfer_profiles(source.id, target.id)
 
-    # 2. Add source's primary email as alias on target
-    await user_repo.add_email_alias(org.id, target.id, source.email)
-
-    # 3. Transfer source's existing aliases to target
+    # 2. Rebind every email source owned (primary + aliases) onto target.
+    # Force-overwrite any prior conflicting row so a stale alias from an
+    # earlier bad merge cannot strand attribution on a deactivated user.
     source_aliases = await user_repo.list_aliases(source.id)
-    for alias in source_aliases:
-        await user_repo.add_email_alias(org.id, target.id, alias.email)
+    emails_to_rebind = {source.email} | {a.email for a in source_aliases}
+    await user_repo.rebind_aliases_to_target(org.id, target.id, emails_to_rebind)
 
-    # 4. Deactivate source + revoke its MCP tokens. Token revocation must
+    # 3. Deactivate source + revoke its MCP tokens. Token revocation must
     # happen here (not via the FK CASCADE) because is_active=False is a
     # soft-delete; tokens would otherwise outlive the merge.
     source.is_active = False
@@ -609,6 +619,7 @@ async def merge_members(
         source_id=str(body.source_id),
         source_email=source.email,
         profiles_transferred=transferred,
+        emails_rebound=len(emails_to_rebind),
         mcp_tokens_revoked=revoked_tokens,
         had_tokens_to_revoke=bool(revoked_tokens),
         by=current_user.email,
@@ -617,3 +628,50 @@ async def merge_members(
     # Return updated target with aliases
     aliases = await user_repo.list_aliases(target.id)
     return _user_to_member(target, [a.email for a in aliases])
+
+
+@router.delete(
+    "/members/{user_id}/aliases",
+    response_model=MemberRead,
+    dependencies=[Depends(require_permissions("team:assign_roles"))],
+)
+async def unlink_alias(
+    user_id: uuid.UUID,
+    email: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MemberRead:
+    """Detach an email alias from a member.
+
+    Email is passed as a query parameter so addresses with ``@``/``.``
+    don't have to be path-escaped.
+
+    After unlinking, the next scan that sees a commit with that email
+    will treat it as an unknown author (and either auto-create a stub
+    user or surface it in ``UnmatchedAuthorsError``, depending on the
+    org's ``auto_create_members`` setting).
+    """
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+    user_repo = UserRepository(db, org_id=org.id)
+
+    user = await user_repo.get_by_id_with_membership(user_id, org.id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found.")
+
+    removed = await user_repo.delete_alias(org.id, user_id, email)
+    if not removed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alias not found on this member.",
+        )
+
+    logger.info(
+        "member_alias_unlinked",
+        user_id=str(user_id),
+        email=email,
+        by=current_user.email,
+    )
+
+    aliases = await user_repo.list_aliases(user.id)
+    return _user_to_member(user, [a.email for a in aliases])

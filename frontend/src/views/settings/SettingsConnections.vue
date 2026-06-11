@@ -20,7 +20,7 @@
     <div class="settings-header pa-6 pb-4">
       <div class="d-flex align-center justify-space-between">
         <div>
-          <div class="text-h5 font-weight-bold">Settings</div>
+          <div class="text-h5 font-weight-bold bo-display">Settings</div>
           <div class="text-body-2 text-medium-emphasis">
             Manage connections, integrations, and AI configuration
           </div>
@@ -114,7 +114,7 @@
               Your MCP token (copy now — it won't be shown again):
             </div>
             <div class="d-flex align-center ga-2">
-              <code class="flex-grow-1 pa-2" style="background: rgba(0,0,0,0.2); border-radius: 4px; word-break: break-all;">
+              <code class="flex-grow-1 pa-2" style="background: rgb(var(--v-theme-background)); border-radius: 4px; word-break: break-all;">
                 {{ newMcpToken }}
               </code>
               <v-btn
@@ -133,7 +133,7 @@
           MCP is auto-configured in your repos during scanning (<code>.mcp.json</code>).
           To activate, set your token as a persistent environment variable:
         </div>
-        <div class="config-snippet pa-3 rounded mb-3" style="background: rgba(0,0,0,0.3); position: relative;">
+        <div class="config-snippet pa-3 rounded mb-3" style="background: rgb(var(--v-theme-background)); position: relative;">
           <v-btn
             icon="mdi-content-copy"
             variant="text"
@@ -371,7 +371,7 @@ function copyConfig(): void {
 
 .settings-header {
   flex-shrink: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgb(var(--v-theme-rule));
   background: rgb(var(--v-theme-background));
   z-index: 1;
 }
@@ -387,21 +387,21 @@ function copyConfig(): void {
   align-items: center;
   gap: 8px;
   padding-bottom: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgb(var(--v-theme-rule));
 }
 </style>
 
 <style>
 /* Global (not scoped) — used by child components and Vuetify portals */
 .settings-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgb(var(--v-theme-rule));
   transition: border-color 0.2s ease;
 }
 
 .coming-soon-card {
   opacity: 0.45;
   border-style: dashed !important;
-  border-color: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgb(var(--v-theme-rule)) !important;
   transition: opacity 0.2s ease;
 }
 
@@ -410,7 +410,7 @@ function copyConfig(): void {
 }
 
 .coming-soon-avatar {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--v-theme-surface-bright));
 }
 
 .settings-card--active {
@@ -426,7 +426,7 @@ function copyConfig(): void {
 }
 
 .preset-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgb(var(--v-theme-rule));
   transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
@@ -439,8 +439,8 @@ function copyConfig(): void {
   min-width: 64px;
   padding: 8px 12px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgb(var(--v-theme-surface-bright));
+  border: 1px solid rgb(var(--v-theme-rule));
   text-align: center;
 }
 </style>

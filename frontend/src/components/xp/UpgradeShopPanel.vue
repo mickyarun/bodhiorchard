@@ -277,12 +277,12 @@ async function unlockVehicle(vehicleId: string): Promise<void> {
 
 .upgrade-shop__card {
   position: relative;
-  border: 2px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgb(var(--v-theme-rule));
   border-radius: 12px;
   padding: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--v-theme-surface-bright));
   text-align: center;
   overflow: hidden;
 }
@@ -302,7 +302,7 @@ async function unlockVehicle(vehicleId: string): Promise<void> {
 }
 .upgrade-shop__card--available:hover {
   transform: translateY(-4px);
-  box-shadow: 0 6px 20px rgba(212, 168, 67, 0.25);
+  box-shadow: 0 6px 20px rgba(var(--v-theme-secondary), 0.25);
   border-color: rgba(var(--v-theme-secondary), 0.8);
 }
 
@@ -333,7 +333,7 @@ async function unlockVehicle(vehicleId: string): Promise<void> {
   aspect-ratio: 1;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--v-theme-surface-bright));
   border-radius: 8px;
 }
 .upgrade-shop__img[style*="display: none"] + .upgrade-shop__icon-fallback {

@@ -23,12 +23,16 @@
  *             finish conditions, fires the `finished` transition.
  *   onDispose: POSTs final placings to the backend via `BackendClient`.
  *
- * Size budget: this file must stay under 300 lines (hard cap). Input
- * validation and FSM wiring moved to `RaceRoomHelpers.ts` to keep that.
+ * Size budget: room orchestration only — parsing, validation, and schema
+ * adapters live in `RaceRoomHelpers.ts`, bot driving in `RaceBotDriver.ts`.
+ * The lobby/invite flows have pushed it past its original 300-line cap;
+ * extracting them into a lobby handler is the tracked follow-up refactor.
  */
 import { Room, Client } from "colyseus"
 import {
+  CANCEL_FLUSH_GRACE_MS,
   COUNTDOWN_MS,
+  LOBBY_MAX_MS,
   MAX_RACERS,
   MIN_RACERS,
   RUNNING_TIMEOUT_MS,
@@ -43,17 +47,23 @@ import {
   tick as physicsTick,
   triggerSprintTap,
 } from "../../../shared/race/RacePhysics"
-import type { Placing } from "../../../shared/race/types"
+import { triggerJump } from "../../../shared/race/RaceTrackFeatures"
 import { RaceRoomState } from "../schema/RaceRoomState"
 import { RacerState } from "../schema/RacerState"
-import { PlacingState } from "../schema/PlacingState"
 import {
   assertRaceCreateOptions,
+  buildBotRacerState,
   buildRacerState,
+  buildRaceResultsPayload,
   copyRacerToSchema,
+  parseAddInviteesPayload,
+  parseMove,
+  parseUserIdOnly,
+  placingToSchema,
   type RaceCreateOptions,
 } from "./RaceRoomHelpers"
-import { postRaceResults } from "../bridge/BackendClient"
+import { driveBots } from "./RaceBotDriver"
+import { postRaceInvite, postRaceResults } from "../bridge/BackendClient"
 import { fireRaceDispose, fireRacePhase } from "../bridge/RaceRegistry"
 
 const SIM_TICK_MS = TICK_MS
@@ -63,6 +73,8 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
 
   /** In-memory physics mirror — schema state is updated from this each tick. */
   private physicsRacers: Racer[] = []
+  /** Subset of physicsRacers driven by RaceBotDriver (dev mode only). */
+  private botRacers: Racer[] = []
   private simHandle: NodeJS.Timeout | null = null
   /** Wall-clock at which running phase began (used to compute elapsedMs). */
   private runningStartedAtMs = 0
@@ -70,7 +82,15 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
   onCreate(rawOptions: unknown): void {
     const options = assertRaceCreateOptions(rawOptions, ALLOWED_DISTANCES_M)
     this.seedState(options)
+    this.seedBots(options.botCount)
     this.registerHandlers()
+    // Keep the lobby alive even when zero clients are connected so the
+    // host can switch tabs (or close the page) while waiting for an
+    // invitee to come online and click their notification. A hard cap
+    // below prevents abandoned lobbies from accumulating. autoDispose is
+    // restored in `beginRunning` so finished rooms clean up normally.
+    this.autoDispose = false
+    this.clock.setTimeout(() => this.expireLobbyIfStillWaiting(), LOBBY_MAX_MS)
   }
 
   onJoin(client: Client, options: { userId: string; name: string; characterModel?: string }): void {
@@ -91,31 +111,37 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     this.stopSim()
     // Notify OrgRoom (if any) so it can drop our ActiveRaceSummary.
     fireRaceDispose(this.roomId)
-    const placings = Array.from(this.state.placings)
-    if (placings.length === 0) return
 
-    const hasAnyFinisher = placings.some((p) => p.finished)
-    if (!hasAnyFinisher) {
-      console.log(`[RaceRoom ${this.roomId}] disposed with no finishers — skipping results POST`)
+    const payload = buildRaceResultsPayload(
+      {
+        roomId: this.roomId,
+        orgId: this.state.orgId,
+        hostUserId: this.state.hostUserId,
+        distanceM: this.state.distanceM,
+      },
+      this.state.placings,
+    )
+    if (!payload) {
+      const placingCount = this.state.placings.length
+      const dnfCount = Array.from(this.state.placings).filter((p) => !p.finished).length
+      console.log(
+        `[RaceRoom ${this.roomId}] disposed without postable results — ` +
+          `placings=${placingCount} finishers=0 dnfs=${dnfCount}`,
+      )
       return
     }
 
+    // Surfaces the count being POSTed so the "only winner reaches the
+    // leaderboard" symptom is visible in logs without needing a DB dump.
+    const finisherCount = payload.placings.filter((p) => p.finished).length
+    console.log(
+      `[RaceRoom ${this.roomId}] posting race results: placings=${payload.placings.length} ` +
+        `finishers=${finisherCount} distanceM=${payload.distanceM}`,
+    )
+
     // Fire-and-forget — Colyseus cannot await dispose. Network failures here
     // do NOT roll back local state; the bridge is expected to retry on 5xx.
-    postRaceResults({
-      roomId: this.roomId,
-      orgId: this.state.orgId,
-      hostUserId: this.state.hostUserId,
-      distanceM: this.state.distanceM,
-      placings: placings.map((p) => ({
-        userId: p.racerId,
-        finishTimeMs: p.finished ? p.finishTimeMs : null,
-        place: p.place,
-        finished: p.finished,
-        distanceMReached: p.distanceM,
-        distanceM: this.state.distanceM,
-      })),
-    }).catch((err: unknown) => {
+    postRaceResults(payload).catch((err: unknown) => {
       console.error(`[RaceRoom ${this.roomId}] postRaceResults failed:`, err)
     })
   }
@@ -128,17 +154,42 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     state.hostUserId = opts.hostUserId
     state.hostName = opts.hostName
     state.distanceM = opts.distanceM
+    state.trackShape = opts.trackShape
     state.phase = "lobby"
     state.phaseStartMs = Date.now()
     for (const id of opts.invitedUserIds) state.invitedUserIds.push(id)
     this.setState(state)
   }
 
+  /**
+   * Seed dev-mode bot racers (count already production-gated to 0 by
+   * resolveBotCount). Bots occupy the first lanes and arrive connected,
+   * so they count toward MIN_RACERS — host + one bot can start. Driven
+   * each tick by RaceBotDriver; excluded from the results POST.
+   */
+  private seedBots(botCount: number): void {
+    for (let n = 1; n <= botCount; n++) {
+      const bot = buildBotRacerState(n, this.state.racers.size)
+      this.state.racers.set(bot.userId, bot)
+      const phys = makeRacer(bot.userId)
+      this.physicsRacers.push(phys)
+      this.botRacers.push(phys)
+    }
+    if (botCount > 0) {
+      console.log(`[RaceRoom ${this.roomId}] seeded ${botCount} test bot(s) (dev mode)`)
+    }
+  }
+
   private registerHandlers(): void {
     this.onMessage("race_join", (client, data: unknown) => this.handleJoin(client, data))
     this.onMessage("race_start", (client) => this.handleStart(client))
+    this.onMessage("race_cancel", (client) => this.handleCancel(client))
+    this.onMessage("race_add_invitees", (client, data: unknown) =>
+      this.handleAddInvitees(client, data),
+    )
     this.onMessage("race_move", (_client, data: unknown) => this.handleMove(data))
     this.onMessage("race_sprint_tap", (_client, data: unknown) => this.handleSprintTap(data))
+    this.onMessage("race_jump", (_client, data: unknown) => this.handleJump(data))
   }
 
   // ─── message handlers ────────────────────
@@ -157,12 +208,101 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     client.userData = { userId: r.userId }
   }
 
+  /**
+   * Host-initiated lobby cancel. Tells everyone still in the room their
+   * race was cancelled (via a broadcast they can render as a toast), then
+   * disconnects all clients so the room disposes. Only honoured before
+   * `running` — once the sim is live, abandoning a race must keep the
+   * `finished` flow intact so existing finishers still get their stats.
+   */
+  private handleCancel(client: Client): void {
+    if (this.state.phase !== "lobby" && this.state.phase !== "countdown") return
+    const opener = (client.userData as { userId?: string } | undefined)?.userId
+    if (opener !== this.state.hostUserId) return
+    console.log(
+      `[RaceRoom ${this.roomId}] host ${this.state.hostName} cancelled the race in ${this.state.phase} phase`,
+    )
+    this.broadcast("race_cancelled", { hostName: this.state.hostName })
+    // Allow normal autoDispose to clean up — disconnect terminates every
+    // client, the room sees `clients=0`, and the timeout we set in
+    // onCreate (or the 15s default after start) takes care of disposal.
+    this.autoDispose = true
+    // Defer the disconnect by one patch cycle so the `race_cancelled`
+    // broadcast above actually flushes to clients first. Disconnecting in
+    // the same tick closes the sockets before Colyseus sends the frame, so
+    // the host's `onRaceCancelled` handler — which drives the toast and the
+    // navigation back to the garden — would never fire.
+    this.clock.setTimeout(() => this.disconnect(), CANCEL_FLUSH_GRACE_MS)
+  }
+
+  /**
+   * Host-initiated "invite more" from the lobby. Adds new user ids to
+   * `state.invitedUserIds` and fires a notification per new invitee via
+   * the backend bridge — same path as `OrgRaceHandler` uses for the
+   * initial create, so the recipient flow (toast + bell + decline) is
+   * identical. Caps total participants at MAX_RACERS.
+   */
+  private handleAddInvitees(client: Client, raw: unknown): void {
+    if (this.state.phase !== "lobby") return
+    const opener = (client.userData as { userId?: string } | undefined)?.userId
+    if (opener !== this.state.hostUserId) return
+
+    const ids = parseAddInviteesPayload(raw)
+    if (ids.length === 0) return
+
+    const known = new Set<string>(this.state.invitedUserIds)
+    this.state.racers.forEach((_r, key) => known.add(key))
+
+    // Cap at MAX_RACERS counting host + invitees + already-joined racers.
+    // Slot budget is whatever's left below MAX_RACERS.
+    const inUse = known.size
+    const slotsLeft = Math.max(0, MAX_RACERS - inUse)
+    const additions: string[] = []
+    for (const id of ids) {
+      if (additions.length >= slotsLeft) break
+      if (known.has(id)) continue
+      known.add(id)
+      additions.push(id)
+    }
+    if (additions.length === 0) return
+
+    for (const id of additions) this.state.invitedUserIds.push(id)
+
+    // Fire the per-recipient invite POSTs in parallel. Failure of any
+    // individual post is logged by BackendClient and doesn't roll back
+    // the local state change — a recipient who missed the notification
+    // will only see it next time they refresh the bell, which is the
+    // same failure mode as the create-time invite.
+    void Promise.all(
+      additions.map((recipientUserId) =>
+        postRaceInvite({
+          orgId: this.state.orgId,
+          recipientUserId,
+          hostUserId: this.state.hostUserId,
+          hostName: this.state.hostName,
+          roomId: this.roomId,
+          distanceM: this.state.distanceM,
+        }),
+      ),
+    )
+
+    console.log(
+      `[RaceRoom ${this.roomId}] +${additions.length} invitees: ${additions.join(", ")}`,
+    )
+  }
+
   private handleStart(client: Client): void {
     if (this.state.phase !== "lobby") return
     const opener = (client.userData as { userId?: string } | undefined)?.userId
     if (opener !== this.state.hostUserId) return
     if (this.state.racers.size < MIN_RACERS) return
 
+    // Host commitment moment: once the countdown starts, abandonment by
+    // every client should let the room dispose normally rather than
+    // tying the multiplayer process up running a zombie sim for
+    // RUNNING_TIMEOUT_MS. autoDispose=false was only there to protect
+    // the lobby waiting on offline invitees.
+    this.autoDispose = true
     this.setPhase("countdown")
     this.clock.setTimeout(() => this.beginRunning(), COUNTDOWN_MS)
   }
@@ -183,6 +323,14 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     triggerSprintTap(physicsRacer, this.state.runningElapsedMs)
   }
 
+  private handleJump(raw: unknown): void {
+    const userId = parseUserIdOnly(raw)
+    if (!userId) return
+    const physicsRacer = this.physicsRacers.find((r) => r.id === userId)
+    if (!physicsRacer) return
+    triggerJump(physicsRacer, this.state.runningElapsedMs)
+  }
+
   // ─── sim loop ────────────────────────────
 
   private beginRunning(): void {
@@ -192,25 +340,110 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     this.simHandle = setInterval(() => this.simStep(), SIM_TICK_MS)
   }
 
+  /**
+   * Backend-initiated removal of a declined invitee. Drops the user id
+   * from the invited list so Alice's lobby stops showing them as
+   * "Hasn't joined yet". Also drops them from the joined-racers map +
+   * physics array defensively in case the decline raced with a join
+   * (unusual but possible if the user had two tabs open). No-op once
+   * the race has left the lobby — past that point the slot is real
+   * (or already DNF) and we don't rewrite the racer list mid-sim.
+   */
+  removeInvitee(userId: string): void {
+    if (this.state.phase !== "lobby") return
+
+    // ArraySchema has no remove-by-value primitive; rebuild without the
+    // declined id. Filter then push back to preserve schema semantics.
+    const remaining: string[] = []
+    this.state.invitedUserIds.forEach((id) => {
+      if (id !== userId) remaining.push(id)
+    })
+    if (remaining.length === this.state.invitedUserIds.length) return
+    this.state.invitedUserIds.clear()
+    for (const id of remaining) this.state.invitedUserIds.push(id)
+
+    // Defensive: if the user had somehow already joined the race room
+    // before declining (two tabs, race condition), drop their racer
+    // slot too. Otherwise Alice's lobby would still show them locked in.
+    if (this.state.racers.has(userId)) {
+      this.state.racers.delete(userId)
+      this.physicsRacers = this.physicsRacers.filter((r) => r.id !== userId)
+    }
+
+    console.log(
+      `[RaceRoom ${this.roomId}] invitee declined ${userId} — ` +
+        `invitedUserIds=${this.state.invitedUserIds.length} ` +
+        `racers=${this.state.racers.size}`,
+    )
+  }
+
+  /**
+   * Hard cap on lobby lifetime — disposes the room when LOBBY_MAX_MS
+   * elapses since creation IF the race never advanced past lobby. If
+   * someone hit Start in the meantime, the phase will already be
+   * `countdown`/`running`/`finished` and we leave the in-flight race
+   * alone (its own simStep + autoDispose handle cleanup).
+   */
+  private expireLobbyIfStillWaiting(): void {
+    if (this.state.phase !== "lobby") return
+    console.log(
+      `[RaceRoom ${this.roomId}] lobby expired after ${LOBBY_MAX_MS}ms — disposing`,
+    )
+    // Mirror `handleCancel`: `disconnect()` boots every client, but the
+    // room only auto-disposes when `autoDispose === true`. Without this
+    // flip the room lingers until the process restarts.
+    this.autoDispose = true
+    this.disconnect()
+  }
+
   private simStep(): void {
     if (this.state.phase !== "running") return
     const nowMs = Date.now()
     const elapsed = nowMs - this.runningStartedAtMs
     this.state.runningElapsedMs = elapsed
 
+    // Bots synthesise their inputs through the same shared entry points
+    // human messages use — must run before the physics integration so a
+    // bot's tap lands on the same tick a human's message would.
+    driveBots(this.botRacers, elapsed, SIM_TICK_MS, this.state.distanceM)
     physicsTick(this.physicsRacers, SIM_TICK_MS, elapsed, this.state.distanceM)
     this.mirrorPhysicsToSchema()
 
     const allFinished = this.physicsRacers.every((r) => r.finished)
     const timedOut = elapsed >= RUNNING_TIMEOUT_MS
-    if (allFinished || timedOut) this.finishRound(timedOut)
+    if (allFinished || timedOut) void this.finishRound(timedOut)
   }
 
-  private finishRound(timeoutFired: boolean): void {
+  private async finishRound(timeoutFired: boolean): Promise<void> {
     this.stopSim()
     const placings = checkFinish(this.physicsRacers, timeoutFired)
     this.state.placings.clear()
     for (const p of placings) this.state.placings.push(placingToSchema(p))
+
+    // Persist the result rows BEFORE flipping the phase, so the client's
+    // end-of-race leaderboard fetch (which fires the moment phase becomes
+    // "finished") sees the just-completed times. Posting on `onDispose`
+    // alone left a ~10–60 s window — long enough that the user reliably
+    // saw "old" leaderboard data sitting next to their fresh race result.
+    // Idempotent on (room_id, user_id), so the dispose-side post still
+    // works as a safety net if this one is interrupted.
+    const payload = buildRaceResultsPayload(
+      {
+        roomId: this.roomId,
+        orgId: this.state.orgId,
+        hostUserId: this.state.hostUserId,
+        distanceM: this.state.distanceM,
+      },
+      this.state.placings,
+    )
+    if (payload) {
+      try {
+        await postRaceResults(payload)
+      } catch (err) {
+        console.error(`[RaceRoom ${this.roomId}] postRaceResults failed:`, err)
+      }
+    }
+
     this.setPhase("finished")
   }
 
@@ -238,31 +471,6 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
       this.simHandle = null
     }
   }
-}
-
-function placingToSchema(p: Placing): PlacingState {
-  const s = new PlacingState()
-  s.racerId = p.racerId
-  s.place = p.place
-  s.finished = p.finished
-  s.finishTimeMs = p.finishTimeMs
-  s.distanceM = p.distanceM
-  return s
-}
-
-interface MoveMsg { userId: string; isMoving: boolean }
-
-function parseMove(raw: unknown): MoveMsg | null {
-  if (typeof raw !== "object" || raw === null) return null
-  const o = raw as Record<string, unknown>
-  if (typeof o.userId !== "string" || typeof o.isMoving !== "boolean") return null
-  return { userId: o.userId, isMoving: o.isMoving }
-}
-
-function parseUserIdOnly(raw: unknown): string | null {
-  if (typeof raw !== "object" || raw === null) return null
-  const o = raw as Record<string, unknown>
-  return typeof o.userId === "string" ? o.userId : null
 }
 
 // Keep this export for RaceRoomState references in tests; avoids a test

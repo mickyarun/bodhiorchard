@@ -29,9 +29,27 @@
 type DisposeCallback = () => void
 type PhaseCallback = (phase: string) => void
 
+/**
+ * Strip CR/LF from values before they reach a log line. `roomId` and
+ * `userId` arrive from network payloads, so a malicious sender could
+ * forge log entries by embedding newlines. Used at every console.* site
+ * in this module so the format-string arg stays a static literal.
+ */
+function sanitizeForLog(value: string): string {
+  return value.replace(/[\r\n]/g, "")
+}
+type InviteeDeclinedCallback = (userId: string) => void
+
 interface RoomHooks {
   onDispose: DisposeCallback
   onPhase: PhaseCallback
+  /**
+   * Fired by `fireRaceInviteDeclined` when the backend tells us an
+   * invitee has declined. Optional because rooms created before the
+   * decline-flow shipped still register through the old shape; treat
+   * the absence as "this room doesn't care about decline events."
+   */
+  onInviteeDeclined?: InviteeDeclinedCallback
 }
 
 const hooks = new Map<string, RoomHooks>()
@@ -57,7 +75,11 @@ export function fireRaceDispose(roomId: string): void {
   try {
     pair.onDispose()
   } catch (err) {
-    console.error(`[RaceRegistry] dispose callback for room ${roomId} threw:`, err)
+    console.error(
+      "[RaceRegistry] dispose callback for room %s threw:",
+      sanitizeForLog(roomId),
+      err,
+    )
   }
 }
 
@@ -72,6 +94,30 @@ export function fireRacePhase(roomId: string, phase: string): void {
   try {
     pair.onPhase(phase)
   } catch (err) {
-    console.error(`[RaceRegistry] phase callback for room ${roomId} threw:`, err)
+    console.error(
+      "[RaceRegistry] phase callback for room %s threw:",
+      sanitizeForLog(roomId),
+      err,
+    )
+  }
+}
+
+/**
+ * Notify the registered race room that one of its invitees declined
+ * server-side. Safe no-op when the room isn't registered (e.g. backend
+ * raced the room's dispose). Does NOT remove the registration — more
+ * decline events for other invitees are possible after this one.
+ */
+export function fireRaceInviteDeclined(roomId: string, userId: string): void {
+  const pair = hooks.get(roomId)
+  if (!pair || !pair.onInviteeDeclined) return
+  try {
+    pair.onInviteeDeclined(userId)
+  } catch (err) {
+    console.error(
+      "[RaceRegistry] inviteeDeclined callback for room %s threw:",
+      sanitizeForLog(roomId),
+      err,
+    )
   }
 }

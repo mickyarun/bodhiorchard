@@ -148,7 +148,7 @@ function saveTitle(): void {
           <template #activator="{ props: assigneeProps }">
             <v-chip
               v-bind="assigneeProps"
-              :color="bud.assignee_name ? 'teal' : 'default'"
+              :color="bud.assignee_name ? 'info' : 'default'"
               variant="tonal"
               size="x-small"
               label
@@ -272,7 +272,7 @@ function saveTitle(): void {
       </div>
       <div
         v-if="!editingTitle"
-        class="text-h5 font-weight-bold"
+        class="text-h5 font-weight-bold bo-display"
         :class="agentLocked ? 'prd-locked-title' : 'cursor-pointer'"
         @click="startEditTitle"
       >

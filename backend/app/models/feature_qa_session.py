@@ -65,6 +65,12 @@ class FeatureQASession(BaseModel):
     )
     # JSONB context: stores candidate matches and last agent turn for multi-turn clarification
     context: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # CLI model the thread's Claude session was minted with, persisted on
+    # the first (claiming) turn. A resumed turn reuses this exact model so
+    # the conversation never switches models mid-thread — correct even once
+    # per-org Agent-Prompt overrides can change a specialist's model. NULL
+    # on legacy / triage-seeded rows; resume falls back to the module default.
+    cli_model: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     def __repr__(self) -> str:
         return (

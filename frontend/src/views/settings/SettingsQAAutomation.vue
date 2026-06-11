@@ -27,7 +27,7 @@
     @success-close="settingsStore.saveSuccess = false"
   >
         <!-- ─── QA AUTOMATION CARD ───────────────────────────── -->
-        <v-card class="pa-6 mb-6" variant="outlined">
+        <v-card class="pa-6 mb-6" color="surface" border>
           <div class="d-flex align-center ga-3 mb-4">
             <v-avatar size="36" color="surface-variant" rounded="lg">
               <v-icon icon="mdi-test-tube" size="22" />
@@ -87,7 +87,7 @@
         </v-card>
 
         <!-- ─── BUD STAGES CARD ──────────────────────────────── -->
-        <v-card class="pa-6 mb-6" variant="outlined">
+        <v-card class="pa-6 mb-6" color="surface" border>
           <div class="d-flex align-center ga-3 mb-4">
             <v-avatar size="36" color="surface-variant" rounded="lg">
               <v-icon icon="mdi-source-branch" size="22" />

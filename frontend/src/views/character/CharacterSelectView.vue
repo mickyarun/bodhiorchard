@@ -15,7 +15,11 @@
  -->
 
 <template>
-  <div class="char-select">
+  <!-- The character creator is a deliberately dark, cinematic experience.
+       Force the dark theme regardless of the app's light/dark setting so its
+       hard-coded dark panels and the Vuetify emphasis text stay consistent
+       (in light mode the medium-emphasis labels were dark-on-dark = invisible). -->
+  <v-theme-provider theme="bodhiorchardDark" with-background class="char-select">
     <!-- Ambient gradient backdrop -->
     <div class="char-select__backdrop" />
 
@@ -182,7 +186,7 @@
         Save &amp; Continue
       </v-btn>
     </footer>
-  </div>
+  </v-theme-provider>
 </template>
 
 <script setup lang="ts">

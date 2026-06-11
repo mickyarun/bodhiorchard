@@ -27,12 +27,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
 import structlog
 from sqlalchemy import select
 from sqlalchemy import update as sql_update
-from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scan_phase import ScanPhase
@@ -40,6 +39,7 @@ from app.models.scan_repo_run import ScanRepoRun
 from app.models.scan_repo_step import ScanRepoStep
 from app.models.scan_run_enums import RepoRunStatus, StepStatus
 from app.models.tracked_repository import TrackedRepository
+from app.repositories.base import rowcount
 from app.repositories.scan_step_status import (
     find_steps_for_run,
     mark_step_done,
@@ -346,7 +346,7 @@ class ScanRunRepository:
                     error=truncated,
                 )
             )
-            steps_flipped = cast(CursorResult[Any], step_result).rowcount or 0
+            steps_flipped = rowcount(step_result) or 0
 
         logger.info(
             "scan_subtree_terminalized",

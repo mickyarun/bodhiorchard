@@ -56,8 +56,24 @@
             <v-icon icon="mdi-play" size="18" class="mr-1" />
             Accept
           </button>
-          <button class="invite__dismiss" @click="onDismiss">
-            Dismiss
+          <!-- "Decline" rather than "Dismiss" because clicking it
+               actually tells the host you're not racing. Pure local
+               cleanup is handled by the 30 s auto-dismiss ring — if you
+               ignore the toast, the host stays uninformed (same as
+               closing your laptop). -->
+          <button
+            class="invite__decline"
+            :disabled="declinePending"
+            @click="onDecline"
+          >
+            <v-progress-circular
+              v-if="declinePending"
+              indeterminate
+              size="14"
+              width="2"
+              class="mr-1"
+            />
+            Decline
           </button>
         </div>
       </div>
@@ -115,8 +131,16 @@ watch(
   () => store.items,
   (items) => {
     if (current.value) return
+    // Skip "X declined your invite" notifications (host-side, marked
+    // by `meta.declinedBy`). They share `type=race_invite` with the
+    // real invites because adding a new Postgres enum value would
+    // require a manual migration — see decline_race_invite docstring.
     const next = items.find(
-      (n) => n.type === 'race_invite' && !n.isRead && !n.isDismissed,
+      (n) =>
+        n.type === 'race_invite' &&
+        !n.isRead &&
+        !n.isDismissed &&
+        !(n.meta as RaceInviteMeta | null | undefined)?.declinedBy,
     )
     if (next) showToast(next)
   },
@@ -162,11 +186,22 @@ async function onAccept(): Promise<void> {
   if (target) await router.push(target)
 }
 
-function onDismiss(): void {
+const declinePending = computed(() =>
+  current.value ? store.pendingDeclineIds.has(current.value.id) : false,
+)
+
+/**
+ * Decline the invite: tells the host (server-side write +
+ * notification) and locally clears the toast. Optimistically nulls
+ * `current` so the toast closes before the request resolves; on
+ * failure the bell entry stays and the user can retry from there.
+ */
+function onDecline(): void {
   const n = current.value
+  if (!n) return
   clearTimers()
   current.value = null
-  if (n) void store.dismiss(n.id)
+  void store.declineRaceInvite(n.id)
 }
 </script>
 
@@ -317,21 +352,33 @@ function onDismiss(): void {
   transition: filter 0.15s, transform 0.15s;
 }
 .invite__accept:hover { filter: brightness(1.08); transform: translateY(-1px); }
-.invite__dismiss {
-  padding: 8px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+/* Decline reads as a destructive action — red-tinted border + fill so
+   it's visually paired with Accept (a clear pair: yes / no), not
+   visually demoted to a "close" affordance. */
+.invite__decline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  border: 1px solid rgba(255, 100, 100, 0.4);
   border-radius: 8px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 100, 100, 0.08);
+  color: #ff9e9e;
   font-family: inherit;
-  font-weight: 600;
+  font-weight: 700;
   font-size: 13px;
+  letter-spacing: 0.04em;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
-.invite__dismiss:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
+.invite__decline:hover:not(:disabled) {
+  background: rgba(255, 100, 100, 0.16);
+  border-color: rgba(255, 100, 100, 0.6);
+  color: #ffcccc;
+}
+.invite__decline:disabled {
+  opacity: 0.55;
+  cursor: progress;
 }
 
 /* Slide-in/out transition */

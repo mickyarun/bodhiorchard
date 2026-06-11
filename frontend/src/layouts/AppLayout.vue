@@ -201,7 +201,7 @@
               </div>
             </template>
 
-            <v-list density="compact" min-width="200">
+            <v-list density="compact" min-width="244">
               <v-list-item
                 prepend-icon="mdi-account-circle-outline"
                 title="My Profile"
@@ -220,6 +220,25 @@
                 title="MCP Token"
                 to="/profile/mcp-token"
               />
+              <div class="theme-pref px-3 pt-2 pb-1">
+                <div class="text-caption text-medium-emphasis px-1 mb-1">Theme</div>
+                <div class="theme-seg" role="radiogroup" aria-label="Theme">
+                  <button
+                    v-for="opt in THEME_OPTIONS"
+                    :key="opt.value"
+                    type="button"
+                    role="radio"
+                    :aria-checked="themePref === opt.value"
+                    class="theme-seg__btn"
+                    :class="{ 'theme-seg__btn--active': themePref === opt.value }"
+                    :title="opt.hint"
+                    @click.stop="setThemePref(opt.value)"
+                  >
+                    <v-icon :icon="opt.icon" size="15" />
+                    {{ opt.label }}
+                  </button>
+                </div>
+              </div>
               <v-divider class="my-1" />
               <v-list-item
                 prepend-icon="mdi-logout"
@@ -250,6 +269,17 @@
 
     <!-- Main content -->
     <v-main class="app-main">
+      <!-- Route-navigation progress. Fixed to the top of the viewport so it
+           reads as a global "the app is working" cue the instant a link is
+           clicked — covering the lazy-chunk download that heavy views can't
+           show feedback for until after they mount. -->
+      <v-progress-linear
+        v-if="navigating"
+        indeterminate
+        color="secondary"
+        height="4"
+        class="route-progress"
+      />
       <div class="app-scroll">
         <router-view />
       </div>
@@ -273,6 +303,14 @@
          CTA closes that class of complaint. Reads the existing
          notifications store, no extra socket subscriptions. -->
     <ChatCompletionToast v-if="authStore.user?.id" />
+
+    <!-- Yield-offer reject / reassign confirmation dialogs. Lifted out
+         of NotificationBell so the bell stays single-root and v-show
+         on it doesn't trip Vue's "runtime directive on fragment" warn.
+         The shared composable wires the bell-row triggers to these
+         modals; v-dialog teleports to body so co-location doesn't
+         matter for the rendered DOM. -->
+    <YieldOfferDialogs v-if="authStore.user?.id" />
   </v-app>
 </template>
 
@@ -282,15 +320,29 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import BodhiorchardLogo from '@/components/common/BodhiorchardLogo.vue'
 import NotificationBell from '@/components/common/NotificationBell.vue'
+import YieldOfferDialogs from '@/components/common/YieldOfferDialogs.vue'
 import XPToast from '@/components/common/XPToast.vue'
 import ChatCompletionToast from '@/components/common/ChatCompletionToast.vue'
 import RaceInviteToast from '@/components/race/RaceInviteToast.vue'
 import RaceWatchBanner from '@/components/race/RaceWatchBanner.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useXPSocket } from '@/composables/useXPSocket'
+import { useThemePreference, type ThemePreference } from '@/composables/useThemePreference'
+import { useNavigationProgress } from '@/composables/useNavigationProgress'
 
 const router = useRouter()
 const authStore = useAuthStore()
+
+// Light/dark toggle (persisted to localStorage by the composable).
+const { preference: themePref, setPreference: setThemePref } = useThemePreference()
+const THEME_OPTIONS: { value: ThemePreference; label: string; icon: string; hint: string }[] = [
+  { value: 'system', label: 'Auto', icon: 'mdi-brightness-auto', hint: 'Follow system' },
+  { value: 'light', label: 'Light', icon: 'mdi-weather-sunny', hint: 'Light theme' },
+  { value: 'dark', label: 'Dark', icon: 'mdi-weather-night', hint: 'Dark theme' },
+]
+
+// Driven by the router guards — true while any route navigation resolves.
+const { navigating } = useNavigationProgress()
 
 // Real-time XP notifications — runs for all authenticated pages
 const { toasts: xpToasts, dismissToast: xpDismiss } = useXPSocket()
@@ -349,7 +401,48 @@ function handleLogout(): void {
 
 <style scoped>
 .app-sidebar {
-  border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border-right: 1px solid rgb(var(--v-theme-rule)) !important;
+}
+
+/* Hairline under the logo / notification header. */
+.app-sidebar :deep(.v-navigation-drawer__content) > .pa-4 {
+  border-bottom: 1px solid rgb(var(--v-theme-rule));
+  margin-bottom: 4px;
+}
+
+/* Nav rhythm: quiet by default, leaf-green when active. The active item
+   carries a left indicator bar + a tonal wash so the current section reads
+   instantly without shouting. Motion is transform/opacity/colour only. */
+.app-sidebar :deep(.v-list-item) {
+  margin-block: 2px;
+  transition: background-color var(--dur-short, 150ms) var(--ease-out, ease),
+              color var(--dur-short, 150ms) var(--ease-out, ease);
+}
+
+.app-sidebar :deep(.v-list-item:hover) {
+  background: rgb(var(--v-theme-surface-bright));
+}
+
+.app-sidebar :deep(.v-list-item--active) {
+  color: rgb(var(--v-theme-primary));
+  background: var(--color-accent-soft, rgba(var(--v-theme-primary), 0.14));
+}
+
+.app-sidebar :deep(.v-list-item--active)::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  border-radius: 0 var(--radius-pill, 999px) var(--radius-pill, 999px) 0;
+  background: rgb(var(--v-theme-primary));
+  opacity: 1;
+}
+
+.app-sidebar :deep(.v-list-item--active .v-icon) {
+  color: rgb(var(--v-theme-primary));
 }
 
 .app-main {
@@ -360,6 +453,9 @@ function handleLogout(): void {
      win via the @supports block below. */
   height: 100vh;
   max-height: 100vh;
+  /* Positioning context for the absolutely-positioned route progress bar
+     so it pins to the top of the content area, not the whole viewport. */
+  position: relative;
 }
 
 @supports (height: 100dvh) {
@@ -374,11 +470,60 @@ function handleLogout(): void {
   overflow-y: auto;
 }
 
+/* Pin the bar to the top of the main content area, above scrolled
+   content, without participating in layout flow (so it never shifts the
+   page as it appears/disappears). */
+.route-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2000;
+}
+
 .user-menu {
   transition: background-color 0.15s ease;
 }
 
 .user-menu:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--v-theme-surface-bright));
+}
+
+/* Auto / Light / Dark segmented control in the user menu. */
+.theme-seg {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: rgb(var(--v-theme-surface-bright));
+  border-radius: var(--radius-pill, 999px);
+}
+.theme-seg__btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 6px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-pill, 999px);
+  color: rgb(var(--v-theme-on-surface-variant));
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s var(--ease-out, ease), color 0.15s var(--ease-out, ease);
+}
+.theme-seg__btn:hover:not(.theme-seg__btn--active) {
+  color: rgb(var(--v-theme-on-surface));
+}
+.theme-seg__btn--active {
+  background: rgb(var(--v-theme-surface));
+  color: rgb(var(--v-theme-primary));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+.theme-seg__btn:focus-visible {
+  outline: 2px solid var(--color-focus, rgb(var(--v-theme-primary)));
+  outline-offset: 1px;
 }
 </style>

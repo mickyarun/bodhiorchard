@@ -43,7 +43,7 @@
         </v-alert>
 
         <!-- ─── AUTO MODE CARD ────────────────────────────── -->
-        <v-card class="pa-6 mb-6" variant="outlined">
+        <v-card class="pa-6 mb-6" color="surface" border>
           <div class="d-flex align-center ga-3 mb-4">
             <v-avatar size="36" color="surface-variant" rounded="lg">
               <v-icon icon="mdi-robot-outline" size="22" />
@@ -70,7 +70,7 @@
         </v-card>
 
         <!-- ─── WORKING DAYS CARD ─────────────────────────── -->
-        <v-card class="pa-6 mb-6" variant="outlined" :disabled="!presence.autoModeEnabled">
+        <v-card class="pa-6 mb-6" color="surface" border :disabled="!presence.autoModeEnabled">
           <div class="d-flex align-center ga-3 mb-4">
             <v-avatar size="36" color="surface-variant" rounded="lg">
               <v-icon icon="mdi-calendar-week" size="22" />
@@ -130,7 +130,7 @@
         </v-card>
 
         <!-- ─── WORKING HOURS CARD ────────────────────────── -->
-        <v-card class="pa-6 mb-6" variant="outlined" :disabled="!presence.autoModeEnabled">
+        <v-card class="pa-6 mb-6" color="surface" border :disabled="!presence.autoModeEnabled">
           <div class="d-flex align-center ga-3 mb-4">
             <v-avatar size="36" color="surface-variant" rounded="lg">
               <v-icon icon="mdi-clock-time-eight-outline" size="22" />
@@ -177,7 +177,7 @@
         </v-card>
 
         <!-- ─── TIMEZONE CARD ─────────────────────────────── -->
-        <v-card class="pa-6 mb-6" variant="outlined" :disabled="!presence.autoModeEnabled">
+        <v-card class="pa-6 mb-6" color="surface" border :disabled="!presence.autoModeEnabled">
           <div class="d-flex align-center ga-3 mb-4">
             <v-avatar size="36" color="surface-variant" rounded="lg">
               <v-icon icon="mdi-earth" size="22" />

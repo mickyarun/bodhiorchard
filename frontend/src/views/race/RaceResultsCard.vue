@@ -24,7 +24,7 @@
     <header class="results__header">
       <div class="results__eyebrow">
         <CheckerFlagIcon />
-        {{ snapshot.distanceM }} m sprint · final standings
+        {{ lapLabel(snapshot.distanceM) }} circuit · final standings
       </div>
       <h1 class="results__title">Race complete</h1>
     </header>
@@ -75,6 +75,8 @@
       </li>
     </ol>
 
+    <RaceLeaderboardSection :distance-m="leaderboardDistance" />
+
     <div class="results__actions">
       <button class="results__back" @click="$emit('leave')">
         <v-icon icon="mdi-arrow-left" size="18" class="mr-1" />
@@ -88,11 +90,13 @@
 import { computed } from 'vue'
 import type { RaceStateSnapshot } from '@/multiplayer/RaceRoomClient'
 import { formatRaceTime } from '@/engine/race/formatTime'
+import { lapLabel } from '@shared/race/RaceConstants'
 import { parseCharacterModel, type CharacterConfig } from '@/engine/characters/CharacterConfig'
 import CharacterPreview from '@/components/character/CharacterPreview.vue'
 import RaceThemeBackdrop from '@/components/race/RaceThemeBackdrop.vue'
 import CheckerFlagIcon from '@/components/race/CheckerFlagIcon.vue'
 import { initials } from '@/components/race/initials'
+import RaceLeaderboardSection from './RaceLeaderboardSection.vue'
 
 const props = defineProps<{
   snapshot: RaceStateSnapshot
@@ -103,6 +107,14 @@ defineEmits<{
 }>()
 
 const rows = computed(() => props.snapshot.placings)
+
+// Snapshot.distanceM is `number`; the leaderboard endpoint only honours
+// the closed set on `ALLOWED_DISTANCES_M` (100 / 200). Narrow defensively
+// — a malformed snapshot defaults to 100 so the section still renders
+// rather than fanning a never-resolving fetch.
+const leaderboardDistance = computed<100 | 200>(() =>
+  props.snapshot.distanceM === 200 ? 200 : 100,
+)
 
 const nameByUserId = computed(() => {
   const m = new Map<string, string>()

@@ -39,23 +39,26 @@ import * as pc from 'playcanvas'
 import { LANE_WIDTH_M, MIN_RACERS, MAX_RACERS } from '@shared/race/RaceConstants'
 import { disposeEntity, safeDestroyMaterial } from './dispose'
 
+// Paint metrics + palette are exported so CircuitTrackBuilder shares the
+// exact same visual language — both shapes must read as "the same track".
+
 /** Thickness of the painted lane-divider stripes. */
-const LANE_DIVIDER_WIDTH_M = 0.18
+export const LANE_DIVIDER_WIDTH_M = 0.18
 
 /** Thickness of the start line painted across the road. */
-const START_LINE_DEPTH_M = 0.5
+export const START_LINE_DEPTH_M = 0.5
 
 /** All white-paint geometry sits this far above the sand to avoid z-fighting. */
-const PAINT_Y_OFFSET = 0.01
+export const PAINT_Y_OFFSET = 0.01
 
 /** Sand colour — warm beige, mid-gloss. Matches the village SandRoadBuilder family. */
-const SAND_R = 0.92
-const SAND_G = 0.84
-const SAND_B = 0.64
+export const SAND_R = 0.92
+export const SAND_G = 0.84
+export const SAND_B = 0.64
 
 /** Finish-band checker: number of squares across the width and rows deep. */
-const CHECKER_COLUMNS = 10
-const CHECKER_ROWS = 2
+export const CHECKER_COLUMNS = 10
+export const CHECKER_ROWS = 2
 
 /**
  * Red/white kerb stripes along the outer track edges — the single biggest

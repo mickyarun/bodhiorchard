@@ -26,6 +26,9 @@
  * symmetry with `RaceCamera` so the scene's teardown code is uniform.
  */
 import * as pc from 'playcanvas'
+import { loopBounds } from '@shared/race/LoopPath'
+import { LOOP_LENGTH_M } from '@shared/race/RaceConstants'
+import type { TrackShape } from '@shared/race/types'
 
 /**
  * Pitch (degrees) — straight down is -90, horizon is 0. At -80 the ground
@@ -56,11 +59,19 @@ const CAM_FOV_DEG = 40
 /** Ground Y the camera is pointed at. Zero puts the focus on the track surface. */
 const CAM_TARGET_Y_M = 0
 
+/**
+ * Extra metres of grass kept visible beyond the circuit's outer edge so
+ * the ring never kisses the viewport border.
+ */
+const CIRCUIT_FIT_MARGIN_M = 8
+
 export interface RaceCameraOverheadOptions {
-  /** Race distance in metres — sets midpoint along X. */
+  /** Race distance in metres — straight midpoint X, or circuit circumference. */
   distanceM: number
-  /** Road width in metres — unused today; retained so callers can tune height later if they widen lanes dramatically. */
+  /** Road width in metres — sizes the circuit fit; unused for straight. */
   trackWidthM: number
+  /** Track layout — picks the straight-midpoint or circuit-centre framing. */
+  trackShape: TrackShape
 }
 
 export class RaceCameraOverhead {
@@ -81,6 +92,11 @@ export class RaceCameraOverhead {
     const cam = this.camera.camera
     if (cam) cam.fov = CAM_FOV_DEG
 
+    if (this.opts.trackShape === 'circuit') {
+      this.activateCircuit()
+      return
+    }
+
     const midpointX = this.opts.distanceM / 2
     this.camera.setPosition(midpointX - CAM_BEHIND_MIDPOINT_M, CAM_HEIGHT_M, 0)
     this.camera.setLocalEulerAngles(CAM_PITCH_DEG, 0, 0)
@@ -88,6 +104,32 @@ export class RaceCameraOverhead {
     // facing toward +X (finish direction). Re-orient by looking at a point
     // a bit past the midpoint at ground level.
     this.camera.lookAt(midpointX, CAM_TARGET_Y_M, 0)
+  }
+
+  /**
+   * Circuit framing: hover over the centre of the loop's bounding box —
+   * the organic loop isn't symmetric, so the centre comes from LoopPath's
+   * bounds rather than a circle radius — at a height where the larger
+   * box half-extent (plus road width and a grass margin) fits the
+   * vertical FOV: height = halfExtent / tan(fov / 2). Sizing to the
+   * larger axis keeps the whole course on screen even in a square
+   * viewport. The same small -X pull-back as the straight path keeps the
+   * view obliquely angled (and keeps lookAt away from the degenerate
+   * straight-down up-vector case).
+   */
+  private activateCircuit(): void {
+    // Frame the fixed physical loop (LOOP_LENGTH_M), not the race distance —
+    // a 1-lap and 2-lap race share the same-sized course.
+    const bounds = loopBounds(LOOP_LENGTH_M)
+    const centerX = (bounds.minX + bounds.maxX) / 2
+    const centerZ = (bounds.minZ + bounds.maxZ) / 2
+    const halfSpanM = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) / 2
+    const halfExtentM = halfSpanM + this.opts.trackWidthM / 2 + CIRCUIT_FIT_MARGIN_M
+    const halfFovRad = (CAM_FOV_DEG / 2) * (Math.PI / 180)
+    const heightM = halfExtentM / Math.tan(halfFovRad)
+
+    this.camera.setPosition(centerX - CAM_BEHIND_MIDPOINT_M, heightM, centerZ)
+    this.camera.lookAt(centerX, CAM_TARGET_Y_M, centerZ)
   }
 
   destroy(): void {

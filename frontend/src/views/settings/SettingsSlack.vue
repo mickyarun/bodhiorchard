@@ -51,6 +51,18 @@
 
     <v-expand-transition>
       <div v-if="showDetails">
+        <AppCallout
+          v-if="settingsStore.connections.slack.connected"
+          variant="warning"
+          eyebrow="Reinstall required"
+          icon="mdi-refresh-alert"
+          class="mb-3"
+        >
+          We've added the <code>im:write</code> scope so the bot can deliver race
+          invites and member login credentials as direct messages. Reinstall the
+          Slack app to grant the new scope &mdash; existing invites continue to
+          land in-app in the meantime.
+        </AppCallout>
         <v-text-field
           v-model="settingsStore.connections.slack.botToken"
           label="Bot Token"
@@ -126,7 +138,7 @@
               </div>
               <pre
                 class="pa-3 rounded text-caption mb-3"
-                style="background: rgba(0, 0, 0, 0.25); overflow-x: auto; white-space: pre; max-height: 150px; overflow-y: auto; color: rgba(var(--v-theme-on-surface), 0.7);"
+                style="background: rgb(var(--v-theme-background)); overflow-x: auto; white-space: pre; max-height: 150px; overflow-y: auto; color: rgba(var(--v-theme-on-surface), 0.7);"
               >{{ slackManifest }}</pre>
               <div class="text-medium-emphasis" style="line-height: 1.6;">
                 3. Review and click <strong class="text-high-emphasis">Create</strong><br>
@@ -171,7 +183,7 @@
               <div class="d-flex align-center ga-2 mb-3">
                 <code
                   class="pa-2 rounded flex-grow-1"
-                  style="background: rgba(0, 0, 0, 0.25); font-size: 0.8rem; word-break: break-all;"
+                  style="background: rgb(var(--v-theme-background)); font-size: 0.8rem; word-break: break-all;"
                 >{{ webhookUrl }}</code>
                 <v-btn
                   size="small"
@@ -192,15 +204,19 @@
               <div class="text-medium-emphasis mb-2" style="line-height: 1.6;">
                 4. Under <strong class="text-high-emphasis">OAuth &amp; Permissions</strong> → <strong class="text-high-emphasis">Bot Token Scopes</strong>, ensure these are added:
               </div>
+              <!-- Order must match the ``oauth_config.scopes.bot`` array
+                   in ``slackManifest`` below so the visual list and the
+                   manifest stay in lockstep. -->
               <div class="d-flex flex-wrap ga-1 mb-2">
                 <v-chip size="x-small" variant="tonal" color="primary">chat:write</v-chip>
+                <v-chip size="x-small" variant="tonal" color="primary">im:write</v-chip>
                 <v-chip size="x-small" variant="tonal" color="primary">channels:read</v-chip>
                 <v-chip size="x-small" variant="tonal" color="primary">channels:history</v-chip>
                 <v-chip size="x-small" variant="tonal" color="primary">channels:join</v-chip>
                 <v-chip size="x-small" variant="tonal" color="primary">reactions:read</v-chip>
-                <v-chip size="x-small" variant="tonal" color="primary">groups:history</v-chip>
                 <v-chip size="x-small" variant="tonal" color="primary">users:read</v-chip>
                 <v-chip size="x-small" variant="tonal" color="primary">users:read.email</v-chip>
+                <v-chip size="x-small" variant="tonal" color="primary">groups:history</v-chip>
               </div>
               <div class="text-medium-emphasis" style="line-height: 1.6;">
                 5. Click <strong class="text-high-emphasis">Save Changes</strong>
@@ -403,6 +419,7 @@ import { ref, computed, watch } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useMembersStore } from '@/stores/members'
 import api from '@/services/api'
+import AppCallout from '@/components/common/AppCallout.vue'
 
 const settingsStore = useSettingsStore()
 const membersStore = useMembersStore()
@@ -435,6 +452,7 @@ const slackManifest = JSON.stringify({
     scopes: {
       bot: [
         'chat:write',
+        'im:write',
         'channels:read',
         'channels:history',
         'channels:join',

@@ -18,7 +18,7 @@
   <div class="setup-gradient d-flex flex-column" style="min-height: 100vh;">
     <v-container class="d-flex flex-column align-center justify-center flex-grow-1 py-8">
       <v-card color="surface" class="pa-8 w-100" max-width="420">
-        <div class="text-h5 font-weight-bold mb-1 text-center">Change Password</div>
+        <div class="text-h5 font-weight-bold bo-display mb-1 text-center">Change Password</div>
         <div class="text-body-2 text-medium-emphasis text-center mb-6">
           Your password must be changed before you can continue.
         </div>

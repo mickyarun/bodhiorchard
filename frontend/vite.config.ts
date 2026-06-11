@@ -32,6 +32,30 @@ export default defineConfig({
       '@shared': fileURLToPath(new URL('../shared', import.meta.url)),
     },
   },
+  // Vite's dep optimizer normally crawls only entries reachable from
+  // `index.html`. When the user navigates to a route lazy-imported via
+  // the router, new Vuetify components surface as "newly optimized
+  // dependencies" — and Vite responds with a full page reload. That
+  // reload drops any open WebSocket (Colyseus race rooms in particular)
+  // mid-handshake, manifesting as "Could not join this race room" the
+  // first time a host opens the lobby on a cold dep cache. Expand the
+  // crawl to every Vue file under src/ so vite-plugin-vuetify's
+  // auto-import resolutions are all discovered at startup and batched
+  // into a single optimization pass.
+  optimizeDeps: {
+    entries: [
+      'index.html',
+      'src/main.ts',
+      'src/views/**/*.vue',
+      'src/components/**/*.vue',
+      'src/layouts/**/*.vue',
+      // Engine Vue overlays render during the race lobby, the exact
+      // moment the bug we fixed surfaced. Even though they don't import
+      // Vuetify today, including them here means a future <v-card>
+      // sneaking in won't silently regress the reload-mid-handshake fix.
+      'src/engine/**/*.vue',
+    ],
+  },
   build: {
     rollupOptions: {
       output: {
@@ -72,7 +96,9 @@ export default defineConfig({
     allowedHosts: ['frontendchat.ngrok.app', 'macbook-pro.taile1406f.ts.net'],
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        // Override the proxy target for side-by-side dev (e.g. a worktree
+        // backend on another port) via VITE_API_TARGET. Defaults to :8000.
+        target: process.env.VITE_API_TARGET || 'http://localhost:8000',
         changeOrigin: true,
         timeout: 300000, // 5 min — AI chat endpoints can be slow
         ws: true,
