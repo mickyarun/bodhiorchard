@@ -61,8 +61,13 @@ const PULSE_SWING = 0.7
 const PULSE_HZ = 0.9
 
 export interface BoostPadBuildOptions {
-  /** Race distance — pad arc positions derive from this via shared fractions. */
-  distanceM: number
+  /**
+   * Physical loop length — pad arc positions derive from this via the
+   * shared fractions. On the circuit this is LOOP_LENGTH_M, so one pad set
+   * is painted on the single loop and seen once per lap; on the straight
+   * track it's the full race distance.
+   */
+  loopLengthM: number
   /** Full track width — pads span every lane (auto-trigger on cross). */
   trackWidthM: number
   /** Shape-specific arc → world mapping; positions AND yaws every element. */
@@ -84,7 +89,7 @@ export class BoostPadBuilder {
     this.baseMat = this.makeEmissiveMaterial(0.55)
     this.chevronMat = this.makeEmissiveMaterial(1.0)
 
-    for (const padArcM of boostPadPositionsM(opts.distanceM)) {
+    for (const padArcM of boostPadPositionsM(opts.loopLengthM)) {
       this.addPad(padArcM, opts.trackWidthM)
     }
   }

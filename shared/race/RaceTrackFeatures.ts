@@ -13,20 +13,30 @@
 // limitations under the License.
 
 /**
- * RaceTrackFeatures — boost pads + hurdles along the race track.
+ * RaceTrackFeatures — boost pads + hurdles along the circuit loop.
  *
  * Pure plain-data, like RacePhysics: consumed by the Colyseus server (the
  * authoritative simulation in RaceRoom) and by the frontend race scene
  * (which renders pads/hurdles at the same positions). Both sides derive
- * feature positions from the race distance through this module so the
- * visuals can never drift from the physics.
+ * feature positions from the fixed LOOP_LENGTH_M through this module so
+ * the visuals can never drift from the physics.
+ *
+ * Loop-space firing: features live on the single physical loop at
+ * fractions of LOOP_LENGTH_M. A racer's `positionM` is the cumulative arc
+ * along the centreline, which on a multi-lap race exceeds LOOP_LENGTH_M.
+ * Each tick we map the crossed segment (prevPositionM, positionM] into
+ * loop-space (mod LOOP_LENGTH_M) and check the pad/hurdle fractions there,
+ * so every feature fires exactly once on every lap it is crossed — no
+ * per-race latch needed. Position is monotonically non-decreasing, so a
+ * pad can't be crossed twice within one lap.
  *
  * Mechanics:
- *   - Boost pad: crossing one (first time only) opens `boostUntilMs` —
- *     a free speed window faster than a sprint, with no stamina drain.
+ *   - Boost pad: crossing one opens `boostUntilMs` — a free speed window
+ *     faster than a sprint, with no stamina drain. Fires once per lap.
  *   - Hurdle: crossing one outside an active jump window knocks the
  *     racer down — velocity zeroed, `knockdownUntilMs` opened, banked
  *     sprint/boost forfeited. They get up and re-accelerate from rest.
+ *     A physical bar is jumped (or clipped) every lap it's crossed.
  *   - Jump: `triggerJump` opens `jumpUntilMs` for HURDLE_JUMP_WINDOW_MS,
  *     rate-limited by HURDLE_JUMP_COOLDOWN_MS between jump starts.
  */
@@ -38,17 +48,22 @@ import {
   HURDLE_JUMP_COOLDOWN_MS,
   HURDLE_JUMP_WINDOW_MS,
   HURDLE_KNOCKDOWN_MS,
+  LOOP_LENGTH_M,
 } from './RaceConstants'
 import type { Racer } from './RacePhysics'
 
-/** Boost-pad centre positions (metres from the start line) for a track. */
-export function boostPadPositionsM(trackLengthM: number): number[] {
-  return BOOST_PAD_FRACTIONS.map((f) => f * trackLengthM)
+/**
+ * Boost-pad centre positions (metres from the start line) on a loop of
+ * the given length. Defaults to the fixed LOOP_LENGTH_M; callers placing
+ * physical props pass LOOP_LENGTH_M explicitly to read at the call site.
+ */
+export function boostPadPositionsM(loopLengthM: number = LOOP_LENGTH_M): number[] {
+  return BOOST_PAD_FRACTIONS.map((f) => f * loopLengthM)
 }
 
-/** Hurdle centre positions (metres from the start line) for a track. */
-export function hurdlePositionsM(trackLengthM: number): number[] {
-  return HURDLE_FRACTIONS.map((f) => f * trackLengthM)
+/** Hurdle centre positions (metres from the start line) on the loop. */
+export function hurdlePositionsM(loopLengthM: number = LOOP_LENGTH_M): number[] {
+  return HURDLE_FRACTIONS.map((f) => f * loopLengthM)
 }
 
 /**
@@ -81,31 +96,47 @@ export function isKnockedDown(racer: Racer, nowMs: number): boolean {
  * this tick: (prevPositionM, positionM]. Called by RacePhysics.tick after
  * position integration, only for racers that haven't finished.
  *
- * Each pad fires at most once per racer per race (tracked by bit in
- * `boostPadsHit`). Hurdles need no such latch — position is monotonically
- * non-decreasing, so each hurdle is crossed exactly once.
+ * Loop-space, per-lap: the crossed segment is reduced mod LOOP_LENGTH_M
+ * and checked against the pad/hurdle fractions on the single physical
+ * loop, so each feature fires once on every lap it's crossed. No latch is
+ * needed — within a lap position is monotonic, so a feature can't fire
+ * twice, and re-firing on the next lap is exactly the desired behaviour.
+ *
+ * A tick advances at most V_MAX_MPS·dt (≈0.6 m), far below LOOP_LENGTH_M,
+ * so the segment spans the start line at most once. The wrap case
+ * (loopPos < loopPrev) is split into (loopPrev, L] then (0, loopPos].
  */
-export function stepTrackFeatures(
-  racer: Racer,
-  prevPositionM: number,
-  nowMs: number,
-  trackLengthM: number,
-): void {
-  const pads = boostPadPositionsM(trackLengthM)
-  for (let i = 0; i < pads.length; i++) {
-    const padBit = 1 << i
-    if ((racer.boostPadsHit & padBit) !== 0) continue
-    if (!crossed(prevPositionM, racer.positionM, pads[i])) continue
-    racer.boostPadsHit |= padBit
+export function stepTrackFeatures(racer: Racer, prevPositionM: number, nowMs: number): void {
+  const loopPrev = prevPositionM % LOOP_LENGTH_M
+  const loopPos = racer.positionM % LOOP_LENGTH_M
+  // Segments to test in loop-space: one for a within-lap step, two when
+  // the tick crossed the start line (loopPos wrapped below loopPrev).
+  const segments: Array<[number, number]> =
+    loopPos < loopPrev
+      ? [
+          [loopPrev, LOOP_LENGTH_M],
+          [0, loopPos],
+        ]
+      : [[loopPrev, loopPos]]
+
+  for (const padM of boostPadPositionsM()) {
+    if (!crossedAnySegment(segments, padM)) continue
     racer.boostUntilMs = nowMs + BOOST_DURATION_MS
   }
 
-  const hurdles = hurdlePositionsM(trackLengthM)
-  for (const hurdleM of hurdles) {
-    if (!crossed(prevPositionM, racer.positionM, hurdleM)) continue
+  for (const hurdleM of hurdlePositionsM()) {
+    if (!crossedAnySegment(segments, hurdleM)) continue
     if (nowMs < racer.jumpUntilMs) continue // airborne — clean clearance
     applyHurdleKnockdown(racer, nowMs)
   }
+}
+
+/** True if any loop-space segment (prevM, nextM] crosses featureM. */
+function crossedAnySegment(segments: ReadonlyArray<[number, number]>, featureM: number): boolean {
+  for (const [prevM, nextM] of segments) {
+    if (crossed(prevM, nextM, featureM)) return true
+  }
+  return false
 }
 
 /** Did the segment (prevM, nextM] cross featureM? */

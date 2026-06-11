@@ -459,7 +459,6 @@ describe("copyRacerToSchema", () => {
       jumpUntilMs: 12_900,
       lastJumpMs: 12_500,
       knockdownUntilMs: 13_400,
-      boostPadsHit: 0b101,
     }
 
     copyRacerToSchema(phys, schema)

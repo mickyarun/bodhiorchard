@@ -35,13 +35,17 @@ import {
   HURDLE_JUMP_WINDOW_MS,
   HURDLE_JUMP_COOLDOWN_MS,
   HURDLE_KNOCKDOWN_MS,
+  LOOP_LENGTH_M,
   RUN_TARGET_MPS,
   WALK_TARGET_MPS,
   STAMINA_INITIAL,
   TICK_MS,
 } from '@shared/race/RaceConstants'
 
-const TRACK_M = 100
+// One physical loop; a 1-lap race finishes at LOOP_LENGTH_M.
+const TRACK_M = LOOP_LENGTH_M
+// A 2-lap race over the same loop — the finish line is twice the loop.
+const TWO_LAP_M = 2 * LOOP_LENGTH_M
 
 /** Advance `count` server ticks starting after `fromMs`; returns the last nowMs. */
 function advance(r: Racer, fromMs: number, count: number): number {
@@ -54,14 +58,18 @@ function advance(r: Racer, fromMs: number, count: number): number {
 }
 
 describe('feature positions', () => {
-  it('boost pads sit at the configured fractions of the distance', () => {
-    expect(boostPadPositionsM(TRACK_M)).toEqual(BOOST_PAD_FRACTIONS.map((f) => f * TRACK_M))
-    expect(boostPadPositionsM(200)).toEqual(BOOST_PAD_FRACTIONS.map((f) => f * 200))
+  it('boost pads sit at the configured fractions of the loop length', () => {
+    expect(boostPadPositionsM()).toEqual(BOOST_PAD_FRACTIONS.map((f) => f * LOOP_LENGTH_M))
+    expect(boostPadPositionsM(LOOP_LENGTH_M)).toEqual(
+      BOOST_PAD_FRACTIONS.map((f) => f * LOOP_LENGTH_M),
+    )
   })
 
-  it('hurdles sit at the configured fractions of the distance', () => {
-    expect(hurdlePositionsM(TRACK_M)).toEqual(HURDLE_FRACTIONS.map((f) => f * TRACK_M))
-    expect(hurdlePositionsM(200)).toEqual(HURDLE_FRACTIONS.map((f) => f * 200))
+  it('hurdles sit at the configured fractions of the loop length', () => {
+    expect(hurdlePositionsM()).toEqual(HURDLE_FRACTIONS.map((f) => f * LOOP_LENGTH_M))
+    expect(hurdlePositionsM(LOOP_LENGTH_M)).toEqual(
+      HURDLE_FRACTIONS.map((f) => f * LOOP_LENGTH_M),
+    )
   })
 })
 
@@ -98,22 +106,22 @@ describe('boost pads', () => {
     expect(r.staminaPct).toBeGreaterThanOrEqual(STAMINA_INITIAL)
   })
 
-  it('each pad fires at most once per racer', () => {
+  it('a pad fires at most once within a single lap (position is monotonic)', () => {
+    // Step across the first pad once; the boost window opens and, since
+    // position never goes backwards within a lap, no second fire occurs.
     const r = makeRacer('a')
     setMoving(r, true)
     r.velocityMps = WALK_TARGET_MPS
-    const padM = boostPadPositionsM(TRACK_M)[0]
+    const padM = boostPadPositionsM()[0]
     r.positionM = padM - 0.01
     tick([r], TICK_MS, TICK_MS, TRACK_M)
-    expect(r.boostPadsHit).toBe(1)
+    expect(r.boostUntilMs).toBe(TICK_MS + BOOST_DURATION_MS)
 
-    // Force a hypothetical re-cross — the bitmask must hold the latch.
-    const expiredMs = TICK_MS + BOOST_DURATION_MS + TICK_MS
+    // A later tick that does NOT re-cross the pad must not re-fire it.
+    const laterMs = TICK_MS + BOOST_DURATION_MS + TICK_MS
     r.boostUntilMs = 0
-    r.positionM = padM - 0.01
-    tick([r], TICK_MS, expiredMs, TRACK_M)
+    tick([r], TICK_MS, laterMs, TRACK_M) // advances forward, past the pad
     expect(r.boostUntilMs).toBe(0)
-    expect(r.boostPadsHit).toBe(1)
   })
 
   it('crossing the finish line on the same tick skips feature processing', () => {
@@ -123,7 +131,74 @@ describe('boost pads', () => {
     r.positionM = TRACK_M - 0.01
     tick([r], TICK_MS, TICK_MS, TRACK_M)
     expect(r.finished).toBe(true)
-    expect(r.boostPadsHit).toBe(0)
+    expect(r.boostUntilMs).toBe(0)
+  })
+})
+
+// Per-lap firing on the single physical loop: a 1-lap race fires each
+// feature once (parity with the pre-lap behaviour); a 2-lap race fires
+// each feature twice — once per lap — and the start-line wrap is handled.
+describe('per-lap loop-space feature firing', () => {
+  /**
+   * Drive a racer at a steady speed from the start to `untilM`, counting
+   * how many distinct ticks open a fresh boost window (pad fires) and how
+   * many ticks open a knockdown (hurdle fires). Jumps are never triggered
+   * so every hurdle crossing knocks the racer down.
+   */
+  function countFeatureFires(
+    finishM: number,
+    untilM: number,
+  ): { padFires: number; hurdleFires: number } {
+    const r = makeRacer('a')
+    setMoving(r, true)
+    let now = 0
+    let padFires = 0
+    let hurdleFires = 0
+    let prevBoostUntil = r.boostUntilMs
+    let prevKnockUntil = r.knockdownUntilMs
+    // Walk the whole way (isMoving held, no sprint taps); after a hurdle
+    // knockdown the racer re-accelerates from rest on its own — it still
+    // crosses every downstream feature, just later.
+    while (r.positionM < untilM && !r.finished && now < 400_000) {
+      now += TICK_MS
+      tick([r], TICK_MS, now, finishM)
+      if (r.boostUntilMs > prevBoostUntil) padFires++
+      if (r.knockdownUntilMs > prevKnockUntil) hurdleFires++
+      prevBoostUntil = r.boostUntilMs
+      prevKnockUntil = r.knockdownUntilMs
+    }
+    return { padFires, hurdleFires }
+  }
+
+  it('1-lap race fires each pad and hurdle exactly once', () => {
+    const { padFires, hurdleFires } = countFeatureFires(TRACK_M, TRACK_M - 1)
+    expect(padFires).toBe(BOOST_PAD_FRACTIONS.length)
+    expect(hurdleFires).toBe(HURDLE_FRACTIONS.length)
+  })
+
+  it('2-lap race fires each pad and hurdle exactly twice (once per lap)', () => {
+    const { padFires, hurdleFires } = countFeatureFires(TWO_LAP_M, TWO_LAP_M - 1)
+    expect(padFires).toBe(BOOST_PAD_FRACTIONS.length * 2)
+    expect(hurdleFires).toBe(HURDLE_FRACTIONS.length * 2)
+  })
+
+  it('a feature straddled by the start-line wrap still fires correctly', () => {
+    // Place a pad at the last fraction near the loop end, then take a tick
+    // that wraps across the start line. The wrap split must catch a pad
+    // sitting just before the line on the outgoing lap.
+    const padM = boostPadPositionsM()[BOOST_PAD_FRACTIONS.length - 1] // 0.75 * 100 = 75
+    const r = makeRacer('a')
+    setMoving(r, true)
+    r.velocityMps = WALK_TARGET_MPS
+    // Sit just past the last pad on lap 1; cross it again on lap 2 after a
+    // start-line wrap. Position just before the start line, step over it.
+    r.positionM = LOOP_LENGTH_M - 0.05
+    tick([r], TICK_MS, TICK_MS, TWO_LAP_M) // wraps to ~0.1 — no pad at 0
+    expect(r.boostUntilMs).toBe(0)
+    // Now advance to just before the 75 m pad on lap 2 and cross it.
+    r.positionM = LOOP_LENGTH_M + padM - 0.01
+    tick([r], TICK_MS, 2 * TICK_MS, TWO_LAP_M)
+    expect(r.boostUntilMs).toBe(2 * TICK_MS + BOOST_DURATION_MS)
   })
 })
 

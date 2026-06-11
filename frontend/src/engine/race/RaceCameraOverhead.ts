@@ -27,6 +27,7 @@
  */
 import * as pc from 'playcanvas'
 import { loopBounds } from '@shared/race/LoopPath'
+import { LOOP_LENGTH_M } from '@shared/race/RaceConstants'
 import type { TrackShape } from '@shared/race/types'
 
 /**
@@ -117,7 +118,9 @@ export class RaceCameraOverhead {
    * straight-down up-vector case).
    */
   private activateCircuit(): void {
-    const bounds = loopBounds(this.opts.distanceM)
+    // Frame the fixed physical loop (LOOP_LENGTH_M), not the race distance —
+    // a 1-lap and 2-lap race share the same-sized course.
+    const bounds = loopBounds(LOOP_LENGTH_M)
     const centerX = (bounds.minX + bounds.maxX) / 2
     const centerZ = (bounds.minZ + bounds.maxZ) / 2
     const halfSpanM = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) / 2

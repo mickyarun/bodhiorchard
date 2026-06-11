@@ -22,12 +22,15 @@
  *
  *   - straight: the original TrackBuilder / Ground / FinishArch /
  *     DecorBuilder path, untouched, with a StraightProjection.
- *   - circuit:  CircuitTrackBuilder loop + Ground sized to the loop's
- *     bounding box + FinishArch at arc = circumference (which is the
- *     start line's world pose, tangent +X, so the x-only FinishArch API
- *     needs no rotation) + a CircuitProjection. DecorBuilder is skipped
- *     on circuit — its prop scattering assumes a straight road edge —
- *     in favour of CircuitDecorBuilder's trackside village.
+ *   - circuit:  CircuitTrackBuilder loop drawn ONCE at the fixed
+ *     LOOP_LENGTH_M (lap count comes from the race distance, not the loop
+ *     size) + Ground sized to the loop's bounding box + FinishArch at the
+ *     start line (which is also arc = LOOP_LENGTH_M — the start line's
+ *     world pose, tangent +X, so the x-only FinishArch API needs no
+ *     rotation) + a CircuitProjection over LOOP_LENGTH_M whose lap-wrap
+ *     carries racers around the same loop once per lap. DecorBuilder is
+ *     skipped on circuit — its prop scattering assumes a straight road
+ *     edge — in favour of CircuitDecorBuilder's trackside village.
  *
  * Ownership: `destroy()` tears the pieces down in reverse build order,
  * mirroring RaceScene's convention. A failure mid-build cleans up the
@@ -36,6 +39,7 @@
  */
 import type * as pc from 'playcanvas'
 import { loopBounds } from '@shared/race/LoopPath'
+import { LOOP_LENGTH_M } from '@shared/race/RaceConstants'
 import type { TrackShape } from '@shared/race/types'
 import type { AssetLoader } from '../assets/AssetLoader'
 import { TrackBuilder } from './TrackBuilder'
@@ -132,26 +136,30 @@ class TrackAssemblyImpl implements TrackAssembly {
       await this.decor.build(root, { trackLengthM: result.trackLengthM })
     } else {
       // Trackside village + cheering spectators, placed along the loop's
-      // outer edge through loopPose.
+      // outer edge through loopPose. The loop is the fixed LOOP_LENGTH_M
+      // regardless of lap count.
       this.circuitDecor = new CircuitDecorBuilder(loader)
       await this.circuitDecor.build(root, {
-        circumferenceM: opts.distanceM,
+        circumferenceM: LOOP_LENGTH_M,
         trackWidthM: result.tileWidthM,
       })
     }
 
     // Pads + hurdles derive their arc positions from the same shared
     // module the server physics uses, so visuals and mechanics can't
-    // drift — and place themselves through the shape's projection.
+    // drift. On the circuit they sit at fractions of the physical loop
+    // (LOOP_LENGTH_M) — one set, seen once per lap; on the straight track
+    // they span the whole distance.
+    const featureLoopM = opts.trackShape === 'circuit' ? LOOP_LENGTH_M : opts.distanceM
     this.boostPads = new BoostPadBuilder()
     this.boostPads.build(root, {
-      distanceM: opts.distanceM,
+      loopLengthM: featureLoopM,
       trackWidthM: result.tileWidthM,
       projection: this.projection,
     })
     this.hurdles = new HurdleBuilder()
     this.hurdles.build(root, {
-      distanceM: opts.distanceM,
+      loopLengthM: featureLoopM,
       trackWidthM: result.tileWidthM,
       projection: this.projection,
     })
@@ -198,10 +206,14 @@ class TrackAssemblyImpl implements TrackAssembly {
     app: pc.AppBase,
     opts: TrackAssemblyOptions,
   ): { trackLengthM: number; tileWidthM: number; laneCenterZs: number[] } {
-    this.projection = new CircuitProjection(opts.distanceM)
+    // The loop is drawn ONCE at the fixed LOOP_LENGTH_M — a 1-lap and a
+    // 2-lap race share an identically-sized course. The projection wraps
+    // arc lengths beyond the loop (the avatar's displayX climbs to the
+    // race distance), so racers physically go around the same loop twice.
+    this.projection = new CircuitProjection(LOOP_LENGTH_M)
     this.circuitTrack = new CircuitTrackBuilder()
     return this.circuitTrack.build(root, app.graphicsDevice, {
-      circumferenceM: opts.distanceM,
+      circumferenceM: LOOP_LENGTH_M,
       laneCount: opts.racerCount,
     })
   }
@@ -216,8 +228,9 @@ class TrackAssemblyImpl implements TrackAssembly {
     if (opts.trackShape === 'circuit') {
       // Footprint covering the loop's bounding box plus the road width,
       // centred on the box — the organic loop isn't symmetric about any
-      // axis, so the old circle-radius framing no longer fits.
-      const bounds = loopBounds(opts.distanceM)
+      // axis, so the old circle-radius framing no longer fits. Sized to
+      // the fixed loop length, not the race distance.
+      const bounds = loopBounds(LOOP_LENGTH_M)
       this.ground.build(root, {
         trackLengthM: bounds.maxX - bounds.minX + trackWidthM,
         trackWidthM: bounds.maxZ - bounds.minZ + trackWidthM,
@@ -238,11 +251,12 @@ class TrackAssemblyImpl implements TrackAssembly {
     trackWidthM: number,
   ): void {
     this.arch = new FinishArch()
-    // Straight: the arch stands at x = distance. Circuit: arc =
-    // circumference wraps to the start line's world pose — origin,
-    // tangent +X (heading 360° ≡ 0°) — so the x-only, unrotated
-    // FinishArch API still places it exactly on the line.
-    const finishPose = this.projection.pose(opts.distanceM, 0)
+    // Straight: the arch stands at x = distance. Circuit: the finish line
+    // IS the start line — arc = LOOP_LENGTH_M wraps to the loop's start
+    // world pose (origin, tangent +X, heading 360° ≡ 0°) — so the x-only,
+    // unrotated FinishArch API places it exactly on the line, shared by
+    // every lap.
+    const finishPose = this.projection.pose(LOOP_LENGTH_M, 0)
     this.arch.build(root, app.graphicsDevice, {
       xAtFinish: opts.trackShape === 'circuit' ? finishPose.x : opts.distanceM,
       trackWidthM,

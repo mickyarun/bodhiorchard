@@ -99,8 +99,6 @@ export interface Racer {
    * While down the racer is stationary and can't sprint or jump.
    */
   knockdownUntilMs: number
-  /** Bitmask of boost-pad indices already consumed (one fire per pad per race). */
-  boostPadsHit: number
 }
 
 export function makeRacer(id: string): Racer {
@@ -119,7 +117,6 @@ export function makeRacer(id: string): Racer {
     // honoured even at nowMs = 0.
     lastJumpMs: -HURDLE_JUMP_COOLDOWN_MS,
     knockdownUntilMs: 0,
-    boostPadsHit: 0,
   }
 }
 
@@ -180,9 +177,11 @@ export function tick(
       continue
     }
 
-    // Pads / hurdles crossed in (prevPositionM, positionM] this tick.
-    // Effects (boost window, knockdown) land on the next velocity step.
-    stepTrackFeatures(r, prevPositionM, nowMs, trackLengthM)
+    // Pads / hurdles crossed in (prevPositionM, positionM] this tick,
+    // resolved in loop-space against the fixed physical loop so each
+    // feature fires once per lap. Effects (boost window, knockdown) land
+    // on the next velocity step.
+    stepTrackFeatures(r, prevPositionM, nowMs)
   }
 }
 

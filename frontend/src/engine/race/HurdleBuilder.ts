@@ -63,8 +63,13 @@ const SHADOW_GRAY = 0.05
 const SHADOW_OPACITY = 0.28
 
 export interface HurdleBuildOptions {
-  /** Race distance — hurdle arc positions derive from this via shared fractions. */
-  distanceM: number
+  /**
+   * Physical loop length — hurdle arc positions derive from this via the
+   * shared fractions. On the circuit this is LOOP_LENGTH_M, so the bars
+   * are placed once on the loop and crossed once per lap; on the straight
+   * track it's the full race distance.
+   */
+  loopLengthM: number
   /** Full track width — hurdles span every lane. */
   trackWidthM: number
   /** Shape-specific arc → world mapping; positions AND yaws every element. */
@@ -86,7 +91,7 @@ export class HurdleBuilder {
     const postMat = this.makeMaterial(POST_GRAY, POST_GRAY, POST_GRAY)
     const shadowMat = this.makeMaterial(SHADOW_GRAY, SHADOW_GRAY, SHADOW_GRAY, SHADOW_OPACITY)
 
-    for (const hurdleArcM of hurdlePositionsM(opts.distanceM)) {
+    for (const hurdleArcM of hurdlePositionsM(opts.loopLengthM)) {
       this.addHurdle(hurdleArcM, opts.trackWidthM, { whiteMat, redMat, postMat, shadowMat })
     }
   }

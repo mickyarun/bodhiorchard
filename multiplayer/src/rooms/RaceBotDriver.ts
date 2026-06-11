@@ -28,6 +28,7 @@
  */
 import { type Racer, setMoving, triggerSprintTap } from "../../../shared/race/RacePhysics"
 import { hurdlePositionsM, triggerJump } from "../../../shared/race/RaceTrackFeatures"
+import { LOOP_LENGTH_M } from "../../../shared/race/RaceConstants"
 import { BOT_USER_ID_PREFIX } from "./RaceRoomHelpers"
 
 /**
@@ -49,17 +50,36 @@ const SPRINT_CADENCE_STEP_MS = 240
 const JUMP_LEAD_M: readonly number[] = [1.2, 6.5, 0.8, 4.8, 2.0, 7.5, 1.6, 3.6, 0.5]
 
 /**
+ * Physical hurdle positions a racer crosses over `raceDistanceM`, in
+ * cumulative-arc metres. The bars live once on the loop at fractions of
+ * LOOP_LENGTH_M; a multi-lap race crosses each of them once per lap, so
+ * lap k contributes loop-position + k·LOOP_LENGTH_M. This is what the bot
+ * jump anticipation must line up with, on every lap.
+ */
+export function hurdleArcPositionsM(raceDistanceM: number): number[] {
+  const loopHurdles = hurdlePositionsM(LOOP_LENGTH_M)
+  const lapCount = Math.max(1, Math.round(raceDistanceM / LOOP_LENGTH_M))
+  const positions: number[] = []
+  for (let lap = 0; lap < lapCount; lap++) {
+    for (const h of loopHurdles) positions.push(lap * LOOP_LENGTH_M + h)
+  }
+  return positions
+}
+
+/**
  * Drive every bot for one sim tick. `elapsedMs` is the round clock and
  * `dtMs` the tick period — both come from RaceRoom's sim loop so tap
- * scheduling stays aligned with the physics integration.
+ * scheduling stays aligned with the physics integration. `raceDistanceM`
+ * is the finish line (lapCount · LOOP_LENGTH_M); bots aim their jumps at
+ * every physical hurdle crossing across all laps.
  */
 export function driveBots(
   botRacers: readonly Racer[],
   elapsedMs: number,
   dtMs: number,
-  trackLengthM: number,
+  raceDistanceM: number,
 ): void {
-  const hurdles = hurdlePositionsM(trackLengthM)
+  const hurdles = hurdleArcPositionsM(raceDistanceM)
   const dtSec = dtMs / 1000
   for (const bot of botRacers) {
     if (bot.finished) continue

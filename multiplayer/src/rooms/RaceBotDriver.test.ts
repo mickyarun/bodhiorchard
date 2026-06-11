@@ -13,16 +13,18 @@
 // limitations under the License.
 
 import { describe, it, expect } from "vitest"
-import { driveBots } from "./RaceBotDriver"
+import { driveBots, hurdleArcPositionsM } from "./RaceBotDriver"
 import { makeRacer, tick, type Racer } from "../../../shared/race/RacePhysics"
-import { TICK_MS } from "../../../shared/race/RaceConstants"
+import { hurdlePositionsM } from "../../../shared/race/RaceTrackFeatures"
+import { LOOP_LENGTH_M, TICK_MS } from "../../../shared/race/RaceConstants"
 
-const TRACK_LENGTH_M = 100
+const TRACK_LENGTH_M = LOOP_LENGTH_M
 
 /** Run a full simulated race: driveBots + physics tick, like RaceRoom.simStep. */
 function simulateRace(
   botCount: number,
   maxMs: number,
+  raceDistanceM: number = TRACK_LENGTH_M,
 ): { racers: Racer[]; knockedDownEver: Set<string>; finishOrder: string[] } {
   const racers: Racer[] = []
   for (let n = 1; n <= botCount; n++) racers.push(makeRacer(`bot-${n}`))
@@ -31,8 +33,8 @@ function simulateRace(
   const finished = new Set<string>()
 
   for (let elapsed = TICK_MS; elapsed <= maxMs; elapsed += TICK_MS) {
-    driveBots(racers, elapsed, TICK_MS, TRACK_LENGTH_M)
-    tick(racers, TICK_MS, elapsed, TRACK_LENGTH_M)
+    driveBots(racers, elapsed, TICK_MS, raceDistanceM)
+    tick(racers, TICK_MS, elapsed, raceDistanceM)
     for (const r of racers) {
       if (r.knockdownUntilMs > 0) knockedDownEver.add(r.id)
       if (r.finished && !finished.has(r.id)) {
@@ -84,6 +86,32 @@ describe("driveBots behaviour", () => {
   it("bots attempt jumps (lastJumpMs advances past its initial backdate)", () => {
     const { racers } = simulateRace(3, 120_000)
     for (const r of racers) {
+      expect(r.lastJumpMs).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe("hurdleArcPositionsM", () => {
+  it("1-lap race lists each physical hurdle once, in loop-space", () => {
+    expect(hurdleArcPositionsM(LOOP_LENGTH_M)).toEqual(hurdlePositionsM(LOOP_LENGTH_M))
+  })
+
+  it("2-lap race repeats every hurdle on each lap, offset by the loop length", () => {
+    const loop = hurdlePositionsM(LOOP_LENGTH_M)
+    expect(hurdleArcPositionsM(2 * LOOP_LENGTH_M)).toEqual([
+      ...loop,
+      ...loop.map((h) => h + LOOP_LENGTH_M),
+    ])
+  })
+})
+
+describe("driveBots over multiple laps", () => {
+  it("bots still finish a 2-lap race and attempt jumps on both laps", () => {
+    // A 2-lap race has twice the hurdles in cumulative arc; bots that
+    // clear the first lap's bars must keep aiming jumps on the second.
+    const { racers } = simulateRace(3, 120_000, 2 * LOOP_LENGTH_M)
+    for (const r of racers) {
+      expect(r.finished).toBe(true)
       expect(r.lastJumpMs).toBeGreaterThan(0)
     }
   })
