@@ -26,6 +26,16 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+// Vuetify bakes its own font-family (Roboto) into .v-application's precompiled
+// CSS, which would otherwise win over `body` for everything Vuetify renders and
+// fall back to the system font (Roboto is never loaded). Re-point the app root
+// at the single source of truth so the body font reaches every component.
+// `html` raises specificity above Vuetify's bare `.v-application` regardless of
+// stylesheet load order — no !important needed.
+html .v-application {
+  font-family: var(--font-body, 'Geist', sans-serif);
+}
+
 .v-theme--bodhiorchardLight body,
 .v-theme--bodhiorchardLight {
   font-weight: 400;
