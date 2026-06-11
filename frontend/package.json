@@ -8,7 +8,7 @@
     "build:landing": "vite-ssg build --config vite.landing.config.ts",
     "typecheck:landing": "vue-tsc --noEmit -p tsconfig.landing.json",
     "preview": "vite preview",
-    "preview:landing": "vite preview --config vite.landing.config.ts --outDir dist-landing",
+    "preview:landing": "vite preview --config vite.landing.config.ts",
     "lint": "eslint . --ext .vue,.ts",
     "test": "vitest run",
     "test:watch": "vitest",
