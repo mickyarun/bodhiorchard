@@ -62,6 +62,15 @@ const SEGMENT_ARC_M = 0.75
 /** Floor on segment count so tiny rings never read as polygons. */
 const MIN_SEGMENTS = 64
 
+/**
+ * The finish checker band wraps to just past arc 0, directly over the
+ * full-circumference lane-divider rings — unlike the straight track,
+ * where the band sits beyond the dividers' extent. A dedicated layer
+ * above PAINT_Y_OFFSET (and below the boost pads at 0.02) stops the
+ * band z-fighting the dividers running underneath it.
+ */
+const CHECKER_Y_OFFSET = 0.014
+
 export interface CircuitTrackBuildOptions {
   /** Lap length in metres — the race distance IS the circumference. */
   circumferenceM: number
@@ -216,8 +225,9 @@ export class CircuitTrackBuilder {
    * start line). Each square is a flat plane placed at its centre pose
    * and yawed to the local tangent — squares are small relative to the
    * curvature, so the chord approximation is invisible. The band starts
-   * half a start-line depth after the line so the two paint layers never
-   * overlap (they share PAINT_Y_OFFSET and would z-fight).
+   * half a start-line depth after the line so the two read as distinct
+   * markings, and sits on its own CHECKER_Y_OFFSET layer so it can't
+   * z-fight the start line or the divider rings running beneath it.
    */
   private addFinishChecker(
     whiteMat: pc.StandardMaterial,
@@ -236,7 +246,7 @@ export class CircuitTrackBuilder {
         const pose = projection.pose(arc, lateralM)
         this.addPlane(
           isLight ? whiteMat : darkMat, 'FinishChecker',
-          pose.x, PAINT_Y_OFFSET, pose.z,
+          pose.x, CHECKER_Y_OFFSET, pose.z,
           entityYawDeg(pose.headingDeg),
           squareW, squareW,
         )
