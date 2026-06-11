@@ -2,6 +2,9 @@
 # design.md (the locked system) IS tracked; this local log is not.
 .hallmark/
 
+# Marketing site lives in its own private repo (BodhiOrchard-Website), not here.
+/landing-site/
+
 # Python
 __pycache__/
 *.py[cod]
