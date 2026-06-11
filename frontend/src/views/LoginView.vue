@@ -128,7 +128,7 @@ async function handleLogin(): Promise<void> {
     } else if (!authStore.user?.character_model) {
       router.push({ name: 'character-select' })
     } else {
-      router.push({ name: 'methodology' })
+      router.push({ name: 'dashboard' })
     }
   }
 }
