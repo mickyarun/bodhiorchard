@@ -29,7 +29,7 @@
           PRE-RACE SETUP
         </div>
         <h2 class="setup__title">Invite to race</h2>
-        <p class="setup__sub">Pick a distance and up to {{ MAX_RACERS - 1 }} rivals to challenge.</p>
+        <p class="setup__sub">Pick your laps and up to {{ MAX_RACERS - 1 }} rivals to challenge.</p>
       </header>
 
       <!-- Everything between the pinned header and footer scrolls when the
@@ -41,33 +41,27 @@
         {{ error }}
       </v-alert>
 
-      <!-- Distance pills -->
+      <!-- Lap pills. The race always runs on the one fixed circuit loop;
+           the choice is how many times around it. We still send distanceM
+           on the wire (lapCount · LOOP_LENGTH_M), so the labels show laps
+           but the value the server validates is the existing distance. -->
       <section class="setup__section">
-        <div class="setup__section-label">Distance</div>
-        <div class="setup__pills" role="radiogroup" aria-label="Race distance">
+        <div class="setup__section-label">Laps</div>
+        <div class="setup__pills" role="radiogroup" aria-label="Race laps">
           <button
-            v-for="d in ALLOWED_DISTANCES_M"
-            :key="d"
+            v-for="laps in ALLOWED_LAP_COUNTS"
+            :key="laps"
             type="button"
             class="setup__pill"
-            :class="{ 'setup__pill--active': distanceM === d }"
+            :class="{ 'setup__pill--active': distanceM === lapCountToDistanceM(laps) }"
             role="radio"
-            :aria-checked="distanceM === d"
-            @click="distanceM = d"
+            :aria-checked="distanceM === lapCountToDistanceM(laps)"
+            @click="distanceM = lapCountToDistanceM(laps)"
           >
-            <span class="setup__pill-value">{{ d }}</span>
-            <span class="setup__pill-unit">m</span>
+            <span class="setup__pill-value">{{ laps }}</span>
+            <span class="setup__pill-unit">{{ laps === 1 ? 'lap' : 'laps' }}</span>
           </button>
         </div>
-      </section>
-
-      <!-- Track shape -->
-      <section class="setup__section">
-        <div class="setup__section-label setup__section-label--spaced">Track</div>
-        <AppPillToggle
-          v-model="trackShape"
-          :options="TRACK_SHAPE_OPTIONS"
-        />
       </section>
 
       <!-- Dev-only: bot test mode (vite dev builds only; the server
@@ -129,21 +123,16 @@ import { useRouter } from 'vue-router'
 import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { OrgRoomClient } from '@/multiplayer/OrgRoomClient'
-import { ALLOWED_DISTANCES_M, MAX_RACERS } from '@shared/race/RaceConstants'
-import type { TrackShape } from '@shared/race/types'
+import {
+  ALLOWED_DISTANCES_M,
+  ALLOWED_LAP_COUNTS,
+  MAX_RACERS,
+  lapCountToDistanceM,
+} from '@shared/race/RaceConstants'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import RaceThemeBackdrop from './RaceThemeBackdrop.vue'
 import CheckerFlagIcon from './CheckerFlagIcon.vue'
 import MemberPicker, { type MemberPickerEntry } from './MemberPicker.vue'
-
-/**
- * Pill options for the track-shape picker. On 'circuit' the chosen
- * distance becomes the lap circumference — hence the "(1 lap)" hint.
- */
-const TRACK_SHAPE_OPTIONS: Array<{ label: string; value: TrackShape }> = [
-  { label: 'Straight', value: 'straight' },
-  { label: 'Circuit (1 lap)', value: 'circuit' },
-]
 
 /**
  * Dev-only bot picker: lets a single dev exercise full races without
@@ -173,7 +162,6 @@ const router = useRouter()
 const authStore = useAuthStore()
 
 const distanceM = ref<number>(ALLOWED_DISTANCES_M[0])
-const trackShape = ref<TrackShape>('straight')
 const botCount = ref<number>(0)
 const selectedIds = ref<string[]>([])
 const sending = ref(false)
@@ -209,7 +197,6 @@ watch(
     error.value = ''
     selectedIds.value = preId ? [preId] : []
     distanceM.value = ALLOWED_DISTANCES_M[0]
-    trackShape.value = 'straight'
     botCount.value = 0
     if (directory.value.length === 0) void loadDirectory()
   },
@@ -238,7 +225,9 @@ async function onSend(): Promise<void> {
     const { roomId } = await client.sendRaceCreate({
       invitedUserIds: [...selectedIds.value],
       distanceM: distanceM.value,
-      trackShape: trackShape.value,
+      // The circuit loop is the only track now — always send 'circuit'.
+      // distanceM (100/200) selects 1 or 2 laps over that fixed loop.
+      trackShape: 'circuit',
       botCount: botCount.value,
     })
     emit('update:modelValue', false)
