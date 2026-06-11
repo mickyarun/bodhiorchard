@@ -14,17 +14,20 @@
  * limitations under the License.
  -->
 
-<!-- Thin compatibility shim: the methodology content now lives in the
-     composable MethodologyAll + its section components
-     (components/methodology/). This wrapper keeps existing imports
-     (MethodologyView, the landing site) working unchanged. -->
 <template>
-  <MethodologyAll @start-building="emit('startBuilding')" />
+  <div class="d-flex justify-center">
+    <v-btn
+      color="primary"
+      size="large"
+      append-icon="mdi-arrow-right"
+      @click="emit('startBuilding')"
+    >
+      Start Building
+    </v-btn>
+  </div>
 </template>
 
 <script setup lang="ts">
-import MethodologyAll from '@/components/methodology/MethodologyAll.vue'
-
 const emit = defineEmits<{
   startBuilding: []
 }>()

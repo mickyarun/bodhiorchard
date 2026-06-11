@@ -79,3 +79,27 @@ defineProps<{
   agent: AgentInfo
 }>()
 </script>
+
+<style scoped lang="scss">
+.agent-card {
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+
+  &:hover {
+    border-color: rgba(46, 125, 50, 0.3) !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    transform: translateY(-2px);
+  }
+
+  .agent-card__accent {
+    height: 3px;
+    width: 100%;
+    opacity: 0.7;
+  }
+
+  .agent-cap-chip {
+    font-size: 0.65rem !important;
+    height: 20px !important;
+  }
+}
+</style>
