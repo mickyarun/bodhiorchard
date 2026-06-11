@@ -27,9 +27,10 @@
  *   - The post-finish Cheer latch.
  *
  * Animation driving matches the dashboard's `CharacterSystem` pattern:
- * setInteger('speed', 0|1) to switch Idle ↔ Walk. Never touches
- * anim.speed (varying the playback multiplier caused visible "jumping"
- * because the step cycle re-keyed mid-stride).
+ * setInteger('speed', 0|1) to switch Idle ↔ Walk. The locomotion states
+ * never touch anim.speed (varying the playback multiplier caused visible
+ * "jumping" because the step cycle re-keyed mid-stride); the knockdown
+ * edges are the one documented exception — see KNOCKDOWN_ANIM_SPEED.
  *
  * Does NOT own the factory's cached animation GLBs (shared, lifecycle
  * tied to the factory) — `reset()` only drops local references.
@@ -48,6 +49,27 @@ const IDLE_SWAP_THRESHOLD_MPS = 0.5
 
 /** Above this velocity, assume the player is sprinting (swap Walk → Running_A). */
 const SPRINT_SWAP_THRESHOLD_MPS = 4.0
+
+/**
+ * AnimComponent playback multiplier while the knockdown fall plays.
+ *
+ * The Defeat state's track (Death_A) runs at graph speed 0.6 in
+ * LOCOMOTION_STATE_GRAPH — tuned for the podium's slow "dejected"
+ * collapse, but far too languid for a mid-race hurdle tumble. 1.5 here
+ * multiplies that to an effective ≈0.9 rate so the fall reads as a spill.
+ *
+ * This module otherwise never touches anim.speed: varying the playback
+ * multiplier mid-stride re-keys the walk cycle and makes the avatar
+ * visibly "jump". That concern doesn't apply on the knockdown edges —
+ * the server pins the racer's velocity to 0 while down, so there is no
+ * stride to re-key. The multiplier is restored to NORMAL_ANIM_SPEED on
+ * the get-up edge, on the finish latch, and in reset() (teardown), so it
+ * can never leak into locomotion.
+ */
+const KNOCKDOWN_ANIM_SPEED = 1.5
+
+/** Default AnimComponent playback multiplier outside the knockdown window. */
+const NORMAL_ANIM_SPEED = 1
 
 type AnimState = 'idle' | 'walk' | 'run'
 
@@ -131,6 +153,10 @@ export class RacerAvatarAnim {
     if (!anim) return true
 
     if (finished) {
+      // A racer can be force-finished while still on the ground (timeout
+      // DNF) — restore the playback multiplier so the Cheer/Idle states
+      // never inherit the knockdown's faster rate.
+      anim.speed = NORMAL_ANIM_SPEED
       // Push the graph through Walk → Idle (speed=0) so the Idle → Cheer
       // edge can fire on the next tick. Cheer has no direct transition
       // from Walk in LOCOMOTION_STATE_GRAPH.
@@ -145,6 +171,12 @@ export class RacerAvatarAnim {
 
   /** Drop references on avatar teardown. Tracks are factory-owned. */
   reset(): void {
+    // Destroy/finish path: if the entity (and its anim component) is
+    // still alive, make sure the knockdown playback multiplier can't
+    // outlive this state machine. Optional chaining covers the usual
+    // case where RacerAvatar.destroy() has already torn the entity down.
+    const anim = this.entity?.anim
+    if (anim) anim.speed = NORMAL_ANIM_SPEED
     this.entity = null
     this.walkTrack = null
     this.runTrack = null
@@ -157,16 +189,20 @@ export class RacerAvatarAnim {
    * Enter / leave the fall animation. Entering pushes the graph through
    * Idle (speed=0) so the Idle → Defeat edge can fire — same trick as
    * `setFinished` uses for Cheer; Defeat's track is Death_A, a fall to
-   * the ground. Leaving clears the emote, blending back up through Idle.
+   * the ground — and speeds the component's playback up so the tumble
+   * reads as a race spill (see KNOCKDOWN_ANIM_SPEED). Leaving restores
+   * the multiplier and clears the emote, blending back through Idle.
    */
   private applyKnockdownState(down: boolean): void {
     const anim = this.entity?.anim
     if (!anim) return
     if (down) {
+      anim.speed = KNOCKDOWN_ANIM_SPEED
       anim.setInteger('speed', 0)
       anim.setInteger('emote', 3)
       this.currentAnimState = 'idle'
     } else {
+      anim.speed = NORMAL_ANIM_SPEED
       anim.setInteger('emote', 0)
     }
   }
