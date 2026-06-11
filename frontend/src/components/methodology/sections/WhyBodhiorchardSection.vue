@@ -16,7 +16,7 @@
 
 <template>
   <v-card class="pa-8 card-border-dark" color="surface">
-    <div class="d-flex flex-column align-center text-center mb-6">
+    <div v-if="showHeading" class="d-flex flex-column align-center text-center mb-6">
       <img :src="logoSrc" width="40" height="40" alt="" class="mb-3" style="border-radius: 50%;" />
       <div class="text-h6 font-weight-medium">Why "Bodhiorchard"?</div>
     </div>
@@ -70,9 +70,13 @@
 withDefaults(
   defineProps<{
     logoSrc?: string
+    // The landing /why-bodhiorchard page supplies its own <h1> heading, so it
+    // hides this internal one to avoid a duplicate title.
+    showHeading?: boolean
   }>(),
   {
     logoSrc: '/assets/bodhiorchard-logo-sm.png',
+    showHeading: true,
   },
 )
 </script>

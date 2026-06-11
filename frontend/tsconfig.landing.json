@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["vite/client", "node"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.d.ts",
+    "src/**/*.vue",
+    "landing-src/**/*.ts",
+    "landing-src/**/*.vue",
+    "env.d.ts",
+    "../shared/**/*.ts"
+  ]
+}
