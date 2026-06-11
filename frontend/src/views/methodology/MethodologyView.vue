@@ -14,66 +14,25 @@
  * limitations under the License.
  -->
 
+<!-- The methodology / marketing content now lives on the public website
+     (bodhiorchard.ai). This route exists only to redirect anyone who lands on
+     the old in-app /methodology URL out to the live site. -->
 <template>
-  <!-- The public methodology page is a cinematic, dark landing. Its rich
-       sections (the circular lifecycle flow, the VS-Agile comparison table,
-       the manifesto and agent cards) are all designed light-on-dark, so the
-       whole page renders in the dark theme regardless of the app's setting —
-       on a light app these sections were white-on-white and unreadable. -->
   <v-app theme="bodhiorchardDark">
-    <!-- Top header bar -->
-    <v-app-bar flat color="surface" density="compact" class="methodology-appbar">
-      <div class="d-flex align-center justify-space-between w-100 px-4">
-        <BodhiorchardLogo :size="28" />
-        <v-btn
-          v-if="!isLoggedIn"
-          color="primary"
-          variant="flat"
-          prepend-icon="mdi-login"
-          @click="router.push({ name: 'login' })"
-        >
-          Login
-        </v-btn>
-        <v-btn
-          v-else
-          color="primary"
-          variant="flat"
-          prepend-icon="mdi-view-dashboard-outline"
-          @click="router.push({ name: 'dashboard' })"
-        >
-          Go to Dashboard
-        </v-btn>
-      </div>
-    </v-app-bar>
-
-    <v-main>
-      <div class="pa-6" style="max-width: 1100px; margin: 0 auto;">
-        <MethodologyStep @start-building="handleStartBuilding" />
-      </div>
+    <v-main class="d-flex flex-column align-center justify-center" style="min-height: 100vh;">
+      <v-progress-circular indeterminate color="primary" size="40" class="mb-4" />
+      <div class="text-body-2 text-medium-emphasis">Taking you to bodhiorchard.ai…</div>
     </v-main>
   </v-app>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useRouter } from 'vue-router'
-import BodhiorchardLogo from '@/components/common/BodhiorchardLogo.vue'
-import MethodologyStep from '@/views/setup/steps/MethodologyStep.vue'
+import { onMounted } from 'vue'
 
-const router = useRouter()
-const isLoggedIn = computed(() => !!localStorage.getItem('bodhiorchard_token'))
+const TARGET = 'https://bodhiorchard.ai/methodology'
 
-function handleStartBuilding(): void {
-  if (isLoggedIn.value) {
-    router.push({ name: 'dashboard' })
-  } else {
-    router.push({ name: 'login' })
-  }
-}
+onMounted(() => {
+  // replace() so the back button doesn't bounce the user straight back here.
+  window.location.replace(TARGET)
+})
 </script>
-
-<style scoped>
-.methodology-appbar {
-  border-bottom: 1px solid rgb(var(--v-theme-rule)) !important;
-}
-</style>

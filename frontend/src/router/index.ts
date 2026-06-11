@@ -64,7 +64,7 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      redirect: '/methodology',
+      redirect: '/dashboard',
     },
     {
       path: '/login',
@@ -265,7 +265,7 @@ router.beforeEach(async (to) => {
 
   // Setup done — don't allow going back to setup
   if (done && to.name === 'setup') {
-    return { name: 'methodology' }
+    return { name: 'dashboard' }
   }
 
   // Auth guard — require token for protected routes
@@ -278,7 +278,7 @@ router.beforeEach(async (to) => {
 
   // Already logged in — redirect away from login
   if (to.name === 'login' && localStorage.getItem('bodhiorchard_token')) {
-    return { name: 'methodology' }
+    return { name: 'dashboard' }
   }
 
   // Permission guard — redirect to dashboard if user lacks required permission
