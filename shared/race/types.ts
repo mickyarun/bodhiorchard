@@ -29,8 +29,10 @@ export type RacePhase = 'lobby' | 'countdown' | 'running' | 'finished'
  *
  * Physics treats `positionM` as a 1-D scalar either way: on a straight
  * track it's the world X, on a circuit it's the arc length along the
- * centreline (the race distance is the circumference — one lap). Only
- * renderers map the scalar to world space, via CircuitGeometry.
+ * loop centreline. The loop has a fixed length; the race distance is
+ * `lapCount × loop length`, so `positionM` climbs past one loop on a
+ * multi-lap race. Only renderers map the scalar to world space, via
+ * `LoopPath` (the circuit's organic closed loop).
  */
 export type TrackShape = 'straight' | 'circuit'
 

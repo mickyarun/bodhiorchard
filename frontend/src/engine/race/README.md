@@ -37,9 +37,10 @@ engine.destroy()
 
 - `TrackProjection` maps the physics' 1-D `positionM` scalar onto world
   space: `StraightProjection` (arc = X, lateral = Z) or
-  `CircuitProjection` (wraps `@shared/race/CircuitGeometry`; the race
-  distance is the lap circumference). Avatars, pads, hurdles and the
-  chase camera all place themselves through it.
+  `CircuitProjection` (wraps `@shared/race/LoopPath`; arc curves around a
+  fixed-length organic loop, wrapping past one lap on multi-lap races).
+  Avatars, pads, hurdles and the chase camera all place themselves
+  through it.
 - `RaceSceneTrack.buildTrackAssembly` owns the per-shape surface stack:
   straight → `TrackBuilder` / `Ground` / `FinishArch` / `DecorBuilder`;
   circuit → `CircuitTrackBuilder` (loop ribbons via `RibbonMesh` over `LoopPath`) +

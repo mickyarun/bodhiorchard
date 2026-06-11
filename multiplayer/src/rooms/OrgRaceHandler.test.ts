@@ -13,7 +13,9 @@
 // limitations under the License.
 
 import { describe, it, expect } from "vitest"
-import { parseRaceCreateMessage } from "./OrgRaceHandler"
+import { parseRaceCreateMessage, raceRacerCount } from "./OrgRaceHandler"
+import { resolveBotCount } from "./RaceRoomHelpers"
+import { MAX_RACERS } from "../../../shared/race/RaceConstants"
 
 describe("parseRaceCreateMessage", () => {
   it("accepts a valid 100m invite (trackShape defaults to straight)", () => {
@@ -97,5 +99,34 @@ describe("parseRaceCreateMessage", () => {
     expect(
       parseRaceCreateMessage({ invitedUserIds: [], distanceM: 100, botCount: NaN }),
     ).toBeNull()
+  })
+})
+
+describe("raceRacerCount occupancy cap", () => {
+  // The create handler rejects with "too_many_invitees" when this exceeds
+  // MAX_RACERS. Bots are resolved through the same prod-gate + clamp the
+  // room uses, so the cap must count them.
+  const fits = (invitees: number, rawBots: number, isProd: boolean): boolean =>
+    raceRacerCount(invitees, resolveBotCount(rawBots, isProd)) <= MAX_RACERS
+
+  it("counts host + invitees + dev bots toward the cap", () => {
+    // host(1) + 1 invitee + 7 bots = 9 ≤ 10 → fits.
+    expect(fits(1, 7, false)).toBe(true)
+    // host(1) + 3 invitees + 7 bots = 11 > 10 → rejected.
+    expect(fits(3, 7, false)).toBe(false)
+  })
+
+  it("accepts a full grid exactly at MAX_RACERS", () => {
+    // host(1) + 9 bots = 10.
+    expect(fits(0, MAX_RACERS - 1, false)).toBe(true)
+    // one more human tips it over.
+    expect(fits(1, MAX_RACERS - 1, false)).toBe(false)
+  })
+
+  it("ignores bots in production so only host + invitees count", () => {
+    // A crafted prod payload asking for 9 bots still seats 0 bots, so a
+    // host + 9 invitees race fits and a 10-invitee race does not.
+    expect(fits(MAX_RACERS - 1, 9, true)).toBe(true)
+    expect(fits(MAX_RACERS, 9, true)).toBe(false)
   })
 })

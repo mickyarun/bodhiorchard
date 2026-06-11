@@ -32,7 +32,7 @@
  */
 import { loopPose } from '@shared/race/LoopPath'
 
-/** Degrees per radian — CircuitGeometry speaks radians, PlayCanvas degrees. */
+/** Degrees per radian — LoopPath speaks radians, PlayCanvas degrees. */
 const DEG_PER_RAD = 180 / Math.PI
 
 export interface TrackPose {

@@ -337,7 +337,8 @@ async function onSend(): Promise<void> {
 }
 .setup__count-sep { opacity: 0.4; margin: 0 2px; }
 
-/* Track-shape picker label sits above the pill toggle. */
+/* Extra top margin for a section label that follows another control
+   (e.g. the dev test-bots label under the lap pills). */
 .setup__section-label--spaced {
   display: block;
   margin-bottom: 10px;

@@ -92,7 +92,7 @@ async function handleRaceCreate(
   // room's MAX_RACERS join cap and drop seats). In production the gate
   // forces bots to 0, so this reduces to host + invitees.
   const botCount = resolveBotCount(parsed.botCount, isProductionServer())
-  const racerCount = parsed.invitedUserIds.length + 1 + botCount
+  const racerCount = raceRacerCount(parsed.invitedUserIds.length, botCount)
   if (racerCount > MAX_RACERS) {
     client.send("race_create_failed", { reason: "too_many_invitees" })
     return
@@ -185,6 +185,16 @@ function addActiveRace(
   summary.racerCount = racerCount
   summary.participantUserIds = new ArraySchema<string>(...participantUserIds)
   room.state.activeRaces.set(roomId, summary)
+}
+
+/**
+ * Total racers a create request would seat: host (the +1) + human
+ * invitees + already-resolved dev bots. Compared against MAX_RACERS to
+ * reject over-capacity races. Pure so the occupancy cap is unit-testable
+ * without standing up a matchMaker / Room.
+ */
+export function raceRacerCount(inviteeCount: number, botCount: number): number {
+  return inviteeCount + 1 + botCount
 }
 
 export function parseRaceCreateMessage(raw: unknown): RaceCreateMessage | null {
