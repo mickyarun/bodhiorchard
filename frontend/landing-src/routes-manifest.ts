@@ -16,6 +16,11 @@
 // imports) so it can be consumed by BOTH the router/nav AND vite.landing.config
 // (esbuild) when generating sitemap.xml — keeping the two from drifting.
 
+// Canonical site origin. Single source for canonical/OG URLs (useSeo),
+// JSON-LD (structured-data), and sitemap.xml (vite.landing.config) so they
+// can't drift. No trailing slash.
+export const SITE_ORIGIN = 'https://bodhiorchard.ai'
+
 export interface LandingRoute {
   path: string
   /** Vue Router route name. */

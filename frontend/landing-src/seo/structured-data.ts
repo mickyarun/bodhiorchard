@@ -17,6 +17,8 @@
 // whose visible content matches it (SoftwareApplication → Home, FAQPage →
 // Methodology, where the questions are also rendered visibly).
 
+import { SITE_ORIGIN } from '../routes-manifest'
+
 export const SOFTWARE_APPLICATION_LD = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
@@ -24,7 +26,7 @@ export const SOFTWARE_APPLICATION_LD = {
   alternateName: 'Bodhiorchard™',
   description:
     'Bodhiorchard is the open-source reference implementation of Agent-Driven Development — a modern methodology that replaces sprint, scrum, and agile ceremony with 12 specialised AI agents working alongside humans across every phase of the software lifecycle.',
-  url: 'https://bodhiorchard.ai/',
+  url: `${SITE_ORIGIN}/`,
   applicationCategory: 'DeveloperApplication',
   applicationSubCategory: 'Project Management',
   operatingSystem: 'macOS, Linux, Windows (WSL2)',

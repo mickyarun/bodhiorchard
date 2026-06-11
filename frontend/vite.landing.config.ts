@@ -29,9 +29,7 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vuetify from 'vite-plugin-vuetify'
-import { LANDING_ROUTES } from './landing-src/routes-manifest'
-
-const SITE_ORIGIN = 'https://bodhiorchard.ai'
+import { LANDING_ROUTES, SITE_ORIGIN } from './landing-src/routes-manifest'
 
 function buildSitemap(): string {
   const lastmod = new Date().toISOString().slice(0, 10)

@@ -39,7 +39,7 @@ import { useSeo } from '../composables/useSeo'
 useSeo({
   title: 'Bodhiorchard vs Agile — a phase-by-phase comparison',
   description:
-    'How Agent-Driven Development compares to Agile / Scrum across 13 phases — from intake and estimation to deployment, knowledge, and retrospectives. The modern alternative to sprint planning and story points.',
+    'How Agent-Driven Development compares to Agile / Scrum phase by phase — from intake and estimation to deployment, knowledge, and retrospectives. The modern alternative to sprint planning and story points.',
   path: '/vs-agile',
 })
 </script>

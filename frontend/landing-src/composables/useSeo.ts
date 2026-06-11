@@ -18,8 +18,9 @@
 // the main app does not ship unhead, so this lives under landing-src/.
 
 import { useHead } from '@unhead/vue'
+import { SITE_ORIGIN } from '../routes-manifest'
 
-const BASE = 'https://bodhiorchard.ai'
+const BASE = SITE_ORIGIN
 const DEFAULT_IMAGE = `${BASE}/landing/bodhiorchard-logo.png`
 
 export interface SeoMeta {

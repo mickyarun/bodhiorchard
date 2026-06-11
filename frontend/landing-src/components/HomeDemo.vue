@@ -20,7 +20,7 @@
 <template>
   <section class="home-demo">
     <div class="text-center mb-5">
-      <div class="text-h6 font-weight-medium">See the living orchard</div>
+      <h2 class="text-h6 font-weight-medium ma-0">See the living orchard</h2>
       <p class="text-caption text-medium-emphasis mx-auto" style="max-width: 520px;">
         A two-minute look at the Living Tree — your organization as a tended orchard.
       </p>

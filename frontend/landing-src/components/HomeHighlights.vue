@@ -16,6 +16,10 @@
 
 <template>
   <section>
+    <div class="text-center mb-8">
+      <div class="highlights__eyebrow">What you get</div>
+      <h2 class="highlights__title bo-display">Less process. More shipped.</h2>
+    </div>
     <v-row dense>
       <v-col v-for="(h, i) in HOME_HIGHLIGHTS" :key="h.title" cols="12" sm="6">
         <ScrollReveal :delay="i * 70">
@@ -39,6 +43,19 @@ import { HOME_HIGHLIGHTS } from '../content/site'
 </script>
 
 <style scoped>
+.highlights__eyebrow {
+  font-size: var(--text-sm, 0.9rem);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label, 0.08em);
+  font-weight: 600;
+  color: rgb(var(--v-theme-primary));
+  margin-bottom: 8px;
+}
+.highlights__title {
+  font-size: var(--text-xl, 1.953rem);
+  letter-spacing: var(--tracking-display, -0.02em);
+  margin: 0;
+}
 .highlight__link {
   display: block;
   padding: 24px;

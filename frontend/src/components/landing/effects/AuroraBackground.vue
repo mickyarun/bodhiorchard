@@ -43,14 +43,14 @@
 }
 .aurora__layer--a {
   background:
-    radial-gradient(38% 44% at 22% 30%, rgba(62, 171, 94, 0.45), transparent 70%),
-    radial-gradient(34% 40% at 78% 24%, rgba(32, 196, 95, 0.30), transparent 72%);
+    radial-gradient(38% 44% at 22% 30%, rgba(var(--v-theme-primary), 0.45), transparent 70%),
+    radial-gradient(34% 40% at 78% 24%, rgba(var(--v-theme-primary), 0.30), transparent 72%);
   animation: aurora-drift-a 26s ease-in-out infinite alternate;
 }
 .aurora__layer--b {
   background:
-    radial-gradient(40% 46% at 68% 72%, rgba(228, 183, 80, 0.22), transparent 70%),
-    radial-gradient(30% 36% at 30% 80%, rgba(62, 171, 94, 0.28), transparent 72%);
+    radial-gradient(40% 46% at 68% 72%, rgba(var(--v-theme-gold), 0.22), transparent 70%),
+    radial-gradient(30% 36% at 30% 80%, rgba(var(--v-theme-primary), 0.28), transparent 72%);
   animation: aurora-drift-b 32s ease-in-out infinite alternate;
 }
 .aurora__grain {
