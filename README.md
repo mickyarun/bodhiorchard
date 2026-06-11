@@ -14,7 +14,7 @@
 
 [Website](https://bodhiorchard.ai/) · [Quick Start](#quick-start) · [Why Bodhiorchard](#why-bodhiorchard) · [The Twelve Agents](#the-twelve-agents) · [Docs](#documentation) · [FAQ](#faq)
 
-<a href="https://youtu.be/OxoqBI7BNxU"><img src="https://img.youtube.com/vi/OxoqBI7BNxU/maxresdefault.jpg" width="70%" alt="Bodhiorchard demo — the Living Tree, your org as a tended orchard"></a>
+<a href="https://youtu.be/OxoqBI7BNxU"><img src="docs/images/livingtree.png" width="85%" alt="Bodhiorchard — your codebase as a living orchard"></a>
 
 **[▶ Watch the demo](https://youtu.be/OxoqBI7BNxU)** — your organization as a living, tended orchard.
 
@@ -77,19 +77,28 @@ npm install && npm run setup && npm run dev
 
 ## Screenshots
 
-| Living Tree dashboard | BUD board | Feature registry |
-|---|---|---|
-| ![Living Tree dashboard](docs/images/livingtree.png) | ![BUD board](docs/images/board.png) | ![Feature registry](docs/images/Feature.png) |
+| | |
+|---|---|
+| ![BUD board — plan, track, ship in one garden](docs/images/board.png) | ![One BUD per feature — spec to prod](docs/images/bud-document.png) |
+| ![Feature registry — every feature, every dev at a glance](docs/images/Feature.png) | ![Slack triage — a message in, a BUD out](docs/images/slack-triage.png) |
+| ![AI drafts the tech spec, you decide](docs/images/techarch.png) | ![Cross-repo code graph — every repo, every link, one map](docs/images/crossrepo.png) |
+| ![MCP knowledge — your agents, fed from your code](docs/images/mcp.png) | ![Bring your Jira, then leave it behind](docs/images/jira-import.png) |
 
 The gamification layer rebuilds developer skill profiles nightly — skills compound, badges unlock, and the leaderboard reflects shipped value, not ticket count:
 
-| Skill profile | XP progression | Leaderboard | Unlocks |
+| | | | |
 |---|---|---|---|
-| ![Developer skill profile](docs/images/skills.png) | ![XP progression](docs/images/gamification.png) | ![Leaderboard](docs/images/LeaderBoard.png) | ![Unlocks](docs/images/unlocks.png) |
+| ![Developer skill profile — rebuilt nightly](docs/images/skills.png) | ![Ship quality, earn XP, grow your tree](docs/images/gamification.png) | ![Leaderboard ranked by shipped value](docs/images/LeaderBoard.png) | ![Unlocks — do the work, unlock the world](docs/images/unlocks.png) |
 
 **More walkthroughs:** [Setup](https://youtu.be/ot-BmKxRgRA) · [Slack triage & MCP tools](https://youtu.be/i8kZdcL1bME) · [Requirements & estimation](https://youtu.be/YBwdTes0Fno) · [Design phase](https://youtu.be/lV71qhmfzzw) · [Development & retrospective](https://youtu.be/YjRihN_SKaw)
 
 ## How it works
+
+<div align="center">
+
+![Twelve agents, one flow, zero ceremony — the Agent-Driven Development lifecycle](docs/images/theflow.png)
+
+</div>
 
 Every feature lives in one **BUD** (Business Understanding Document) that moves through the lifecycle, with an agent driving each phase and a human gate between phases:
 
