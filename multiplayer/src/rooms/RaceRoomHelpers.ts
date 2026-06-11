@@ -20,7 +20,7 @@
  */
 import type { Racer } from "../../../shared/race/RacePhysics"
 import type { Placing, TrackShape } from "../../../shared/race/types"
-import { ALLOWED_TRACK_SHAPES } from "../../../shared/race/RaceConstants"
+import { ALLOWED_TRACK_SHAPES, MAX_RACERS } from "../../../shared/race/RaceConstants"
 import { PlacingState } from "../schema/PlacingState"
 import { RacerState } from "../schema/RacerState"
 import type { RaceResultsPayload, RaceResultsPlacing } from "../bridge/BackendClient"
@@ -32,6 +32,8 @@ export interface RaceCreateOptions {
   distanceM: number
   trackShape: TrackShape
   invitedUserIds: string[]
+  /** Dev-mode test bots to seed (0 in production — see resolveBotCount). */
+  botCount: number
 }
 
 /** Race-identifying fields forwarded onto every results-POST payload. */
@@ -73,7 +75,76 @@ export function assertRaceCreateOptions(
   for (const v of invited) {
     if (typeof v === "string" && v.length > 0) invitedUserIds.push(v)
   }
-  return { orgId, hostUserId, hostName, distanceM, trackShape, invitedUserIds }
+  const botCount = resolveBotCount(o.botCount, isProductionServer())
+  return { orgId, hostUserId, hostName, distanceM, trackShape, invitedUserIds, botCount }
+}
+
+/**
+ * Resolve the dev-mode bot count from an untrusted payload field.
+ *
+ * Bot racers are a local development aid only, and the gate lives HERE,
+ * server-side: whatever a client sends, a production server forces 0 so
+ * bots can never occupy lanes in a real org's race (their synthetic user
+ * ids must never approach the backend). On non-production servers the
+ * value clamps to [0, MAX_RACERS − 1], always leaving a lane for the
+ * human host. Anything non-numeric resolves to 0.
+ */
+export function resolveBotCount(raw: unknown, isProduction: boolean): number {
+  if (isProduction) return 0
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0
+  const n = Math.trunc(raw)
+  return Math.max(0, Math.min(MAX_RACERS - 1, n))
+}
+
+/** Named environment gate for resolveBotCount — see its docstring. */
+export function isProductionServer(): boolean {
+  return process.env.NODE_ENV === "production"
+}
+
+/**
+ * Bot identification policy — ONE mechanism, used everywhere: bot user
+ * ids carry the `bot-` prefix. Real user ids are backend-issued UUIDs,
+ * so the prefix cannot collide. `RacerState.isBot` mirrors this for
+ * clients; `buildRaceResultsPayload` keys off it to keep bots out of the
+ * backend POST (bot ids would violate the results table's user FKs).
+ */
+export const BOT_USER_ID_PREFIX = "bot-"
+
+export function isBotUserId(userId: string): boolean {
+  return userId.startsWith(BOT_USER_ID_PREFIX)
+}
+
+/**
+ * Fixed, valid character encodings for bots, cycled by bot number —
+ * parseCharacterModel's "kaykit:{id}:{shirt}:{pants}:{skin}:{rh}:{lh}"
+ * format, so the client spawns real avatars instead of fallbacks.
+ */
+const BOT_CHARACTER_MODELS: readonly string[] = [
+  "kaykit:barbarian:E63946:1D3557:F4C28F::",
+  "kaykit:mage:457B9D:2B2D42:C68642::",
+  "kaykit:knight:F4A261:264653:F4C28F::",
+  "kaykit:ranger:2A9D8F:3A2E2A:8D5524::",
+  "kaykit:rogue:9B5DE5:22223B:F4C28F::",
+  "kaykit:rogue_hooded:FFD75E:283618:C68642::",
+  "kaykit:barbarian:30D66D:0D1422:F4C28F::",
+]
+
+/**
+ * Seed one bot's schema state. Bots are `connected` from birth (no
+ * client will ever join for them) so they count toward MIN_RACERS and
+ * the lobby renders them as ready — host + one bot can start a race.
+ */
+export function buildBotRacerState(botNumber: number, laneIndex: number): RacerState {
+  const id = `${BOT_USER_ID_PREFIX}${botNumber}`
+  const state = new RacerState()
+  state.id = id
+  state.userId = id
+  state.name = `Bot ${botNumber}`
+  state.characterModel = BOT_CHARACTER_MODELS[(botNumber - 1) % BOT_CHARACTER_MODELS.length]
+  state.laneIndex = laneIndex
+  state.isBot = true
+  state.connected = true
+  return state
 }
 
 /**
@@ -175,6 +246,13 @@ export function placingToSchema(p: Placing): PlacingState {
  * passed in surfaces in the outgoing payload, finishers and DNFs alike.
  * A regression here is what would produce the "only winner appears on
  * the leaderboard" symptom, so the test is the canary.
+ *
+ * Dev-mode bots (isBotUserId) are excluded entirely: their synthetic
+ * ids aren't real users, so a row for them would violate the backend's
+ * user FKs — and the "any finisher" decision below is therefore made
+ * over HUMAN placings only. A round where only bots crossed the line
+ * persists nothing. Bots still appear in the in-room placings schema,
+ * so the podium UI shows them.
  */
 export function buildRaceResultsPayload(
   header: RaceResultsHeader,
@@ -183,6 +261,7 @@ export function buildRaceResultsPayload(
   const rows: RaceResultsPlacing[] = []
   let anyFinisher = false
   for (const p of placings) {
+    if (isBotUserId(p.racerId)) continue
     rows.push({
       userId: p.racerId,
       finishTimeMs: p.finished ? p.finishTimeMs : null,
@@ -201,4 +280,45 @@ export function buildRaceResultsPayload(
     distanceM: header.distanceM,
     placings: rows,
   }
+}
+
+// ─── in-room message parsers ─────────────────────
+//
+// Pure payload validation for RaceRoom's onMessage handlers, kept here
+// (with the other parsers) so RaceRoom.ts stays orchestration-only and
+// the validation rules are unit-testable without Colyseus.
+
+export interface MoveMsg {
+  userId: string
+  isMoving: boolean
+}
+
+export function parseMove(raw: unknown): MoveMsg | null {
+  if (typeof raw !== "object" || raw === null) return null
+  const o = raw as Record<string, unknown>
+  if (typeof o.userId !== "string" || typeof o.isMoving !== "boolean") return null
+  return { userId: o.userId, isMoving: o.isMoving }
+}
+
+export function parseUserIdOnly(raw: unknown): string | null {
+  if (typeof raw !== "object" || raw === null) return null
+  const o = raw as Record<string, unknown>
+  return typeof o.userId === "string" ? o.userId : null
+}
+
+/**
+ * Parse a `race_add_invitees` payload into a clean string array.
+ * Drops empty / non-string entries silently so a buggy client can't
+ * push junk into `state.invitedUserIds`.
+ */
+export function parseAddInviteesPayload(raw: unknown): string[] {
+  if (typeof raw !== "object" || raw === null) return []
+  const o = raw as Record<string, unknown>
+  const arr = o.userIds
+  if (!Array.isArray(arr)) return []
+  const out: string[] = []
+  for (const v of arr) {
+    if (typeof v === "string" && v.length > 0) out.push(v)
+  }
+  return out
 }

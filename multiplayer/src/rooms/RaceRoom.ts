@@ -50,12 +50,17 @@ import { RaceRoomState } from "../schema/RaceRoomState"
 import { RacerState } from "../schema/RacerState"
 import {
   assertRaceCreateOptions,
+  buildBotRacerState,
   buildRacerState,
   buildRaceResultsPayload,
   copyRacerToSchema,
+  parseAddInviteesPayload,
+  parseMove,
+  parseUserIdOnly,
   placingToSchema,
   type RaceCreateOptions,
 } from "./RaceRoomHelpers"
+import { driveBots } from "./RaceBotDriver"
 import { postRaceInvite, postRaceResults } from "../bridge/BackendClient"
 import { fireRaceDispose, fireRacePhase } from "../bridge/RaceRegistry"
 
@@ -66,6 +71,8 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
 
   /** In-memory physics mirror — schema state is updated from this each tick. */
   private physicsRacers: Racer[] = []
+  /** Subset of physicsRacers driven by RaceBotDriver (dev mode only). */
+  private botRacers: Racer[] = []
   private simHandle: NodeJS.Timeout | null = null
   /** Wall-clock at which running phase began (used to compute elapsedMs). */
   private runningStartedAtMs = 0
@@ -73,6 +80,7 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
   onCreate(rawOptions: unknown): void {
     const options = assertRaceCreateOptions(rawOptions, ALLOWED_DISTANCES_M)
     this.seedState(options)
+    this.seedBots(options.botCount)
     this.registerHandlers()
     // Keep the lobby alive even when zero clients are connected so the
     // host can switch tabs (or close the page) while waiting for an
@@ -149,6 +157,25 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     state.phaseStartMs = Date.now()
     for (const id of opts.invitedUserIds) state.invitedUserIds.push(id)
     this.setState(state)
+  }
+
+  /**
+   * Seed dev-mode bot racers (count already production-gated to 0 by
+   * resolveBotCount). Bots occupy the first lanes and arrive connected,
+   * so they count toward MIN_RACERS — host + one bot can start. Driven
+   * each tick by RaceBotDriver; excluded from the results POST.
+   */
+  private seedBots(botCount: number): void {
+    for (let n = 1; n <= botCount; n++) {
+      const bot = buildBotRacerState(n, this.state.racers.size)
+      this.state.racers.set(bot.userId, bot)
+      const phys = makeRacer(bot.userId)
+      this.physicsRacers.push(phys)
+      this.botRacers.push(phys)
+    }
+    if (botCount > 0) {
+      console.log(`[RaceRoom ${this.roomId}] seeded ${botCount} test bot(s) (dev mode)`)
+    }
   }
 
   private registerHandlers(): void {
@@ -373,6 +400,10 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     const elapsed = nowMs - this.runningStartedAtMs
     this.state.runningElapsedMs = elapsed
 
+    // Bots synthesise their inputs through the same shared entry points
+    // human messages use — must run before the physics integration so a
+    // bot's tap lands on the same tick a human's message would.
+    driveBots(this.botRacers, elapsed, SIM_TICK_MS, this.state.distanceM)
     physicsTick(this.physicsRacers, SIM_TICK_MS, elapsed, this.state.distanceM)
     this.mirrorPhysicsToSchema()
 
@@ -438,38 +469,6 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
       this.simHandle = null
     }
   }
-}
-
-interface MoveMsg { userId: string; isMoving: boolean }
-
-function parseMove(raw: unknown): MoveMsg | null {
-  if (typeof raw !== "object" || raw === null) return null
-  const o = raw as Record<string, unknown>
-  if (typeof o.userId !== "string" || typeof o.isMoving !== "boolean") return null
-  return { userId: o.userId, isMoving: o.isMoving }
-}
-
-function parseUserIdOnly(raw: unknown): string | null {
-  if (typeof raw !== "object" || raw === null) return null
-  const o = raw as Record<string, unknown>
-  return typeof o.userId === "string" ? o.userId : null
-}
-
-/**
- * Parse a `race_add_invitees` payload into a clean string array.
- * Drops empty / non-string entries silently so a buggy client can't
- * push junk into `state.invitedUserIds`.
- */
-function parseAddInviteesPayload(raw: unknown): string[] {
-  if (typeof raw !== "object" || raw === null) return []
-  const o = raw as Record<string, unknown>
-  const arr = o.userIds
-  if (!Array.isArray(arr)) return []
-  const out: string[] = []
-  for (const v of arr) {
-    if (typeof v === "string" && v.length > 0) out.push(v)
-  }
-  return out
 }
 
 // Keep this export for RaceRoomState references in tests; avoids a test

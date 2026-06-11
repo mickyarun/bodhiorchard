@@ -14,12 +14,17 @@
 
 import { describe, it, expect } from "vitest"
 import {
+  BOT_USER_ID_PREFIX,
   assertRaceCreateOptions,
+  buildBotRacerState,
   buildRacerState,
   buildRaceResultsPayload,
   copyRacerToSchema,
+  isBotUserId,
   placingToSchema,
+  resolveBotCount,
 } from "./RaceRoomHelpers"
+import { MAX_RACERS } from "../../../shared/race/RaceConstants"
 import { PlacingState } from "../schema/PlacingState"
 import { RacerState } from "../schema/RacerState"
 import { checkFinish, makeRacer, type Racer } from "../../../shared/race/RacePhysics"
@@ -46,6 +51,7 @@ describe("assertRaceCreateOptions", () => {
       distanceM: 100,
       trackShape: "straight",
       invitedUserIds: ["user-2", "user-3"],
+      botCount: 0,
     })
   })
 
@@ -119,6 +125,56 @@ describe("assertRaceCreateOptions", () => {
   it("throws on non-object input", () => {
     expect(() => assertRaceCreateOptions("bad", ALLOWED)).toThrow(/object/)
     expect(() => assertRaceCreateOptions(null, ALLOWED)).toThrow(/object/)
+  })
+
+  it("accepts botCount on a non-production server (vitest NODE_ENV=test)", () => {
+    const opts = assertRaceCreateOptions(
+      { orgId: "o", hostUserId: "h", hostName: "n", distanceM: 100, botCount: 3 },
+      ALLOWED,
+    )
+    expect(opts.botCount).toBe(3)
+  })
+})
+
+describe("resolveBotCount", () => {
+  it("forces 0 on production servers regardless of the requested count", () => {
+    expect(resolveBotCount(7, true)).toBe(0)
+    expect(resolveBotCount(1, true)).toBe(0)
+  })
+
+  it("clamps to [0, MAX_RACERS - 1] on non-production servers", () => {
+    expect(resolveBotCount(0, false)).toBe(0)
+    expect(resolveBotCount(7, false)).toBe(7)
+    expect(resolveBotCount(99, false)).toBe(MAX_RACERS - 1)
+    expect(resolveBotCount(-3, false)).toBe(0)
+    expect(resolveBotCount(2.9, false)).toBe(2)
+  })
+
+  it("resolves non-numeric junk to 0", () => {
+    expect(resolveBotCount(undefined, false)).toBe(0)
+    expect(resolveBotCount("7", false)).toBe(0)
+    expect(resolveBotCount(NaN, false)).toBe(0)
+    expect(resolveBotCount(Infinity, false)).toBe(0)
+  })
+})
+
+describe("buildBotRacerState", () => {
+  it("creates a connected, prefixed, flagged bot with a valid character model", () => {
+    const bot = buildBotRacerState(2, 1)
+    expect(bot.userId).toBe(`${BOT_USER_ID_PREFIX}2`)
+    expect(bot.id).toBe(bot.userId)
+    expect(bot.name).toBe("Bot 2")
+    expect(bot.laneIndex).toBe(1)
+    expect(bot.isBot).toBe(true)
+    expect(bot.connected).toBe(true)
+    // parseCharacterModel contract: kaykit prefix + 6 colon-separated fields.
+    expect(bot.characterModel.startsWith("kaykit:")).toBe(true)
+    expect(bot.characterModel.split(":")).toHaveLength(7)
+  })
+
+  it("isBotUserId recognises bot ids and not human UUIDs", () => {
+    expect(isBotUserId(buildBotRacerState(1, 0).userId)).toBe(true)
+    expect(isBotUserId("4f6e2f3a-1111-2222-3333-444455556666")).toBe(false)
   })
 })
 
@@ -328,6 +384,46 @@ describe("buildRaceResultsPayload", () => {
         finishTimeMs: 0,
         distanceM: 65,
       }),
+    ]
+    expect(buildRaceResultsPayload(header, placings)).toBeNull()
+  })
+
+  it("excludes bot placings while keeping every human row", () => {
+    const placings = [
+      makePlacing({ racerId: "bot-1", place: 1, finishTimeMs: 13_900, distanceM: 100 }),
+      makePlacing({ racerId: "human-a", place: 2, finishTimeMs: 14_500, distanceM: 100 }),
+      makePlacing({ racerId: "bot-2", place: 3, finishTimeMs: 15_100, distanceM: 100 }),
+      makePlacing({
+        racerId: "human-b",
+        place: 4,
+        finished: false,
+        finishTimeMs: 0,
+        distanceM: 61,
+      }),
+    ]
+    const payload = buildRaceResultsPayload(header, placings)
+    expect(payload).not.toBeNull()
+    expect(payload?.placings.map((p) => p.userId)).toEqual(["human-a", "human-b"])
+  })
+
+  it("returns null when only bots finished (human-only finisher rule)", () => {
+    const placings = [
+      makePlacing({ racerId: "bot-1", place: 1, finishTimeMs: 13_900, distanceM: 100 }),
+      makePlacing({
+        racerId: "human-a",
+        place: 2,
+        finished: false,
+        finishTimeMs: 0,
+        distanceM: 80,
+      }),
+    ]
+    expect(buildRaceResultsPayload(header, placings)).toBeNull()
+  })
+
+  it("returns null for an all-bot round (nothing human to persist)", () => {
+    const placings = [
+      makePlacing({ racerId: "bot-1", place: 1, finishTimeMs: 13_900, distanceM: 100 }),
+      makePlacing({ racerId: "bot-2", place: 2, finishTimeMs: 14_100, distanceM: 100 }),
     ]
     expect(buildRaceResultsPayload(header, placings)).toBeNull()
   })

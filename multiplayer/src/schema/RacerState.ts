@@ -44,4 +44,10 @@ export class RacerState extends Schema {
   /** Round-ms when the racer gets up from a hurdle knockdown; drives the fall anim. */
   @type("uint32") knockdownUntilMs = 0
   @type("boolean") connected = false
+  /**
+   * True for server-driven dev-mode test bots (userId `bot-<n>`). Bots
+   * live only inside the room — lobby, sim, podium — and are filtered
+   * out of the backend results POST (their ids aren't real users).
+   */
+  @type("boolean") isBot = false
 }

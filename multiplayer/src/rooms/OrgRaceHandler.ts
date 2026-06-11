@@ -47,6 +47,12 @@ export interface RaceCreateMessage {
   invitedUserIds: string[]
   distanceM: number
   trackShape: TrackShape
+  /**
+   * Dev-mode test bots requested by the host. Parsed here only for type
+   * safety; the authoritative clamp AND the production force-to-0 gate
+   * live in RaceRoomHelpers.resolveBotCount on the room-create path.
+   */
+  botCount: number
 }
 
 /**
@@ -98,6 +104,7 @@ async function handleRaceCreate(
       distanceM: parsed.distanceM,
       trackShape: parsed.trackShape,
       invitedUserIds: parsed.invitedUserIds,
+      botCount: parsed.botCount,
     })
 
     addActiveRace(
@@ -199,5 +206,13 @@ export function parseRaceCreateMessage(raw: unknown): RaceCreateMessage | null {
     }
     trackShape = o.trackShape as TrackShape
   }
-  return { invitedUserIds: invited, distanceM: o.distanceM, trackShape }
+  // Optional dev-bot count: absent → 0; a present non-integer is rejected
+  // outright, like a bad trackShape. Range clamping (and the production
+  // force-to-0) is centralised in RaceRoomHelpers.resolveBotCount.
+  let botCount = 0
+  if (o.botCount !== undefined) {
+    if (typeof o.botCount !== "number" || !Number.isInteger(o.botCount)) return null
+    botCount = o.botCount
+  }
+  return { invitedUserIds: invited, distanceM: o.distanceM, trackShape, botCount }
 }

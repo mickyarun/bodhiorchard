@@ -25,6 +25,7 @@ describe("parseRaceCreateMessage", () => {
       invitedUserIds: ["user-a", "user-b"],
       distanceM: 100,
       trackShape: "straight",
+      botCount: 0,
     })
   })
 
@@ -75,5 +76,26 @@ describe("parseRaceCreateMessage", () => {
     expect(parseRaceCreateMessage(null)).toBeNull()
     expect(parseRaceCreateMessage("hi")).toBeNull()
     expect(parseRaceCreateMessage(undefined)).toBeNull()
+  })
+
+  it("accepts an integer botCount and defaults a missing one to 0", () => {
+    expect(
+      parseRaceCreateMessage({ invitedUserIds: [], distanceM: 100, botCount: 3 })?.botCount,
+    ).toBe(3)
+    expect(
+      parseRaceCreateMessage({ invitedUserIds: ["a"], distanceM: 100 })?.botCount,
+    ).toBe(0)
+  })
+
+  it("rejects non-integer botCount values", () => {
+    expect(
+      parseRaceCreateMessage({ invitedUserIds: [], distanceM: 100, botCount: "3" }),
+    ).toBeNull()
+    expect(
+      parseRaceCreateMessage({ invitedUserIds: [], distanceM: 100, botCount: 1.5 }),
+    ).toBeNull()
+    expect(
+      parseRaceCreateMessage({ invitedUserIds: [], distanceM: 100, botCount: NaN }),
+    ).toBeNull()
   })
 })

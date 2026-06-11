@@ -471,6 +471,8 @@ export class OrgRoomClient {
     invitedUserIds: string[]
     distanceM: number
     trackShape: TrackShape
+    /** Dev-only test bots; production servers force this to 0. */
+    botCount?: number
   }): Promise<{ roomId: string }> {
     if (!this.room) throw new Error("OrgRoomClient: not connected")
     const room = this.room

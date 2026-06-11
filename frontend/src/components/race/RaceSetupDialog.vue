@@ -65,6 +65,16 @@
         />
       </section>
 
+      <!-- Dev-only: bot test mode (vite dev builds only; the server
+           additionally forces botCount to 0 in production). -->
+      <section v-if="isDevBuild" class="setup__section">
+        <div class="setup__section-label setup__section-label--spaced">Test bots (dev only)</div>
+        <AppPillToggle
+          v-model="botCount"
+          :options="BOT_COUNT_OPTIONS"
+        />
+      </section>
+
       <!-- Invitees list -->
       <section class="setup__section">
         <div class="setup__section-head">
@@ -128,6 +138,19 @@ const TRACK_SHAPE_OPTIONS: Array<{ label: string; value: TrackShape }> = [
   { label: 'Circuit (1 lap)', value: 'circuit' },
 ]
 
+/**
+ * Dev-only bot picker: lets a single dev exercise full races without
+ * inviting anyone. Rendered only on vite dev builds (isDevBuild) and
+ * server-gated besides — production multiplayer forces botCount to 0.
+ */
+const BOT_COUNT_OPTIONS: Array<{ label: string; value: number }> = [
+  { label: 'None', value: 0 },
+  { label: '1', value: 1 },
+  { label: '3', value: 3 },
+  { label: '7', value: 7 },
+]
+const isDevBuild = import.meta.env.DEV
+
 type DirectoryEntry = MemberPickerEntry
 
 const props = defineProps<{
@@ -144,6 +167,7 @@ const authStore = useAuthStore()
 
 const distanceM = ref<number>(ALLOWED_DISTANCES_M[0])
 const trackShape = ref<TrackShape>('straight')
+const botCount = ref<number>(0)
 const selectedIds = ref<string[]>([])
 const sending = ref(false)
 const error = ref<string>('')
@@ -163,8 +187,10 @@ const invitableMembers = computed(() => {
   })
 })
 
+// With test bots requested, zero human invitees is a valid solo-dev race
+// (bots count toward MIN_RACERS server-side, so host + 1 bot can start).
 const canSubmit = computed(() =>
-  selectedIds.value.length >= 1
+  (selectedIds.value.length >= 1 || botCount.value > 0)
   && selectedIds.value.length <= MAX_RACERS - 1
   && !sending.value,
 )
@@ -177,6 +203,7 @@ watch(
     selectedIds.value = preId ? [preId] : []
     distanceM.value = ALLOWED_DISTANCES_M[0]
     trackShape.value = 'straight'
+    botCount.value = 0
     if (directory.value.length === 0) void loadDirectory()
   },
   { immediate: true },
@@ -205,6 +232,7 @@ async function onSend(): Promise<void> {
       invitedUserIds: [...selectedIds.value],
       distanceM: distanceM.value,
       trackShape: trackShape.value,
+      botCount: botCount.value,
     })
     emit('update:modelValue', false)
     await router.push(`/raceview/${roomId}`)
