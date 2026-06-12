@@ -27,6 +27,7 @@ import { PATH } from '../assets/AssetManifest'
 import { getHouseTier } from '../buildings/HouseTierConfig'
 import type { StreetDef, VillagePlacement } from '@shared/world/VillageLayout'
 import { randRange } from '../utils/MathUtils'
+import { Theme } from '../rendering/Theme'
 
 // ─── Constants ──────────────────────────────────────
 
@@ -192,13 +193,16 @@ export class SandRoadBuilder {
     canvas.height = SAND_TEX_SIZE
     const ctx = canvas.getContext('2d')!
 
+    // Calm packed earth from the shared path family — the old brighter
+    // sand glowed under bloom and washed the village interior white.
+    const [br, bg, bb] = Theme.PATHS.surfaceBase
     const grad = ctx.createRadialGradient(
       SAND_TEX_SIZE / 2, SAND_TEX_SIZE / 2, 0,
       SAND_TEX_SIZE / 2, SAND_TEX_SIZE / 2, SAND_TEX_SIZE / 2,
     )
-    grad.addColorStop(0, 'rgba(210, 190, 150, 0.9)')
-    grad.addColorStop(0.6, 'rgba(200, 180, 140, 0.7)')
-    grad.addColorStop(1, 'rgba(180, 165, 120, 0.0)')
+    grad.addColorStop(0, `rgba(${br}, ${bg}, ${bb}, 0.8)`)
+    grad.addColorStop(0.6, `rgba(${br - 10}, ${bg - 10}, ${bb - 10}, 0.6)`)
+    grad.addColorStop(1, `rgba(${br - 25}, ${bg - 20}, ${bb - 20}, 0.0)`)
 
     ctx.fillStyle = grad
     ctx.fillRect(0, 0, SAND_TEX_SIZE, SAND_TEX_SIZE)

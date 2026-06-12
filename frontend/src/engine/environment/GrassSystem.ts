@@ -13,36 +13,46 @@
 // limitations under the License.
 
 /**
- * GrassSystem — Scattered GLB grass + flowers using Poisson disc sampling.
+ * GrassSystem — lush procedural grass tufts + GLB flower accents.
  *
- * Loads grass and flower GLBs from Kenney Nature Kit and scatters hundreds
- * of instances across the world, skipping exclusion zones (buildings, trees).
+ * Grass is NOT a GLB: each tuft is three crossed alpha-tested quads
+ * sharing a painted blade texture (deep-green roots → vibrant tips).
+ * Crossed quads read as volume from every camera angle, take the
+ * GrassWind transformVS sway (height² — roots anchored, tips travel),
+ * and the whole field renders as ONE instanced draw call.
  *
- * Hardware-instanced via `buildInstancedGlbs` so the 450 grass + 40 flower
- * scatter points collapse into ~6 draw calls (one per (mesh, material)
- * combination across the 3 grass + 3 flower GLBs) instead of 490 entities
- * each driving its own per-mesh transform upload.
+ * Flowers stay GLB scatter (Kenney, instanced per asset) — they're the
+ * color accents between tufts.
+ *
+ * Placement: Poisson-ish rejection scatter, skipping exclusion zones.
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import { AssetLoader } from '../assets/AssetLoader'
-import { SCATTER_GRASS, SCATTER_FLOWERS } from '../assets/AssetManifest'
+import { SCATTER_FLOWERS } from '../assets/AssetManifest'
 import { isInsideAnyZone, randRange, type ExclusionZone } from '../utils/MathUtils'
 import {
   buildInstancedGlbs, type GlbScatterGroup, type ScatterTransform,
 } from '../utils/GlbInstancing'
-import { Theme } from '../rendering/Theme'
+import { createInstancedEntity, computeInstanceAabb } from '../treetest/instancing'
+import { Theme, toCss } from '../rendering/Theme'
 import { GrassWind } from '../effects/GrassWind'
 
-const GRASS_COUNT = 450
+const GRASS_COUNT = 700
 const FLOWER_COUNT = 40
 const WORLD_HALF = 40 // compact world with TILE_SIZE=1
-const MIN_DISTANCE = 1.2 // tighter spacing for lush coverage
+const MIN_DISTANCE = 1.1 // tighter spacing for lush coverage
+const BLADE_TEX_SIZE = 128
+/** Tuft footprint in mesh units — instance scale multiplies this. */
+const TUFT_WIDTH = 0.9
+const TUFT_HEIGHT = 0.65
 
 export class GrassSystem {
   private root: pc.Entity | null = null
   private vbs: pc.VertexBuffer[] = []
   private materials: pc.Material[] = []
+  private tuftMesh: pc.Mesh | null = null
+  private bladeTexture: pc.Texture | null = null
   private wind = new GrassWind()
 
   async build(
@@ -51,30 +61,59 @@ export class GrassSystem {
     exclusionZones: readonly ExclusionZone[],
   ): Promise<pc.Entity> {
     this.root = new pc.Entity('GrassSystem')
+    const device = app.app.graphicsDevice
 
-    const grassAssets = await loader.loadBatch(SCATTER_GRASS)
+    // ─── Lush tufts: one instanced batch of crossed alpha quads ───
+    const points = this.poissonScatter(GRASS_COUNT, WORLD_HALF, MIN_DISTANCE, exclusionZones)
+    if (points.length > 0) {
+      this.tuftMesh = this.buildTuftMesh(device)
+      this.bladeTexture = this.buildBladeTexture(device)
+      const tuftMat = this.buildTuftMaterial(this.bladeTexture)
+      this.materials.push(tuftMat)
+      this.wind.apply([tuftMat], Theme.SCATTER.grassWindStrength)
+
+      const matrices = new Float32Array(points.length * 16)
+      const mat = new pc.Mat4()
+      const pos = new pc.Vec3()
+      const rot = new pc.Quat()
+      const scl = new pc.Vec3()
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i]
+        pos.set(p.x, 0, p.z)
+        rot.setFromEulerAngles(0, randRange(0, 360), 0)
+        const s = randRange(0.7, 1.45)
+        scl.set(s, s * randRange(0.85, 1.25), s)
+        mat.setTRS(pos, rot, scl)
+        matrices.set(mat.data, i * 16)
+      }
+      const aabb = computeInstanceAabb(matrices, points.length, TUFT_HEIGHT * 2)
+      const { entity, vb } = createInstancedEntity(
+        device, this.tuftMesh, tuftMat, matrices, points.length,
+        'GrassTufts', { aabb },
+      )
+      this.root.addChild(entity)
+      this.vbs.push(vb)
+    }
+
+    // ─── Flower accents: GLB scatter, instanced per asset ───
     const flowerAssets = await loader.loadBatch(SCATTER_FLOWERS)
-
-    const grassGroups = this.scatterIntoAssetGroups(
-      grassAssets, GRASS_COUNT, MIN_DISTANCE, 1.5, 4.0, exclusionZones,
+    const flowerGroups: GlbScatterGroup[] = flowerAssets.map(
+      (asset) => ({ asset, transforms: [] }),
     )
-    const flowerGroups = this.scatterIntoAssetGroups(
-      flowerAssets, FLOWER_COUNT, 3, 2.5, 5.5, exclusionZones,
+    for (const pt of this.poissonScatter(FLOWER_COUNT, WORLD_HALF, 3, exclusionZones)) {
+      const transform: ScatterTransform = {
+        x: pt.x, y: 0, z: pt.z,
+        yawDeg: randRange(0, 360),
+        scale:  randRange(2.5, 5.5),
+      }
+      flowerGroups[Math.floor(Math.random() * flowerGroups.length)].transforms.push(transform)
+    }
+    const flowers = buildInstancedGlbs(
+      device, loader, flowerGroups, { namePrefix: 'FlowerInstanced' },
     )
-
-    // The spring tint forces per-batch material CLONES — which is also
-    // what makes the wind chunk safe to install (shared GLB container
-    // materials must never be mutated).
-    const { entities, vbs, materials } = buildInstancedGlbs(
-      app.app.graphicsDevice,
-      loader,
-      [...grassGroups, ...flowerGroups],
-      { namePrefix: 'GrassInstanced', tint: Theme.SCATTER.grass },
-    )
-    for (const e of entities) this.root.addChild(e)
-    this.vbs = vbs
-    this.materials = materials
-    this.wind.apply(materials, Theme.SCATTER.grassWindStrength)
+    for (const e of flowers.entities) this.root.addChild(e)
+    this.vbs.push(...flowers.vbs)
+    this.materials.push(...flowers.materials)
 
     app.root.addChild(this.root)
     return this.root
@@ -85,34 +124,99 @@ export class GrassSystem {
     this.wind.update(dt)
   }
 
-  /**
-   * Scatter `count` points across the world (skipping exclusion zones) and
-   * randomly bucket each point into one of the asset groups. Each bucket's
-   * transforms list is what `buildInstancedGlbs` consumes to build a single
-   * instanced batch per (mesh, material) for that asset.
-   */
-  private scatterIntoAssetGroups(
-    assets: pc.Asset[],
-    count: number,
-    minDist: number,
-    minScale: number,
-    maxScale: number,
-    exclusionZones: readonly ExclusionZone[],
-  ): GlbScatterGroup[] {
-    const groups: GlbScatterGroup[] = assets.map((asset) => ({
-      asset, transforms: [],
-    }))
-    const points = this.poissonScatter(count, WORLD_HALF, minDist, exclusionZones)
-    for (const pt of points) {
-      const idx = Math.floor(Math.random() * assets.length)
-      const transform: ScatterTransform = {
-        x: pt.x, y: 0, z: pt.z,
-        yawDeg: randRange(0, 360),
-        scale:  randRange(minScale, maxScale),
-      }
-      groups[idx].transforms.push(transform)
+  /** Three quads crossed at 60° around Y, base at y=0, tip at TUFT_HEIGHT. */
+  private buildTuftMesh(device: pc.GraphicsDevice): pc.Mesh {
+    const positions: number[] = []
+    const normals: number[] = []
+    const uvs: number[] = []
+    const indices: number[] = []
+    const hw = TUFT_WIDTH / 2
+    const h = TUFT_HEIGHT
+
+    for (let q = 0; q < 3; q++) {
+      const a = (q * Math.PI) / 3
+      const dx = Math.cos(a) * hw
+      const dz = Math.sin(a) * hw
+      const base = q * 4
+      positions.push(
+        -dx, 0, -dz,   dx, 0, dz,
+         dx, h, dz,   -dx, h, -dz,
+      )
+      // Up-biased normals make the lighting read like a ground covering
+      // rather than vertical billboards catching side light.
+      for (let v = 0; v < 4; v++) normals.push(0, 1, 0)
+      uvs.push(0, 0, 1, 0, 1, 1, 0, 1)
+      indices.push(base, base + 1, base + 2, base, base + 2, base + 3)
     }
-    return groups
+
+    const geometry = new pc.Geometry()
+    geometry.positions = positions
+    geometry.normals = normals
+    geometry.uvs = uvs
+    geometry.indices = indices
+    return pc.Mesh.fromGeometry(device, geometry)
+  }
+
+  /** Painted blade silhouettes: deep-green roots fading to vibrant tips. */
+  private buildBladeTexture(device: pc.GraphicsDevice): pc.Texture {
+    const S = BLADE_TEX_SIZE
+    const canvas = document.createElement('canvas')
+    canvas.width = S
+    canvas.height = S
+    const ctx = canvas.getContext('2d')!
+    ctx.clearRect(0, 0, S, S)
+
+    const root = Theme.GRASS_BLADES.root
+    const tip = Theme.GRASS_BLADES.tip
+    const bladeCount = 11
+    for (let b = 0; b < bladeCount; b++) {
+      const cx = (b + 0.5) * (S / bladeCount) + randRange(-3, 3)
+      const w = S / bladeCount * randRange(0.5, 0.85)
+      const height = S * randRange(0.55, 0.98)
+      const lean = randRange(-S * 0.08, S * 0.08)
+
+      const grad = ctx.createLinearGradient(0, S, 0, S - height)
+      grad.addColorStop(0, toCss(root))
+      grad.addColorStop(1, toCss(tip))
+      ctx.fillStyle = grad
+      // Tapered blade: wide base → pointed tip, slight lean.
+      ctx.beginPath()
+      ctx.moveTo(cx - w / 2, S)
+      ctx.quadraticCurveTo(cx - w / 2 + lean * 0.4, S - height * 0.6, cx + lean, S - height)
+      ctx.quadraticCurveTo(cx + w / 2 + lean * 0.4, S - height * 0.6, cx + w / 2, S)
+      ctx.closePath()
+      ctx.fill()
+    }
+
+    const texture = new pc.Texture(device, {
+      width: S,
+      height: S,
+      format: pc.PIXELFORMAT_RGBA8,
+      mipmaps: true,
+      addressU: pc.ADDRESS_CLAMP_TO_EDGE,
+      addressV: pc.ADDRESS_CLAMP_TO_EDGE,
+      minFilter: pc.FILTER_LINEAR_MIPMAP_LINEAR,
+      magFilter: pc.FILTER_LINEAR,
+      anisotropy: 4,
+    })
+    const pixels = texture.lock()
+    pixels.set(ctx.getImageData(0, 0, S, S).data)
+    texture.unlock()
+    return texture
+  }
+
+  private buildTuftMaterial(texture: pc.Texture): pc.StandardMaterial {
+    const mat = new pc.StandardMaterial()
+    mat.diffuseMap = texture
+    mat.opacityMap = texture
+    mat.opacityMapChannel = 'a'
+    mat.alphaTest = 0.45
+    mat.cull = pc.CULLFACE_NONE
+    mat.twoSidedLighting = true
+    mat.metalness = 0
+    mat.gloss = 0.1
+    mat.update()
+    return mat
   }
 
   /**
@@ -160,6 +264,13 @@ export class GrassSystem {
     this.vbs = []
     for (const mat of this.materials) mat.destroy()
     this.materials = []
+    if (this.tuftMesh) {
+      this.tuftMesh.vertexBuffer?.destroy()
+      this.tuftMesh.indexBuffer?.[0]?.destroy()
+      this.tuftMesh = null
+    }
+    this.bladeTexture?.destroy()
+    this.bladeTexture = null
     if (this.root) {
       this.root.destroy()
       this.root = null

@@ -136,6 +136,12 @@ export const Theme = {
     emissiveScale: 0.35,
   },
 
+  /** Procedural grass-tuft blade texture (GrassSystem). */
+  GRASS_BLADES: {
+    root: [44, 96, 28] as Rgb255,    // deep shaded base
+    tip:  [118, 196, 66] as Rgb255,  // vibrant sunlit tip
+  },
+
   /** Scatter foliage tints (multiplied onto cloned GLB materials). */
   SCATTER: {
     pine:  [0.72, 0.95, 0.78] as readonly [number, number, number],  // deep blue-green
@@ -178,19 +184,22 @@ export const Theme = {
 
   /** Paths, village roads, and lanterns. */
   PATHS: {
-    /** Primary path tint — warm sand instead of the old pure white. */
-    primaryTint:   [0.97, 0.91, 0.76] as readonly [number, number, number],
-    secondaryTint: [0.72, 0.56, 0.42] as readonly [number, number, number],
-    /** Path-wear halo peak alpha (was 0.6 — barely read as trodden earth). */
-    wearAlpha: 0.75,
+    /** Packed-earth texture base (PathSystem.createSandTexture). */
+    surfaceBase:   [186, 170, 142] as Rgb255,
+    /** Primary path tint — calm sand; the old warm tint glowed orange
+     *  once grading saturation stacked on it. */
+    primaryTint:   [0.94, 0.90, 0.82] as readonly [number, number, number],
+    secondaryTint: [0.66, 0.57, 0.46] as readonly [number, number, number],
+    /** Path-wear halo peak alpha — subtle tint, not a glow strip. */
+    wearAlpha: 0.5,
     lanternPole:   [0.34, 0.23, 0.14] as readonly [number, number, number],
     lanternGlow:   [1.0, 0.87, 0.45] as readonly [number, number, number],
     lanternPoleWidth: 0.09,
   },
 
   POSTFX: {
-    bloomIntensity: 0.03,
-    grading: { saturation: 1.12, contrast: 1.04, brightness: 1.0 },
+    bloomIntensity: 0.018,
+    grading: { saturation: 1.07, contrast: 1.03, brightness: 1.0 },
     vignette: { intensity: 0.2, inner: 0.6, outer: 1.8, curvature: 0.5 },
   },
 } as const

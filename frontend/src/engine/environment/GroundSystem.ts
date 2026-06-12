@@ -129,8 +129,10 @@ export class GroundSystem {
 
       const entity = new pc.Entity(`Ground_${zone.name}`)
       entity.addComponent('render', { type: 'plane' })
-      // Diameter = radius × 2, with slight padding for soft edge
-      const diameter = zone.radius * 2.4
+      // Tight fit: ×1.7 keeps a soft fade ring just past the fence line.
+      // The old ×2.4 discs reached far into the lawn and read as giant
+      // glowing halos around every zone once bloom/grading were live.
+      const diameter = zone.radius * 1.7
       entity.setLocalScale(diameter, 1, diameter)
       entity.setPosition(zone.x, 0.02, zone.z)  // just above grass
 
@@ -360,14 +362,16 @@ export class GroundSystem {
         const dy = y - cy
         const dist = Math.sqrt(dx * dx + dy * dy) / maxR  // 0 at center, 1 at edge
 
-        // Fade starts at 55% radius, fully transparent at 100%
+        // Fade starts at 55% radius, fully transparent at 100%. Center
+        // caps at 0.85 so grass always bleeds through — opaque discs
+        // read as glowing pads under bloom.
         let alpha: number
         if (dist < 0.55) {
-          alpha = 1.0
+          alpha = 0.85
         } else if (dist < 1.0) {
           // Smooth cubic fade
           const t = (dist - 0.55) / 0.45
-          alpha = 1.0 - t * t * (3 - 2 * t)
+          alpha = (1.0 - t * t * (3 - 2 * t)) * 0.85
         } else {
           alpha = 0
         }
