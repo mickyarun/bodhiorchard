@@ -213,8 +213,8 @@ Yes, via WSL2 in either deployment mode.
 
 ## Roadmap
 
-- **Shipped** — core platform (auth, multi-tenant, RBAC), BUD lifecycle, feature registry with vector search, repo scanning + code intelligence, skill profiling, 3D Living Tree, Slack-native triage, MCP server, 12 agent definitions, `npx bodhiorchard` installer
-- **Next** — autonomous agent execution engine, real-time Slack bot conversations, GitHub webhook pipeline, automated test generation, CI/CD integration
+- **Shipped** — core platform (auth, multi-tenant, RBAC), BUD lifecycle, feature registry with vector search, repo scanning + code intelligence, skill profiling, 3D Living Tree, Slack-native triage **and real-time Slack bot conversations**, **GitHub webhook pipeline** (PR-merge → BUD status + repo re-scan), **automated test-plan generation from BUDs** (unit / integration / e2e / security / UAT), **CI/CD integration** (QA-automation repo wired via MCP; test commits flow back to the BUD), MCP server, 12 agent definitions, `npx bodhiorchard` installer
+- **Next** — autonomous agent execution engine: small, low-risk BUDs run tech spec → code → review → test end to end, with a human approval gate before release (deliberately not lights-out)
 - **Future** — multi-org marketplace, custom agent builder, analytics dashboards, mobile companion, plugin ecosystem
 
 ## Contributing
