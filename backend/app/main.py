@@ -31,6 +31,7 @@ from app.api.router import api_router
 from app.core.logging import setup_logging
 from app.core.middleware import RequestLoggingMiddleware
 from app.services.mcp_audit_cleanup import run_forever as run_audit_cleanup
+from app.services.minigame_nudge import run_forever as run_minigame_nudge
 from app.services.pr_merge_worker import WorkerPool, start_pr_merge_workers
 from app.services.scan.pr_merge_update import handle_pr_merge_delivery
 from app.services.velocity_snapshot_roller import run_forever as run_velocity_snapshot_roller
@@ -248,6 +249,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # caveat as 8a — Redis lock comes when we go multi-pod.
     velocity_snapshot_task = asyncio.create_task(run_velocity_snapshot_roller())
 
+    # 8c. Daily Slack nudge for the garden mini-games — DMs Slack-linked
+    # members to keep streaks alive and surface who's leading each
+    # leaderboard. Best-effort + single-instance, same caveat as 8a/8b.
+    minigame_nudge_task = asyncio.create_task(run_minigame_nudge())
+
     # 9. PR-merge Redis-stream worker pool. One consumer per
     # (org, repo) stream; supervisor task spawns consumers lazily as
     # streams appear in the registry. Orphan recovery re-publishes
@@ -269,6 +275,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     embedding_warmup_task.cancel()
     mcp_audit_cleanup_task.cancel()
     velocity_snapshot_task.cancel()
+    minigame_nudge_task.cancel()
     if pr_merge_pool is not None:
         await pr_merge_pool.stop()
     await stop_workers()

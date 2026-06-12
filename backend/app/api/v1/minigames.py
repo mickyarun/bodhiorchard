@@ -24,9 +24,10 @@ from __future__ import annotations
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.user import User
 from app.schemas.minigame import (
     LeaderboardEntry,
@@ -35,6 +36,7 @@ from app.schemas.minigame import (
     MinigameScoreResult,
     MinigameStatusRead,
 )
+from app.services.minigame_nudge import send_org_nudges
 from app.services.minigame_service import (
     MinigameValidationError,
     get_leaderboard,
@@ -112,3 +114,26 @@ async def minigame_leaderboard(
             for r in rows
         ],
     )
+
+
+class NudgeResult(BaseModel):
+    sent: int
+
+
+@router.post(
+    "/nudge",
+    response_model=NudgeResult,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
+async def minigame_nudge_now(
+    current_user: User = Depends(get_current_user),
+) -> NudgeResult:
+    """Send the daily mini-game Slack nudge to this org's members now.
+
+    The scheduled task sends this automatically every day; this endpoint
+    lets an admin trigger it on demand (e.g. to test the message).
+    ``send_org_nudges`` opens its own DB sessions, so no request session
+    is threaded in.
+    """
+    sent = await send_org_nudges(current_user.org_id)
+    return NudgeResult(sent=sent)
