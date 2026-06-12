@@ -53,7 +53,14 @@ const STORE = 'trees'
 //     set. The cache key only encodes the palette INDEX, not the color
 //     values, so v3 entries would restore with the old garish baked colors.
 //     One-time regrow under the new palette.
-export const SCHEMA_VERSION = 4
+//
+// v5: branch colors quantized for instancing (COLOR_QUANT_STEP bands).
+//     v4 entries store one group per near-unique branch color with
+//     unquantized colorKeys; restoring them against the quantized
+//     getMaterial() key derivation would miss the matCache and silently
+//     drop every branch group (invisible trees). Regrow collapses each
+//     tree's ~1,600 single-instance groups into a few dozen real batches.
+export const SCHEMA_VERSION = 5
 const DEFAULT_MAX_ENTRIES = 50
 
 // ─── Cached data shape ───────────────────────────────────────────────────────

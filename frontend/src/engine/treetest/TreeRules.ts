@@ -78,6 +78,23 @@ export function wiggleColor(color: Color3, level: number): Color3 {
   ) as Color3
 }
 
+/**
+ * Channel step used to quantize branch colors for material/instancing
+ * grouping. wiggleColor gives almost every branch a unique RGB, which made
+ * the per-color instancing bake degenerate into one group (= one draw call)
+ * PER BRANCH — ~1,600 single-instance draws per tree. Quantizing the color
+ * used for grouping keeps the trunk-to-tip gradient (in ~5-8 visible bands
+ * per channel) while collapsing those groups into a few dozen per tree.
+ */
+export const COLOR_QUANT_STEP = 32
+
+/** Snap each channel to the nearest COLOR_QUANT_STEP multiple (clamped). */
+export function quantizeColor(color: Color3, step = COLOR_QUANT_STEP): Color3 {
+  return color.map(c =>
+    Math.max(0, Math.min(255, Math.round(c / step) * step))
+  ) as Color3
+}
+
 /** Build rotation matrix for next branch segment. */
 export function getRulesMatrix(rules: TreeRules): Mat3 {
   const yRot = Mat3.rotateY(wiggle(rules.whorl, rules.whorlWarp))
