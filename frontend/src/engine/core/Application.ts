@@ -361,6 +361,18 @@ export class Application {
   }
 
   /**
+   * Set the camera component's tone mapping (typed accessor for the v2.17+
+   * camera-level property). PostFX hands mapping back and forth between the
+   * camera and the CameraFrame compose pass — both active at once would
+   * double-tone-map the scene gray.
+   */
+  setCameraToneMapping(toneMapping: number): void {
+    const cam = this.camera?.camera
+    if (!cam) return
+    ;(cam as unknown as Record<string, unknown>).toneMapping = toneMapping
+  }
+
+  /**
    * Tighten the sun's shadow frustum to the active world size. Directional
    * shadowDistance is camera-relative, so coverage must span the orbit
    * camera (~100u out) PLUS the world radius — but the init default (200u)

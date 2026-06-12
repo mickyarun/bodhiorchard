@@ -63,6 +63,8 @@ import type { CharacterSystem } from './characters/CharacterSystem'
 import { SerializedExecutor } from './utils/SerializedExecutor'
 import { PerfHud } from './utils/PerfHud'
 import { classifyDiff } from './core/SceneDiff'
+import { PostFX } from './rendering/PostFX'
+import { AmbientParticles } from './effects/AmbientParticles'
 import { VehicleController } from './vehicles/VehicleController'
 import { VehicleSystem } from './vehicles/VehicleSystem'
 import { getVehicleDef } from './vehicles/VehicleManifest'
@@ -105,6 +107,9 @@ export class GardenEngine {
   // True when a drain burst replaced subsystem instances (full rebuild) —
   // gates the OrgRoom callback re-wiring in afterSceneBuildDrained.
   private subsystemsReplaced = false
+  // Engine-lifetime visual extras — survive scene rebuilds.
+  private postFX: PostFX | null = null
+  private ambientParticles: AmbientParticles | null = null
 
   // Interior exploration
   private interior: InteriorManager | null = null
@@ -272,6 +277,15 @@ export class GardenEngine {
     if (PerfHud.shouldEnable()) {
       this.perfHudDetach = new PerfHud().attach(this.app.app, container)
     }
+
+    // Post-processing chain (bloom/grading/vignette + ACES handoff) and
+    // ambient pollen motes — engine-lifetime, unaffected by scene rebuilds.
+    if (PostFX.shouldEnable()) {
+      this.postFX = new PostFX()
+      this.postFX.enable(this.app)
+    }
+    this.ambientParticles = new AmbientParticles()
+    this.ambientParticles.build(this.app.app, this.app.root)
 
     this.callbacks.onSceneReady?.()
   }
@@ -1918,6 +1932,10 @@ export class GardenEngine {
       this.input = null
       safe('perfHud.detach', () => this.perfHudDetach?.())
       this.perfHudDetach = null
+      safe('postFX.destroy', () => this.postFX?.destroy())
+      this.postFX = null
+      safe('ambientParticles.destroy', () => this.ambientParticles?.destroy())
+      this.ambientParticles = null
       safe('camera.destroyHelp', () => this.camera?.destroyHelp())
       this.camera = null
     } finally {
