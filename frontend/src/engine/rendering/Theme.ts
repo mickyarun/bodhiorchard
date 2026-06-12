@@ -145,6 +145,43 @@ export const Theme = {
     emissive: [248, 250, 255] as Rgb255,
   },
 
+  /** Swimming pool (WaterSurface + PoolResortBuilder). Tropical-resort
+   *  read: bright aqua water over a light tiled basin — the old navy
+   *  basin + 0.7-opacity water collapsed into a flat dark rectangle. */
+  POOL: {
+    water:        [0.30, 0.78, 0.96] as readonly [number, number, number],
+    waterEmissive: [0.10, 0.40, 0.55] as readonly [number, number, number],
+    waterOpacity: 0.8,
+    causticBase:  [40, 150, 175] as Rgb255,
+    basinFloor:   [0.30, 0.62, 0.80] as readonly [number, number, number],
+    basinWall:    [0.38, 0.70, 0.86] as readonly [number, number, number],
+    deck:         [0.94, 0.85, 0.66] as readonly [number, number, number],
+    coping:       [0.97, 0.95, 0.90] as readonly [number, number, number],
+  },
+
+  /** Housing village (HouseBuilder / RectangularFence / HousingVillage). */
+  VILLAGE: {
+    roofClay:     [0.78, 0.46, 0.36] as readonly [number, number, number],
+    roofTrim:     [0.92, 0.88, 0.80] as readonly [number, number, number],
+    chimney:      [0.62, 0.60, 0.58] as readonly [number, number, number],
+    fencePostA:   [0.55, 0.40, 0.24] as readonly [number, number, number],
+    fencePostB:   [0.63, 0.48, 0.30] as readonly [number, number, number],
+    fencePanel:   [0.68, 0.54, 0.34] as readonly [number, number, number],
+    fenceGate:    [0.42, 0.30, 0.16] as readonly [number, number, number],
+  },
+
+  /** Paths, village roads, and lanterns. */
+  PATHS: {
+    /** Primary path tint — warm sand instead of the old pure white. */
+    primaryTint:   [0.97, 0.91, 0.76] as readonly [number, number, number],
+    secondaryTint: [0.72, 0.56, 0.42] as readonly [number, number, number],
+    /** Path-wear halo peak alpha (was 0.6 — barely read as trodden earth). */
+    wearAlpha: 0.75,
+    lanternPole:   [0.34, 0.23, 0.14] as readonly [number, number, number],
+    lanternGlow:   [1.0, 0.87, 0.45] as readonly [number, number, number],
+    lanternPoleWidth: 0.09,
+  },
+
   POSTFX: {
     bloomIntensity: 0.03,
     grading: { saturation: 1.12, contrast: 1.04, brightness: 1.0 },

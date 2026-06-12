@@ -310,7 +310,7 @@ export class SceneManager {
 
     // Housing village (builds its own fence + roads + driveways)
     if (data.members.length > 0) {
-      const village = new HousingVillage(this.loader)
+      const village = new HousingVillage(this.loader, this.materials)
       const housingResult = await village.build(
         this.app, data.members, this.layout, this._currentUserId, this.materials,
       )

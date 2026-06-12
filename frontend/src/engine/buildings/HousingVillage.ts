@@ -38,6 +38,7 @@ import type { WorldLayout } from '../world/WorldLayout'
 import type { ExclusionZone } from '../utils/MathUtils'
 import { SandRoadBuilder } from '../world/SandRoadBuilder'
 import { RectangularFence } from '../world/RectangularFence'
+import { SCATTER_BUSHES } from '../assets/AssetManifest'
 import { LabelRenderer } from '../rendering/LabelRenderer'
 import {
   computeVillageLayout,
@@ -74,6 +75,7 @@ export interface HousingVillageResult {
 export class HousingVillage {
   private houseBuilder: HouseBuilder
   private roads: SandRoadBuilder
+  private loader: AssetLoader
 
   /** Stored context for live tier rebuilds. */
   private buildContext: {
@@ -86,10 +88,13 @@ export class HousingVillage {
     currentUserId: string | null
   } | null = null
 
-  constructor(loader: AssetLoader) {
-    const factory = new BuildingFactory(loader)
+  constructor(loader: AssetLoader, materials?: MaterialFactory) {
+    // Materials are needed for the procedural roof/chimney treatment —
+    // without them BuildingFactory silently falls back to untinted boxes.
+    const factory = new BuildingFactory(loader, materials)
     this.houseBuilder = new HouseBuilder(factory)
     this.roads = new SandRoadBuilder(loader)
+    this.loader = loader
   }
 
   async build(
@@ -139,6 +144,10 @@ export class HousingVillage {
     if (materials) {
       new RectangularFence(materials).build(root, { bounds: layout.fenceBounds, gateSide })
     }
+
+    // Fence-line greenery — bushes at the corners and wall midpoints soften
+    // the bare fence run that made the village read as an empty pen.
+    await this.buildFenceGreenery(root, layout.fenceBounds, gateSide)
 
     // ─── Houses: build LOCAL, wrap with pivot, compose yaw ─────────────
     for (const placement of layout.placements) {
@@ -250,6 +259,46 @@ export class HousingVillage {
   }
 
   // ─── Gate Helpers ──────────────────────────────
+
+  /**
+   * Bushes hugging the fence line: one at each corner plus the midpoint of
+   * every non-gate wall, placed just OUTSIDE the fence in zone-local
+   * coordinates (the village root's yaw rotates them with everything else).
+   * A dozen entities — not worth instancing plumbing through HousingState.
+   */
+  private async buildFenceGreenery(
+    root: pc.Entity,
+    bounds: FenceBounds,
+    gateSide: 'north' | 'south' | 'east' | 'west',
+  ): Promise<void> {
+    const assets = await this.loader.loadBatch(SCATTER_BUSHES)
+    if (assets.length === 0) return
+
+    const pad = 0.9
+    const cx = (bounds.minX + bounds.maxX) / 2
+    const cz = (bounds.minZ + bounds.maxZ) / 2
+    const spots: Array<{ x: number; z: number; side?: string }> = [
+      { x: bounds.minX - pad, z: bounds.minZ - pad },
+      { x: bounds.maxX + pad, z: bounds.minZ - pad },
+      { x: bounds.minX - pad, z: bounds.maxZ + pad },
+      { x: bounds.maxX + pad, z: bounds.maxZ + pad },
+      { x: cx, z: bounds.minZ - pad, side: 'north' },
+      { x: cx, z: bounds.maxZ + pad, side: 'south' },
+      { x: bounds.maxX + pad, z: cz, side: 'east' },
+      { x: bounds.minX - pad, z: cz, side: 'west' },
+    ]
+
+    for (const spot of spots) {
+      if (spot.side === gateSide) continue  // keep the gate approach clear
+      const asset = assets[Math.floor(Math.random() * assets.length)]
+      const bush = this.loader.instance(asset)
+      bush.setLocalPosition(spot.x, 0, spot.z)
+      bush.setLocalEulerAngles(0, Math.random() * 360, 0)
+      const s = 0.8 + Math.random() * 0.5
+      bush.setLocalScale(s, s, s)
+      root.addChild(bush)
+    }
+  }
 
   /**
    * Pick which wall of the zone-local rectangle houses the gate. Works

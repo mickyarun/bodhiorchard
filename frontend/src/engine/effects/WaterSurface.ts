@@ -22,6 +22,7 @@
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
+import { Theme, toCss } from '../rendering/Theme'
 
 /** Pool dimensions for water surface placement. */
 export interface PoolBounds {
@@ -63,9 +64,11 @@ export class WaterSurface {
     this.causticTexture = this.createCausticTexture(app.app.graphicsDevice)
 
     this.waterMaterial = new pc.StandardMaterial()
-    this.waterMaterial.diffuse = new pc.Color(0.15, 0.55, 0.9)
-    this.waterMaterial.emissive = new pc.Color(0.1, 0.35, 0.55)
-    this.waterMaterial.opacity = 0.7
+    const [wr, wg, wb] = Theme.POOL.water
+    const [er, eg, eb] = Theme.POOL.waterEmissive
+    this.waterMaterial.diffuse = new pc.Color(wr, wg, wb)
+    this.waterMaterial.emissive = new pc.Color(er, eg, eb)
+    this.waterMaterial.opacity = Theme.POOL.waterOpacity
     this.waterMaterial.blendType = pc.BLEND_NORMAL
     this.waterMaterial.metalness = 0.15
     this.waterMaterial.gloss = 0.9
@@ -88,9 +91,10 @@ export class WaterSurface {
     const hd = pool.depth / 2
     const wallThickness = 0.3
 
-    // Pool floor (dark blue)
+    // Pool floor — light aqua tile so the basin reads "pool", not "void"
     const floorMat = new pc.StandardMaterial()
-    floorMat.diffuse = new pc.Color(0.08, 0.15, 0.35)
+    const [fr, fg, fb] = Theme.POOL.basinFloor
+    floorMat.diffuse = new pc.Color(fr, fg, fb)
     floorMat.metalness = 0
     floorMat.gloss = 0.3
     floorMat.update()
@@ -102,9 +106,10 @@ export class WaterSurface {
     floor.render!.meshInstances[0].material = floorMat
     this.root.addChild(floor)
 
-    // Pool walls (medium blue tiles)
+    // Pool walls (light tile, a step brighter than the floor)
     const wallMat = new pc.StandardMaterial()
-    wallMat.diffuse = new pc.Color(0.12, 0.25, 0.5)
+    const [lr, lg, lb] = Theme.POOL.basinWall
+    wallMat.diffuse = new pc.Color(lr, lg, lb)
     wallMat.metalness = 0
     wallMat.gloss = 0.4
     wallMat.update()
@@ -133,8 +138,8 @@ export class WaterSurface {
     canvas.height = CAUSTIC_SIZE
     const ctx = canvas.getContext('2d')!
 
-    // Deep pool base color
-    ctx.fillStyle = 'rgb(30, 90, 110)'
+    // Bright tropical aqua base (Theme.POOL.causticBase)
+    ctx.fillStyle = toCss(Theme.POOL.causticBase)
     ctx.fillRect(0, 0, CAUSTIC_SIZE, CAUSTIC_SIZE)
 
     // Caustic light lines (overlapping bright streaks)
@@ -198,10 +203,11 @@ export class WaterSurface {
     const pos = this.surface.getLocalPosition()
     this.surface.setLocalPosition(pos.x, waveY, pos.z)
 
-    // Animate caustic texture offset for shimmer
-    const offsetX = Math.sin(this.time * 0.3) * 0.1
-    const offsetY = Math.cos(this.time * 0.25) * 0.08
-    this.waterMaterial.diffuseMapOffset = new pc.Vec2(offsetX, offsetY)
+    // Animate caustic texture offset for shimmer (faster than the old
+    // 0.3/0.25 — the shimmer was too slow to register as "water").
+    const offsetX = Math.sin(this.time * 0.55) * 0.1
+    const offsetY = Math.cos(this.time * 0.45) * 0.08
+    this.waterMaterial.diffuseMapOffset.set(offsetX, offsetY)
     this.waterMaterial.update()
   }
 

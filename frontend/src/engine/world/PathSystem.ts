@@ -31,6 +31,7 @@ import type { Application } from '../core/Application'
 import { AssetLoader } from '../assets/AssetLoader'
 import { randRange } from '../utils/MathUtils'
 import { END_TRIM, evalRouteAt, type PathRoute } from '@shared/world/paths'
+import { Theme } from '../rendering/Theme'
 
 // Layout primitives (`PathRoute`, `PathKind`, `END_TRIM`, `evalRouteAt`,
 // `buildRoutes`) live in `shared/world/paths.ts` — consumers should import
@@ -64,9 +65,12 @@ export class PathSystem {
     this.root = new pc.Entity('PathSystem')
 
     this.sandTexture = this.createSandTexture(app.app.graphicsDevice)
-    this.primaryMat = this.createStripMaterial(new pc.Color(1, 1, 1))
+    // Warm sand tint — the old pure-white tint read as a generic light strip.
+    const [pr, pg, pb] = Theme.PATHS.primaryTint
+    this.primaryMat = this.createStripMaterial(new pc.Color(pr, pg, pb))
     // Dirt tint: warmer and darker than sand — reads as worn-in secondary path.
-    this.secondaryMat = this.createStripMaterial(new pc.Color(0.65, 0.5, 0.38))
+    const [sr, sg, sb] = Theme.PATHS.secondaryTint
+    this.secondaryMat = this.createStripMaterial(new pc.Color(sr, sg, sb))
 
     const stoneAsset = await loader.load(PATH_ASSET)
 

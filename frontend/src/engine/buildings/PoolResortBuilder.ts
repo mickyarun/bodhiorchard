@@ -44,6 +44,7 @@ import type { InteractionPoint } from "../characters/InteractionPoint"
 import type { ExclusionZone } from "../utils/MathUtils"
 import { WaterSurface } from "../effects/WaterSurface"
 import { BUILDING, DECOR } from "../assets/AssetManifest"
+import { Theme } from "../rendering/Theme"
 
 export interface PoolResortResult {
   entity: pc.Entity
@@ -61,8 +62,8 @@ const DECK_TOP_Y = 0.18         // top of deck, just above water surface (0.15)
 const COPING_Y = 0.22           // thin white tile ring above the deck edge
 
 // ─── Material colors (RGB, 0-1 linear space) ────────────────────────────
-const SANDSTONE: [number, number, number] = [0.92, 0.84, 0.66]
-const COPING_WHITE: [number, number, number] = [0.96, 0.94, 0.88]
+const SANDSTONE: [number, number, number] = [...Theme.POOL.deck]
+const COPING_WHITE: [number, number, number] = [...Theme.POOL.coping]
 const BOARD_WHITE: [number, number, number] = [0.93, 0.93, 0.90]
 const METAL_SILVER: [number, number, number] = [0.82, 0.85, 0.88]
 const UMBRELLA_COLORS: ReadonlyArray<[number, number, number]> = [
@@ -118,16 +119,25 @@ const SIDE_TABLE_SLOTS: ReadonlyArray<{ x: number; z: number }> = [
   { x:  0.0, z: 4.2 },   // between north pair
 ]
 
-/** Flower pots flanking the entrance path (+Z side of the deck). */
+/** Flower pots flanking the entrance path (+Z side) and the deck corners —
+ *  the corners were bare, which read as an empty concrete slab. */
 const POTTED_PLANT_SLOTS: ReadonlyArray<{ x: number; z: number }> = [
   { x: -1.6, z: 7.2 },
   { x:  1.6, z: 7.2 },
+  { x: -6.9, z: 6.9 },
+  { x:  6.9, z: 6.9 },
+  { x: -6.9, z: -6.9 },
+  { x:  6.9, z: -6.9 },
 ]
 
-/** Decor bushes on grass behind the diving board (-Z, outside deck). */
+/** Decor bushes on grass around the resort perimeter (outside deck). */
 const BUSH_SLOTS: ReadonlyArray<{ x: number; z: number }> = [
   { x: -5.5, z: -7.8 },
   { x:  5.5, z: -7.8 },
+  { x: -8.2, z:  0.0 },
+  { x:  8.2, z:  0.0 },
+  { x: -8.0, z:  4.5 },
+  { x:  8.0, z: -4.5 },
 ]
 
 export class PoolResortBuilder {

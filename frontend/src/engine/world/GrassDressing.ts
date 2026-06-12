@@ -156,12 +156,13 @@ export class GrassDressing {
     // bleeds through → "soft halo" not "second path."
     const imageData = ctx.getImageData(0, 0, S, S)
     const data = imageData.data
+    const peakAlpha = Theme.PATHS.wearAlpha
     for (let y = 0; y < S; y++) {
       for (let x = 0; x < S; x++) {
         const edgeDist = Math.min(x, S - 1 - x) / (S / 2)
-        // Smoothstep from edge (alpha=0) to center (alpha=0.6).
+        // Smoothstep from edge (alpha=0) to center (alpha=peak).
         const t = Math.min(edgeDist / 0.9, 1)
-        const alpha = t * t * (3 - 2 * t) * 0.6
+        const alpha = t * t * (3 - 2 * t) * peakAlpha
         const idx = (y * S + x) * 4
         data[idx + 3] = Math.floor(alpha * 255)
       }
