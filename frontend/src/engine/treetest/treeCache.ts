@@ -60,7 +60,11 @@ const STORE = 'trees'
 //     getMaterial() key derivation would miss the matCache and silently
 //     drop every branch group (invisible trees). Regrow collapses each
 //     tree's ~1,600 single-instance groups into a few dozen real batches.
-export const SCHEMA_VERSION = 5
+//
+// v6: trunks/branches now grow in natural BARK (identity color moved to
+//     the canopy + feature branches) with much smaller colorWarp drift.
+//     v5 bakes have identity-colored branches baked in — regrow once.
+export const SCHEMA_VERSION = 6
 const DEFAULT_MAX_ENTRIES = 50
 
 // ─── Cached data shape ───────────────────────────────────────────────────────

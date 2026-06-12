@@ -42,6 +42,8 @@ export class WaterSurface {
   private baseY = 0.15
   private causticTexture: pc.Texture | null = null
   private waterMaterial: pc.StandardMaterial | null = null
+  private rimTexture: pc.Texture | null = null
+  private rimMaterial: pc.StandardMaterial | null = null
 
   build(
     app: Application,
@@ -78,9 +80,73 @@ export class WaterSurface {
 
     this.surface.render!.meshInstances[0].material = this.waterMaterial
 
+    // Pale shallow band ringing the water's edge — the classic stylized
+    // pool read (deep center, light rim). Child of the surface so it bobs
+    // with the waves and inherits the pool footprint scale.
+    this.rimTexture = this.createRimTexture(app.app.graphicsDevice)
+    this.rimMaterial = new pc.StandardMaterial()
+    this.rimMaterial.diffuse = new pc.Color(1, 1, 1)
+    this.rimMaterial.diffuseMap = this.rimTexture
+    this.rimMaterial.emissiveMap = this.rimTexture
+    this.rimMaterial.emissive = new pc.Color(0.35, 0.35, 0.35)
+    this.rimMaterial.opacityMap = this.rimTexture
+    this.rimMaterial.blendType = pc.BLEND_NORMAL
+    this.rimMaterial.depthWrite = false
+    this.rimMaterial.cull = pc.CULLFACE_NONE
+    this.rimMaterial.update()
+
+    const rim = new pc.Entity('WaterRim')
+    rim.addComponent('render', { type: 'plane' })
+    rim.setLocalPosition(0, 0.004, 0)
+    rim.render!.meshInstances[0].material = this.rimMaterial
+    rim.render!.castShadows = false
+    this.surface.addChild(rim)
+
     this.root.addChild(this.surface)
     app.root.addChild(this.root)
     return this.root
+  }
+
+  /** Rect ring: light aqua at the border fading to transparent inward. */
+  private createRimTexture(device: pc.GraphicsDevice): pc.Texture {
+    const S = 256
+    const canvas = document.createElement('canvas')
+    canvas.width = S
+    canvas.height = S
+    const ctx = canvas.getContext('2d')!
+    ctx.clearRect(0, 0, S, S)
+
+    const [rr, rg, rb] = Theme.POOL.rim
+    const band = S * 0.16
+    const img = ctx.createImageData(S, S)
+    const d = img.data
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const edge = Math.min(x, y, S - 1 - x, S - 1 - y)
+        // 1.0 at the border → 0 once `band` pixels in (smoothstep).
+        const t = Math.min(edge / band, 1)
+        const alpha = (1 - t * t * (3 - 2 * t)) * 0.75
+        const idx = (y * S + x) * 4
+        d[idx] = rr
+        d[idx + 1] = rg
+        d[idx + 2] = rb
+        d[idx + 3] = Math.round(alpha * 255)
+      }
+    }
+    const texture = new pc.Texture(device, {
+      width: S,
+      height: S,
+      format: pc.PIXELFORMAT_RGBA8,
+      mipmaps: true,
+      addressU: pc.ADDRESS_CLAMP_TO_EDGE,
+      addressV: pc.ADDRESS_CLAMP_TO_EDGE,
+      minFilter: pc.FILTER_LINEAR_MIPMAP_LINEAR,
+      magFilter: pc.FILTER_LINEAR,
+    })
+    const pixels = texture.lock()
+    pixels.set(img.data)
+    texture.unlock()
+    return texture
   }
 
   /** Build pool walls and floor to create the sunken basin. */
@@ -225,5 +291,9 @@ export class WaterSurface {
       this.waterMaterial.destroy()
       this.waterMaterial = null
     }
+    this.rimTexture?.destroy()
+    this.rimTexture = null
+    this.rimMaterial?.destroy()
+    this.rimMaterial = null
   }
 }

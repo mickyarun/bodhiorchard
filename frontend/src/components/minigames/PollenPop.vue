@@ -13,30 +13,44 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 
-  PollenPop — pop the drifting pollen motes before the clock runs out.
+  PollenPop — pop the drifting blossoms before the clock runs out.
 
-  25 seconds; motes rise through the play area; each pop is one point.
+  25 seconds; blossoms rise through the meadow air; each pop is a point.
 -->
 <template>
-  <div class="pollen-pop d-flex flex-column align-center ga-3 pa-4">
-    <div class="d-flex align-center ga-3 w-100 justify-space-between">
-      <span class="text-subtitle-2">⏱ {{ timeLeft.toFixed(0) }}s</span>
-      <span class="text-subtitle-2">Popped {{ score }}</span>
+  <div class="pollen d-flex flex-column ga-3">
+    <div class="d-flex align-center justify-space-between">
+      <div class="pollen__timer" :class="{ 'pollen__timer--low': timeLeft <= 5 && !done }">
+        ⏱ {{ timeLeft.toFixed(0) }}s
+        <span class="pollen__timer-bar" :style="{ width: `${(timeLeft / GAME_SECONDS) * 100}%` }" />
+      </div>
+      <span class="pollen__score">{{ score }} <small>popped</small></span>
     </div>
 
-    <div ref="arena" class="pollen-pop__arena">
+    <div ref="arena" class="pollen__arena">
       <button
         v-for="m in motes"
         :key="m.id"
-        class="pollen-pop__mote"
-        :style="{ left: `${m.x}%`, top: `${m.y}%`, transform: `scale(${m.scale})` }"
-        @pointerdown="pop(m.id)"
+        class="pollen__mote"
+        :style="{ left: `${m.x}%`, top: `${m.y}%`, fontSize: `${22 * m.scale}px` }"
+        @pointerdown="pop(m.id, $event)"
       >
-        ✿
+        {{ m.emoji }}
       </button>
-      <div v-if="done" class="pollen-pop__overlay">
-        <div class="text-h6 mb-2">Time! You popped {{ score }}</div>
-        <v-btn color="success" @click="$emit('finished', score)">Collect points</v-btn>
+
+      <span
+        v-for="p in pops"
+        :key="p.id"
+        class="pollen__pop"
+        :style="{ left: `${p.x}%`, top: `${p.y}%` }"
+      >+1</span>
+
+      <div v-if="done" class="pollen__overlay">
+        <span class="pollen__overlay-emoji">🌼</span>
+        <div class="text-h6 font-weight-bold mb-1">You popped {{ score }}!</div>
+        <v-btn color="success" rounded="lg" @click="$emit('finished', score)">
+          Collect points
+        </v-btn>
       </div>
     </div>
   </div>
@@ -49,6 +63,7 @@ defineEmits<{ finished: [score: number] }>()
 
 const GAME_SECONDS = 25
 const SPAWN_EVERY_S = 0.55
+const MOTE_EMOJI = ['🌸', '🌼', '💮', '🌺']
 
 interface Mote {
   id: number
@@ -57,9 +72,11 @@ interface Mote {
   vy: number  // percent per second (upward)
   vx: number
   scale: number
+  emoji: string
 }
 
 const motes = ref<Mote[]>([])
+const pops = ref<Array<{ id: number; x: number; y: number }>>([])
 const score = ref(0)
 const timeLeft = ref(GAME_SECONDS)
 const done = ref(false)
@@ -77,16 +94,23 @@ function spawn(): void {
     y: 104,
     vy: 9 + Math.random() * 10,
     vx: (Math.random() - 0.5) * 6,
-    scale: 0.8 + Math.random() * 0.7,
+    scale: 0.8 + Math.random() * 0.8,
+    emoji: MOTE_EMOJI[Math.floor(Math.random() * MOTE_EMOJI.length)],
   })
 }
 
-function pop(id: number): void {
+function pop(id: number, _ev: PointerEvent): void {
   if (done.value) return
   const idx = motes.value.findIndex((m) => m.id === id)
   if (idx >= 0) {
+    const m = motes.value[idx]
     motes.value.splice(idx, 1)
     score.value += 1
+    const popId = nextId++
+    pops.value.push({ id: popId, x: m.x, y: m.y })
+    window.setTimeout(() => {
+      pops.value = pops.value.filter((p) => p.id !== popId)
+    }, 500)
   }
 }
 
@@ -125,34 +149,79 @@ onUnmounted(() => cancelAnimationFrame(raf))
 </script>
 
 <style scoped>
-.pollen-pop__arena {
+.pollen__timer {
+  position: relative;
+  font-size: 15px;
+  font-weight: 700;
+  padding-bottom: 5px;
+  min-width: 72px;
+}
+.pollen__timer--low {
+  color: #ff7043;
+}
+.pollen__timer-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: currentColor;
+  transition: width 0.3s linear;
+  opacity: 0.7;
+}
+.pollen__score {
+  font-size: 20px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.pollen__arena {
   position: relative;
   width: 100%;
   height: 320px;
-  border-radius: 12px;
-  background: linear-gradient(180deg, #cfe9ff 0%, #e7f6dc 100%);
+  border-radius: 16px;
+  background:
+    radial-gradient(ellipse 120% 60% at 50% 110%, rgba(126, 190, 80, 0.5), transparent 60%),
+    linear-gradient(180deg, #aedcff 0%, #d8f0c8 70%, #b8dd90 100%);
   overflow: hidden;
+  box-shadow: inset 0 4px 14px rgba(0, 0, 0, 0.12);
 }
-.pollen-pop__mote {
+.pollen__mote {
   position: absolute;
   border: none;
   background: transparent;
-  font-size: 26px;
-  color: #f0a832;
   cursor: pointer;
-  transition: transform 0.1s;
-  text-shadow: 0 0 8px rgba(255, 220, 130, 0.9);
+  padding: 4px;
+  line-height: 1;
+  filter: drop-shadow(0 0 6px rgba(255, 235, 170, 0.8));
+  transition: transform 0.08s;
 }
-.pollen-pop__mote:active {
-  transform: scale(1.6) !important;
+.pollen__mote:active {
+  transform: scale(1.7);
 }
-.pollen-pop__overlay {
+.pollen__pop {
+  position: absolute;
+  font-size: 14px;
+  font-weight: 800;
+  color: #2e7d32;
+  pointer-events: none;
+  animation: pop-float 0.5s ease-out forwards;
+}
+@keyframes pop-float {
+  0% { transform: translate(-50%, 0) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -26px) scale(1.4); opacity: 0; }
+}
+.pollen__overlay {
   position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.82);
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #1b3a22;
+}
+.pollen__overlay-emoji {
+  font-size: 42px;
 }
 </style>

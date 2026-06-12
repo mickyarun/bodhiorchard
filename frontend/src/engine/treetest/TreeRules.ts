@@ -44,7 +44,7 @@ export function defaultTrunk(): TreeRules {
     sizeWarp: 0.2,
     whorl: Math.PI * 2 / 3,    // 120°
     whorlWarp: 0,
-    colorWarp: 15,              // drives trunk-to-tip brightening via wiggleColor bias
+    colorWarp: 5,               // gentle trunk-to-tip lightening — stays woody, no white tips
     minSize: 5 * WORLD_SCALE,
   }
 }
@@ -58,7 +58,7 @@ export function defaultBranch(): TreeRules {
     sizeWarp: 0.3,
     whorl: 0,
     whorlWarp: 0,
-    colorWarp: 12,              // tips approach white after ~10 generations
+    colorWarp: 4,               // gentle lightening — branch tips stay in the wood family
     minSize: 10 * WORLD_SCALE,
   }
 }

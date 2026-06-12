@@ -60,6 +60,31 @@ const PATH_CLEARANCE = 2.2
 const PATH_SAMPLES_PER_ROUTE = 28
 const CELL = 1.0
 
+/** A rotated rectangle the carpet must stay out of (e.g. the village
+ *  compound — blades grow up to the fence, none inside). */
+export interface BlockedRect {
+  cx: number
+  cz: number
+  yawRad: number
+  halfW: number
+  halfD: number
+}
+
+function insideAnyRect(x: number, z: number, rects: readonly BlockedRect[]): boolean {
+  for (const r of rects) {
+    const dx = x - r.cx
+    const dz = z - r.cz
+    // World → rect-local, matching HousingVillage.computeGateSide's
+    // convention exactly (same yaw sign, same axes).
+    const cos = Math.cos(r.yawRad)
+    const sin = Math.sin(r.yawRad)
+    const lx = dx * cos - dz * sin
+    const lz = dx * sin + dz * cos
+    if (Math.abs(lx) <= r.halfW && Math.abs(lz) <= r.halfD) return true
+  }
+  return false
+}
+
 export class GrassSystem {
   private root: pc.Entity | null = null
   private vbs: pc.VertexBuffer[] = []
@@ -73,13 +98,22 @@ export class GrassSystem {
     _loader: AssetLoader,
     exclusionZones: readonly ExclusionZone[],
     pathRoutes: readonly PathRoute[] = [],
+    blockedRects: readonly BlockedRect[] = [],
   ): Promise<pc.Entity> {
     this.root = new pc.Entity('GrassSystem')
     const device = app.app.graphicsDevice
     const blockedCells = this.rasterizePathClearance(pathRoutes)
 
-    this.buildCarpet(device, exclusionZones, blockedCells)
-    this.buildFlowers(device, exclusionZones, blockedCells)
+    // A circular zone whose center sits inside a blocked rect is the
+    // rect's own (oversized) exclusion circle — drop it so blades grow
+    // right up to the rect edge (the fence) instead of stopping at the
+    // circle and leaving a bald ring of bare ground texture around it.
+    const zones = exclusionZones.filter(
+      (z) => !insideAnyRect(z.x, z.z, blockedRects),
+    )
+
+    this.buildCarpet(device, zones, blockedCells, blockedRects)
+    this.buildFlowers(device, zones, blockedCells, blockedRects)
 
     app.root.addChild(this.root)
     return this.root
@@ -95,6 +129,7 @@ export class GrassSystem {
     device: pc.GraphicsDevice,
     exclusionZones: readonly ExclusionZone[],
     blockedCells: Set<string>,
+    blockedRects: readonly BlockedRect[],
   ): void {
     const bladeTexture = buildBladeTexture(device)
     this.textures.push(bladeTexture)
@@ -117,6 +152,7 @@ export class GrassSystem {
         const z = gz + randRange(-GRID_STEP, GRID_STEP) * 0.5
         if (isInsideAnyZone(x, z, exclusionZones as ExclusionZone[])) continue
         if (blockedCells.has(this.cellKey(x, z))) continue
+        if (insideAnyRect(x, z, blockedRects)) continue
 
         pos.set(x, 0, z)
         rot.setFromEulerAngles(0, randRange(0, 360), 0)
@@ -154,6 +190,7 @@ export class GrassSystem {
     device: pc.GraphicsDevice,
     exclusionZones: readonly ExclusionZone[],
     blockedCells: Set<string>,
+    blockedRects: readonly BlockedRect[],
   ): void {
     const mesh = buildCrossQuadMesh(device, FLOWER_WIDTH, FLOWER_HEIGHT)
     this.meshes.push(mesh)
@@ -172,6 +209,7 @@ export class GrassSystem {
       const z = randRange(-CARPET_HALF, CARPET_HALF)
       if (isInsideAnyZone(x, z, exclusionZones as ExclusionZone[])) continue
       if (blockedCells.has(this.cellKey(x, z))) continue
+      if (insideAnyRect(x, z, blockedRects)) continue
       const minSq = FLOWER_MIN_DIST * FLOWER_MIN_DIST
       if (placed.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < minSq)) continue
       placed.push({ x, z })

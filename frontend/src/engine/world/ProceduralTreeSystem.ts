@@ -51,12 +51,18 @@ import {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-/** Pick trunk color by repo index — cycles through the curated identity
- *  palette in Theme (muted jewel + natural wood hues; distinct per repo but
- *  cohesive as an orchard). NOTE: trunk color is part of the IndexedDB
- *  tree-cache key, so palette edits force a one-time regrow of every tree. */
+/** Pick the repo's IDENTITY color by index — cycles through the curated
+ *  palette in Theme. Expressed in the canopy + feature branches (trunks
+ *  grow in natural bark). NOTE: the palette index is part of the
+ *  IndexedDB tree-cache key, so palette edits force a one-time regrow. */
 function trunkColor(index: number): Color3 {
   const c = Theme.TRUNK_PALETTE[index % Theme.TRUNK_PALETTE.length]
+  return [c[0], c[1], c[2]]
+}
+
+/** Natural wood for trunk + structural branches. */
+function barkColor(): Color3 {
+  const c = Theme.TREE_BARK.root
   return [c[0], c[1], c[2]]
 }
 
@@ -187,7 +193,9 @@ export class ProceduralTreeSystem implements RepoVisualization {
       this.root.addChild(container)
       this.treeMap.set(repo.repo_name, container)
 
-      // Map EngineFeature → Tree3DSystem feature format
+      // Map EngineFeature → Tree3DSystem feature format. The trunk grows
+      // in natural BARK; the repo's identity color shows in the canopy
+      // (leaf blend) and on the feature branches.
       const repoFeatures = perRepoFeatures[i]
       const color = trunkColor(i)
       const treeFeatures = repoFeatures.map(f => ({
@@ -230,13 +238,13 @@ export class ProceduralTreeSystem implements RepoVisualization {
         // Cache hit: skip growth, restore instanced state directly.
         tree.loadFromCache(
           { branchGroups: cached.branchGroups, primaries: cached.primaries },
-          color, pos.x, pos.z,
+          barkColor(), pos.x, pos.z,
         )
         if (cached.leafGroup) leaves.loadFromCache(cached.leafGroup)
         this.handleTreeReady(entry, cached.labelY)
         entry.done = true
       } else {
-        tree.startTree(color, pos.x, 0, pos.z)
+        tree.startTree(barkColor(), pos.x, 0, pos.z)
       }
     }
 
@@ -325,7 +333,8 @@ export class ProceduralTreeSystem implements RepoVisualization {
           const hasImplemented = [...entry.featuresByTitle.values()].some(f => f.status === 'implemented')
           let leafExport: BakedLeafGroup | null = null
           if (hasImplemented) {
-            entry.leaves.spawnLeaves(tips, entry.tree.getRootColor())
+            // Identity color (not bark) — the canopy carries the repo hue.
+            entry.leaves.spawnLeaves(tips, entry.rootColor)
             leafExport = entry.leaves.bakeInstanced()
           }
 
@@ -448,13 +457,13 @@ export class ProceduralTreeSystem implements RepoVisualization {
     if (cached) {
       tree.loadFromCache(
         { branchGroups: cached.branchGroups, primaries: cached.primaries },
-        color, old.worldX, old.worldZ,
+        barkColor(), old.worldX, old.worldZ,
       )
       if (cached.leafGroup) leaves.loadFromCache(cached.leafGroup)
       this.handleTreeReady(entry, cached.labelY)
       entry.done = true
     } else {
-      tree.startTree(color, old.worldX, 0, old.worldZ)
+      tree.startTree(barkColor(), old.worldX, 0, old.worldZ)
     }
     if (entry.userHidden) setEntryVisible(entry, false)
   }

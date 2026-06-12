@@ -71,6 +71,9 @@ export const Theme = {
   LIGHT: {
     sun:          [255, 230, 189] as Rgb255,  // warm golden
     sunIntensity: 2.1,
+    /** Shadows never crush to black — big repo-tree canopies otherwise
+     *  paint dead-dark wedges across the grass carpet. */
+    shadowIntensity: 0.78,
     fill:         [140, 173, 235] as Rgb255,  // cool sky bounce
     fillIntensity: 0.75,
     ambient:      [122, 115, 102] as Rgb255,  // warm slate (was 0.48,0.45,0.40)
@@ -107,13 +110,20 @@ export const Theme = {
     pavilion:   [178, 172, 158] as Rgb255,  // stone paving
   } as Record<string, Rgb255>,
 
+  /** Natural bark for repo-tree trunks/branches. The per-repo IDENTITY
+   *  color lives in the canopy (LEAF.blendTrunk) and feature branches —
+   *  wooden trunks with tinted crowns read as real trees instead of
+   *  candy-colored skeletons. */
+  TREE_BARK: {
+    root: [96, 66, 42] as Rgb255,
+  },
+
   /**
-   * Repo-tree trunk identity palette — one distinct hue per repo, cycled
-   * by index. Curated muted-jewel + natural-wood set: hues stay spread
-   * around the wheel for identity, but saturation/lightness are capped so
-   * the orchard reads cohesive instead of neon.
-   * NOTE: trunk color is part of the IndexedDB tree-cache key — changing
-   * an entry forces a one-time regrow of that tree.
+   * Repo-tree identity palette — one distinct hue per repo, cycled by
+   * index. Expressed in the CANOPY (leaf blend) and feature branches,
+   * not the trunk. Curated muted-jewel + natural-wood set: hues stay
+   * spread around the wheel for identity, saturation/lightness capped.
+   * NOTE: the palette index is part of the IndexedDB tree-cache key.
    */
   TRUNK_PALETTE: [
     [139, 94, 60],    // walnut
@@ -130,12 +140,13 @@ export const Theme = {
     [172, 132, 96],   // chestnut
   ] as Rgb255[],
 
-  /** Procedural repo-tree leaves (LeafSystem). Leaf color = trunk color
-   *  blended into `base` by `blendTrunk`; `emissiveScale` lifts shadowed
-   *  canopies without the old neon glow (was 0.65). */
+  /** Procedural repo-tree leaves (LeafSystem). Leaf color = the repo's
+   *  IDENTITY color blended into `base` by `blendTrunk` — with wooden
+   *  trunks, the canopy is where per-repo identity reads. `emissiveScale`
+   *  lifts shadowed canopies without the old neon glow (was 0.65). */
   LEAF: {
     base: [76, 158, 60] as Rgb255,
-    blendTrunk: 0.3,
+    blendTrunk: 0.55,
     emissiveScale: 0.35,
   },
 
@@ -186,18 +197,26 @@ export const Theme = {
    *  read: bright aqua water over a light tiled basin — the old navy
    *  basin + 0.7-opacity water collapsed into a flat dark rectangle. */
   POOL: {
-    water:        [0.30, 0.78, 0.96] as readonly [number, number, number],
-    waterEmissive: [0.10, 0.40, 0.55] as readonly [number, number, number],
-    waterOpacity: 0.8,
-    causticBase:  [40, 150, 175] as Rgb255,
+    water:        [0.22, 0.66, 0.94] as readonly [number, number, number],
+    waterEmissive: [0.08, 0.36, 0.56] as readonly [number, number, number],
+    waterOpacity: 0.85,
+    causticBase:  [36, 138, 172] as Rgb255,
+    /** Light shallow band ringing the water's edge — the classic stylized
+     *  pool read (deep center, pale rim). */
+    rim:          [168, 226, 246] as Rgb255,
     basinFloor:   [0.30, 0.62, 0.80] as readonly [number, number, number],
     basinWall:    [0.38, 0.70, 0.86] as readonly [number, number, number],
-    deck:         [0.94, 0.85, 0.66] as readonly [number, number, number],
+    /** Teak deck planks (two alternating board tones). */
+    plankA:       [0.78, 0.60, 0.40] as readonly [number, number, number],
+    plankB:       [0.70, 0.52, 0.34] as readonly [number, number, number],
     coping:       [0.97, 0.95, 0.90] as readonly [number, number, number],
   },
 
   /** Housing village (HouseBuilder / RectangularFence / HousingVillage). */
   VILLAGE: {
+    /** Packed-earth floor covering the whole fenced compound — the grass
+     *  carpet stops at the fence line; inside is village ground. */
+    floor:        [0.66, 0.56, 0.42] as readonly [number, number, number],
     roofClay:     [0.78, 0.46, 0.36] as readonly [number, number, number],
     roofTrim:     [0.92, 0.88, 0.80] as readonly [number, number, number],
     chimney:      [0.62, 0.60, 0.58] as readonly [number, number, number],

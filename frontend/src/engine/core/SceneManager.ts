@@ -52,7 +52,7 @@ import { SkySystem } from '../environment/SkySystem'
 import { GroundSystem } from '../environment/GroundSystem'
 import { CloudSystem } from '../environment/CloudSystem'
 import { PineTreeSystem } from '../environment/PineTreeSystem'
-import { GrassSystem } from '../environment/GrassSystem'
+import { GrassSystem, type BlockedRect } from '../environment/GrassSystem'
 import { BushSystem } from '../environment/BushSystem'
 import { ForestLake } from '../environment/ForestLake'
 import { MountainBackdrop } from '../environment/MountainBackdrop'
@@ -454,11 +454,44 @@ export class SceneManager {
     this.bushes = new BushSystem()
     this.decorProps = new DecorativePropScatter()
     this.grass = new GrassSystem()
+    // The carpet stops exactly at the village fence (blades outside only;
+    // inside is the packed-earth compound floor).
+    const grassBlockedRects: BlockedRect[] = []
+    if (this._housing.fenceBoundsLocal && this._housing.center) {
+      const b = this._housing.fenceBoundsLocal
+      // The rect's local center may be offset from the zone origin —
+      // rotate it into world space (inverse of the world→local transform
+      // used in insideAnyRect / computeGateSide) before adding the zone
+      // center.
+      const lcx = (b.minX + b.maxX) / 2
+      const lcz = (b.minZ + b.maxZ) / 2
+      const yaw = this._housing.yawRad
+      const cos = Math.cos(yaw)
+      const sin = Math.sin(yaw)
+      grassBlockedRects.push({
+        cx: this._housing.center.x + (lcx * cos + lcz * sin),
+        cz: this._housing.center.z + (-lcx * sin + lcz * cos),
+        yawRad: yaw,
+        halfW: (b.maxX - b.minX) / 2 + 1.2,
+        halfD: (b.maxZ - b.minZ) / 2 + 1.2,
+      })
+    }
+    // The carpet treats repo-tree zones differently from building zones:
+    // grass grows right under the canopies (their wide exclusion radius is
+    // for props/pines), with only a small bare circle at the trunk base —
+    // the full-radius holes read as dark bald blobs around every tree.
+    const treeZoneSet = new Set(treeZones)
+    const carpetZones = [
+      ...this.layout.getExclusionZones().filter((z) => !treeZoneSet.has(z)),
+      ...treeZones.map((z) => ({ ...z, radius: 1.4 })),
+    ]
     await Promise.all([
       this.pines.build(this.app, this.loader, this.layout.getExclusionZones()),
       this.bushes.build(this.app, this.loader, this.layout.getExclusionZones(), pathRoutes),
       this.decorProps.build(this.app, this.loader, this.layout.getExclusionZones(), pathRoutes),
-      this.grass.build(this.app, this.loader, this.layout.getExclusionZones(), pathRoutes),
+      this.grass.build(
+        this.app, this.loader, carpetZones, pathRoutes, grassBlockedRects,
+      ),
       this.initPhysics(currentBuild, signal),
     ])
     if (checkCancelled()) return

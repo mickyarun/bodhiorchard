@@ -158,6 +158,7 @@ export class Application {
       color: toColor(Theme.LIGHT.sun),
       intensity: Theme.LIGHT.sunIntensity,
       castShadows: true,
+      shadowIntensity: Theme.LIGHT.shadowIntensity,
       shadowBias: 0.05,
       normalOffsetBias: 0.05,
       // 1024 depth-map is 4× cheaper than 2048; orchard radius ~70u so a

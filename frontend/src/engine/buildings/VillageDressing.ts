@@ -34,6 +34,7 @@ import type { AssetLoader } from '../assets/AssetLoader'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { VillageLayoutResult } from '@shared/world/VillageLayout'
 import { BUILDING, DECOR, GARDEN_PROPS } from '../assets/AssetManifest'
+import { Theme } from '../rendering/Theme'
 
 /** Deterministic per-index jitter — yards keep their look across rebuilds. */
 function jitter(index: number, salt: number): number {
@@ -57,12 +58,44 @@ export class VillageDressing {
     const dressing = new pc.Entity('VillageDressing')
     root.addChild(dressing)
 
+    if (materials) {
+      this.buildFloor(dressing, materials, layout)
+      this.buildWashingLine(dressing, materials, layout)
+    }
     await Promise.all([
       this.buildCampfire(dressing, loader, layout),
       this.buildStreetBenches(dressing, loader, layout),
       this.buildYards(dressing, loader, layout),
     ])
-    if (materials) this.buildWashingLine(dressing, materials, layout)
+  }
+
+  /**
+   * Packed-earth floor covering the whole fenced compound. The grass
+   * carpet stops at the fence line (GrassSystem blocked-rect), so the
+   * inside reads as lived-in village ground instead of patchy lawn.
+   * Flat MaterialFactory color — no texture, nothing extra to destroy.
+   */
+  private buildFloor(
+    parent: pc.Entity, materials: MaterialFactory, layout: VillageLayoutResult,
+  ): void {
+    const bounds = layout.fenceBounds
+    const margin = 1.2
+    const w = bounds.maxX - bounds.minX + margin * 2
+    const d = bounds.maxZ - bounds.minZ + margin * 2
+
+    const floor = new pc.Entity('VillageFloor')
+    floor.addComponent('render', { type: 'plane' })
+    floor.setLocalScale(w, 1, d)
+    floor.setLocalPosition(
+      (bounds.minX + bounds.maxX) / 2,
+      0.012,  // above grass (0), below roads/driveways and zone overlays
+      (bounds.minZ + bounds.maxZ) / 2,
+    )
+    floor.render!.meshInstances[0].material = materials.getColor(
+      'village_floor', ...Theme.VILLAGE.floor, { gloss: 0.06 },
+    )
+    floor.render!.castShadows = false
+    parent.addChild(floor)
   }
 
   /** Campfire circle in the gap between the fence and the first street. */
