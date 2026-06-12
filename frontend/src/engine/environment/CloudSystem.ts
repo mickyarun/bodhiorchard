@@ -24,6 +24,7 @@ import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import { randRange } from '../utils/MathUtils'
+import { Theme } from '../rendering/Theme'
 
 const CLOUD_COUNT = 12
 const ALTITUDE_MIN = 100
@@ -49,8 +50,12 @@ export class CloudSystem {
     this.root = new pc.Entity('CloudSystem')
 
     const cloudMat = materials.getColor('cloud', 1, 1, 1, {
-      opacity: 0.45,
-      emissive: [0.92, 0.94, 0.97],
+      opacity: Theme.CLOUD.opacity,
+      emissive: [
+        Theme.CLOUD.emissive[0] / 255,
+        Theme.CLOUD.emissive[1] / 255,
+        Theme.CLOUD.emissive[2] / 255,
+      ],
     })
 
     for (let i = 0; i < CLOUD_COUNT; i++) {

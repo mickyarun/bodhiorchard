@@ -34,6 +34,7 @@ import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { EngineData } from '../types'
 import { AssetLoader } from '../assets/AssetLoader'
 import { acquireRenderPause, releaseRenderPause } from '../utils/AppLifecycle'
+import { Theme } from '../rendering/Theme'
 import {
   getAllDecorationGLBs,
   getEnvironmentGLBs, getBuildingGLBs, getMiscGLBs,
@@ -183,6 +184,18 @@ export class SceneManager {
     // tree placement and the perimeter belt offset. WorldLayout boots
     // at baseline in its ctor; rescale brings it to the real N.
     this.layout.rescale(data.repos.length)
+
+    // Tighten the sun's shadow frustum to the rescaled world — small orgs
+    // get noticeably crisper shadows from the same 1024 depth map.
+    this.app.setShadowParams({
+      distance: Math.min(
+        Math.max(
+          this.layout.getWorldRadius() + Theme.LIGHT.shadowMargin,
+          Theme.LIGHT.shadowDistanceMin,
+        ),
+        Theme.LIGHT.shadowDistanceMax,
+      ),
+    })
 
     // Cache member data for identity lookups (character_model for house visits)
     this._memberDataMap.clear()

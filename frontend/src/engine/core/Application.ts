@@ -31,6 +31,7 @@ import {
   installVisibilityGate,
   installRenderErrorTrap,
 } from '../utils/AppLifecycle'
+import { Theme, toColor } from '../rendering/Theme'
 
 export interface ApplicationConfig {
   onUpdate?: (dt: number, clock: Clock) => void
@@ -104,19 +105,21 @@ export class Application {
     )
 
     // ─── Scene lighting: THE fix for black models ─────────────
-    // Slightly warm ambient tint for golden-hour feel (was cool 0.4/0.4/0.45).
-    this.app.scene.ambientLight = new pc.Color(0.48, 0.45, 0.40)
+    // Warm ambient tint for the spring-morning feel; value lives in Theme.
+    this.app.scene.ambientLight = toColor(Theme.LIGHT.ambient)
 
     const scene = this.app.scene as unknown as Record<string, unknown>
     // Bumped exposure for more punch — scene read as muddy at 1.2.
     scene.exposure = 1.35
 
-    // Fog (v2.17+: scene.fog is a read-only getter, set properties on it)
+    // Fog (v2.17+: scene.fog is a read-only getter, set properties on it).
+    // Warmed to the sky-horizon family and pushed back so the lake (~240u)
+    // and mountains (~280u) stay readable instead of dissolving into haze.
     const fog = (this.app.scene as unknown as { fog: Record<string, unknown> }).fog
     fog.type = pc.FOG_LINEAR
-    fog.color = new pc.Color(0.75, 0.85, 0.95)
-    fog.start = 150
-    fog.end = 500
+    fog.color = toColor(Theme.FOG.color)
+    fog.start = Theme.FOG.start
+    fog.end = Theme.FOG.end
 
     this.app.scene.skyboxIntensity = 0.6
 
@@ -130,9 +133,10 @@ export class Application {
     // Camera
     this.camera = new pc.Entity('Camera')
     this.camera.addComponent('camera', {
-      clearColor: new pc.Color(0.53, 0.68, 0.85),
+      // Matches SKY.horizon so the band beyond the sky dome blends seamlessly.
+      clearColor: toColor(Theme.CAMERA.clearColor),
       projection: pc.PROJECTION_PERSPECTIVE,
-      fov: 55,
+      fov: Theme.CAMERA.fov,
       nearClip: 0.1,
       farClip: 1500,
       frustumCulling: true,
@@ -151,8 +155,8 @@ export class Application {
     this.sun = new pc.Entity('Sun')
     this.sun.addComponent('light', {
       type: 'directional',
-      color: new pc.Color(1.0, 0.90, 0.74),
-      intensity: 2.1,
+      color: toColor(Theme.LIGHT.sun),
+      intensity: Theme.LIGHT.sunIntensity,
       castShadows: true,
       shadowBias: 0.05,
       normalOffsetBias: 0.05,
@@ -171,8 +175,8 @@ export class Application {
     const fillSky = new pc.Entity('FillSky')
     fillSky.addComponent('light', {
       type: 'directional',
-      color: new pc.Color(0.55, 0.68, 0.92),
-      intensity: 0.75,
+      color: toColor(Theme.LIGHT.fill),
+      intensity: Theme.LIGHT.fillIntensity,
       castShadows: false,
     })
     fillSky.setEulerAngles(-60, 45, 0)
@@ -250,16 +254,21 @@ export class Application {
           const height = dir[1]
           let r: number, g: number, b: number
 
+          // Endpoints track Theme.SKY so ambient shading agrees with the
+          // visible sky dome (SkySystem) and the fog/horizon family.
+          const hz = Theme.SKY.horizon
+          const zn = Theme.SKY.zenith
+          const gd = Theme.SKY.belowDeep
           if (height >= 0) {
             const t = height
-            r = lerp8(210, 102, t)
-            g = lerp8(224, 153, t)
-            b = lerp8(245, 235, t)
+            r = lerp8(hz[0], zn[0], t)
+            g = lerp8(hz[1], zn[1], t)
+            b = lerp8(hz[2], zn[2], t)
           } else {
             const t = Math.min(-height * 3, 1)
-            r = lerp8(210, 90, t)
-            g = lerp8(224, 140, t)
-            b = lerp8(245, 72, t)
+            r = lerp8(hz[0], gd[0], t)
+            g = lerp8(hz[1], gd[1], t)
+            b = lerp8(hz[2], gd[2], t)
           }
 
           data[idx] = r
@@ -349,6 +358,20 @@ export class Application {
 
   setConfig(config: ApplicationConfig): void {
     this.config = config
+  }
+
+  /**
+   * Tighten the sun's shadow frustum to the active world size. Directional
+   * shadowDistance is camera-relative, so coverage must span the orbit
+   * camera (~100u out) PLUS the world radius — but the init default (200u)
+   * wastes ~25% of shadow texels on small orgs (radius 18u). Called by
+   * SceneManager after the layout rescales for the org's repo count.
+   */
+  setShadowParams(opts: { distance: number; resolution?: number }): void {
+    const light = this.sun?.light
+    if (!light) return
+    light.shadowDistance = opts.distance
+    if (opts.resolution !== undefined) light.shadowResolution = opts.resolution
   }
 
   /**

@@ -16,7 +16,8 @@
  * ProceduralTreeSystem — RepoVisualization using procedural Tree3DSystem growth.
  *
  * Replaces the static Kenney GLB trees. Each repo becomes an animated procedural tree:
- *   - Trunk color mapped from repo health (thriving→green … wilted→reddish)
+ *   - Trunk color is a per-repo identity hue, cycled by index from
+ *     Theme.TRUNK_PALETTE (health is signaled elsewhere, not by trunk color)
  *   - Feature branches colored by status (planned/in_progress/implemented)
  *   - Grows frame-by-frame via update(dt) — trees animate during scene load
  *   - Billboard label appears once growth completes (above canopy tip)
@@ -37,6 +38,7 @@ import { WORLD_SCALE } from '../treetest/TreeRules'
 import { LabelRenderer } from '../rendering/LabelRenderer'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import { setTreeData, type TreeFeatureNodeData } from './TreeNodeData'
+import { Theme } from '../rendering/Theme'
 import {
   loadTreeCache,
   saveTreeCache,
@@ -49,28 +51,13 @@ import {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-/**
- * Distinct trunk base colors — one per repo, cycled by index.
- * Chosen to be visually differentiated in a daylit PBR scene (no emissive).
- */
-const TRUNK_PALETTE: Color3[] = [
-  [ 70, 160, 230],  // sky blue
-  [220, 120,  40],  // amber
-  [160,  80, 200],  // violet
-  [ 50, 190, 140],  // teal
-  [220,  60,  80],  // coral
-  [180, 200,  50],  // lime
-  [ 80, 120, 220],  // indigo
-  [230, 160,  50],  // gold
-  [100, 200,  80],  // grass green
-  [200,  80, 150],  // pink
-  [ 60, 180, 200],  // cyan
-  [200, 130,  70],  // tan
-]
-
-/** Pick trunk color by repo index — cycles through the palette. */
+/** Pick trunk color by repo index — cycles through the curated identity
+ *  palette in Theme (muted jewel + natural wood hues; distinct per repo but
+ *  cohesive as an orchard). NOTE: trunk color is part of the IndexedDB
+ *  tree-cache key, so palette edits force a one-time regrow of every tree. */
 function trunkColor(index: number): Color3 {
-  return TRUNK_PALETTE[index % TRUNK_PALETTE.length]
+  const c = Theme.TRUNK_PALETTE[index % Theme.TRUNK_PALETTE.length]
+  return [c[0], c[1], c[2]]
 }
 
 /** Max features injected as colored branches per tree. */
@@ -174,7 +161,7 @@ export class ProceduralTreeSystem implements RepoVisualization {
       perRepoFeatures.push(repoFeatures)
       cacheKeys.push(computeCacheKey({
         repoName:        repo.repo_name,
-        trunkColorIndex: i % TRUNK_PALETTE.length,
+        trunkColorIndex: i % Theme.TRUNK_PALETTE.length,
         features:        repoFeatures.map(f => ({ title: f.title, status: f.status })),
       }))
     }

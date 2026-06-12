@@ -24,18 +24,10 @@ import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { WorldZone } from '../world/WorldLayout'
+import { Theme, toCss, type Rgb255 } from '../rendering/Theme'
 
 const TEXTURE_SIZE = 1024
 const OVERLAY_TEX_SIZE = 256
-
-// Zone-specific ground colors
-const ZONE_COLORS: Record<string, { r: number; g: number; b: number }> = {
-  pool:       { r: 210, g: 185, b: 140 },  // warm sand
-  housing:    { r: 190, g: 170, b: 130 },  // sandy dirt
-  coffee_bar: { r: 160, g: 140, b: 110 },  // packed earth
-  cafeteria:  { r: 165, g: 145, b: 115 },  // packed earth
-  pavilion:   { r: 170, g: 165, b: 155 },  // stone paving
-}
 
 export class GroundSystem {
   private entity: pc.Entity | null = null
@@ -59,9 +51,12 @@ export class GroundSystem {
 
     this.material = new pc.StandardMaterial()
     this.material.diffuseMap = this.texture
-    this.material.diffuse = new pc.Color(1, 1, 1)
+    // Warm spring tint multiplied over the grass texture — lifts the olive
+    // base toward a vibrant green without replacing the texture asset.
+    const [tr, tg, tb] = Theme.GROUND.tint
+    this.material.diffuse = new pc.Color(tr, tg, tb)
     this.material.metalness = 0
-    this.material.gloss = 0.05
+    this.material.gloss = Theme.GROUND.gloss
     this.material.update()
 
     const meshInstance = this.entity.render!.meshInstances[0]
@@ -129,7 +124,7 @@ export class GroundSystem {
    */
   addZoneOverlays(app: Application, zones: readonly WorldZone[]): void {
     for (const zone of zones) {
-      const colors = ZONE_COLORS[zone.name]
+      const colors = Theme.ZONE_COLORS[zone.name]
       if (!colors) continue  // skip orchard — stays grass
 
       const entity = new pc.Entity(`Ground_${zone.name}`)
@@ -170,7 +165,7 @@ export class GroundSystem {
     const ctx = canvas.getContext('2d')!
 
     // Rich base green — darker, more natural
-    ctx.fillStyle = 'rgb(48, 95, 32)'
+    ctx.fillStyle = toCss(Theme.GROUND.base)
     ctx.fillRect(0, 0, S, S)
 
     // Layer 1: large natural color patches (light/dark variation like real turf)
@@ -316,8 +311,9 @@ export class GroundSystem {
   /** Generate a zone-specific ground texture with radial alpha fade. */
   private createZoneTexture(
     device: pc.GraphicsDevice,
-    color: { r: number; g: number; b: number },
+    zoneColor: Rgb255,
   ): pc.Texture {
+    const color = { r: zoneColor[0], g: zoneColor[1], b: zoneColor[2] }
     const S = OVERLAY_TEX_SIZE
     const canvas = document.createElement('canvas')
     canvas.width = S

@@ -48,7 +48,12 @@ const STORE = 'trees'
 //     double-applied the tree offset and drifted leaves to 2× the tree
 //     position). v2 caches written between the v1→v2 schema bump and this
 //     fix contain bad world-space leaf matrices and must be invalidated.
-export const SCHEMA_VERSION = 3
+//
+// v4: trunk palette replaced with the curated Theme.TRUNK_PALETTE identity
+//     set. The cache key only encodes the palette INDEX, not the color
+//     values, so v3 entries would restore with the old garish baked colors.
+//     One-time regrow under the new palette.
+export const SCHEMA_VERSION = 4
 const DEFAULT_MAX_ENTRIES = 50
 
 // ─── Cached data shape ───────────────────────────────────────────────────────
