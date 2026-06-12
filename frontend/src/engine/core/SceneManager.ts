@@ -81,6 +81,10 @@ import {
 } from '../takeover/TakeoverPhysicsBuilder'
 import { GATE_WIDTH } from '../world/FenceConstants'
 
+/** Forest-lake world position — far SE edge, opposite the mountain range. */
+const FOREST_LAKE_X = 180
+const FOREST_LAKE_Z = -160
+
 export class SceneManager {
   private app: Application
   private materials: MaterialFactory
@@ -251,28 +255,36 @@ export class SceneManager {
     if (checkCancelled()) return
     this.layout.addExclusionZones(treeZones)
 
-    // 3b. Garden birds — roam between repo trees
-    this.gardenBirds = new GardenBirdSystem(this.app.app)
-    await this.gardenBirds.init(this.loader)
-    if (this.repoVis instanceof ProceduralTreeSystem) {
-      this.gardenBirds.setTrees(this.repoVis.getTreeMap())
-    }
-
-    // 3c. Garden animals — cube-pets wandering on the ground
-    this.gardenAnimals = new GardenAnimalSystem(this.app.app)
-    await this.gardenAnimals.init(this.loader)
-    if (checkCancelled()) return
-
-    // 4. Buildings (buildingFactory created above in phase 2b for HubAnchor)
+    // 3b–4 + far scenery + agents — ONE parallel barrier. Every member is
+    // mutually independent: buildings claim different zones, birds/animals
+    // only need the loader (+ tree map, already built), the lake/mountains
+    // live at the world edge, and agents key off tree positions. Assets are
+    // already warm from loadBatch, so this group is bound by entity assembly,
+    // not network. All `layout` mutations interleave on the JS thread and
+    // complete before the barrier resolves — and exclusion-zone consumers
+    // (paths, scatter) only run after it.
     const coffeeZone = this.layout.getZone('coffee_bar')
     const cafeteriaZone = this.layout.getZone('cafeteria')
     const poolZone = this.layout.getZone('pool')
     const pavilionZone = this.layout.getZone('pavilion')
 
-    if (coffeeZone) {
+    const buildBirds = async (): Promise<void> => {
+      this.gardenBirds = new GardenBirdSystem(this.app.app)
+      await this.gardenBirds.init(this.loader)
+      if (this.repoVis instanceof ProceduralTreeSystem) {
+        this.gardenBirds.setTrees(this.repoVis.getTreeMap())
+      }
+    }
+
+    const buildAnimals = async (): Promise<void> => {
+      this.gardenAnimals = new GardenAnimalSystem(this.app.app)
+      await this.gardenAnimals.init(this.loader)
+    }
+
+    const buildCoffee = async (): Promise<void> => {
+      if (!coffeeZone) return
       const coffeeBuilder = new CoffeeBarBuilder(buildingFactory)
       const coffeeResult = await coffeeBuilder.build(this.app, coffeeZone.x, coffeeZone.z)
-      if (checkCancelled()) return
       this.buildingEntities.push(coffeeResult.entity)
       this.layout.addExclusionZones([coffeeResult.exclusionZone])
       this.layout.registerSeats(coffeeResult.seats)
@@ -288,10 +300,10 @@ export class SceneManager {
       })
     }
 
-    if (cafeteriaZone) {
+    const buildCafeteria = async (): Promise<void> => {
+      if (!cafeteriaZone) return
       const cafeteriaBuilder = new CafeteriaBuilder(buildingFactory)
       const cafeteriaResult = await cafeteriaBuilder.build(this.app, cafeteriaZone.x, cafeteriaZone.z)
-      if (checkCancelled()) return
       this.buildingEntities.push(cafeteriaResult.entity)
       this.layout.addExclusionZones([cafeteriaResult.exclusionZone])
       this.layout.registerSeats(cafeteriaResult.seats)
@@ -308,13 +320,13 @@ export class SceneManager {
       })
     }
 
-    // Housing village (builds its own fence + roads + driveways)
-    if (data.members.length > 0) {
+    const buildVillage = async (): Promise<void> => {
+      // Housing village (builds its own fence + roads + driveways)
+      if (data.members.length === 0) return
       const village = new HousingVillage(this.loader, this.materials)
       const housingResult = await village.build(
         this.app, data.members, this.layout, this._currentUserId, this.materials,
       )
-      if (checkCancelled()) return
       this.buildingEntities.push(housingResult.entity)
       this.layout.addExclusionZones([housingResult.exclusionZone])
       this.layout.registerSeats(housingResult.seats)
@@ -322,10 +334,10 @@ export class SceneManager {
       this._housing.absorb(village, housingResult)
     }
 
-    if (poolZone) {
+    const buildPool = async (): Promise<void> => {
+      if (!poolZone) return
       const poolBuilder = new PoolResortBuilder(buildingFactory, this.loader)
       const poolResult = await poolBuilder.build(this.app, poolZone.x, poolZone.z)
-      if (checkCancelled()) return
       this.buildingEntities.push(poolResult.entity)
       this.layout.addExclusionZones([poolResult.exclusionZone])
       this.layout.registerSeats(poolResult.seats)
@@ -333,12 +345,12 @@ export class SceneManager {
       this.poolWater = poolResult.waterSurface
     }
 
-    if (pavilionZone) {
+    const buildPavilion = async (): Promise<void> => {
+      if (!pavilionZone) return
       // Stored on `this.pavilion` — see field docstring for why the instance
       // ref is load-bearing for clean teardown.
       this.pavilion = new StandupPavilion(buildingFactory)
       const pavilionResult = await this.pavilion.build(this.app, pavilionZone.x, pavilionZone.z)
-      if (checkCancelled()) return
       this.buildingEntities.push(pavilionResult.entity)
       this.layout.addExclusionZones([pavilionResult.exclusionZone])
       this.layout.registerSeats(pavilionResult.seats)
@@ -352,6 +364,36 @@ export class SceneManager {
       }
     }
 
+    const buildForestLake = async (): Promise<void> => {
+      // Forest lake — pond inside a dense forest cluster, opposite the
+      // mountains (SE), at the far edge of the world like the backdrop.
+      this.forestLake = new ForestLake()
+      await this.forestLake.build(this.app, this.loader, FOREST_LAKE_X, FOREST_LAKE_Z)
+    }
+
+    const buildMountains = async (): Promise<void> => {
+      this.mountains = new MountainBackdrop()
+      await this.mountains.build(this.app, this.loader)
+    }
+
+    const buildAgents = async (): Promise<void> => {
+      // Agent characters — always initialized so live WebSocket events can
+      // spawn robots even if no agents are active at page load time.
+      this.agentSystem = new AgentCharacterSystem()
+      await this.agentSystem.build(
+        this.app, this.loader, data.agent_activity,
+        (repoName) => this.getTreePosition(repoName),
+      )
+    }
+
+    await Promise.all([
+      buildBirds(), buildAnimals(),
+      buildCoffee(), buildCafeteria(), buildVillage(), buildPool(), buildPavilion(),
+      buildForestLake(), buildMountains(),
+      buildAgents(),
+    ])
+    if (checkCancelled()) return
+
     // 4b. Characters — CharacterSystem is a renderer only; entities are
     // spawned on demand from OrgRoom state by GardenEngine.connectToOrgRoom.
     try {
@@ -361,10 +403,6 @@ export class SceneManager {
       console.warn('[SceneManager] CharacterSystem init failed (scene continues):', err)
       this.characterSystem = null
     }
-    if (checkCancelled()) return
-
-    // 4c. Initialize Rapier physics for takeover mode (non-blocking)
-    await this.initPhysics(currentBuild, signal)
     if (checkCancelled()) return
 
     // 5. Paths between zones + zone signs
@@ -405,34 +443,20 @@ export class SceneManager {
       this.signEntities.push(sign)
     }
 
-    // 6. Scatter pine trees + bushes (after all exclusion zones are registered)
+    // 6. Scatter systems (after all exclusion zones are registered) + Rapier
+    // physics — one parallel barrier. Physics needs the buildings (done) and
+    // is dominated by the WASM fetch, which overlaps nicely with the
+    // CPU-bound scatter placement. initPhysics self-guards cancellation
+    // (it destroys an orphaned world when the build was superseded).
     this.pines = new PineTreeSystem()
-    await this.pines.build(this.app, this.loader, this.layout.getExclusionZones())
-    if (checkCancelled()) return
-
     this.bushes = new BushSystem()
-    await this.bushes.build(this.app, this.loader, this.layout.getExclusionZones(), pathRoutes)
-    if (checkCancelled()) return
-
-    // 6a. Decorative prop scatter — flower patches + rock piles in mid-distance
-    // wedges, complementing BushSystem's single bushes/stumps.
     this.decorProps = new DecorativePropScatter()
-    await this.decorProps.build(
-      this.app, this.loader, this.layout.getExclusionZones(), pathRoutes,
-    )
-    if (checkCancelled()) return
-
-    // 6b. Forest lake — pond inside a dense forest cluster, opposite the mountains (SE)
-    // Positioned at the far edge of the world, like mountains
-    const FOREST_LAKE_X = 180
-    const FOREST_LAKE_Z = -160
-    this.forestLake = new ForestLake()
-    await this.forestLake.build(this.app, this.loader, FOREST_LAKE_X, FOREST_LAKE_Z)
-    if (checkCancelled()) return
-
-    // 6c. Mountain backdrop — Eastern Ghats-style range at the far edge
-    this.mountains = new MountainBackdrop()
-    await this.mountains.build(this.app, this.loader)
+    await Promise.all([
+      this.pines.build(this.app, this.loader, this.layout.getExclusionZones()),
+      this.bushes.build(this.app, this.loader, this.layout.getExclusionZones(), pathRoutes),
+      this.decorProps.build(this.app, this.loader, this.layout.getExclusionZones(), pathRoutes),
+      this.initPhysics(currentBuild, signal),
+    ])
     if (checkCancelled()) return
 
     // 7. Relationship arcs
@@ -464,16 +488,8 @@ export class SceneManager {
     // 8c. Zone fences — circular wooden fences around each building zone.
     // Gate angle points toward orchard (0,0) so it aligns with the path entrance.
     // Orchard is the central hub; it has paths converging from all sides so no fence.
+    // (Agent characters were built in the parallel barrier above.)
     this.buildZoneFences(buildingFactory)
-
-    // 8d. Agent characters — always initialized so live WebSocket events can spawn robots
-    // even if no agents are active at page load time
-    this.agentSystem = new AgentCharacterSystem()
-    await this.agentSystem.build(
-      this.app, this.loader, data.agent_activity,
-      (repoName) => this.getTreePosition(repoName),
-    )
-    if (checkCancelled()) return
 
     // 9. Wrap all garden content under a single root for scene transitions.
     // When entering a house interior, gardenRoot.enabled = false hides the entire garden.
