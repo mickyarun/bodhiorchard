@@ -50,6 +50,17 @@
       >
         Standup
       </v-chip>
+      <v-chip
+        v-if="displayData"
+        size="small"
+        variant="tonal"
+        :color="minigames.streakCount > 0 ? 'warning' : undefined"
+        prepend-icon="mdi-gamepad-variant-outline"
+        style="cursor: pointer;"
+        @click="showGames = true"
+      >
+        Games<template v-if="minigames.streakCount > 0"> · 🔥{{ minigames.streakCount }}</template>
+      </v-chip>
 
       <v-spacer />
 
@@ -154,6 +165,9 @@
         <StandupPanel v-if="showStandup" @close="showStandup = false" />
       </Transition>
 
+      <!-- Garden games + daily streak dialog -->
+      <MiniGameHub v-model="showGames" />
+
       <!-- Takeover hint overlay -->
       <div
         v-if="viewMode === 'tree' && displayData && !isTakeover"
@@ -183,6 +197,8 @@ import TreeContent from './TreeContent.vue'
 import GraphContent from './GraphContent.vue'
 import SetupChecklist from '@/components/SetupChecklist.vue'
 import StandupPanel from '@/components/standup/StandupPanel.vue'
+import MiniGameHub from '@/components/minigames/MiniGameHub.vue'
+import { useMinigamesStore } from '@/stores/minigames'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
 
 const route = useRoute()
@@ -216,6 +232,8 @@ watch(viewMode, (mode) => {
 
 const showRelations = ref(false)
 const showStandup = ref(false)
+const showGames = ref(false)
+const minigames = useMinigamesStore()
 const isTakeover = ref(false)
 const visibleRepos = ref<string[]>([])
 
@@ -337,6 +355,8 @@ let takeoverSyncInterval: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
   store.fetchTreeData()
+  // Streak chip in the header needs play state before the hub is opened.
+  void minigames.fetchStatus()
   window.addEventListener('keydown', onKeyDown)
 
   // Poll control state every 500ms so the hint stays in sync
