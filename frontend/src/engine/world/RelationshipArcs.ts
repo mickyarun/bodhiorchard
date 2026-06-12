@@ -152,6 +152,8 @@ export class RelationshipArcs {
     this.root!.addChild(arcParent)
   }
 
+  get isVisible(): boolean { return this.visible }
+
   toggle(): boolean {
     this.visible = !this.visible
     if (this.root) this.root.enabled = this.visible

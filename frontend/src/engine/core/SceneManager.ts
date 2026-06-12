@@ -31,7 +31,7 @@
 import * as pc from 'playcanvas'
 import type { Application } from './Application'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
-import type { EngineData } from '../types'
+import type { EngineData, EngineFeature } from '../types'
 import { AssetLoader } from '../assets/AssetLoader'
 import { acquireRenderPause, releaseRenderPause } from '../utils/AppLifecycle'
 import { Theme } from '../rendering/Theme'
@@ -496,6 +496,53 @@ export class SceneManager {
     // Camera and lights are kept outside so they work in both modes.
     this.wrapGardenRoot()
 
+  }
+
+  /**
+   * Apply an incremental EngineData change without tearing the scene down.
+   * Only called when SceneDiff classified the change as layout-invariant
+   * (same repos in the same order, identical members). Returns false when
+   * this scene can't honor the incremental contract (e.g. a non-procedural
+   * repo visualization) so the caller falls back to a full rebuild.
+   */
+  async applyIncremental(
+    diff: { changedRepos: string[]; relationshipsChanged: boolean },
+    data: EngineData,
+  ): Promise<boolean> {
+    if (diff.changedRepos.length > 0) {
+      if (!(this.repoVis instanceof ProceduralTreeSystem)) return false
+
+      // Mirror build()'s per-repo feature indexing (skip backend shadows).
+      const featuresByRepo = new Map<string, EngineFeature[]>()
+      for (const f of data.features) {
+        if (!f.repo_name || f.link_role === 'backend') continue
+        const arr = featuresByRepo.get(f.repo_name)
+        if (arr) arr.push(f); else featuresByRepo.set(f.repo_name, [f])
+      }
+
+      for (const name of diff.changedRepos) {
+        const repo = data.repos.find(r => r.repo_name === name)
+        if (!repo) continue
+        await this.repoVis.rebuildRepo(repo, featuresByRepo.get(name) ?? [])
+      }
+    }
+
+    if (diff.relationshipsChanged && this.repoVis) {
+      const wasVisible = this.arcs?.isVisible ?? false
+      this.arcs?.destroy(this.materials)
+      this.arcs = new RelationshipArcs()
+      const treePositions = new Map<string, pc.Vec3>()
+      for (const repo of data.repos) {
+        const pos = this.repoVis.getTreePosition(repo.repo_name)
+        if (pos) treePositions.set(repo.repo_name, pos)
+      }
+      const arcsEntity = this.arcs.build(this.materials, data.relationships, treePositions)
+      // Parent under the garden root (exists after the initial full build)
+      // so arcs still hide when entering interiors.
+      ;(this._gardenRoot ?? this.app.root).addChild(arcsEntity)
+      this.arcs.setVisible(wasVisible)
+    }
+    return true
   }
 
   /**
