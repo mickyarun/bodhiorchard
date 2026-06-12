@@ -47,6 +47,7 @@ import {
 import {
   buildInstancedGlbs, type GlbScatterGroup, type ScatterTransform,
 } from '../utils/GlbInstancing'
+import { Theme } from '../rendering/Theme'
 
 // ─── Scatter region (annulus) ────────────────────────────────────────────
 const INNER_R = 24          // outside orchard plaza rim (plaza = r~7, repo trees end ~r=14)
@@ -74,11 +75,11 @@ const CLUSTER_WEIGHTS: Array<{ type: ClusterType; weight: number }> = [
 const FLOWERS_PER_PATCH_MIN = 4
 const FLOWERS_PER_PATCH_MAX = 6
 const FLOWER_PATCH_SPREAD = 1.4
-/** Default flower GLBs are tiny — invisible at overhead camera. Scale up
- *  so the color accents actually read from distance. Matches the scale
- *  treatment in HubAnchor's bush ring. */
-const FLOWER_SCALE_MIN = 1.8
-const FLOWER_SCALE_MAX = 2.4
+/** Modest scale-up — the old 1.8-2.4 read as plastic toy tulips next to
+ *  the procedural grass carpet; the carpet's own flower tufts now carry
+ *  the color accents, these are just secondary garnish. */
+const FLOWER_SCALE_MIN = 1.1
+const FLOWER_SCALE_MAX = 1.5
 
 // ─── Rock cluster tuning ─────────────────────────────────────────────────
 const ROCKS_PER_CLUSTER_MIN = 2
@@ -100,6 +101,7 @@ const STUMP_LOG_PATHS = [
 export class DecorativePropScatter {
   private root: pc.Entity | null = null
   private vbs: pc.VertexBuffer[] = []
+  private materials: pc.Material[] = []
 
   async build(
     app: Application,
@@ -144,12 +146,21 @@ export class DecorativePropScatter {
       }
     }
 
-    const { entities, vbs } = buildInstancedGlbs(
-      app.app.graphicsDevice, loader, [...groupsByAsset.values()],
+    // Wood assets (stumps, log stacks) get the warm tint — the raw Kenney
+    // GLBs render plastic-white in the daylit scene. Rocks/flowers untinted.
+    const groups = [...groupsByAsset.values()]
+    const isWood = (g: GlbScatterGroup): boolean => /stump|log/.test(g.asset.name)
+    const wood = buildInstancedGlbs(
+      app.app.graphicsDevice, loader, groups.filter(isWood),
+      { namePrefix: 'DecorWoodInstanced', tint: Theme.SCATTER.wood },
+    )
+    const rest = buildInstancedGlbs(
+      app.app.graphicsDevice, loader, groups.filter((g) => !isWood(g)),
       { namePrefix: 'DecorPropInstanced' },
     )
-    for (const e of entities) this.root.addChild(e)
-    this.vbs = vbs
+    for (const e of [...wood.entities, ...rest.entities]) this.root.addChild(e)
+    this.vbs = [...wood.vbs, ...rest.vbs]
+    this.materials = [...wood.materials, ...rest.materials]
 
     return this.root
   }
@@ -270,6 +281,8 @@ export class DecorativePropScatter {
   destroy(): void {
     for (const vb of this.vbs) vb.destroy()
     this.vbs = []
+    for (const mat of this.materials) mat.destroy()
+    this.materials = []
     if (this.root) {
       this.root.destroy()
       this.root = null

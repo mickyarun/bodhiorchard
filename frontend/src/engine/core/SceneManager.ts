@@ -458,7 +458,7 @@ export class SceneManager {
       this.pines.build(this.app, this.loader, this.layout.getExclusionZones()),
       this.bushes.build(this.app, this.loader, this.layout.getExclusionZones(), pathRoutes),
       this.decorProps.build(this.app, this.loader, this.layout.getExclusionZones(), pathRoutes),
-      this.grass.build(this.app, this.loader, this.layout.getExclusionZones()),
+      this.grass.build(this.app, this.loader, this.layout.getExclusionZones(), pathRoutes),
       this.initPhysics(currentBuild, signal),
     ])
     if (checkCancelled()) return

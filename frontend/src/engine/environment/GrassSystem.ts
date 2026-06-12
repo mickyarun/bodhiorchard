@@ -13,107 +13,73 @@
 // limitations under the License.
 
 /**
- * GrassSystem — lush procedural grass tufts + GLB flower accents.
+ * GrassSystem — a dense painterly grass CARPET with flower tufts.
  *
- * Grass is NOT a GLB: each tuft is three crossed alpha-tested quads
- * sharing a painted blade texture (deep-green roots → vibrant tips).
- * Crossed quads read as volume from every camera angle, take the
- * GrassWind transformVS sway (height² — roots anchored, tips travel),
- * and the whole field renders as ONE instanced draw call.
+ * The old version scattered ~700 isolated tufts that read as bright
+ * clumps stuck on the ground texture. The carpet look needs density and
+ * color harmony instead: ~30k low blade tufts on a jittered grid, roots
+ * at the ground color, split across three subtly-tinted batches so the
+ * field has large-scale patch variation. Three instanced draw calls
+ * total for the grass, three more for the flower color groups.
  *
- * Flowers stay GLB scatter (Kenney, instanced per asset) — they're the
- * color accents between tufts.
+ * Placement skips exclusion zones AND a rasterized path-clearance grid
+ * (blades poking through the path strips break the illusion fastest).
  *
- * Placement: Poisson-ish rejection scatter, skipping exclusion zones.
+ * All foliage materials take the GrassWind transformVS sway.
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
-import { AssetLoader } from '../assets/AssetLoader'
-import { SCATTER_FLOWERS } from '../assets/AssetManifest'
+import type { AssetLoader } from '../assets/AssetLoader'
 import { isInsideAnyZone, randRange, type ExclusionZone } from '../utils/MathUtils'
-import {
-  buildInstancedGlbs, type GlbScatterGroup, type ScatterTransform,
-} from '../utils/GlbInstancing'
+import { evalRouteAt, type PathRoute } from '@shared/world/paths'
 import { createInstancedEntity, computeInstanceAabb } from '../treetest/instancing'
-import { Theme, toCss } from '../rendering/Theme'
+import { Theme } from '../rendering/Theme'
 import { GrassWind } from '../effects/GrassWind'
+import {
+  buildBladeTexture,
+  buildCrossQuadMesh,
+  buildFlowerTexture,
+  buildFoliageMaterial,
+} from './GrassAssets'
 
-const GRASS_COUNT = 700
-const FLOWER_COUNT = 40
-const WORLD_HALF = 40 // compact world with TILE_SIZE=1
-const MIN_DISTANCE = 1.1 // tighter spacing for lush coverage
-const BLADE_TEX_SIZE = 128
-/** Tuft footprint in mesh units — instance scale multiplies this. */
-const TUFT_WIDTH = 0.9
-const TUFT_HEIGHT = 0.65
+// ─── Carpet density ──────────────────────────────────────────────────────
+const CARPET_HALF = 58       // world half-extent the carpet covers
+const GRID_STEP = 0.55       // jittered-grid spacing → ~33k candidate points
+const DROPOUT = 0.22         // random gaps keep the grid from reading as a grid
+const TUFT_WIDTH = 1.05
+const TUFT_HEIGHT = 0.55
+
+// ─── Flowers ─────────────────────────────────────────────────────────────
+const FLOWER_COUNT = 240
+const FLOWER_MIN_DIST = 2.4
+const FLOWER_WIDTH = 0.55
+const FLOWER_HEIGHT = 0.7
+
+/** Keep blades off the walking strips (primary path half-width ≈1.5). */
+const PATH_CLEARANCE = 2.2
+const PATH_SAMPLES_PER_ROUTE = 28
+const CELL = 1.0
 
 export class GrassSystem {
   private root: pc.Entity | null = null
   private vbs: pc.VertexBuffer[] = []
   private materials: pc.Material[] = []
-  private tuftMesh: pc.Mesh | null = null
-  private bladeTexture: pc.Texture | null = null
+  private meshes: pc.Mesh[] = []
+  private textures: pc.Texture[] = []
   private wind = new GrassWind()
 
   async build(
     app: Application,
-    loader: AssetLoader,
+    _loader: AssetLoader,
     exclusionZones: readonly ExclusionZone[],
+    pathRoutes: readonly PathRoute[] = [],
   ): Promise<pc.Entity> {
     this.root = new pc.Entity('GrassSystem')
     const device = app.app.graphicsDevice
+    const blockedCells = this.rasterizePathClearance(pathRoutes)
 
-    // ─── Lush tufts: one instanced batch of crossed alpha quads ───
-    const points = this.poissonScatter(GRASS_COUNT, WORLD_HALF, MIN_DISTANCE, exclusionZones)
-    if (points.length > 0) {
-      this.tuftMesh = this.buildTuftMesh(device)
-      this.bladeTexture = this.buildBladeTexture(device)
-      const tuftMat = this.buildTuftMaterial(this.bladeTexture)
-      this.materials.push(tuftMat)
-      this.wind.apply([tuftMat], Theme.SCATTER.grassWindStrength)
-
-      const matrices = new Float32Array(points.length * 16)
-      const mat = new pc.Mat4()
-      const pos = new pc.Vec3()
-      const rot = new pc.Quat()
-      const scl = new pc.Vec3()
-      for (let i = 0; i < points.length; i++) {
-        const p = points[i]
-        pos.set(p.x, 0, p.z)
-        rot.setFromEulerAngles(0, randRange(0, 360), 0)
-        const s = randRange(0.7, 1.45)
-        scl.set(s, s * randRange(0.85, 1.25), s)
-        mat.setTRS(pos, rot, scl)
-        matrices.set(mat.data, i * 16)
-      }
-      const aabb = computeInstanceAabb(matrices, points.length, TUFT_HEIGHT * 2)
-      const { entity, vb } = createInstancedEntity(
-        device, this.tuftMesh, tuftMat, matrices, points.length,
-        'GrassTufts', { aabb },
-      )
-      this.root.addChild(entity)
-      this.vbs.push(vb)
-    }
-
-    // ─── Flower accents: GLB scatter, instanced per asset ───
-    const flowerAssets = await loader.loadBatch(SCATTER_FLOWERS)
-    const flowerGroups: GlbScatterGroup[] = flowerAssets.map(
-      (asset) => ({ asset, transforms: [] }),
-    )
-    for (const pt of this.poissonScatter(FLOWER_COUNT, WORLD_HALF, 3, exclusionZones)) {
-      const transform: ScatterTransform = {
-        x: pt.x, y: 0, z: pt.z,
-        yawDeg: randRange(0, 360),
-        scale:  randRange(2.5, 5.5),
-      }
-      flowerGroups[Math.floor(Math.random() * flowerGroups.length)].transforms.push(transform)
-    }
-    const flowers = buildInstancedGlbs(
-      device, loader, flowerGroups, { namePrefix: 'FlowerInstanced' },
-    )
-    for (const e of flowers.entities) this.root.addChild(e)
-    this.vbs.push(...flowers.vbs)
-    this.materials.push(...flowers.materials)
+    this.buildCarpet(device, exclusionZones, blockedCells)
+    this.buildFlowers(device, exclusionZones, blockedCells)
 
     app.root.addChild(this.root)
     return this.root
@@ -124,153 +90,160 @@ export class GrassSystem {
     this.wind.update(dt)
   }
 
-  /** Three quads crossed at 60° around Y, base at y=0, tip at TUFT_HEIGHT. */
-  private buildTuftMesh(device: pc.GraphicsDevice): pc.Mesh {
-    const positions: number[] = []
-    const normals: number[] = []
-    const uvs: number[] = []
-    const indices: number[] = []
-    const hw = TUFT_WIDTH / 2
-    const h = TUFT_HEIGHT
-
-    for (let q = 0; q < 3; q++) {
-      const a = (q * Math.PI) / 3
-      const dx = Math.cos(a) * hw
-      const dz = Math.sin(a) * hw
-      const base = q * 4
-      positions.push(
-        -dx, 0, -dz,   dx, 0, dz,
-         dx, h, dz,   -dx, h, -dz,
-      )
-      // Up-biased normals make the lighting read like a ground covering
-      // rather than vertical billboards catching side light.
-      for (let v = 0; v < 4; v++) normals.push(0, 1, 0)
-      uvs.push(0, 0, 1, 0, 1, 1, 0, 1)
-      indices.push(base, base + 1, base + 2, base, base + 2, base + 3)
-    }
-
-    const geometry = new pc.Geometry()
-    geometry.positions = positions
-    geometry.normals = normals
-    geometry.uvs = uvs
-    geometry.indices = indices
-    return pc.Mesh.fromGeometry(device, geometry)
-  }
-
-  /** Painted blade silhouettes: deep-green roots fading to vibrant tips. */
-  private buildBladeTexture(device: pc.GraphicsDevice): pc.Texture {
-    const S = BLADE_TEX_SIZE
-    const canvas = document.createElement('canvas')
-    canvas.width = S
-    canvas.height = S
-    const ctx = canvas.getContext('2d')!
-    ctx.clearRect(0, 0, S, S)
-
-    const root = Theme.GRASS_BLADES.root
-    const tip = Theme.GRASS_BLADES.tip
-    const bladeCount = 11
-    for (let b = 0; b < bladeCount; b++) {
-      const cx = (b + 0.5) * (S / bladeCount) + randRange(-3, 3)
-      const w = S / bladeCount * randRange(0.5, 0.85)
-      const height = S * randRange(0.55, 0.98)
-      const lean = randRange(-S * 0.08, S * 0.08)
-
-      const grad = ctx.createLinearGradient(0, S, 0, S - height)
-      grad.addColorStop(0, toCss(root))
-      grad.addColorStop(1, toCss(tip))
-      ctx.fillStyle = grad
-      // Tapered blade: wide base → pointed tip, slight lean.
-      ctx.beginPath()
-      ctx.moveTo(cx - w / 2, S)
-      ctx.quadraticCurveTo(cx - w / 2 + lean * 0.4, S - height * 0.6, cx + lean, S - height)
-      ctx.quadraticCurveTo(cx + w / 2 + lean * 0.4, S - height * 0.6, cx + w / 2, S)
-      ctx.closePath()
-      ctx.fill()
-    }
-
-    const texture = new pc.Texture(device, {
-      width: S,
-      height: S,
-      format: pc.PIXELFORMAT_RGBA8,
-      mipmaps: true,
-      addressU: pc.ADDRESS_CLAMP_TO_EDGE,
-      addressV: pc.ADDRESS_CLAMP_TO_EDGE,
-      minFilter: pc.FILTER_LINEAR_MIPMAP_LINEAR,
-      magFilter: pc.FILTER_LINEAR,
-      anisotropy: 4,
-    })
-    const pixels = texture.lock()
-    pixels.set(ctx.getImageData(0, 0, S, S).data)
-    texture.unlock()
-    return texture
-  }
-
-  private buildTuftMaterial(texture: pc.Texture): pc.StandardMaterial {
-    const mat = new pc.StandardMaterial()
-    mat.diffuseMap = texture
-    mat.opacityMap = texture
-    mat.opacityMapChannel = 'a'
-    mat.alphaTest = 0.45
-    mat.cull = pc.CULLFACE_NONE
-    mat.twoSidedLighting = true
-    mat.metalness = 0
-    mat.gloss = 0.1
-    mat.update()
-    return mat
-  }
-
-  /**
-   * Simple Poisson-ish scatter: random rejection with minimum distance.
-   * Not a true Poisson disc sample, but fast enough for decorative placement.
-   */
-  private poissonScatter(
-    count: number,
-    halfExtent: number,
-    minDist: number,
+  /** ~30k blade tufts in three subtly-tinted instanced batches. */
+  private buildCarpet(
+    device: pc.GraphicsDevice,
     exclusionZones: readonly ExclusionZone[],
-  ): Array<{ x: number; z: number }> {
-    const points: Array<{ x: number; z: number }> = []
-    const maxAttempts = count * 10
+    blockedCells: Set<string>,
+  ): void {
+    const bladeTexture = buildBladeTexture(device)
+    this.textures.push(bladeTexture)
+    const mesh = buildCrossQuadMesh(device, TUFT_WIDTH, TUFT_HEIGHT)
+    this.meshes.push(mesh)
+
+    const tints = Theme.GRASS_BLADES.batchTints
+    const batches: number[][] = tints.map(() => [])
+
+    const mat = new pc.Mat4()
+    const pos = new pc.Vec3()
+    const rot = new pc.Quat()
+    const scl = new pc.Vec3()
+    for (let gx = -CARPET_HALF; gx <= CARPET_HALF; gx += GRID_STEP) {
+      for (let gz = -CARPET_HALF; gz <= CARPET_HALF; gz += GRID_STEP) {
+        if (Math.random() < DROPOUT) continue
+        // Full-cell jitter — anything less leaves faint concentric row
+        // artifacts readable at the overview zoom.
+        const x = gx + randRange(-GRID_STEP, GRID_STEP) * 0.5
+        const z = gz + randRange(-GRID_STEP, GRID_STEP) * 0.5
+        if (isInsideAnyZone(x, z, exclusionZones as ExclusionZone[])) continue
+        if (blockedCells.has(this.cellKey(x, z))) continue
+
+        pos.set(x, 0, z)
+        rot.setFromEulerAngles(0, randRange(0, 360), 0)
+        const s = randRange(0.75, 1.25)
+        scl.set(s, s * randRange(0.8, 1.35), s)
+        mat.setTRS(pos, rot, scl)
+        const bucket = batches[Math.floor(Math.random() * batches.length)]
+        for (let k = 0; k < 16; k++) bucket.push(mat.data[k])
+      }
+    }
+
+    for (let i = 0; i < batches.length; i++) {
+      const flat = batches[i]
+      const count = flat.length / 16
+      if (count === 0) continue
+      const material = buildFoliageMaterial(bladeTexture)
+      const [tr, tg, tb] = tints[i]
+      material.diffuse = new pc.Color(tr, tg, tb)
+      material.update()
+      this.materials.push(material)
+
+      const matrices = new Float32Array(flat)
+      const aabb = computeInstanceAabb(matrices, count, TUFT_HEIGHT * 2)
+      const { entity, vb } = createInstancedEntity(
+        device, mesh, material, matrices, count, `GrassCarpet_${i}`, { aabb },
+      )
+      this.root!.addChild(entity)
+      this.vbs.push(vb)
+    }
+    this.wind.apply(this.materials.slice(), Theme.SCATTER.grassWindStrength)
+  }
+
+  /** Flower tufts dotted through the carpet — one batch per petal color. */
+  private buildFlowers(
+    device: pc.GraphicsDevice,
+    exclusionZones: readonly ExclusionZone[],
+    blockedCells: Set<string>,
+  ): void {
+    const mesh = buildCrossQuadMesh(device, FLOWER_WIDTH, FLOWER_HEIGHT)
+    this.meshes.push(mesh)
+
+    const petals = Theme.FLOWERS.petals
+    const batches: number[][] = petals.map(() => [])
+    const placed: Array<{ x: number; z: number }> = []
+    const mat = new pc.Mat4()
+    const pos = new pc.Vec3()
+    const rot = new pc.Quat()
+    const scl = new pc.Vec3()
     let attempts = 0
-
-    while (points.length < count && attempts < maxAttempts) {
+    while (placed.length < FLOWER_COUNT && attempts < FLOWER_COUNT * 12) {
       attempts++
-      const x = randRange(-halfExtent, halfExtent)
-      const z = randRange(-halfExtent, halfExtent)
-
+      const x = randRange(-CARPET_HALF, CARPET_HALF)
+      const z = randRange(-CARPET_HALF, CARPET_HALF)
       if (isInsideAnyZone(x, z, exclusionZones as ExclusionZone[])) continue
+      if (blockedCells.has(this.cellKey(x, z))) continue
+      const minSq = FLOWER_MIN_DIST * FLOWER_MIN_DIST
+      if (placed.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < minSq)) continue
+      placed.push({ x, z })
 
-      let tooClose = false
-      const checkCount = Math.min(points.length, 20)
-      for (let i = points.length - checkCount; i < points.length; i++) {
-        const dx = x - points[i].x
-        const dz = z - points[i].z
-        if (dx * dx + dz * dz < minDist * minDist) {
-          tooClose = true
-          break
+      pos.set(x, 0, z)
+      rot.setFromEulerAngles(0, randRange(0, 360), 0)
+      const s = randRange(0.8, 1.3)
+      scl.set(s, s, s)
+      mat.setTRS(pos, rot, scl)
+      const bucket = batches[Math.floor(Math.random() * batches.length)]
+      for (let k = 0; k < 16; k++) bucket.push(mat.data[k])
+    }
+
+    const flowerMats: pc.Material[] = []
+    for (let i = 0; i < batches.length; i++) {
+      const flat = batches[i]
+      const count = flat.length / 16
+      if (count === 0) continue
+      const texture = buildFlowerTexture(device, petals[i])
+      this.textures.push(texture)
+      const material = buildFoliageMaterial(texture)
+      this.materials.push(material)
+      flowerMats.push(material)
+
+      const matrices = new Float32Array(flat)
+      const aabb = computeInstanceAabb(matrices, count, FLOWER_HEIGHT * 2)
+      const { entity, vb } = createInstancedEntity(
+        device, mesh, material, matrices, count, `GrassFlowers_${i}`, { aabb },
+      )
+      this.root!.addChild(entity)
+      this.vbs.push(vb)
+    }
+    this.wind.apply(flowerMats, Theme.SCATTER.grassWindStrength * 0.7)
+  }
+
+  /** Mark CELL-sized cells within PATH_CLEARANCE of any primary-path sample
+   *  so the per-point check is a single Set lookup, not a distance scan. */
+  private rasterizePathClearance(routes: readonly PathRoute[]): Set<string> {
+    const blocked = new Set<string>()
+    const reach = Math.ceil(PATH_CLEARANCE / CELL)
+    for (const route of routes) {
+      for (let i = 0; i <= PATH_SAMPLES_PER_ROUTE; i++) {
+        const p = evalRouteAt(route, i / PATH_SAMPLES_PER_ROUTE)
+        const cx = Math.round(p.x / CELL)
+        const cz = Math.round(p.z / CELL)
+        for (let dx = -reach; dx <= reach; dx++) {
+          for (let dz = -reach; dz <= reach; dz++) {
+            blocked.add(`${cx + dx}:${cz + dz}`)
+          }
         }
       }
-      if (tooClose) continue
-
-      points.push({ x, z })
     }
+    return blocked
+  }
 
-    return points
+  private cellKey(x: number, z: number): string {
+    return `${Math.round(x / CELL)}:${Math.round(z / CELL)}`
   }
 
   destroy(): void {
     this.wind.clear()
     for (const vb of this.vbs) vb.destroy()
     this.vbs = []
-    for (const mat of this.materials) mat.destroy()
+    for (const material of this.materials) material.destroy()
     this.materials = []
-    if (this.tuftMesh) {
-      this.tuftMesh.vertexBuffer?.destroy()
-      this.tuftMesh.indexBuffer?.[0]?.destroy()
-      this.tuftMesh = null
+    for (const mesh of this.meshes) {
+      mesh.vertexBuffer?.destroy()
+      mesh.indexBuffer?.[0]?.destroy()
     }
-    this.bladeTexture?.destroy()
-    this.bladeTexture = null
+    this.meshes = []
+    for (const texture of this.textures) texture.destroy()
+    this.textures = []
     if (this.root) {
       this.root.destroy()
       this.root = null

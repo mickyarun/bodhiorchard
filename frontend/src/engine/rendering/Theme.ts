@@ -86,7 +86,10 @@ export const Theme = {
   GROUND: {
     /** Diffuse multiplier over grass.jpg — lifts the olive base toward
      *  vibrant spring green (red suppressed, green slightly over 1). */
-    tint: [0.74, 1.04, 0.52] as readonly [number, number, number],
+    tint: [0.80, 1.06, 0.52] as readonly [number, number, number],
+    /** grass.jpg tiles across the 600u plane. Fewer tiles = larger, softer
+     *  painterly patches; the fine 60×60 noise fought the blade carpet. */
+    tiling: 34,
     gloss: 0.05,
     /** Procedural fallback texture base. */
     base: [58, 118, 38] as Rgb255,
@@ -136,10 +139,29 @@ export const Theme = {
     emissiveScale: 0.35,
   },
 
-  /** Procedural grass-tuft blade texture (GrassSystem). */
+  /** Procedural grass carpet (GrassSystem). The reference look is a dense
+   *  painterly field where blades and ground read as ONE surface: roots
+   *  sit at the ground color, tips go warm yellow-green. Three batch tints
+   *  give large-scale patch variation without per-instance color data. */
   GRASS_BLADES: {
-    root: [44, 96, 28] as Rgb255,    // deep shaded base
-    tip:  [118, 196, 66] as Rgb255,  // vibrant sunlit tip
+    root: [46, 100, 32] as Rgb255,   // ≈ ground color (blades grow out of it)
+    tip:  [112, 182, 70] as Rgb255,  // sunlit tip — green-leaning, yellow only as a hint
+    batchTints: [
+      [1.0, 1.0, 1.0],
+      [0.85, 0.92, 0.82],
+      [1.03, 1.02, 0.93],
+    ] as ReadonlyArray<readonly [number, number, number]>,
+  },
+
+  /** Procedural flower tufts dotted through the carpet (GrassSystem).
+   *  Petal color per batch; stems stay grass-green. */
+  FLOWERS: {
+    stem: [74, 128, 52] as Rgb255,
+    petals: [
+      [252, 250, 240] as Rgb255,  // daisy white
+      [248, 142, 128] as Rgb255,  // soft coral
+      [250, 214, 110] as Rgb255,  // buttercup
+    ],
   },
 
   /** Scatter foliage tints (multiplied onto cloned GLB materials). */
@@ -147,6 +169,9 @@ export const Theme = {
     pine:  [0.72, 0.95, 0.78] as readonly [number, number, number],  // deep blue-green
     bush:  [0.92, 1.08, 0.78] as readonly [number, number, number],  // fresh leaf green
     grass: [0.90, 1.05, 0.78] as readonly [number, number, number],  // spring blades
+    /** Warm wood multiplier for the pale Kenney log/stump GLBs — untinted
+     *  they render plastic-white in the daylit scene. */
+    wood:  [0.84, 0.64, 0.44] as readonly [number, number, number],
     /** Vertex-wind sway amplitude for grass/flower scatter (world units
      *  at blade tip, pre height² weighting). */
     grassWindStrength: 0.35,

@@ -107,9 +107,11 @@ export class GroundSystem {
       tex.setSource(img)
       this.pngTexture = tex
       this.material.diffuseMap = tex
-      // 60 tiles across 600 units → 10 world units per tile. Matches the
-      // low-poly stylized look in the target reference without visible seams.
-      this.material.diffuseMapTiling = new pc.Vec2(60, 60)
+      // Tiling from Theme — larger, softer patches read painterly under
+      // the blade carpet (fine tiling fought the blades with noise).
+      this.material.diffuseMapTiling = new pc.Vec2(
+        Theme.GROUND.tiling, Theme.GROUND.tiling,
+      )
       this.material.update()
     }
     img.onerror = (err) => {

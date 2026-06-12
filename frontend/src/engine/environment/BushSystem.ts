@@ -68,26 +68,37 @@ export class BushSystem {
     }
     allPoints.push(...bushPoints)
 
-    // 2. Decorative props (stumps, logs, rocks) in open areas
+    // 2. Decorative props in open areas. The Kenney wood GLBs (stumps,
+    // logs) render plastic-white untinted, so they split into a
+    // warm-wood-tinted call; the plant bushes share the leaf tint.
     const propAssets = await loader.loadBatch(SCATTER_PROPS)
     const propGroups: GlbScatterGroup[] = propAssets.map(
       (asset) => ({ asset, transforms: [] }),
     )
     for (const pt of this.scatterOpen(PROP_COUNT, exclusionZones, allPoints)) {
-      appendTransform(propGroups, pt.x, pt.z, randRange(1.5, 3.0))
+      appendTransform(propGroups, pt.x, pt.z, randRange(1.2, 2.2))
     }
+    // AssetLoader names assets by their path, so the GLB filename is testable.
+    const isWood = (g: GlbScatterGroup): boolean => /stump|log/.test(g.asset.name)
 
     const bushes = buildInstancedGlbs(
       app.app.graphicsDevice, loader, bushGroups,
       { namePrefix: 'BushInstanced', tint: Theme.SCATTER.bush },
     )
-    const props = buildInstancedGlbs(
-      app.app.graphicsDevice, loader, propGroups,
-      { namePrefix: 'PropInstanced' },
+    const woodProps = buildInstancedGlbs(
+      app.app.graphicsDevice, loader, propGroups.filter(isWood),
+      { namePrefix: 'WoodPropInstanced', tint: Theme.SCATTER.wood },
     )
-    for (const e of [...bushes.entities, ...props.entities]) this.root.addChild(e)
-    this.vbs = [...bushes.vbs, ...props.vbs]
-    this.materials = [...bushes.materials, ...props.materials]
+    const plantProps = buildInstancedGlbs(
+      app.app.graphicsDevice, loader, propGroups.filter((g) => !isWood(g)),
+      { namePrefix: 'PlantPropInstanced', tint: Theme.SCATTER.bush },
+    )
+    const results = [bushes, woodProps, plantProps]
+    for (const r of results) {
+      for (const e of r.entities) this.root.addChild(e)
+    }
+    this.vbs = results.flatMap((r) => r.vbs)
+    this.materials = results.flatMap((r) => r.materials)
 
     app.root.addChild(this.root)
     return this.root
