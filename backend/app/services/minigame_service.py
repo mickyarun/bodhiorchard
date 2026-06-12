@@ -12,19 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Garden mini-game scoring + daily streak integration.
+"""Garden mini-game scoring, streaks, and leaderboard.
 
-Mini-games are lightweight engagement loops in the garden dashboard
-(fishing at the forest lake, pollen pop). Submitting a score:
+Mini-games are engagement loops, INTENTIONALLY decoupled from the XP
+economy — XP is earned only by real development work. Playing awards no
+XP and never touches ``DeveloperXP``/``reward_events``. Instead each play:
 
-  1. awards XP once per game per UTC day (``award_xp`` dedup via
-     ``source_ref`` — replays return no award but still count as activity)
-  2. ticks the shared daily streak (``check_and_award_streak`` — the same
-     streak the rest of the platform uses, so playing a mini-game keeps a
-     developer's streak alive)
+  1. updates the player's personal best (the leaderboard key)
+  2. advances a self-contained "play on consecutive days" streak
 
-No new tables: awards land in ``reward_events``; the streak lives on
-``DeveloperXP``. Commit is the caller's (endpoint's) responsibility.
+All persistence lives on ``minigame_scores`` (see MinigameRepository).
+Commit is the caller's (endpoint's) responsibility.
 """
 
 import uuid
@@ -33,11 +31,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.repositories.developer_xp import (
-    DeveloperXPRepository,
-    RewardEventRepository,
-)
-from app.services.xp_service import award_xp, check_and_award_streak
+from app.repositories.minigame import LeaderboardRow, MinigameRepository
 
 
 class MinigameValidationError(ValueError):
@@ -47,21 +41,17 @@ class MinigameValidationError(ValueError):
 @dataclass(frozen=True)
 class GameSpec:
     name: str
-    base_xp: int
-    score_cap: int
+    max_score: int
 
 
-# Game registry — adding a game here is the only backend change it needs.
+# Game registry — adding a game here + a frontend component is all it takes.
 GAMES: dict[str, GameSpec] = {
-    "fishing": GameSpec(name="Lake Fishing", base_xp=15, score_cap=35),
-    "pollen_pop": GameSpec(name="Pollen Pop", base_xp=15, score_cap=35),
+    "fishing": GameSpec(name="Lake Fishing", max_score=50),
+    "pollen_pop": GameSpec(name="Pollen Pop", max_score=200),
 }
 
+# Absolute ceiling regardless of per-game cap — guards against tampering.
 MAX_SCORE = 1000
-
-
-def _source_ref(game: str, user_id: uuid.UUID, day: str) -> str:
-    return f"minigame:{game}:{user_id}:{day}"
 
 
 async def submit_score(
@@ -72,35 +62,25 @@ async def submit_score(
     game: str,
     score: int,
 ) -> dict[str, object]:
-    """Validate, award daily XP (deduped), and tick the streak."""
+    """Validate then record the play; returns best/streak state (no XP)."""
     spec = GAMES.get(game)
     if spec is None:
         raise MinigameValidationError(f"unknown game: {game}")
     if not 0 <= score <= MAX_SCORE:
         raise MinigameValidationError(f"score out of range 0..{MAX_SCORE}: {score}")
 
-    today = datetime.now(UTC).date().isoformat()
-    amount = spec.base_xp + min(score, spec.score_cap)
-
-    result = await award_xp(
-        db,
-        user_id=user_id,
-        org_id=org_id,
-        amount=float(amount),
-        source="minigame",
-        source_ref=_source_ref(game, user_id, today),
-        metadata={"game": game, "score": score},
-    )
-    streak_count = await check_and_award_streak(db, user_id=user_id, org_id=org_id)
+    repo = MinigameRepository(db, org_id=org_id)
+    today = datetime.now(UTC).date()
+    outcome = await repo.record_play(user_id=user_id, game=game, score=score, today=today)
 
     return {
         "game": game,
-        "xp_awarded": result.amount_awarded if result else 0,
-        "first_play_today": result is not None,
-        "total_xp": result.new_total if result else None,
-        "level": result.new_level if result else None,
-        "level_changed": result.level_changed if result else False,
-        "streak_count": streak_count,
+        "score": score,
+        "best_score": outcome.best_score,
+        "is_new_best": outcome.is_new_best,
+        "current_streak": outcome.current_streak,
+        "best_streak": outcome.best_streak,
+        "first_play_today": outcome.first_play_today,
     }
 
 
@@ -110,26 +90,46 @@ async def get_status(
     user_id: uuid.UUID,
     org_id: uuid.UUID,
 ) -> dict[str, object]:
-    """Today's play state per game plus the user's current streak."""
-    today = datetime.now(UTC).date().isoformat()
-    event_repo = RewardEventRepository(db, org_id=org_id)
+    """Per-game play state + personal best + the player's best active streak."""
+    today = datetime.now(UTC).date()
+    repo = MinigameRepository(db, org_id=org_id)
+    rows = {r.game: r for r in await repo.list_for_user(user_id)}
 
     games = []
     for key, spec in GAMES.items():
-        played = await event_repo.has_source_ref(_source_ref(key, user_id, today))
+        row = rows.get(key)
         games.append(
             {
                 "key": key,
                 "name": spec.name,
-                "played_today": played,
-                "max_xp": spec.base_xp + spec.score_cap,
+                "max_score": spec.max_score,
+                "best_score": row.best_score if row else 0,
+                "played_today": bool(row and row.last_played_date == today),
             }
         )
 
-    xp_repo = DeveloperXPRepository(db, org_id=org_id)
-    row = await xp_repo.get_by_user(user_id)
+    # The header chip shows the user's strongest live streak. A streak is
+    # "live" only if its last play was today or yesterday — older rows are
+    # stale and would otherwise show a frozen number.
+    live_streak = 0
+    for row in rows.values():
+        if row.last_played_date and (today - row.last_played_date).days <= 1:
+            live_streak = max(live_streak, row.current_streak)
+
     return {
         "games": games,
-        "streak_count": row.streak_count if row else 0,
-        "streak_best": row.streak_best if row else 0,
+        "streak_count": live_streak,
     }
+
+
+async def get_leaderboard(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    game: str,
+    limit: int,
+) -> list[LeaderboardRow]:
+    if game not in GAMES:
+        raise MinigameValidationError(f"unknown game: {game}")
+    repo = MinigameRepository(db, org_id=org_id)
+    return await repo.leaderboard(game=game, limit=limit)

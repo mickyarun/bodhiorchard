@@ -14,26 +14,30 @@
 
 """Garden mini-game endpoints.
 
-GET  /v1/minigames/status — today's play state per game + daily streak.
-POST /v1/minigames/score  — submit a finished play; awards XP once per
-game per UTC day and ticks the platform-wide daily streak.
+GET  /v1/minigames/status      — per-game play state, personal best, streak.
+POST /v1/minigames/score       — submit a finished play (no XP; updates
+                                 best score + consecutive-day streak).
+GET  /v1/minigames/leaderboard — top personal bests for one game.
 """
 
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
 from app.models.user import User
 from app.schemas.minigame import (
+    LeaderboardEntry,
+    MinigameLeaderboardRead,
     MinigameScoreIn,
     MinigameScoreResult,
     MinigameStatusRead,
 )
 from app.services.minigame_service import (
     MinigameValidationError,
+    get_leaderboard,
     get_status,
     submit_score,
 )
@@ -77,6 +81,34 @@ async def minigame_score(
         user_id=str(current_user.id),
         game=payload.game,
         score=payload.score,
-        xp_awarded=result["xp_awarded"],
+        is_new_best=result["is_new_best"],
     )
     return MinigameScoreResult.model_validate(result)
+
+
+@router.get("/leaderboard", response_model=MinigameLeaderboardRead)
+async def minigame_leaderboard(
+    game: str = Query(min_length=1, max_length=64),
+    limit: int = Query(default=10, ge=1, le=50),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MinigameLeaderboardRead:
+    try:
+        rows = await get_leaderboard(db, org_id=current_user.org_id, game=game, limit=limit)
+    except MinigameValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    return MinigameLeaderboardRead(
+        game=game,
+        entries=[
+            LeaderboardEntry(
+                user_id=r.user_id,
+                user_name=r.user_name,
+                best_score=r.best_score,
+                plays=r.plays,
+            )
+            for r in rows
+        ],
+    )

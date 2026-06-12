@@ -13,10 +13,10 @@
 // limitations under the License.
 
 /**
- * Mini-games store — daily play state + streak, score submission.
- *
- * First play of each game per UTC day awards XP (backend dedup);
- * any play keeps the platform-wide daily streak alive.
+ * Mini-games store — personal bests, daily play streak, and per-game
+ * leaderboards. Mini-games are pure engagement: NO XP is awarded (XP is
+ * reserved for real development work). Playing updates your best score
+ * (the leaderboard key) and keeps your consecutive-day streak alive.
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
@@ -25,32 +25,39 @@ import api from '@/services/api'
 export interface MinigameInfo {
   key: string
   name: string
+  max_score: number
+  best_score: number
   played_today: boolean
-  max_xp: number
 }
 
 export interface MinigameScoreResult {
   game: string
-  xp_awarded: number
+  score: number
+  best_score: number
+  is_new_best: boolean
+  current_streak: number
+  best_streak: number
   first_play_today: boolean
-  total_xp: number | null
-  level: number | null
-  level_changed: boolean
-  streak_count: number
+}
+
+export interface LeaderboardEntry {
+  user_id: string
+  user_name: string
+  best_score: number
+  plays: number
 }
 
 interface MinigameStatus {
   games: MinigameInfo[]
   streak_count: number
-  streak_best: number
 }
 
 export const useMinigamesStore = defineStore('minigames', () => {
   const games = ref<MinigameInfo[]>([])
   const streakCount = ref(0)
-  const streakBest = ref(0)
   const loading = ref(false)
   const error = ref('')
+  const leaderboards = ref<Record<string, LeaderboardEntry[]>>({})
 
   async function fetchStatus(): Promise<void> {
     loading.value = true
@@ -59,11 +66,22 @@ export const useMinigamesStore = defineStore('minigames', () => {
       const { data } = await api.get<MinigameStatus>('/v1/minigames/status')
       games.value = data.games
       streakCount.value = data.streak_count
-      streakBest.value = data.streak_best
     } catch {
       error.value = 'Failed to load mini-games'
     } finally {
       loading.value = false
+    }
+  }
+
+  async function fetchLeaderboard(game: string): Promise<void> {
+    try {
+      const { data } = await api.get<{ entries: LeaderboardEntry[] }>(
+        '/v1/minigames/leaderboard',
+        { params: { game, limit: 10 } },
+      )
+      leaderboards.value = { ...leaderboards.value, [game]: data.entries }
+    } catch {
+      error.value = 'Failed to load leaderboard'
     }
   }
 
@@ -73,9 +91,14 @@ export const useMinigamesStore = defineStore('minigames', () => {
         game,
         score,
       })
-      streakCount.value = data.streak_count
+      streakCount.value = data.current_streak
       const entry = games.value.find((g) => g.key === game)
-      if (entry) entry.played_today = true
+      if (entry) {
+        entry.played_today = true
+        entry.best_score = data.best_score
+      }
+      // Refresh the leaderboard so a new best shows immediately.
+      void fetchLeaderboard(game)
       return data
     } catch {
       error.value = 'Failed to submit score'
@@ -83,5 +106,14 @@ export const useMinigamesStore = defineStore('minigames', () => {
     }
   }
 
-  return { games, streakCount, streakBest, loading, error, fetchStatus, submitScore }
+  return {
+    games,
+    streakCount,
+    loading,
+    error,
+    leaderboards,
+    fetchStatus,
+    fetchLeaderboard,
+    submitScore,
+  }
 })

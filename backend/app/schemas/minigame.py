@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Schemas for garden mini-game scoring and daily-streak status."""
+"""Schemas for garden mini-game scoring, status, and leaderboard."""
+
+import uuid
 
 from pydantic import BaseModel, Field
 
@@ -26,22 +28,34 @@ class MinigameScoreIn(BaseModel):
 
 class MinigameScoreResult(BaseModel):
     game: str
-    xp_awarded: int
+    score: int
+    best_score: int
+    is_new_best: bool
+    current_streak: int
+    best_streak: int
     first_play_today: bool
-    total_xp: int | None
-    level: int | None
-    level_changed: bool
-    streak_count: int
 
 
 class MinigameInfo(BaseModel):
     key: str
     name: str
+    max_score: int
+    best_score: int
     played_today: bool
-    max_xp: int
 
 
 class MinigameStatusRead(BaseModel):
     games: list[MinigameInfo]
     streak_count: int
-    streak_best: int
+
+
+class LeaderboardEntry(BaseModel):
+    user_id: uuid.UUID
+    user_name: str
+    best_score: int
+    plays: int
+
+
+class MinigameLeaderboardRead(BaseModel):
+    game: str
+    entries: list[LeaderboardEntry]

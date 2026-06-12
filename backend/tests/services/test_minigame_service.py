@@ -14,38 +14,31 @@
 
 """Unit tests for the mini-game scoring service.
 
-XP/streak plumbing (award_xp / check_and_award_streak) is mocked — those
-have their own coverage. These tests pin the service contract: game-key
-validation, score bounds, XP composition, dedup passthrough, and that a
-replayed game still ticks the daily streak.
+The repository is mocked — these pin the SERVICE contract: game-key
+validation, score bounds, that submit_score is XP-free (delegates purely
+to MinigameRepository.record_play), and the status/leaderboard shaping.
+The streak/best-score mechanics themselves are exercised against a real
+session in tests/integration.
 """
 
 import uuid
+from datetime import date, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.repositories.minigame import LeaderboardRow, PlayOutcome
 from app.services.minigame_service import (
     GAMES,
     MinigameValidationError,
+    get_leaderboard,
     get_status,
     submit_score,
 )
-from app.services.xp_service import XPAwardResult
 
 USER_ID = uuid.uuid4()
 ORG_ID = uuid.uuid4()
-
-
-def _award(amount: int = 35) -> XPAwardResult:
-    return XPAwardResult(
-        amount_awarded=amount,
-        new_total=100,
-        old_level=1,
-        new_level=1,
-        level_changed=False,
-        new_level_name="Sprout",
-    )
 
 
 async def test_submit_rejects_unknown_game() -> None:
@@ -60,71 +53,89 @@ async def test_submit_rejects_out_of_range_score() -> None:
         await submit_score(db, user_id=USER_ID, org_id=ORG_ID, game="fishing", score=1001)
 
 
-async def test_submit_awards_base_plus_capped_score_bonus() -> None:
+async def test_submit_records_play_and_returns_best_streak() -> None:
     db = AsyncMock()
-    with (
-        patch(
-            "app.services.minigame_service.award_xp", new=AsyncMock(return_value=_award())
-        ) as award,
-        patch(
-            "app.services.minigame_service.check_and_award_streak",
-            new=AsyncMock(return_value=3),
-        ),
-    ):
-        result = await submit_score(db, user_id=USER_ID, org_id=ORG_ID, game="fishing", score=900)
-
-    # base 15 + bonus capped at 35 → 50, regardless of a 900 score
-    assert award.call_args.kwargs["amount"] == 50.0
-    assert award.call_args.kwargs["source"] == "minigame"
-    assert "fishing" in award.call_args.kwargs["source_ref"]
-    assert result["first_play_today"] is True
-    assert result["xp_awarded"] == 35
-    assert result["streak_count"] == 3
-
-
-async def test_replay_is_deduped_but_still_ticks_streak() -> None:
-    db = AsyncMock()
-    with (
-        patch("app.services.minigame_service.award_xp", new=AsyncMock(return_value=None)),
-        patch(
-            "app.services.minigame_service.check_and_award_streak",
-            new=AsyncMock(return_value=5),
-        ) as streak,
-    ):
-        result = await submit_score(
-            db, user_id=USER_ID, org_id=ORG_ID, game="pollen_pop", score=10
+    repo = AsyncMock()
+    repo.record_play = AsyncMock(
+        return_value=PlayOutcome(
+            best_score=42,
+            is_new_best=True,
+            current_streak=3,
+            best_streak=5,
+            first_play_today=True,
         )
+    )
+    with patch("app.services.minigame_service.MinigameRepository", return_value=repo):
+        result = await submit_score(db, user_id=USER_ID, org_id=ORG_ID, game="fishing", score=42)
 
-    assert result["first_play_today"] is False
-    assert result["xp_awarded"] == 0
-    assert result["total_xp"] is None
-    assert result["streak_count"] == 5
-    streak.assert_awaited_once()
+    repo.record_play.assert_awaited_once()
+    assert result == {
+        "game": "fishing",
+        "score": 42,
+        "best_score": 42,
+        "is_new_best": True,
+        "current_streak": 3,
+        "best_streak": 5,
+        "first_play_today": True,
+    }
 
 
-async def test_status_reports_per_game_play_state_and_streak() -> None:
+async def test_submit_is_xp_free() -> None:
+    """Regression guard: mini-games must never touch the XP economy."""
+    import app.services.minigame_service as svc
+
+    assert not hasattr(svc, "award_xp")
+    assert not hasattr(svc, "check_and_award_streak")
+
+
+async def test_status_reports_best_played_and_live_streak() -> None:
     db = AsyncMock()
-    event_repo = AsyncMock()
-    event_repo.has_source_ref = AsyncMock(side_effect=[True, False])
-    xp_repo = AsyncMock()
-    xp_row = type("Row", (), {"streak_count": 4, "streak_best": 9})()
-    xp_repo.get_by_user = AsyncMock(return_value=xp_row)
+    today = date(2026, 6, 12)
+    rows = [
+        SimpleNamespace(game="fishing", best_score=30, last_played_date=today, current_streak=4),
+        SimpleNamespace(
+            game="pollen_pop",
+            best_score=80,
+            last_played_date=today - timedelta(days=5),  # stale streak
+            current_streak=9,
+        ),
+    ]
+    repo = AsyncMock()
+    repo.list_for_user = AsyncMock(return_value=rows)
 
     with (
-        patch(
-            "app.services.minigame_service.RewardEventRepository",
-            return_value=event_repo,
-        ),
-        patch(
-            "app.services.minigame_service.DeveloperXPRepository",
-            return_value=xp_repo,
-        ),
+        patch("app.services.minigame_service.MinigameRepository", return_value=repo),
+        patch("app.services.minigame_service.datetime") as dt,
     ):
+        dt.now.return_value.date.return_value = today
         status = await get_status(db, user_id=USER_ID, org_id=ORG_ID)
 
     games = {g["key"]: g for g in status["games"]}  # type: ignore[union-attr]
     assert set(games) == set(GAMES)
+    assert games["fishing"]["best_score"] == 30
+    assert games["fishing"]["played_today"] is True
+    assert games["pollen_pop"]["played_today"] is False
+    # Only fishing's streak is live (played today); pollen_pop's is stale.
     assert status["streak_count"] == 4
-    assert status["streak_best"] == 9
-    played = [g["played_today"] for g in status["games"]]  # type: ignore[union-attr]
-    assert played == [True, False]
+
+
+async def test_leaderboard_rejects_unknown_game() -> None:
+    db = AsyncMock()
+    with pytest.raises(MinigameValidationError, match="unknown game"):
+        await get_leaderboard(db, org_id=ORG_ID, game="chess", limit=10)
+
+
+async def test_leaderboard_passes_through_repo_rows() -> None:
+    db = AsyncMock()
+    repo = AsyncMock()
+    repo.leaderboard = AsyncMock(
+        return_value=[
+            LeaderboardRow(user_id=USER_ID, user_name="Ada", best_score=48, plays=3),
+        ]
+    )
+    with patch("app.services.minigame_service.MinigameRepository", return_value=repo):
+        rows = await get_leaderboard(db, org_id=ORG_ID, game="fishing", limit=10)
+
+    repo.leaderboard.assert_awaited_once_with(game="fishing", limit=10)
+    assert rows[0].user_name == "Ada"
+    assert rows[0].best_score == 48
