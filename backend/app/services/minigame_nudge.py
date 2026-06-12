@@ -110,8 +110,13 @@ def compose_digest(
     if not lines:
         return None
 
-    link = f"{settings.frontend_url.rstrip('/')}/dashboard"
-    header = "🎮 *Garden Games* — your daily nudge"
+    link = f"{frontend_url.rstrip('/')}/dashboard"
+    first = user_name.split()[0] if user_name.strip() else None
+    header = (
+        f"🎮 *Garden Games* — hey {first}!"
+        if first
+        else "🎮 *Garden Games* — your daily nudge"
+    )
     footer = f"Play in the garden: {link}"
     return "\n".join([header, *lines, footer])
 

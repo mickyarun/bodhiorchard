@@ -761,8 +761,14 @@ export class SceneManager {
     this._gardenRoot = new pc.Entity('GardenRoot')
     this.app.root.addChild(this._gardenRoot)
 
-    // Entities to keep as direct children of EngineRoot (visible in all modes)
-    const keep = new Set(['Camera', 'Sun', 'FillSky', 'GardenRoot', 'InteriorRoot'])
+    // Entities to keep as direct children of EngineRoot (visible in all modes).
+    // 'AmbientPollen' is engine-lifetime (built once by GardenEngine, owned by
+    // its own destroy()) — it must NOT be swept into GardenRoot, or the next
+    // full rebuild's teardown (which destroys GardenRoot) would free it and
+    // leave GardenEngine.ambientParticles holding a dangling entity.
+    const keep = new Set([
+      'Camera', 'Sun', 'FillSky', 'GardenRoot', 'InteriorRoot', 'AmbientPollen',
+    ])
     const toMove: pc.Entity[] = []
 
     for (const child of [...this.app.root.children] as pc.Entity[]) {

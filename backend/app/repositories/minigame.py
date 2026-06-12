@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.minigame import MinigameScore
@@ -142,7 +143,19 @@ class MinigameRepository:
         if existing is not None:
             return existing
 
+        # A concurrent first play of the same game can race here: FOR UPDATE
+        # locks nothing when no row exists, so two requests both reach the
+        # INSERT and the second hits uq_minigame_scores_user_game. The
+        # SAVEPOINT scopes that IntegrityError so the outer transaction stays
+        # usable; we then re-select the row the winner inserted (now lockable).
+        # Mirrors DeveloperXPRepository.get_or_create.
         row = MinigameScore(org_id=self._org_id, user_id=user_id, game=game)
-        self._db.add(row)
-        await self._db.flush()
-        return row
+        try:
+            async with self._db.begin_nested():
+                self._db.add(row)
+            return row
+        except IntegrityError:
+            existing = (await self._db.execute(stmt)).scalar_one_or_none()
+            if existing is None:
+                raise
+            return existing
