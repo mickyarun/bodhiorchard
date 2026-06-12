@@ -522,9 +522,14 @@ export class SceneManager {
     // release (the engine is gone).
     const pcApp = this.app.app
     const pauseToken = acquireRenderPause(pcApp, 'SceneManager.rebuild')
+    const buildStart = performance.now()
     try {
       this.teardown()
       await this.build(data, signal)
+      if (import.meta.env.DEV) {
+        const ms = performance.now() - buildStart
+        console.info(`[Perf] scene rebuild: ${ms.toFixed(0)}ms`)
+      }
     } finally {
       releaseRenderPause(pcApp, pauseToken)
     }

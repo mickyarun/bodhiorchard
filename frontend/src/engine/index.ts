@@ -61,6 +61,7 @@ import { drawColliderWireframes } from './physics'
 import { OrgRoomClient, type MemberStateSnapshot } from '../multiplayer'
 import type { CharacterSystem } from './characters/CharacterSystem'
 import { SerializedExecutor } from './utils/SerializedExecutor'
+import { PerfHud } from './utils/PerfHud'
 import { VehicleController } from './vehicles/VehicleController'
 import { VehicleSystem } from './vehicles/VehicleSystem'
 import { getVehicleDef } from './vehicles/VehicleManifest'
@@ -94,6 +95,8 @@ export class GardenEngine {
   private canvas: HTMLCanvasElement | null = null
   private callbacks: EngineCallbacks = {}
   private picker: TreePickerSystem | null = null
+  // Dev-only perf overlay (?perf=1) — holds the detach fn while active.
+  private perfHudDetach: (() => void) | null = null
 
   // Interior exploration
   private interior: InteriorManager | null = null
@@ -257,6 +260,10 @@ export class GardenEngine {
 
     // Show controls help overlay (auto-fades after 6s)
     this.camera.showControlsHelp(container)
+
+    if (PerfHud.shouldEnable()) {
+      this.perfHudDetach = new PerfHud().attach(this.app.app, container)
+    }
 
     this.callbacks.onSceneReady?.()
   }
@@ -1851,6 +1858,8 @@ export class GardenEngine {
       this.materials = null
       safe('input.destroy', () => this.input?.destroy())
       this.input = null
+      safe('perfHud.detach', () => this.perfHudDetach?.())
+      this.perfHudDetach = null
       safe('camera.destroyHelp', () => this.camera?.destroyHelp())
       this.camera = null
     } finally {
