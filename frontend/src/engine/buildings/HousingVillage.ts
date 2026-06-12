@@ -39,6 +39,7 @@ import type { ExclusionZone } from '../utils/MathUtils'
 import { SandRoadBuilder } from '../world/SandRoadBuilder'
 import { RectangularFence } from '../world/RectangularFence'
 import { SCATTER_BUSHES } from '../assets/AssetManifest'
+import { VillageDressing } from './VillageDressing'
 import { LabelRenderer } from '../rendering/LabelRenderer'
 import {
   computeVillageLayout,
@@ -148,6 +149,10 @@ export class HousingVillage {
     // Fence-line greenery — bushes at the corners and wall midpoints soften
     // the bare fence run that made the village read as an empty pen.
     await this.buildFenceGreenery(root, layout.fenceBounds, gateSide)
+
+    // Life between the houses: campfire circle, street benches, per-house
+    // yard props, washing line. Purely visual, zone-local.
+    await new VillageDressing().build(root, this.loader, layout, materials)
 
     // ─── Houses: build LOCAL, wrap with pivot, compose yaw ─────────────
     for (const placement of layout.placements) {

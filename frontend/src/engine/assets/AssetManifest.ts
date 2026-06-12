@@ -182,6 +182,15 @@ export const SCATTER_PROPS: string[] = [
   `${GARDEN}/plant_bushSmall.glb`,
 ]
 
+/** Loose garden props for scene dressing (village yards, campfire).
+ *  Loaded on demand by VillageDressing (cached by AssetLoader). */
+export const GARDEN_PROPS = {
+  campfireStones: `${GARDEN}/campfire_stones.glb`,
+  campfireLogs:   `${GARDEN}/campfire_logs.glb`,
+  mushroomRed:    `${GARDEN}/mushroom_red.glb`,
+  mushroomTan:    `${GARDEN}/mushroom_tan.glb`,
+} as const
+
 /** Named garden props referenced by builders that want a specific model
  *  (rather than a random pick from SCATTER_* arrays). Adding an entry here
  *  also ensures the asset is included in getEnvironmentGLBs() preload via
