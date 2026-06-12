@@ -15,14 +15,18 @@
 /**
  * RelationshipArcs — Bezier curve arcs between trees.
  *
- * Renders colored arcs using small box segments between source and target trees.
- * Color by rel_type: CALLS=blue, IMPORTS=green, EXTENDS=orange, IMPLEMENTS=purple.
- * Togglable visibility.
+ * Renders colored arcs as hardware-instanced box segments: ONE draw call
+ * per rel_type (CALLS=blue, IMPORTS=green, EXTENDS=orange, IMPLEMENTS=purple)
+ * instead of 16 entities per arc. Each arc keeps a render-less parent
+ * entity at the curve apex carrying the 'pickable' tag + relationship
+ * data, so hover/click tooltips keep working. Togglable visibility —
+ * arcs build disabled and cost nothing until toggled on.
  */
 import * as pc from 'playcanvas'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { EngineRelationship, RelType } from '../types'
 import { setTreeData } from './TreeNodeData'
+import { createInstancedEntity, computeInstanceAabb } from '../treetest/instancing'
 
 const ARC_SEGMENTS = 16
 const SEGMENT_THICKNESS = 0.06
@@ -47,11 +51,14 @@ export class RelationshipArcs {
   private root: pc.Entity | null = null
   private visible = false
   private materialKeys = new Set<string>()
+  private vbs: pc.VertexBuffer[] = []
+  private boxMesh: pc.Mesh | null = null
 
   build(
     materials: MaterialFactory,
     relationships: EngineRelationship[],
     treePositions: Map<string, pc.Vec3>,
+    device: pc.GraphicsDevice,
   ): pc.Entity {
     this.root = new pc.Entity('RelationshipArcs')
     this.root.enabled = this.visible
@@ -60,6 +67,9 @@ export class RelationshipArcs {
     // overlapping arcs vertically (one feature → one curve at a unique
     // height). Sorting the pair makes A↔B and B↔A share the same bucket.
     const pairIndex = new Map<string, number>()
+    // Segment world matrices accumulate per rel_type → one instanced
+    // batch per type at the end.
+    const segmentsByType = new Map<RelType, number[]>()
 
     for (const rel of relationships) {
       const srcPos = treePositions.get(rel.source_repo)
@@ -74,27 +84,46 @@ export class RelationshipArcs {
       const fanIndex = pairIndex.get(pairKey) ?? 0
       pairIndex.set(pairKey, fanIndex + 1)
 
-      this.createArc(materials, srcPos, tgtPos, rel, fanIndex)
+      this.appendArc(segmentsByType, srcPos, tgtPos, rel, fanIndex)
+    }
+
+    // One instanced draw per rel_type that actually has arcs.
+    for (const [relType, flat] of segmentsByType) {
+      const count = flat.length / 16
+      if (count === 0) continue
+      const color = REL_COLORS[relType]
+      const matKey = `arc_${relType}`
+      this.materialKeys.add(matKey)
+      const mat = materials.getColor(matKey, color[0], color[1], color[2], {
+        emissive: [color[0] * 0.5, color[1] * 0.5, color[2] * 0.5],
+        opacity: 0.7,
+      })
+      const matrices = new Float32Array(flat)
+      const aabb = computeInstanceAabb(matrices, count, 2)
+      const { entity, vb } = createInstancedEntity(
+        device, this.getBoxMesh(device), mat, matrices, count,
+        `ArcSegments_${relType}`, { aabb },
+      )
+      this.root.addChild(entity)
+      this.vbs.push(vb)
     }
 
     return this.root
   }
 
-  private createArc(
-    materials: MaterialFactory,
+  /**
+   * Compute one arc's bezier segments into the per-type matrix bucket and
+   * create its render-less pick parent at the curve apex (the old per-arc
+   * parent sat at the origin, making the 3D ray-sphere pick test
+   * effectively dead — the apex anchor makes arcs sensibly hoverable).
+   */
+  private appendArc(
+    segmentsByType: Map<RelType, number[]>,
     from: pc.Vec3,
     to: pc.Vec3,
     rel: EngineRelationship,
     fanIndex: number,
   ): void {
-    const color = REL_COLORS[rel.rel_type]
-    const matKey = `arc_${rel.rel_type}`
-    this.materialKeys.add(matKey)
-    const mat = materials.getColor(matKey, color[0], color[1], color[2], {
-      emissive: [color[0] * 0.5, color[1] * 0.5, color[2] * 0.5],
-      opacity: 0.7,
-    })
-
     // Per-feature arcs always have weight=1, so heights are driven by
     // the per-pair fan index — a single arc sits at FAN_BASE_HEIGHT, and
     // additional arcs stack uniformly above it. After FAN_LINEAR_LIMIT
@@ -117,9 +146,11 @@ export class RelationshipArcs {
       points.push(new pc.Vec3(x, y + 3, z))
     }
 
-    // Create small box segments between consecutive points
+    // Render-less pick anchor at the curve apex
     const arcParent = new pc.Entity(`Arc_${rel.rel_type}_${rel.source_repo}_${rel.target_repo}`)
     arcParent.tags.add('pickable')
+    const apex = points[Math.floor(points.length / 2)]
+    arcParent.setPosition(apex.x, apex.y, apex.z)
     setTreeData(arcParent, {
       type: 'tree_relationship',
       sourceRepo: rel.source_repo,
@@ -128,28 +159,32 @@ export class RelationshipArcs {
       weight: rel.weight,
       featureTitle: rel.feature_title ?? null,
     })
+    this.root!.addChild(arcParent)
 
+    // Segment matrices: unit box scaled to (thickness, thickness, len),
+    // -Z forward aligned along the segment (same as entity.lookAt).
+    let bucket = segmentsByType.get(rel.rel_type)
+    if (!bucket) {
+      bucket = []
+      segmentsByType.set(rel.rel_type, bucket)
+    }
     for (let i = 0; i < points.length - 1; i++) {
       const a = points[i]
       const b = points[i + 1]
-      const mid = new pc.Vec3(
-        (a.x + b.x) / 2,
-        (a.y + b.y) / 2,
-        (a.z + b.z) / 2,
-      )
+      _segMid.set((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2)
       const len = a.distance(b)
-
-      const seg = new pc.Entity(`Seg_${i}`)
-      seg.addComponent('render', { type: 'box' })
-      seg.setPosition(mid.x, mid.y, mid.z)
-      seg.setLocalScale(SEGMENT_THICKNESS, SEGMENT_THICKNESS, len)
-      seg.lookAt(b)
-
-      seg.render!.meshInstances[0].material = mat
-      arcParent.addChild(seg)
+      _segMat.setLookAt(_segMid, b, pc.Vec3.UP)
+      _segScale.setScale(SEGMENT_THICKNESS, SEGMENT_THICKNESS, len)
+      _segMat.mul(_segScale)
+      for (let k = 0; k < 16; k++) bucket.push(_segMat.data[k])
     }
+  }
 
-    this.root!.addChild(arcParent)
+  private getBoxMesh(device: pc.GraphicsDevice): pc.Mesh {
+    if (!this.boxMesh) {
+      this.boxMesh = pc.Mesh.fromGeometry(device, new pc.BoxGeometry())
+    }
+    return this.boxMesh
   }
 
   get isVisible(): boolean { return this.visible }
@@ -174,9 +209,21 @@ export class RelationshipArcs {
     }
     this.materialKeys.clear()
 
+    for (const vb of this.vbs) vb.destroy()
+    this.vbs = []
+    if (this.boxMesh) {
+      this.boxMesh.vertexBuffer?.destroy()
+      this.boxMesh.indexBuffer?.[0]?.destroy()
+      this.boxMesh = null
+    }
     if (this.root) {
       this.root.destroy()
       this.root = null
     }
   }
 }
+
+// Scratch objects for the segment-matrix loop — zero per-segment allocation.
+const _segMid = new pc.Vec3()
+const _segMat = new pc.Mat4()
+const _segScale = new pc.Mat4()

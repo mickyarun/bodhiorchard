@@ -466,7 +466,9 @@ export class SceneManager {
       const pos = this.repoVis.getTreePosition(repo.repo_name)
       if (pos) treePositions.set(repo.repo_name, pos)
     }
-    const arcsEntity = this.arcs.build(this.materials, data.relationships, treePositions)
+    const arcsEntity = this.arcs.build(
+      this.materials, data.relationships, treePositions, this.app.app.graphicsDevice,
+    )
     this.app.root.addChild(arcsEntity)
 
     // 8. Effects
@@ -536,7 +538,9 @@ export class SceneManager {
         const pos = this.repoVis.getTreePosition(repo.repo_name)
         if (pos) treePositions.set(repo.repo_name, pos)
       }
-      const arcsEntity = this.arcs.build(this.materials, data.relationships, treePositions)
+      const arcsEntity = this.arcs.build(
+        this.materials, data.relationships, treePositions, this.app.app.graphicsDevice,
+      )
       // Parent under the garden root (exists after the initial full build)
       // so arcs still hide when entering interiors.
       ;(this._gardenRoot ?? this.app.root).addChild(arcsEntity)

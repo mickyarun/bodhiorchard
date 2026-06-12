@@ -17,8 +17,6 @@
  *
  * For tree repos: places fruits at the outer edges of the canopy.
  * For graph spheres: uses offsets from RepoVisualization.getFeatureOffsets().
- *
- * Replaces TreeDecorator.decorateFeatures() (ground-level flowers).
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
@@ -171,7 +169,7 @@ export class FeatureSystem {
     }
   }
 
-  /** Get fruit entity by feature title (for FeatureLinkArcs endpoint). */
+  /** Get fruit entity by feature title (e.g. as a cross-repo arc endpoint). */
   getFruitEntity(featureTitle: string): pc.Entity | undefined {
     return this.fruitEntities.get(featureTitle)
   }
