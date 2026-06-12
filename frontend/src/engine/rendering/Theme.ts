@@ -72,10 +72,13 @@ export const Theme = {
     fill:         [140, 173, 235] as Rgb255,  // cool sky bounce
     fillIntensity: 0.75,
     ambient:      [122, 115, 102] as Rgb255,  // warm slate (was 0.48,0.45,0.40)
-    /** shadowDistance = clamp(worldRadius + margin, min, max) */
+    /** shadowDistance = clamp(worldRadius + margin, min, max). The margin
+     *  approximates the orbit camera's distance from the world edge; max
+     *  must cover the largest org (orchard cap 70u + housing reach ≈ 140u
+     *  + camera ~100u opposite → ~240u). */
     shadowMargin: 130,
     shadowDistanceMin: 150,
-    shadowDistanceMax: 220,
+    shadowDistanceMax: 240,
   },
 
   GROUND: {
