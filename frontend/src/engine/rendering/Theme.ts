@@ -63,7 +63,9 @@ export const Theme = {
 
   CAMERA: {
     clearColor: [205, 228, 248] as Rgb255,  // matches SKY.horizon
-    fov: 55,  // retuned in the composition step
+    /** 50° flattens low-poly forms slightly vs the old 55° without the
+     *  telephoto compression a 45° FOV showed at this orbit distance. */
+    fov: 50,
   },
 
   LIGHT: {
@@ -138,6 +140,10 @@ export const Theme = {
   SCATTER: {
     pine:  [0.72, 0.95, 0.78] as readonly [number, number, number],  // deep blue-green
     bush:  [0.92, 1.08, 0.78] as readonly [number, number, number],  // fresh leaf green
+    grass: [0.90, 1.05, 0.78] as readonly [number, number, number],  // spring blades
+    /** Vertex-wind sway amplitude for grass/flower scatter (world units
+     *  at blade tip, pre height² weighting). */
+    grassWindStrength: 0.35,
   },
 
   CLOUD: {

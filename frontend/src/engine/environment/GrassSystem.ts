@@ -31,6 +31,8 @@ import { isInsideAnyZone, randRange, type ExclusionZone } from '../utils/MathUti
 import {
   buildInstancedGlbs, type GlbScatterGroup, type ScatterTransform,
 } from '../utils/GlbInstancing'
+import { Theme } from '../rendering/Theme'
+import { GrassWind } from '../effects/GrassWind'
 
 const GRASS_COUNT = 450
 const FLOWER_COUNT = 40
@@ -40,6 +42,8 @@ const MIN_DISTANCE = 1.2 // tighter spacing for lush coverage
 export class GrassSystem {
   private root: pc.Entity | null = null
   private vbs: pc.VertexBuffer[] = []
+  private materials: pc.Material[] = []
+  private wind = new GrassWind()
 
   async build(
     app: Application,
@@ -58,17 +62,27 @@ export class GrassSystem {
       flowerAssets, FLOWER_COUNT, 3, 2.5, 5.5, exclusionZones,
     )
 
-    const { entities, vbs } = buildInstancedGlbs(
+    // The spring tint forces per-batch material CLONES — which is also
+    // what makes the wind chunk safe to install (shared GLB container
+    // materials must never be mutated).
+    const { entities, vbs, materials } = buildInstancedGlbs(
       app.app.graphicsDevice,
       loader,
       [...grassGroups, ...flowerGroups],
-      { namePrefix: 'GrassInstanced' },
+      { namePrefix: 'GrassInstanced', tint: Theme.SCATTER.grass },
     )
     for (const e of entities) this.root.addChild(e)
     this.vbs = vbs
+    this.materials = materials
+    this.wind.apply(materials, Theme.SCATTER.grassWindStrength)
 
     app.root.addChild(this.root)
     return this.root
+  }
+
+  /** Advance the wind clock — call once per frame. */
+  update(dt: number): void {
+    this.wind.update(dt)
   }
 
   /**
@@ -141,8 +155,11 @@ export class GrassSystem {
   }
 
   destroy(): void {
+    this.wind.clear()
     for (const vb of this.vbs) vb.destroy()
     this.vbs = []
+    for (const mat of this.materials) mat.destroy()
+    this.materials = []
     if (this.root) {
       this.root.destroy()
       this.root = null

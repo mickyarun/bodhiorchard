@@ -52,6 +52,7 @@ import { SkySystem } from '../environment/SkySystem'
 import { GroundSystem } from '../environment/GroundSystem'
 import { CloudSystem } from '../environment/CloudSystem'
 import { PineTreeSystem } from '../environment/PineTreeSystem'
+import { GrassSystem } from '../environment/GrassSystem'
 import { BushSystem } from '../environment/BushSystem'
 import { ForestLake } from '../environment/ForestLake'
 import { MountainBackdrop } from '../environment/MountainBackdrop'
@@ -102,6 +103,7 @@ export class SceneManager {
   private arcs: RelationshipArcs | null = null
   private pines: PineTreeSystem | null = null
   private bushes: BushSystem | null = null
+  private grass: GrassSystem | null = null
   private forestLake: ForestLake | null = null
   private mountains: MountainBackdrop | null = null
   private paths: PathSystem | null = null
@@ -451,10 +453,12 @@ export class SceneManager {
     this.pines = new PineTreeSystem()
     this.bushes = new BushSystem()
     this.decorProps = new DecorativePropScatter()
+    this.grass = new GrassSystem()
     await Promise.all([
       this.pines.build(this.app, this.loader, this.layout.getExclusionZones()),
       this.bushes.build(this.app, this.loader, this.layout.getExclusionZones(), pathRoutes),
       this.decorProps.build(this.app, this.loader, this.layout.getExclusionZones(), pathRoutes),
+      this.grass.build(this.app, this.loader, this.layout.getExclusionZones()),
       this.initPhysics(currentBuild, signal),
     ])
     if (checkCancelled()) return
@@ -561,6 +565,7 @@ export class SceneManager {
     this.clouds?.update(dt)
     this.forestLake?.update(dt)
     this.poolWater?.update(dt)
+    this.grass?.update(dt)
     this.repoVis?.update?.(dt, viewerPos)
     this.gardenBirds?.update(dt)
     this.gardenAnimals?.update(dt)
@@ -845,6 +850,9 @@ export class SceneManager {
 
     this.pines?.destroy()
     this.pines = null
+
+    this.grass?.destroy()
+    this.grass = null
 
     for (const sign of this.signEntities) {
       sign.destroy()
