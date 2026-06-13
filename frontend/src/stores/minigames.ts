@@ -91,7 +91,9 @@ export const useMinigamesStore = defineStore('minigames', () => {
         game,
         score,
       })
-      streakCount.value = data.current_streak
+      // streakCount is the global max across all games; a fresh play can
+      // only hold or raise it — never drop it to one game's streak.
+      streakCount.value = Math.max(streakCount.value, data.current_streak)
       const entry = games.value.find((g) => g.key === game)
       if (entry) {
         entry.played_today = true

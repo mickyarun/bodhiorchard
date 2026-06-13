@@ -24,6 +24,7 @@
  * with the engine.
  */
 import * as pc from 'playcanvas'
+import { Theme } from '../rendering/Theme'
 
 const PARTICLE_COUNT = 80
 const LIFETIME_S = 12
@@ -33,7 +34,7 @@ const EMITTER_HALF_Z = 55
 const EMITTER_CENTER_Y = 5
 const DOT_TEX_SIZE = 16
 /** Warm pollen white — matches the Theme sun family. */
-const MOTE_COLOR = new pc.Color(1.0, 0.95, 0.82)
+const MOTE_COLOR = new pc.Color(...Theme.EFFECTS.pollenMote)
 
 export class AmbientParticles {
   private entity: pc.Entity | null = null

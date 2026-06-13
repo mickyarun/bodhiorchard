@@ -88,7 +88,7 @@ export class WaterSurface {
     this.rimMaterial.diffuse = new pc.Color(1, 1, 1)
     this.rimMaterial.diffuseMap = this.rimTexture
     this.rimMaterial.emissiveMap = this.rimTexture
-    this.rimMaterial.emissive = new pc.Color(0.35, 0.35, 0.35)
+    this.rimMaterial.emissive = new pc.Color(...Theme.POOL.rimEmissive)
     this.rimMaterial.opacityMap = this.rimTexture
     this.rimMaterial.blendType = pc.BLEND_NORMAL
     this.rimMaterial.depthWrite = false

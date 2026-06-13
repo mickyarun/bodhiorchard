@@ -42,12 +42,6 @@ function jitter(index: number, salt: number): number {
   return x - Math.floor(x)
 }
 
-const TOWEL_COLORS: ReadonlyArray<[number, number, number]> = [
-  [0.90, 0.45, 0.40],
-  [0.45, 0.62, 0.85],
-  [0.92, 0.85, 0.55],
-]
-
 export class VillageDressing {
   async build(
     root: pc.Entity,
@@ -203,8 +197,8 @@ export class VillageDressing {
     const x1 = x0 + 4.5
     const poleH = 1.7
 
-    const poleMat = materials.getColor('village_pole', 0.45, 0.33, 0.22)
-    const lineMat = materials.getColor('village_line', 0.92, 0.92, 0.90)
+    const poleMat = materials.getColor('village_pole', ...Theme.VILLAGE.washPole)
+    const lineMat = materials.getColor('village_line', ...Theme.VILLAGE.washLine)
 
     for (const px of [x0, x1]) {
       const pole = new pc.Entity('WashPole')
@@ -223,8 +217,8 @@ export class VillageDressing {
     line.render!.meshInstances[0].material = lineMat
     parent.addChild(line)
 
-    for (let t = 0; t < TOWEL_COLORS.length; t++) {
-      const c = TOWEL_COLORS[t]
+    for (let t = 0; t < Theme.VILLAGE.towels.length; t++) {
+      const c = Theme.VILLAGE.towels[t]
       const towel = new pc.Entity('WashTowel')
       towel.addComponent('render', { type: 'box' })
       towel.setLocalScale(0.6, 0.55, 0.04)

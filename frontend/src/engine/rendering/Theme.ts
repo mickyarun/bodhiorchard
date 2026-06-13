@@ -204,6 +204,8 @@ export const Theme = {
     /** Light shallow band ringing the water's edge — the classic stylized
      *  pool read (deep center, pale rim). */
     rim:          [168, 226, 246] as Rgb255,
+    /** Emissive lift on the rim band so the shallow edge stays bright. */
+    rimEmissive:  [0.35, 0.35, 0.35] as readonly [number, number, number],
     basinFloor:   [0.30, 0.62, 0.80] as readonly [number, number, number],
     basinWall:    [0.38, 0.70, 0.86] as readonly [number, number, number],
     /** Teak deck planks (two alternating board tones). */
@@ -224,6 +226,14 @@ export const Theme = {
     fencePostB:   [0.63, 0.48, 0.30] as readonly [number, number, number],
     fencePanel:   [0.68, 0.54, 0.34] as readonly [number, number, number],
     fenceGate:    [0.42, 0.30, 0.16] as readonly [number, number, number],
+    /** Washing line behind the north house row (VillageDressing). */
+    washPole:     [0.45, 0.33, 0.22] as readonly [number, number, number],
+    washLine:     [0.92, 0.92, 0.90] as readonly [number, number, number],
+    towels: [
+      [0.90, 0.45, 0.40],
+      [0.45, 0.62, 0.85],
+      [0.92, 0.85, 0.55],
+    ] as ReadonlyArray<readonly [number, number, number]>,
   },
 
   /** Paths, village roads, and lanterns. */
@@ -245,5 +255,11 @@ export const Theme = {
     bloomIntensity: 0.018,
     grading: { saturation: 1.07, contrast: 1.03, brightness: 1.0 },
     vignette: { intensity: 0.2, inner: 0.6, outer: 1.8, curvature: 0.5 },
+  },
+
+  /** Ambient effects dressing (AmbientParticles). */
+  EFFECTS: {
+    /** Warm pollen-mote white — drifting motes in the sun family. */
+    pollenMote: [1.0, 0.95, 0.82] as readonly [number, number, number],
   },
 } as const
