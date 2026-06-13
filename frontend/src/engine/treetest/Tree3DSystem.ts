@@ -566,25 +566,34 @@ export class Tree3DSystem {
    * + bakeInstanced(): per-color instanced MeshInstances, primary pick-proxy
    * entities at midpoints, no live growth, ready for wind + picking.
    */
+  /**
+   * Restore a baked tree from cache. Returns the number of instanced branch
+   * entities actually attached — 0 means the cached geometry produced nothing
+   * renderable (a corrupt/empty entry), so the caller should grow fresh
+   * instead of leaving an invisible tree.
+   */
   loadFromCache(
     exported: BakedTreeExport,
     rootColor: Color3,
     worldX: number,
     worldZ: number,
-  ): void {
+  ): number {
     this.resetGrowthState(rootColor, worldX, 0, worldZ)
     // Cache hit means the tree is already fully grown — enable wind immediately
     // instead of waiting for buildWindEntries() after a growth-complete event.
     this.windReady = true
 
     // Recreate per-color instanced mesh instances + their materials.
+    let attached = 0
     for (const group of exported.branchGroups) {
       // Re-seed the material cache so later getMaterial() lookups hit (e.g. if
       // a later re-grow ever goes through the per-entity path again).
       if (!this.matCache.has(group.colorKey)) {
         this.getMaterial(group.color)
       }
-      this.attachInstancedBranchEntity(group.colorKey, group.matrices, group.count)
+      if (this.attachInstancedBranchEntity(group.colorKey, group.matrices, group.count)) {
+        attached++
+      }
     }
 
     // Recreate primary-feature pick proxies. Render-less entities — picked by
@@ -596,6 +605,8 @@ export class Tree3DSystem {
       this.treeRoot.addChild(entity)
       this.featureEntityMap.set(entity, { title: p.title, status: p.status })
     }
+
+    return attached
   }
 
   // Shared full reset used by startTree() (before growth) and loadFromCache()
@@ -634,9 +645,11 @@ export class Tree3DSystem {
     this.growSpeed     = GROW_SPEED
   }
 
-  private attachInstancedBranchEntity(colorKey: string, matrices: Float32Array, count: number): void {
+  private attachInstancedBranchEntity(
+    colorKey: string, matrices: Float32Array, count: number,
+  ): boolean {
     const material = this.matCache.get(colorKey)
-    if (!material || count === 0) return
+    if (!material || count === 0) return false
     // Margin covers a unit cylinder's worst-case extent under the instance's
     // rotation/scale (branches up to ~1 unit long) plus slack for wind sway.
     const aabb = computeInstanceAabb(matrices, count, BRANCH_AABB_MARGIN)
@@ -652,6 +665,7 @@ export class Tree3DSystem {
     this.treeRoot.addChild(entity)
     this.bakedEntities.push(entity)
     this.bakedVertexBuffers.push(vb)
+    return true
   }
 
   // Converts each surviving primary-feature branch entity into a render-less
