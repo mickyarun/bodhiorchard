@@ -25,9 +25,15 @@ token decrypted per send, DMs opened per user, every Slack call fails
 silently so one bad token never aborts the sweep. Reuses the existing
 ``slack_client`` seam. No XP, no in-app notification — a pure nudge.
 
-Scheduling reuses the daily-loop skeleton from
-``velocity_snapshot_roller`` / ``mcp_audit_cleanup``: one in-process
-asyncio task registered in ``main.py`` lifespan.
+Scheduling: one in-process asyncio task (registered in ``main.py``
+lifespan) ticks every 15 minutes and sends each org its nudge at
+**09:00 in that org's own timezone** — the IANA zone from the org's
+presence settings (``organizations.config.presence.timezone``). Orgs
+with no zone set fall back to the server's local time, matching the
+presence systems' own default. A per-process ``{org_id: local-date}``
+map dedupes so each org is nudged at most once per local day; only the
+*scheduling* is timezone-aware — streak bookkeeping stays UTC, exactly
+as plays are recorded (``minigame_service``).
 """
 
 from __future__ import annotations
@@ -36,6 +42,8 @@ import asyncio
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
+from zoneinfo import ZoneInfo
 
 import structlog
 
@@ -46,12 +54,15 @@ from app.repositories.minigame import LeaderboardRow, MinigameRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.user import UserRepository
 from app.services.minigame_service import GAMES
+from app.services.org_settings import get_presence_settings
 from app.services.slack_client import chat_post_message, conversations_open
 
 logger = structlog.get_logger(__name__)
 
-SLEEP_SECONDS = 24 * 60 * 60
-RETRY_SLEEP_SECONDS = 60 * 60
+# Send at 09:00 in each org's local zone; tick often enough to land inside
+# the 09:00 hour without an external scheduler.
+NUDGE_HOUR_LOCAL = 9
+TICK_SECONDS = 15 * 60
 ALERT_AFTER_CONSECUTIVE_FAILURES = 2
 
 
@@ -184,28 +195,74 @@ async def send_org_nudges(org_id: uuid.UUID) -> int:
     return sent
 
 
-async def sweep_once() -> int:
-    """Nudge every org once. Returns total messages sent across orgs."""
+def _zone_for_config(config: dict[str, Any] | None) -> ZoneInfo | None:
+    """Resolve an org's presence IANA zone, or None for server-local time.
+
+    ``None`` (no zone configured, or an unresolvable name) maps to the
+    server's local zone — the same fallback the presence systems use.
+    """
+    tz = get_presence_settings(config).timezone
+    if not tz:
+        return None
+    try:
+        return ZoneInfo(tz)
+    except Exception:
+        return None
+
+
+def _due_local_date(
+    *,
+    config: dict[str, Any] | None,
+    now_utc: datetime,
+    last_nudged_local: date | None,
+) -> date | None:
+    """The org-local date to stamp if a nudge is due right now, else None.
+
+    Pure (no I/O) so the schedule decision is unit-testable. Due means it
+    is the 09:00 hour in the org's zone and we have not already nudged on
+    that local date.
+    """
+    now_local = now_utc.astimezone(_zone_for_config(config))
+    if now_local.hour != NUDGE_HOUR_LOCAL:
+        return None
+    if last_nudged_local == now_local.date():
+        return None
+    return now_local.date()
+
+
+async def _tick(now_utc: datetime, sent_on: dict[uuid.UUID, date]) -> int:
+    """One scheduler pass: nudge every org whose local 09:00 has arrived.
+
+    ``sent_on`` is mutated in place to record the local date each org was
+    nudged, so a later tick in the same hour does not re-send. A failed
+    send is left unrecorded so the next tick retries within the hour.
+    """
     async with AsyncSessionLocal() as session:
-        org_ids = await OrganizationRepository(session).list_all_ids()
+        orgs = await OrganizationRepository(session).list_with_slack_token_and_config()
 
     total = 0
-    for oid in org_ids:
+    for org_id, _token, config in orgs:
+        due = _due_local_date(
+            config=config, now_utc=now_utc, last_nudged_local=sent_on.get(org_id)
+        )
+        if due is None:
+            continue
         try:
-            total += await send_org_nudges(oid)
+            total += await send_org_nudges(org_id)
+            sent_on[org_id] = due
         except Exception:
-            logger.warning("minigame_nudge_org_failed", org_id=str(oid), exc_info=True)
+            logger.warning("minigame_nudge_org_failed", org_id=str(org_id), exc_info=True)
     return total
 
 
 async def run_forever() -> None:
-    """Daily loop — same structure as velocity_snapshot_roller.run_forever."""
+    """Ticking loop — wakes every 15 min and sends at each org's local 09:00."""
+    sent_on: dict[uuid.UUID, date] = {}
     consecutive_failures = 0
     while True:
         try:
-            await sweep_once()
+            await _tick(datetime.now(UTC), sent_on)
             consecutive_failures = 0
-            sleep_for = SLEEP_SECONDS
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -216,5 +273,4 @@ async def run_forever() -> None:
                 else logger.exception
             )
             log("minigame_nudge_failed", consecutive_failures=consecutive_failures)
-            sleep_for = RETRY_SLEEP_SECONDS
-        await asyncio.sleep(sleep_for)
+        await asyncio.sleep(TICK_SECONDS)

@@ -154,10 +154,42 @@ function openDb(): Promise<IDBDatabase> {
         db.createObjectStore(STORE, { keyPath: 'cacheKey' })
       }
     }
-    req.onsuccess = () => resolve(req.result)
-    req.onerror   = () => reject(req.error)
+    req.onsuccess = () => {
+      const db = req.result
+      // Another tab opening a newer SCHEMA_VERSION would otherwise be blocked
+      // by this connection forever. Close on version change so the upgrade can
+      // proceed; the next openDb() call re-opens at the new version.
+      db.onversionchange = () => {
+        db.close()
+        dbPromise = null
+      }
+      resolve(db)
+    }
+    // Reset the cached promise on any failure so callers fall back to a fresh
+    // grow (cache miss) instead of awaiting a permanently-rejected/blocked open
+    // for the rest of the session.
+    req.onerror = () => {
+      dbPromise = null
+      reject(req.error)
+    }
+    req.onblocked = () => {
+      dbPromise = null
+      reject(new Error('tree-cache open blocked by another tab'))
+    }
   })
   return dbPromise
+}
+
+/**
+ * A baked tree is only usable if every branch group carries a non-empty,
+ * correctly-sized matrix buffer. Every real tree has at least a trunk group,
+ * so zero groups (or a count/length mismatch) means a corrupt/partial entry.
+ */
+export function isStructurallyValid(tree: BakedTree): boolean {
+  if (!Array.isArray(tree.branchGroups) || tree.branchGroups.length === 0) return false
+  return tree.branchGroups.every(
+    (g) => g.count > 0 && g.matrices?.length === g.count * 16,
+  )
 }
 
 /** Returns the baked tree for the given key, or null on miss. */
@@ -171,6 +203,11 @@ export async function loadTreeCache(key: string): Promise<BakedTree | null> {
       req.onsuccess = () => {
         const result = req.result as BakedTree | undefined
         if (!result || result.schemaVersion !== SCHEMA_VERSION) return resolve(null)
+        // A partial write (e.g. a quota-aborted transaction) can leave a
+        // schema-valid entry whose branch geometry is empty or malformed.
+        // Restoring it yields an invisible tree, so treat it as a miss and
+        // let the caller grow fresh.
+        if (!isStructurallyValid(result)) return resolve(null)
         resolve(result)
       }
       req.onerror = () => reject(req.error)
@@ -190,8 +227,28 @@ export async function saveTreeCache(data: BakedTree): Promise<void> {
       tx.oncomplete = () => resolve()
       tx.onerror    = () => reject(tx.error)
     })
+  } catch (err) {
+    // Swallow — a failed cache write should never break growth. On a quota
+    // overflow (large orgs bake multi-MB blobs), evict the oldest entries so
+    // the next write has room, rather than silently never caching again.
+    if (err instanceof DOMException && err.name === 'QuotaExceededError') {
+      void pruneLRU(Math.floor(DEFAULT_MAX_ENTRIES / 2))
+    }
+  }
+}
+
+/** Remove a single entry — used to evict a corrupt/unusable baked tree. */
+export async function deleteTreeCache(key: string): Promise<void> {
+  try {
+    const db = await openDb()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite')
+      tx.objectStore(STORE).delete(key)
+      tx.oncomplete = () => resolve()
+      tx.onerror    = () => reject(tx.error)
+    })
   } catch {
-    // Swallow — a failed cache write should never break growth.
+    // ignore — eviction is best-effort
   }
 }
 

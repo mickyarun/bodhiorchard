@@ -42,6 +42,7 @@ import { Theme } from '../rendering/Theme'
 import {
   loadTreeCache,
   saveTreeCache,
+  deleteTreeCache,
   pruneLRU,
   computeCacheKey,
   SCHEMA_VERSION,
@@ -234,16 +235,21 @@ export class ProceduralTreeSystem implements RepoVisualization {
       })
 
       const cached = cacheHits[i]
-      if (cached) {
+      const restored = cached
+        ? tree.loadFromCache(
+            { branchGroups: cached.branchGroups, primaries: cached.primaries },
+            barkColor(), pos.x, pos.z,
+          )
+        : 0
+      if (cached && restored > 0) {
         // Cache hit: skip growth, restore instanced state directly.
-        tree.loadFromCache(
-          { branchGroups: cached.branchGroups, primaries: cached.primaries },
-          barkColor(), pos.x, pos.z,
-        )
         if (cached.leafGroup) leaves.loadFromCache(cached.leafGroup)
         this.handleTreeReady(entry, cached.labelY)
         entry.done = true
       } else {
+        // No cache, or the cached geometry restored to nothing (corrupt/empty
+        // entry → invisible tree). Evict the bad entry and grow fresh.
+        if (cached) void deleteTreeCache(cacheKeys[i])
         tree.startTree(barkColor(), pos.x, 0, pos.z)
       }
     }
@@ -454,15 +460,19 @@ export class ProceduralTreeSystem implements RepoVisualization {
     this.entries[idx] = entry
 
     const cached = await loadTreeCache(cacheKey)
-    if (cached) {
-      tree.loadFromCache(
-        { branchGroups: cached.branchGroups, primaries: cached.primaries },
-        barkColor(), old.worldX, old.worldZ,
-      )
+    const restored = cached
+      ? tree.loadFromCache(
+          { branchGroups: cached.branchGroups, primaries: cached.primaries },
+          barkColor(), old.worldX, old.worldZ,
+        )
+      : 0
+    if (cached && restored > 0) {
       if (cached.leafGroup) leaves.loadFromCache(cached.leafGroup)
       this.handleTreeReady(entry, cached.labelY)
       entry.done = true
     } else {
+      // Corrupt/empty cache entry restores to nothing — evict and grow fresh.
+      if (cached) void deleteTreeCache(cacheKey)
       tree.startTree(barkColor(), old.worldX, 0, old.worldZ)
     }
     if (entry.userHidden) setEntryVisible(entry, false)
