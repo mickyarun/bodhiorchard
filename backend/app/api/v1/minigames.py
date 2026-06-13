@@ -23,7 +23,7 @@ GET  /v1/minigames/leaderboard — top personal bests for one game.
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,8 +36,10 @@ from app.schemas.minigame import (
     MinigameScoreResult,
     MinigameStatusRead,
 )
+from app.services.minigame_broadcast import broadcast_high_score, is_new_org_record
 from app.services.minigame_nudge import send_org_nudges
 from app.services.minigame_service import (
+    GAMES,
     MinigameValidationError,
     get_leaderboard,
     get_status,
@@ -61,10 +63,16 @@ async def minigame_status(
 @router.post("/score", response_model=MinigameScoreResult)
 async def minigame_score(
     payload: MinigameScoreIn,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MinigameScoreResult:
     try:
+        # Snapshot the standing record BEFORE recording, so we can tell whether
+        # this play dethroned a different player and is worth broadcasting.
+        top_before = await get_leaderboard(
+            db, org_id=current_user.org_id, game=payload.game, limit=1
+        )
         result = await submit_score(
             db,
             user_id=current_user.id,
@@ -85,6 +93,24 @@ async def minigame_score(
         score=payload.score,
         is_new_best=result["is_new_best"],
     )
+
+    # New all-time org record (someone else's crown taken) → notify everyone on
+    # Slack, after the response, without blocking it.
+    prev_top = top_before[0] if top_before else None
+    if prev_top is not None and is_new_org_record(
+        prev_top=prev_top, breaker_id=current_user.id, score=payload.score
+    ):
+        background_tasks.add_task(
+            broadcast_high_score,
+            org_id=current_user.org_id,
+            game_name=GAMES[payload.game].name,
+            breaker_user_id=current_user.id,
+            breaker_name=current_user.name or "",
+            score=payload.score,
+            previous_best=prev_top.best_score,
+            previous_holder=prev_top.user_name,
+        )
+
     return MinigameScoreResult.model_validate(result)
 
 
