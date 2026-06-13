@@ -56,6 +56,10 @@ export class InputManager {
   private mouseDownPos: { x: number; y: number } | null = null
   private mouseDownTime = 0
   private hasDragged = false // true once displacement exceeds threshold
+  // True for the duration of a gesture that began while a modal dialog was
+  // open, so the whole press→drag→release yields to the dialog instead of
+  // orbiting the camera or picking a repo tree underneath it.
+  private gestureSuppressed = false
   private pendingClick: { x: number; y: number } | null = null
   private currentMousePos: { x: number; y: number } = { x: 0, y: 0 }
   private static readonly DRAG_THRESHOLD = 4 // px — only affects click suppression
@@ -112,6 +116,7 @@ export class InputManager {
     this.blurHandler = (): void => {
       this.mouseDownPos = null
       this.hasDragged = false
+      this.gestureSuppressed = false
       this.orbitDx = 0
       this.orbitDy = 0
       this.panDx = 0
@@ -230,13 +235,34 @@ export class InputManager {
 
   // ─── Mouse Handlers ─────────────────────────────────
 
+  /**
+   * True while a modal Vuetify dialog is open. The dialog renders over the
+   * canvas, but its transparent margins let wheel/click events fall through to
+   * the canvas — so the camera would still zoom and clicks would still pick
+   * repo trees behind the dialog. Matches `.v-dialog` specifically (not
+   * tooltips/menus, which are `.v-tooltip` / `.v-menu`).
+   */
+  private isModalDialogOpen(): boolean {
+    return document.querySelector('.v-overlay--active.v-dialog') !== null
+  }
+
   private onMouseDown(event: pc.MouseEvent): void {
+    // Snapshot at press time: a gesture started under an open dialog is
+    // ignored end-to-end (no orbit, no pick), even if the dialog closes mid-drag.
+    this.gestureSuppressed = this.isModalDialogOpen()
+    if (this.gestureSuppressed) return
     this.mouseDownPos = { x: event.x, y: event.y }
     this.mouseDownTime = performance.now()
     this.hasDragged = false
   }
 
   private onMouseUp(event: pc.MouseEvent): void {
+    if (this.gestureSuppressed) {
+      this.gestureSuppressed = false
+      this.mouseDownPos = null
+      this.hasDragged = false
+      return
+    }
     if (this.mouseDownPos && !this.hasDragged) {
       const elapsed = performance.now() - this.mouseDownTime
       if (elapsed < InputManager.CLICK_MAX_MS && event.button === pc.MOUSEBUTTON_LEFT) {
@@ -272,6 +298,8 @@ export class InputManager {
   }
 
   private onMouseMove(event: pc.MouseEvent): void {
+    // A gesture begun under a dialog must not orbit/pan or move the hover ray.
+    if (this.gestureSuppressed) return
     this.currentMousePos = { x: event.x, y: event.y }
 
     // Track drag threshold for click suppression only
@@ -297,6 +325,11 @@ export class InputManager {
   }
 
   private onMouseWheel(event: pc.MouseEvent): void {
+    // A modal dialog is open over the canvas — don't let the wheel zoom the
+    // camera through it. (The target check below only catches wheels whose DOM
+    // target is inside an overlay; one that falls through to the canvas needs
+    // this dialog-state check.)
+    if (this.isModalDialogOpen()) return
     // Ignore scroll when mouse is over a UI overlay (dropdown menus, panels)
     const native = (event as unknown as { event?: Event }).event
     if (native?.target instanceof HTMLElement) {
@@ -342,6 +375,9 @@ export class InputManager {
     // gestures, so a tap on the joystick or a button must not also
     // register as a camera-orbit start. PlayCanvas wraps the native
     // TouchEvent; the original DOM event is reachable via `event.event`.
+    // Don't start a camera-orbit touch under an open modal dialog.
+    if (this.isModalDialogOpen()) return
+
     const native = (event as unknown as { event?: Event }).event
     const target = native?.target
     if (target instanceof Element && target.closest('.touch-controls')) return
