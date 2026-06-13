@@ -85,14 +85,9 @@ def compose_digest(
 
         # Streak-at-risk: a live streak last continued YESTERDAY (so it's
         # still alive) but not yet played today.
-        if (
-            st
-            and st.last_played_date == today - timedelta(days=1)
-            and st.current_streak >= 1
-        ):
+        if st and st.last_played_date == today - timedelta(days=1) and st.current_streak >= 1:
             lines.append(
-                f"🔥 Play *{spec.name}* today to keep your "
-                f"*{st.current_streak}-day* streak alive."
+                f"🔥 Play *{spec.name}* today to keep your *{st.current_streak}-day* streak alive."
             )
             continue
 
@@ -113,9 +108,7 @@ def compose_digest(
     link = f"{frontend_url.rstrip('/')}/dashboard"
     first = user_name.split()[0] if user_name.strip() else None
     header = (
-        f"🎮 *Garden Games* — hey {first}!"
-        if first
-        else "🎮 *Garden Games* — your daily nudge"
+        f"🎮 *Garden Games* — hey {first}!" if first else "🎮 *Garden Games* — your daily nudge"
     )
     footer = f"Play in the garden: {link}"
     return "\n".join([header, *lines, footer])

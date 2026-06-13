@@ -34,6 +34,13 @@
       <v-tab value="xp">XP</v-tab>
       <v-tab value="race-100">Circuit · 1 lap</v-tab>
       <v-tab value="race-200">Circuit · 2 laps</v-tab>
+      <v-tab
+        v-for="game in minigamesStore.games"
+        :key="game.key"
+        :value="`game-${game.key}`"
+      >
+        {{ game.name }}
+      </v-tab>
     </v-tabs>
 
     <v-window v-model="activeTab">
@@ -42,6 +49,13 @@
       </v-window-item>
       <v-window-item value="race-200">
         <RaceLeaderboardTab :distance="200" />
+      </v-window-item>
+      <v-window-item
+        v-for="game in minigamesStore.games"
+        :key="game.key"
+        :value="`game-${game.key}`"
+      >
+        <MinigameLeaderboardTab :game="game.key" :game-name="game.name" />
       </v-window-item>
       <v-window-item value="xp">
 
@@ -113,13 +127,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useXPStore } from '@/stores/xp'
+import { useMinigamesStore } from '@/stores/minigames'
 import { useAuthStore } from '@/stores/auth'
 import RaceLeaderboardTab from './RaceLeaderboardTab.vue'
+import MinigameLeaderboardTab from './MinigameLeaderboardTab.vue'
 import LeaderboardPodium, { type PodiumEntry } from '@/components/leaderboard/LeaderboardPodium.vue'
 
-const activeTab = ref<'xp' | 'race-100' | 'race-200'>('xp')
+// Tab keys are dynamic: 'xp', 'race-100', 'race-200', and one 'game-<key>'
+// per registered mini-game (fetched on mount).
+const activeTab = ref<string>('xp')
 
 const xpStore = useXPStore()
+const minigamesStore = useMinigamesStore()
 const authStore = useAuthStore()
 const loading = ref(true)
 
@@ -163,6 +182,9 @@ const podiumEntries = computed<PodiumEntry[]>(() =>
 )
 
 onMounted(async () => {
+  // The mini-game tabs are driven by the registered games list; fetch it
+  // alongside the XP board so the tabs appear without needing to open a game.
+  void minigamesStore.fetchStatus()
   await xpStore.fetchLeaderboard()
   loading.value = false
 })
