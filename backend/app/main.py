@@ -33,6 +33,9 @@ from app.core.middleware import RequestLoggingMiddleware
 from app.services.mcp_audit_cleanup import run_forever as run_audit_cleanup
 from app.services.minigame_nudge import run_forever as run_minigame_nudge
 from app.services.pr_merge_worker import WorkerPool, start_pr_merge_workers
+from app.services.quiz_batch_generation import run_forever as run_quiz_batch_topup
+from app.services.quiz_monthly_rollup import run_forever as run_quiz_monthly_rollup
+from app.services.quiz_scheduler import run_forever as run_quiz_scheduler
 from app.services.scan.pr_merge_update import handle_pr_merge_delivery
 from app.services.velocity_snapshot_roller import run_forever as run_velocity_snapshot_roller
 
@@ -254,6 +257,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # leaderboard. Best-effort + single-instance, same caveat as 8a/8b.
     minigame_nudge_task = asyncio.create_task(run_minigame_nudge())
 
+    # 8d. Company Quiz Game — daily rolling top-up of each org's review queue
+    # so admins always have AI-drafted questions to approve ahead of quiz days.
+    # Best-effort + single-instance, same caveat as 8a/8b/8c.
+    quiz_batch_task = asyncio.create_task(run_quiz_batch_topup())
+
+    # 8e. Company Quiz Game scheduler — 60s tick that opens approved questions
+    # at each org's local fire time and reveals them when the window closes.
+    quiz_scheduler_task = asyncio.create_task(run_quiz_scheduler())
+
+    # 8f. Company Quiz Game monthly rollup — on the 1st, awards SP to the prior
+    # month's org-wide top scorer (idempotent; the feature's only economy hook).
+    quiz_rollup_task = asyncio.create_task(run_quiz_monthly_rollup())
+
     # 9. PR-merge Redis-stream worker pool. One consumer per
     # (org, repo) stream; supervisor task spawns consumers lazily as
     # streams appear in the registry. Orphan recovery re-publishes
@@ -276,6 +292,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     mcp_audit_cleanup_task.cancel()
     velocity_snapshot_task.cancel()
     minigame_nudge_task.cancel()
+    quiz_batch_task.cancel()
+    quiz_scheduler_task.cancel()
+    quiz_rollup_task.cancel()
     if pr_merge_pool is not None:
         await pr_merge_pool.stop()
     await stop_workers()

@@ -226,6 +226,18 @@ const router = createRouter({
           component: () => import('@/views/settings/SettingsJiraImport.vue'),
         },
         {
+          path: 'settings/quiz-game',
+          name: 'settings-quiz-game',
+          meta: { permission: 'org:edit_settings' },
+          component: () => import('@/views/settings/SettingsQuizGame.vue'),
+        },
+        {
+          path: 'settings/quiz-review',
+          name: 'settings-quiz-review',
+          meta: { permission: 'org:edit_settings' },
+          component: () => import('@/views/quiz/QuizReviewView.vue'),
+        },
+        {
           path: 'settings/code',
           name: 'settings-code',
           meta: { permission: 'integrations:configure' },

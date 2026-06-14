@@ -69,7 +69,6 @@ SP_STREAK_30 = 2.0  # 30-day activity streak milestone
 SP_FIRST_BUD = 1.0  # first BUD contribution (one-time)
 SP_LEADERBOARD_TOP3 = 1.0  # top 3 XP leaderboard (weekly)
 
-
 # ─── Role → BUD Shipped SP mapping ────────────
 
 BUD_SHIPPED_SP: dict[str, float] = {

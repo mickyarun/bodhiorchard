@@ -164,6 +164,20 @@
               rounded="lg"
               class="pl-10"
             />
+            <v-list-item
+              v-if="canManageQuiz"
+              title="Quiz Game"
+              to="/settings/quiz-game"
+              rounded="lg"
+              class="pl-10"
+            />
+            <v-list-item
+              v-if="canManageQuiz"
+              title="Quiz Review"
+              to="/settings/quiz-review"
+              rounded="lg"
+              class="pl-10"
+            />
             <!-- MCP Connect is self-service (any authenticated user can
                  mint / revoke their own tokens); no canView* gate. -->
             <v-list-item
@@ -357,6 +371,7 @@ const {
   canViewQAAutomation,
   canViewPresenceSettings,
   canViewJiraImport,
+  canManageQuiz,
 } = usePermissions()
 
 // Collapsed-sidebar preference, persisted across reloads. `expand-on-hover`

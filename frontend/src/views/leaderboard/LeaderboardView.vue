@@ -32,6 +32,7 @@
 
     <v-tabs v-model="activeTab" color="primary" density="comfortable" class="mb-4">
       <v-tab value="xp">XP</v-tab>
+      <v-tab value="quiz">Quiz</v-tab>
       <v-tab value="race-100">Circuit · 1 lap</v-tab>
       <v-tab value="race-200">Circuit · 2 laps</v-tab>
       <v-tab
@@ -44,6 +45,9 @@
     </v-tabs>
 
     <v-window v-model="activeTab">
+      <v-window-item value="quiz">
+        <QuizLeaderboardTab />
+      </v-window-item>
       <v-window-item value="race-100">
         <RaceLeaderboardTab :distance="100" />
       </v-window-item>
@@ -131,6 +135,7 @@ import { useMinigamesStore } from '@/stores/minigames'
 import { useAuthStore } from '@/stores/auth'
 import RaceLeaderboardTab from './RaceLeaderboardTab.vue'
 import MinigameLeaderboardTab from './MinigameLeaderboardTab.vue'
+import QuizLeaderboardTab from './QuizLeaderboardTab.vue'
 import LeaderboardPodium, { type PodiumEntry } from '@/components/leaderboard/LeaderboardPodium.vue'
 
 // Tab keys are dynamic: 'xp', 'race-100', 'race-200', and one 'game-<key>'

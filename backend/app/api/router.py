@@ -37,6 +37,8 @@ from app.api.v1.minigames import router as minigames_router
 from app.api.v1.notifications import router as notifications_router
 from app.api.v1.organizations import router as orgs_router
 from app.api.v1.public import router as public_router
+from app.api.v1.quiz import router as quiz_router
+from app.api.v1.quiz_review import router as quiz_review_router
 from app.api.v1.races import internal_router as races_internal_router
 from app.api.v1.races import router as races_router
 from app.api.v1.roles import router as roles_router
@@ -94,6 +96,8 @@ api_router.include_router(mcp_router)
 api_router.include_router(mcp_remote_router)
 api_router.include_router(internal_colyseus_router, prefix="/api/v1")
 api_router.include_router(minigames_router, prefix="/api/v1/minigames")
+api_router.include_router(quiz_router, prefix="/api/v1/quiz")
+api_router.include_router(quiz_review_router, prefix="/api/v1/quiz")
 api_router.include_router(races_router, prefix="/api/v1/races")
 api_router.include_router(races_internal_router, prefix="/api/v1")
 api_router.include_router(scans_router, prefix="/api/v1/reposcanv2")

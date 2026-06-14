@@ -44,6 +44,7 @@ JOB_SCAN = "scan"  # Future
 JOB_AGENT_RUN = "agent_run"  # Future
 JOB_REPO_BULK_ONBOARD = "repo_bulk_onboard"
 JOB_SKILL_RERUN = "skill_rerun"
+JOB_QUIZ_BATCH = "quiz_batch"
 
 _COMPLETED_TTL = 300  # seconds before cleanup
 _QUEUE_MAXSIZE = 50  # backpressure limit per queue

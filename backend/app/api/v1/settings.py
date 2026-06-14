@@ -49,6 +49,7 @@ from app.schemas.settings import (
     GitHubAppStatus,
     GitHubSettings,
     JiraSettingsRead,
+    QuizGameSettings,
     ScanSettings,
     SlackSettings,
     SourceCodeSettings,
@@ -69,6 +70,7 @@ from app.services.org_settings import (
     get_jira_settings,
     get_presence_settings,
     get_qa_settings,
+    get_quiz_settings,
 )
 from app.services.slack_client import auth_test
 
@@ -339,6 +341,51 @@ async def update_connections(
         await fetch_and_persist_app_slug(org, db)
 
     return await get_connections(current_user, db)
+
+
+@router.get(
+    "/quiz",
+    response_model=QuizGameSettings,
+    dependencies=[Depends(require_permissions("org:view_settings"))],
+)
+async def get_quiz_game_settings(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> QuizGameSettings:
+    """Return the organization's Company Quiz Game settings.
+
+    Resolved through ``get_quiz_settings`` so defaults stay in lockstep with
+    every other reader (scheduler, batch generator, notifier).
+    """
+    org = await OrganizationRepository(db).get_for_user(current_user)
+    return get_quiz_settings(org.config)
+
+
+@router.patch(
+    "/quiz",
+    response_model=QuizGameSettings,
+    dependencies=[Depends(require_permissions("org:edit_settings"))],
+)
+async def update_quiz_game_settings(
+    body: QuizGameSettings,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> QuizGameSettings:
+    """Replace the organization's Company Quiz Game settings.
+
+    The full settings object is sent by the admin Settings page; it is stored
+    under ``org.config["quiz"]`` in the snake_case shape ``get_quiz_settings``
+    reads back.
+    """
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+    config = dict(org.config or {})
+    config["quiz"] = body.model_dump(mode="json", by_alias=False)
+    org.config = config
+    flag_modified(org, "config")
+    await db.flush()
+    await db.refresh(org)
+    return get_quiz_settings(org.config)
 
 
 class MCPTokenResponse(BaseModel):
