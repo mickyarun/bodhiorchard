@@ -21,21 +21,30 @@ LINK = "https://app.example/dashboard"
 
 class TestOpenMessage:
     def test_names_the_leader_to_beat(self) -> None:
-        msg = compose_open_message(LINK, [("Alice", 420), ("Bob", 380)])
+        msg = compose_open_message(LINK, [("Alice", 420), ("Bob", 380)], 1.0)
         assert "Alice" in msg and "420" in msg
         assert "top the board" in msg
         assert LINK in msg
 
+    def test_advertises_sp_prize(self) -> None:
+        msg = compose_open_message(LINK, [], 2.0)
+        assert "2 SP" in msg  # %g drops the trailing .0
+        assert "SP up for grabs" in msg
+
+    def test_no_sp_line_when_amount_zero(self) -> None:
+        msg = compose_open_message(LINK, [("Alice", 10)], 0)
+        assert "SP" not in msg
+
     def test_empty_board_invites_first_score(self) -> None:
-        msg = compose_open_message(LINK, [])
+        msg = compose_open_message(LINK, [], 1.0)
         assert "first" in msg.lower()
         assert "Alice" not in msg
 
     def test_all_zero_treated_as_empty(self) -> None:
         # A member on the board with 0 pts isn't a "leader to beat".
-        msg = compose_open_message(LINK, [("Arun", 0)])
+        msg = compose_open_message(LINK, [("Arun", 0)], 1.0)
         assert "first" in msg.lower()
-        assert "leads this month" not in msg
+        assert "leads" not in msg
 
 
 class TestRevealMessage:

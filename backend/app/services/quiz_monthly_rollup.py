@@ -14,10 +14,17 @@
 
 """Monthly quiz champion → SP award. The feature's ONLY economy touchpoint.
 
-On the 1st of each month, the previous month's top scorer per org earns SP via
-the shared ``award_sp`` path (idempotent on a month-keyed ``source_ref``). XP is
-never touched. The winner must still be an active member; if the top scorer has
-left, the award rolls to the next eligible scorer.
+Once a month is over, its top scorer per org earns SP via the shared
+``award_sp`` path. Guards:
+
+- **Idempotent + catch-up**: the award is keyed on a month ``source_ref`` and
+  attempted on EVERY daily tick (not just the 1st), so it's granted exactly once
+  but still lands even if the process was down on the 1st.
+- **No zero-point champion**: a member who only answered (and got everything
+  wrong) never wins — the winner must have > 0 points.
+- **Active winner only**: if the top scorer left the org, the award rolls to the
+  next eligible scorer.
+- **XP is never touched.**
 """
 
 from __future__ import annotations
@@ -47,8 +54,8 @@ WINNER_CANDIDATES = 5
 async def finalize_org_month(org_id: uuid.UUID, *, period_month: str, amount: float) -> bool:
     """Award SP to the previous month's top active scorer for one org.
 
-    Returns True if an award was made. Idempotent: the month-keyed source_ref
-    means re-running on the 1st never double-awards.
+    Returns True if an award was made. Idempotent (month-keyed source_ref), so it
+    is safe to call every day — repeats are no-ops and a missed 1st self-heals.
     """
     if amount <= 0:
         return False
@@ -62,6 +69,10 @@ async def finalize_org_month(org_id: uuid.UUID, *, period_month: str, amount: fl
         user_repo = UserRepository(db)
         winner_id: uuid.UUID | None = None
         for row in rows:
+            # Rows are points-desc: once we hit 0, nobody below scored either, so
+            # there is no eligible champion this month.
+            if row.total_points <= 0:
+                break
             user = await user_repo.get_by_id_in_org(row.user_id, org_id)
             if user and user.is_active:
                 winner_id = row.user_id
@@ -87,11 +98,12 @@ async def finalize_org_month(org_id: uuid.UUID, *, period_month: str, amount: fl
     return False
 
 
-async def sweep_once(today_month_first: bool) -> int:
-    """Award the previous month's champion for every enabled org. Returns count."""
-    if not today_month_first:
-        return 0
+async def sweep_once() -> int:
+    """Ensure last month's champion is awarded for every enabled org. Returns count.
 
+    Run daily; the per-month ``source_ref`` makes repeat runs no-ops, so this both
+    grants the award and catches up if a prior 1st-of-month run was missed.
+    """
     period_month = previous_month_key(datetime.now(UTC).date())
     async with AsyncSessionLocal() as session:
         org_ids = await OrganizationRepository(session).list_all_ids()
@@ -114,11 +126,11 @@ async def sweep_once(today_month_first: bool) -> int:
 
 
 async def run_forever() -> None:
-    """Daily loop — finalizes the prior month's champion on the 1st."""
+    """Daily loop — ensures the prior month's champion is awarded (idempotent)."""
     consecutive_failures = 0
     while True:
         try:
-            await sweep_once(datetime.now(UTC).day == 1)
+            await sweep_once()
             consecutive_failures = 0
             sleep_for = CHECK_SECONDS
         except asyncio.CancelledError:

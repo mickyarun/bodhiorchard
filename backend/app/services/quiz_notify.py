@@ -35,6 +35,7 @@ from app.repositories.organization import OrganizationRepository
 from app.repositories.quiz_score import QuizScoreRepository
 from app.repositories.user import UserRepository
 from app.services.event_bus import publish
+from app.services.org_settings import get_quiz_settings
 from app.services.quiz_schedule_math import current_month_key
 from app.services.slack_client import chat_post_message, conversations_open
 
@@ -87,12 +88,17 @@ async def _month_standings(org_id: uuid.UUID, *, limit: int = 3) -> list[tuple[s
     return [(r.user_name, r.total_points) for r in rows]
 
 
-def compose_open_message(link: str, standings: list[tuple[str, int]]) -> str:
-    """Build the quiz-open DM with a beat-the-leader nudge. Pure / testable."""
+def compose_open_message(link: str, standings: list[tuple[str, int]], sp_amount: float) -> str:
+    """Build the quiz-open DM: SP prize + beat-the-leader nudge. Pure / testable."""
     lines = ["🧠 *Today's company quiz is live!* One question from your own dev data."]
+    if sp_amount > 0:
+        lines.append(
+            f"🏅 *Rare SP up for grabs* — this month's top scorer wins *{sp_amount:g} SP*. "
+            "SP is hard-earned, so every correct answer counts."
+        )
     if standings and standings[0][1] > 0:
         leader, pts = standings[0]
-        lines.append(f"🏆 *{leader}* leads this month with *{pts}* pts — can you top the board?")
+        lines.append(f"🏆 *{leader}* leads with *{pts}* pts — can you top the board?")
     else:
         lines.append("🥇 The board's wide open — be the first to put points up this month!")
     lines.append(f"Answer before the window closes — the explanation drops at reveal.\n{link}")
@@ -115,10 +121,15 @@ def compose_reveal_message(link: str, standings: list[tuple[str, int]]) -> str:
 
 
 async def notify_quiz_open(org_id: uuid.UUID) -> int:
-    """DM members that today's quiz is live, nudging them to beat the leader."""
+    """DM members that today's quiz is live — SP prize + beat-the-leader nudge."""
     link = f"{settings.frontend_url.rstrip('/')}/dashboard"
     standings = await _month_standings(org_id)
-    return await _dm_all_members(org_id, compose_open_message(link, standings), event="quiz_open")
+    async with AsyncSessionLocal() as db:
+        config = await OrganizationRepository(db).get_config(org_id)
+    sp_amount = get_quiz_settings(config).monthly_sp_amount
+    return await _dm_all_members(
+        org_id, compose_open_message(link, standings, sp_amount), event="quiz_open"
+    )
 
 
 async def notify_quiz_reveal(org_id: uuid.UUID) -> int:
