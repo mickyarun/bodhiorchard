@@ -63,6 +63,7 @@
         <template v-else-if="playing">
           <FishingGame v-if="activeGame === 'fishing'" @finished="onFinished" />
           <PollenPop v-else-if="activeGame === 'pollen_pop'" @finished="onFinished" />
+          <FireflyFollow v-else-if="activeGame === 'firefly'" @finished="onFinished" />
         </template>
 
         <!-- ── Result + leaderboard ── -->
@@ -128,6 +129,7 @@ import { computed, ref, watch } from 'vue'
 import { useMinigamesStore, type MinigameScoreResult } from '@/stores/minigames'
 import FishingGame from './FishingGame.vue'
 import PollenPop from './PollenPop.vue'
+import FireflyFollow from './FireflyFollow.vue'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
@@ -135,6 +137,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 const GAME_ART: Record<string, string> = {
   fishing: '🎣',
   pollen_pop: '🌸',
+  firefly: '✨',
 }
 const MEDALS = ['🥇', '🥈', '🥉']
 
@@ -247,6 +250,9 @@ function close(value: boolean): void {
 }
 .game-card--pollen_pop {
   background: linear-gradient(160deg, #3c5a23 0%, #5a7c2e 60%, #87a83c 100%);
+}
+.game-card--firefly {
+  background: linear-gradient(160deg, #1a1840 0%, #3b2d6e 55%, #6a4fa0 100%);
 }
 .game-card__art {
   font-size: 44px;

@@ -31,6 +31,7 @@ from app.services.minigame_nudge import (
     _zone_for_config,
     compose_digest,
 )
+from app.services.minigame_service import GAMES
 
 ME = uuid.uuid4()
 RIVAL = uuid.uuid4()
@@ -40,8 +41,9 @@ FRONTEND = "https://app.example.test"
 
 
 def _leaders(**kw: LeaderboardRow | None) -> dict[str, LeaderboardRow | None]:
-    # Default: nobody leads either game.
-    base: dict[str, LeaderboardRow | None] = {"fishing": None, "pollen_pop": None}
+    # Default: nobody leads any game. Derived from the registry so adding a
+    # game doesn't silently leave a key unaccounted for.
+    base: dict[str, LeaderboardRow | None] = dict.fromkeys(GAMES, None)
     base.update(kw)
     return base
 
@@ -85,13 +87,15 @@ def test_leader_nudge_when_someone_else_is_ahead() -> None:
 
 
 def test_no_nudge_when_user_already_leads_and_played_today() -> None:
+    # The user already tops EVERY registered game and played each today — no
+    # streak at risk, no rival ahead, nothing unplayed — so the digest is
+    # silent. Built from GAMES so a newly-added game can't reopen a nudge.
     leaders = _leaders(
-        fishing=LeaderboardRow(user_id=ME, user_name="Me", best_score=48, plays=2),
-        pollen_pop=LeaderboardRow(user_id=ME, user_name="Me", best_score=90, plays=1),
+        **{g: LeaderboardRow(user_id=ME, user_name="Me", best_score=50, plays=2) for g in GAMES}
     )
     states = [
-        _UserGameState(game="fishing", best_score=48, current_streak=3, last_played_date=TODAY),
-        _UserGameState(game="pollen_pop", best_score=90, current_streak=3, last_played_date=TODAY),
+        _UserGameState(game=g, best_score=50, current_streak=3, last_played_date=TODAY)
+        for g in GAMES
     ]
     msg = compose_digest(
         user_id=ME,

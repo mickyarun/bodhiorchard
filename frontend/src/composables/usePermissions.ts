@@ -26,6 +26,13 @@ export function usePermissions() {
     return permissions.some(p => hasPermission(p))
   }
 
+  // Org administrators — the org owner and platform admins. Role-based (not a
+  // granted permission) because it gates admin-only *detail* like raw play
+  // counts on the mini-game leaderboards, which ordinary players shouldn't see.
+  const isOrgAdmin = computed(
+    () => authStore.user?.role === 'org_owner' || authStore.user?.role === 'admin',
+  )
+
   // Sidebar visibility
   const canApprove = computed(() => hasPermission('backlog:approve'))
   const canManageMembers = computed(() => hasPermission('team:manage'))
@@ -66,6 +73,7 @@ export function usePermissions() {
   return {
     hasPermission,
     hasAnyPermission,
+    isOrgAdmin,
     canApprove,
     canManageMembers,
     canViewSettings,

@@ -51,7 +51,7 @@
               <v-list-item-title class="font-weight-medium">
                 {{ row.user_name }}
               </v-list-item-title>
-              <v-list-item-subtitle class="text-caption">
+              <v-list-item-subtitle v-if="isOrgAdmin" class="text-caption">
                 {{ row.plays }} {{ row.plays === 1 ? 'play' : 'plays' }}
               </v-list-item-subtitle>
               <template #append>
@@ -71,6 +71,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useMinigamesStore } from '@/stores/minigames'
 import { useAuthStore } from '@/stores/auth'
+import { usePermissions } from '@/composables/usePermissions'
 import LeaderboardPodium, { type PodiumEntry } from '@/components/leaderboard/LeaderboardPodium.vue'
 
 const props = defineProps<{
@@ -80,6 +81,7 @@ const props = defineProps<{
 
 const store = useMinigamesStore()
 const authStore = useAuthStore()
+const { isOrgAdmin } = usePermissions()
 const loading = ref(false)
 
 const MEDALS = ['🥇', '🥈', '🥉']
@@ -112,7 +114,8 @@ const podiumEntries = computed<PodiumEntry[]>(() =>
     name: row.user_name,
     figure: row.best_score.toLocaleString(),
     figureKind: 'ink',
-    meta: `${row.plays} ${row.plays === 1 ? 'play' : 'plays'}`,
+    // Play count is admin-only detail — hidden from ordinary players.
+    meta: isOrgAdmin.value ? `${row.plays} ${row.plays === 1 ? 'play' : 'plays'}` : undefined,
     isMe: row.user_id === currentUserId.value,
   })),
 )

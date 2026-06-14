@@ -48,6 +48,7 @@ class GameSpec:
 GAMES: dict[str, GameSpec] = {
     "fishing": GameSpec(name="Lake Fishing", max_score=50),
     "pollen_pop": GameSpec(name="Pollen Pop", max_score=200),
+    "firefly": GameSpec(name="Firefly Follow", max_score=50),
 }
 
 # Absolute ceiling regardless of per-game cap — guards against tampering.
