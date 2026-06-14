@@ -346,7 +346,7 @@ async def update_connections(
 @router.get(
     "/quiz",
     response_model=QuizGameSettings,
-    dependencies=[Depends(require_permissions("org:view_settings"))],
+    dependencies=[Depends(require_permissions("quiz:configure"))],
 )
 async def get_quiz_game_settings(
     current_user: User = Depends(get_current_user),
@@ -364,7 +364,7 @@ async def get_quiz_game_settings(
 @router.patch(
     "/quiz",
     response_model=QuizGameSettings,
-    dependencies=[Depends(require_permissions("org:edit_settings"))],
+    dependencies=[Depends(require_permissions("quiz:configure"))],
 )
 async def update_quiz_game_settings(
     body: QuizGameSettings,

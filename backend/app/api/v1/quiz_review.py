@@ -47,7 +47,7 @@ from app.services.quiz_review import (
 
 router = APIRouter(tags=["quiz"])
 
-_EDIT = Depends(require_permissions("org:edit_settings"))
+_EDIT = Depends(require_permissions("quiz:configure"))
 
 
 def _review_item(question: QuizQuestion) -> QuizReviewItem:
