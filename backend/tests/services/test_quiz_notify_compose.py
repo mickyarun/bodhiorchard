@@ -29,11 +29,21 @@ class TestOpenMessage:
     def test_advertises_sp_prize(self) -> None:
         msg = compose_open_message(LINK, [], 2.0)
         assert "2 SP" in msg  # %g drops the trailing .0
-        assert "SP up for grabs" in msg
+        assert "Monthly prize" in msg
+
+    def test_explains_scoring_rules(self) -> None:
+        from app.services.quiz_constants import BASE_POINTS, MAX_SPEED_BONUS
+
+        msg = compose_open_message(LINK, [], 1.0)
+        assert "How it scores" in msg
+        assert str(BASE_POINTS) in msg  # base points
+        assert f"+{MAX_SPEED_BONUS}" in msg  # speed bonus
 
     def test_no_sp_line_when_amount_zero(self) -> None:
         msg = compose_open_message(LINK, [("Alice", 10)], 0)
-        assert "SP" not in msg
+        # Scoring rules still show, but no monthly-prize line.
+        assert "Monthly prize" not in msg
+        assert "How it scores" in msg
 
     def test_empty_board_invites_first_score(self) -> None:
         msg = compose_open_message(LINK, [], 1.0)

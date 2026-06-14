@@ -36,6 +36,7 @@ from app.repositories.quiz_score import QuizScoreRepository
 from app.repositories.user import UserRepository
 from app.services.event_bus import publish
 from app.services.org_settings import get_quiz_settings
+from app.services.quiz_constants import BASE_POINTS, MAX_SPEED_BONUS
 from app.services.quiz_schedule_math import current_month_key
 from app.services.slack_client import chat_post_message, conversations_open
 
@@ -91,10 +92,15 @@ async def _month_standings(org_id: uuid.UUID, *, limit: int = 3) -> list[tuple[s
 def compose_open_message(link: str, standings: list[tuple[str, int]], sp_amount: float) -> str:
     """Build the quiz-open DM: SP prize + beat-the-leader nudge. Pure / testable."""
     lines = ["🧠 *Today's company quiz is live!* One question from your own dev data."]
+    lines.append(
+        f"📊 *How it scores:* a correct answer is *{BASE_POINTS} pts*, plus up to "
+        f"*+{MAX_SPEED_BONUS}* for answering early. A wrong answer scores 0 — accuracy first, "
+        "speed second."
+    )
     if sp_amount > 0:
         lines.append(
-            f"🏅 *Rare SP up for grabs* — this month's top scorer wins *{sp_amount:g} SP*. "
-            "SP is hard-earned, so every correct answer counts."
+            f"🏅 *Monthly prize:* SP is rare — the top scorer this month wins "
+            f"*{sp_amount:g} SP*. Every quiz adds up."
         )
     if standings and standings[0][1] > 0:
         leader, pts = standings[0]
