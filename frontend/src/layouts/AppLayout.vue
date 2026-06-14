@@ -234,6 +234,13 @@
                 title="MCP Token"
                 to="/profile/mcp-token"
               />
+              <!-- Self-service Slack notification opt-outs — any member,
+                   no permission gate. -->
+              <v-list-item
+                prepend-icon="mdi-bell-cog-outline"
+                title="Notification Settings"
+                to="/profile/notifications"
+              />
               <div class="theme-pref px-3 pt-2 pb-1">
                 <div class="text-caption text-medium-emphasis px-1 mb-1">Theme</div>
                 <div class="theme-seg" role="radiogroup" aria-label="Theme">

@@ -156,6 +156,14 @@ const router = createRouter({
           component: () => import('@/views/profile/ProfileMcpToken.vue'),
         },
         {
+          // Self-service per-user notification opt-outs. No permission gate —
+          // any authenticated member manages their own Slack DM preferences
+          // via /v1/me/notification-preferences.
+          path: 'profile/notifications',
+          name: 'profile-notifications',
+          component: () => import('@/views/profile/NotificationSettings.vue'),
+        },
+        {
           path: 'skills',
           name: 'skills',
           component: () => import('@/views/skills/SkillProfilesView.vue'),

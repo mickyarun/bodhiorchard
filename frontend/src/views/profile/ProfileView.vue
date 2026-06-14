@@ -32,6 +32,14 @@
       <v-btn
         variant="tonal"
         size="small"
+        prepend-icon="mdi-bell-cog-outline"
+        to="/profile/notifications"
+      >
+        Notifications
+      </v-btn>
+      <v-btn
+        variant="tonal"
+        size="small"
         prepend-icon="mdi-lock-reset"
         to="/change-password"
       >

@@ -54,6 +54,7 @@ from app.repositories.minigame import LeaderboardRow, MinigameRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.user import UserRepository
 from app.services.minigame_service import GAMES
+from app.services.notifications import NotificationCategory, category_default
 from app.services.org_settings import get_presence_settings
 from app.services.slack_client import chat_post_message, conversations_open
 
@@ -140,7 +141,11 @@ async def send_org_nudges(org_id: uuid.UUID) -> int:
             logger.warning("minigame_nudge_token_decrypt_failed", org_id=str(org_id))
             return 0
 
-        pairs = await UserRepository(session).list_active_slack_user_pairs(org_id)
+        pairs = await UserRepository(session).list_slack_recipients(
+            org_id,
+            category=NotificationCategory.MINIGAMES,
+            default_enabled=category_default(NotificationCategory.MINIGAMES),
+        )
         if not pairs:
             return 0
 

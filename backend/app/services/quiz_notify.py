@@ -35,6 +35,7 @@ from app.repositories.organization import OrganizationRepository
 from app.repositories.quiz_score import QuizScoreRepository
 from app.repositories.user import UserRepository
 from app.services.event_bus import publish
+from app.services.notifications import NotificationCategory, category_default
 from app.services.org_settings import get_quiz_settings
 from app.services.quiz_constants import BASE_POINTS, MAX_SPEED_BONUS
 from app.services.quiz_schedule_math import current_month_key
@@ -57,7 +58,11 @@ async def _dm_all_members(org_id: uuid.UUID, message: str, *, event: str) -> int
         if not token:
             logger.warning("quiz_slack_token_decrypt_failed", org_id=str(org_id), quiz_event=event)
             return 0
-        pairs = await UserRepository(session).list_active_slack_user_pairs(org_id)
+        pairs = await UserRepository(session).list_slack_recipients(
+            org_id,
+            category=NotificationCategory.QUIZ,
+            default_enabled=category_default(NotificationCategory.QUIZ),
+        )
         if not pairs:
             return 0
 
