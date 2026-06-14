@@ -24,6 +24,9 @@ Once a month is over, its top scorer per org earns SP via the shared
   wrong) never wins — the winner must have > 0 points.
 - **Active winner only**: if the top scorer left the org, the award rolls to the
   next eligible scorer.
+- **Ties split the prize**: meaningful tie-breaks (more-correct, then faster)
+  decide a single winner; if people are still genuinely tied on points + correct
+  + speed, the SP is split equally among them rather than picked by name.
 - **XP is never touched.**
 """
 
@@ -37,7 +40,7 @@ import structlog
 
 from app.database import AsyncSessionLocal
 from app.repositories.organization import OrganizationRepository
-from app.repositories.quiz_score import QuizScoreRepository
+from app.repositories.quiz_score import MonthlyLeaderboardRow, QuizScoreRepository
 from app.repositories.user import UserRepository
 from app.services.org_settings import get_quiz_settings
 from app.services.quiz_schedule_math import previous_month_key
@@ -48,54 +51,80 @@ logger = structlog.get_logger(__name__)
 CHECK_SECONDS = 24 * 60 * 60
 RETRY_SLEEP_SECONDS = 60 * 60
 ALERT_AFTER_CONSECUTIVE_FAILURES = 2
-WINNER_CANDIDATES = 5
+WINNER_CANDIDATES = 10
 
 
-async def finalize_org_month(org_id: uuid.UUID, *, period_month: str, amount: float) -> bool:
-    """Award SP to the previous month's top active scorer for one org.
+def select_winners(
+    rows: list[MonthlyLeaderboardRow], active_user_ids: set[uuid.UUID]
+) -> list[uuid.UUID]:
+    """Pick the winning user id(s) from points-desc leaderboard rows.
 
-    Returns True if an award was made. Idempotent (month-keyed source_ref), so it
-    is safe to call every day — repeats are no-ops and a missed 1st self-heals.
+    Considers only active members with > 0 points; takes the best
+    (points, correct, speed) tuple and returns EVERY active member sharing it —
+    so a genuine tie returns multiple winners (the prize is then split), and
+    name is never the decider. Pure / testable.
+    """
+    eligible = [r for r in rows if r.total_points > 0 and r.user_id in active_user_ids]
+    if not eligible:
+        return []
+    top = eligible[0]  # rows arrive points-desc, correct-desc, time-asc
+    key = (top.total_points, top.correct_count, top.total_time_ms)
+    return [
+        r.user_id for r in eligible if (r.total_points, r.correct_count, r.total_time_ms) == key
+    ]
+
+
+async def finalize_org_month(org_id: uuid.UUID, *, period_month: str, amount: float) -> int:
+    """Award SP to the previous month's champion(s) for one org. Returns #awards.
+
+    Idempotent (per-user month-keyed source_ref), so it is safe to call every day
+    — repeats are no-ops and a missed 1st self-heals. A genuine tie splits the
+    prize equally.
     """
     if amount <= 0:
-        return False
+        return 0
 
     async with AsyncSessionLocal() as db:
         score_repo = QuizScoreRepository(db, org_id=org_id)
         rows = await score_repo.leaderboard(period_month=period_month, limit=WINNER_CANDIDATES)
         if not rows:
-            return False
+            return 0
 
         user_repo = UserRepository(db)
-        winner_id: uuid.UUID | None = None
+        active_ids: set[uuid.UUID] = set()
         for row in rows:
-            # Rows are points-desc: once we hit 0, nobody below scored either, so
-            # there is no eligible champion this month.
-            if row.total_points <= 0:
-                break
             user = await user_repo.get_by_id_in_org(row.user_id, org_id)
             if user and user.is_active:
-                winner_id = row.user_id
-                break
-        if winner_id is None:
-            return False
+                active_ids.add(row.user_id)
 
-        awarded = await award_sp(
-            db,
-            user_id=winner_id,
-            org_id=org_id,
-            amount=amount,
-            source="sp_quiz_monthly_top",
-            source_ref=f"sp_quiz_monthly:{org_id}:{period_month}",
-        )
+        winners = select_winners(rows, active_ids)
+        if not winners:
+            return 0
+
+        share = round(amount / len(winners), 2)
+        awarded = 0
+        for winner_id in winners:
+            result = await award_sp(
+                db,
+                user_id=winner_id,
+                org_id=org_id,
+                amount=share,
+                source="sp_quiz_monthly_top",
+                source_ref=f"sp_quiz_monthly:{org_id}:{period_month}:{winner_id}",
+            )
+            if result is not None:
+                awarded += 1
         await db.commit()
 
-    if awarded is not None:
+    if awarded:
         logger.info(
-            "quiz_monthly_award", org_id=str(org_id), period=period_month, user_id=str(winner_id)
+            "quiz_monthly_award",
+            org_id=str(org_id),
+            period=period_month,
+            winners=len(winners),
+            share=share,
         )
-        return True
-    return False
+    return awarded
 
 
 async def sweep_once() -> int:
@@ -116,10 +145,9 @@ async def sweep_once() -> int:
             settings = get_quiz_settings(config)
             if not settings.enabled:
                 continue
-            if await finalize_org_month(
+            awarded += await finalize_org_month(
                 org_id, period_month=period_month, amount=settings.monthly_sp_amount
-            ):
-                awarded += 1
+            )
         except Exception:
             logger.warning("quiz_monthly_rollup_org_failed", org_id=str(org_id), exc_info=True)
     return awarded
