@@ -48,10 +48,10 @@ export function usePermissions() {
   // ability rather than splitting view-only access from action access.
   const canViewCodeSettings = computed(() => hasPermission('integrations:configure'))
 
-  // Company Quiz Game admin (settings + question review/approval). Gated on
-  // the same permission the backend enforces (org:edit_settings) so page
-  // visibility never drifts from save/approve ability.
-  const canManageQuiz = computed(() => hasPermission('org:edit_settings'))
+  // Company Quiz Game admin (settings + question review/approval). Gated on a
+  // standalone permission so it can be granted to a "Quiz Master" custom role
+  // independently of org admin — keeping competing players out of the answers.
+  const canManageQuiz = computed(() => hasPermission('quiz:configure'))
 
   // Bug board. Each helper pairs the new ``bugs:*`` perm with the
   // legacy ``buds:*`` fallback so role tokens minted before the Step E

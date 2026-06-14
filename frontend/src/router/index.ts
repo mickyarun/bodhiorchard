@@ -228,13 +228,13 @@ const router = createRouter({
         {
           path: 'settings/quiz-game',
           name: 'settings-quiz-game',
-          meta: { permission: 'org:edit_settings' },
+          meta: { permission: 'quiz:configure' },
           component: () => import('@/views/settings/SettingsQuizGame.vue'),
         },
         {
           path: 'settings/quiz-review',
           name: 'settings-quiz-review',
-          meta: { permission: 'org:edit_settings' },
+          meta: { permission: 'quiz:configure' },
           component: () => import('@/views/quiz/QuizReviewView.vue'),
         },
         {
