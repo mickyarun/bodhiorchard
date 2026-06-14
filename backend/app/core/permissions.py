@@ -135,6 +135,17 @@ PERMISSION_CATEGORIES: list[CategoryDef] = [
         ],
     ),
     CategoryDef(
+        key="QUIZ",
+        name="Company Quiz",
+        description="Permissions for managing the Company Quiz Game",
+        permissions=[
+            # A standalone permission (NOT bundled into org/admin) so quiz
+            # management can be granted to specific people via a custom role —
+            # keeping it separate from anyone who plays and competes for SP.
+            PermissionDef("quiz:configure", "Manage the Company Quiz (settings + review)"),
+        ],
+    ),
+    CategoryDef(
         key="INTEGRATIONS",
         name="Integrations",
         description="Permissions related to third-party integrations",
@@ -218,6 +229,12 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         name="org_owner",
         description="Organization owner with full access",
         permission_specs=["*"],
+    ),
+    RoleDef(
+        name="quiz_master",
+        description="Runs the Company Quiz (configure + approve questions); assign to "
+        "a non-competing member so admins can play fairly",
+        permission_specs=["quiz:configure"],
     ),
     RoleDef(
         name="admin",
