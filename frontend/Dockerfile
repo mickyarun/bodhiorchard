@@ -45,7 +45,17 @@ RUN npx vite build && \
 FROM nginx:alpine
 
 COPY --from=builder /app/frontend/dist /usr/share/nginx/html
-COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Ship the config as an envsubst template (not a static conf.d file) so the
+# image entrypoint can fill in ${NGINX_RESOLVER} at start. The companion
+# .envsh detects the runtime's DNS server from /etc/resolv.conf, making the
+# image work unchanged on both Docker and Podman.
+COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY frontend/docker-entrypoint.d/16-detect-resolver.envsh /docker-entrypoint.d/16-detect-resolver.envsh
+
+# The nginx entrypoint only *sources* *.envsh files that are executable; a
+# Windows/CRLF checkout can drop the exec bit, so set it explicitly here.
+RUN chmod +x /docker-entrypoint.d/16-detect-resolver.envsh
 
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]

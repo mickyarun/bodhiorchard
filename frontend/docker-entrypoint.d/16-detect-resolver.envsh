@@ -1,0 +1,38 @@
+#!/bin/sh
+# Detect the container's DNS resolver and expose it as $NGINX_RESOLVER so the
+# template step below can bake it into default.conf. nginx's runtime upstream
+# resolution (the `resolver` directive + variable `proxy_pass`) needs the
+# address of a real DNS server, and that address differs by container runtime:
+#
+#   * Docker  -> embedded DNS at the fixed magic address 127.0.0.11
+#   * Podman  -> aardvark-dns on the network gateway (e.g. 10.89.0.1)
+#
+# Both runtimes write the correct address into the container's
+# /etc/resolv.conf, so we read the first `nameserver` from there instead of
+# hardcoding 127.0.0.11 (which is Docker-only and left Podman users with
+# "backend could not be resolved" -> 502 Bad Gateway).
+#
+# This file uses the .envsh extension on purpose: the nginx image entrypoint
+# *sources* executable *.envsh files (so exports persist) but only *executes*
+# *.sh files (exports would be lost). It is numbered 16 so it runs after the
+# image's own 15-local-resolvers.envsh and before 20-envsubst-on-templates.sh.
+
+# Prefer the first IPv4 nameserver (matched by the dot in dotted-quad form).
+# On a dual-stack host resolv.conf can list an IPv6 nameserver first; pairing
+# it with `ipv6=off` below would parse but isn't what we want, so we pick the
+# IPv4 entry and only fall through to the first nameserver of any family if no
+# IPv4 one exists.
+resolver_addr="$(awk '/^nameserver/ && $2 ~ /\./ { print $2; exit }' /etc/resolv.conf 2>/dev/null)"
+if [ -z "$resolver_addr" ]; then
+    resolver_addr="$(awk '/^nameserver/ { print $2; exit }' /etc/resolv.conf 2>/dev/null)"
+fi
+
+# Fall back to Docker's embedded DNS if /etc/resolv.conf has no nameserver
+# (unusual, but keeps the previous behaviour rather than failing to start).
+export NGINX_RESOLVER="${resolver_addr:-127.0.0.11}"
+
+# Restrict envsubst to only this variable so nginx's own runtime variables
+# ($host, $remote_addr, $backend_upstream, ...) survive the template pass.
+export NGINX_ENVSUBST_FILTER='^NGINX_RESOLVER$'
+
+echo "Using DNS resolver: $NGINX_RESOLVER (from /etc/resolv.conf)"

@@ -13,14 +13,19 @@ server {
     # 1 MB — every multi-megabyte screenshot hit that wall silently.
     client_max_body_size 12M;
 
-    # Docker's embedded DNS. Without this + runtime-resolved upstreams
+    # Runtime DNS resolver. Without this + runtime-resolved upstreams
     # below, nginx caches the backend/multiplayer IPs at startup — so
-    # `docker compose up --force-recreate backend` (which gives the
-    # backend a new IP) strands nginx talking to the old IP (often
-    # reassigned to another container), manifesting as 502 "Connection
-    # refused" until nginx is reloaded. `valid=10s` is short enough to
-    # pick up container restarts quickly without DNS pressure.
-    resolver 127.0.0.11 valid=10s ipv6=off;
+    # `compose up --force-recreate backend` (which gives the backend a
+    # new IP) strands nginx talking to the old IP (often reassigned to
+    # another container), manifesting as 502 "Connection refused" until
+    # nginx is reloaded. `valid=10s` is short enough to pick up container
+    # restarts quickly without DNS pressure.
+    #
+    # ${NGINX_RESOLVER} is substituted at container start from the first
+    # nameserver in /etc/resolv.conf (see docker-entrypoint.d/
+    # 16-detect-resolver.envsh) so this works on both Docker (embedded DNS
+    # at 127.0.0.11) and Podman (aardvark-dns on the network gateway).
+    resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
 
     # API proxy. The `set $backend_upstream ...` trick forces nginx to
     # resolve the hostname per-request using the resolver above instead

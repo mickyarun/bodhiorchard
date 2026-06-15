@@ -1,0 +1,6 @@
+# Force LF on shell scripts and the nginx template so a Windows checkout
+# can't introduce CRLF — a trailing \r corrupts sourced shell variables
+# (e.g. NGINX_RESOLVER) and breaks the container DNS auto-detection.
+*.envsh text eol=lf
+*.sh text eol=lf
+nginx.conf.template text eol=lf
