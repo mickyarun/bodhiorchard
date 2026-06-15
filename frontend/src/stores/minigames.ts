@@ -30,16 +30,6 @@ export interface MinigameInfo {
   played_today: boolean
 }
 
-export interface MinigameScoreResult {
-  game: string
-  score: number
-  best_score: number
-  is_new_best: boolean
-  current_streak: number
-  best_streak: number
-  first_play_today: boolean
-}
-
 export interface LeaderboardEntry {
   user_id: string
   user_name: string
@@ -85,29 +75,6 @@ export const useMinigamesStore = defineStore('minigames', () => {
     }
   }
 
-  async function submitScore(game: string, score: number): Promise<MinigameScoreResult | null> {
-    try {
-      const { data } = await api.post<MinigameScoreResult>('/v1/minigames/score', {
-        game,
-        score,
-      })
-      // streakCount is the global max across all games; a fresh play can
-      // only hold or raise it — never drop it to one game's streak.
-      streakCount.value = Math.max(streakCount.value, data.current_streak)
-      const entry = games.value.find((g) => g.key === game)
-      if (entry) {
-        entry.played_today = true
-        entry.best_score = data.best_score
-      }
-      // Refresh the leaderboard so a new best shows immediately.
-      void fetchLeaderboard(game)
-      return data
-    } catch {
-      error.value = 'Failed to submit score'
-      return null
-    }
-  }
-
   return {
     games,
     streakCount,
@@ -116,6 +83,5 @@ export const useMinigamesStore = defineStore('minigames', () => {
     leaderboards,
     fetchStatus,
     fetchLeaderboard,
-    submitScore,
   }
 })

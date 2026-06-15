@@ -40,6 +40,7 @@ import { HouseRoom } from "./rooms/HouseRoom"
 import { CoffeeBarRoom } from "./rooms/CoffeeBarRoom"
 import { CafeteriaRoom } from "./rooms/CafeteriaRoom"
 import { RaceRoom } from "./rooms/RaceRoom"
+import { MinigameRoom } from "./rooms/MinigameRoom"
 import { handleBridgePublish } from "./bridge/BridgeEndpoint"
 
 const port = parseInt(process.env.PORT || "2567", 10)
@@ -51,6 +52,7 @@ const server = defineServer({
     coffeebar: defineRoom(CoffeeBarRoom),
     cafeteria: defineRoom(CafeteriaRoom),
     race: defineRoom(RaceRoom),
+    minigame: defineRoom(MinigameRoom),
   },
 
   transport: new WebSocketTransport({
@@ -65,7 +67,10 @@ const server = defineServer({
     app.use("/internal", expressJson({ limit: "1mb" }))
 
     app.get("/health", (_req: Request, res: Response) => {
-      res.json({ status: "ok", rooms: ["org", "house", "coffeebar", "cafeteria", "race"] })
+      res.json({
+        status: "ok",
+        rooms: ["org", "house", "coffeebar", "cafeteria", "race", "minigame"],
+      })
     })
 
     // Backend → Colyseus event bridge

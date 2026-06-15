@@ -31,17 +31,26 @@ import uuid
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.deps import get_db
 from app.core.security import verify_token
+from app.repositories.minigame import MinigameRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.repositories.user import UserRepository
+from app.schemas.minigame import MinigameResultsBody, MinigameResultsResponse
 from app.schemas.settings import PresenceSettings
+from app.services.minigame_broadcast import broadcast_high_score, is_new_org_record
+from app.services.minigame_service import (
+    GAMES,
+    MinigameValidationError,
+    get_leaderboard,
+    submit_score,
+)
 from app.services.org_settings import get_presence_settings
 from app.services.presence_cache import get_presence_state
 from app.services.race_invite_service import (
@@ -327,3 +336,93 @@ async def post_race_invite(
         distance_m=body.distance_m,
     )
     return RaceInviteResponse(notification_id=notif_id)
+
+
+@router.post("/minigame-results", response_model=MinigameResultsResponse)
+async def post_minigame_results(
+    body: MinigameResultsBody,
+    background_tasks: BackgroundTasks,
+    _: None = Depends(_verify_bridge_secret),
+    db: AsyncSession = Depends(get_db),
+) -> MinigameResultsResponse:
+    """Persist a server-computed mini-game score — the ONLY score write path.
+
+    Called by the Colyseus ``MinigameRoom`` when a play finishes. The score was
+    computed by the authoritative server (the client can no longer self-report),
+    and the user/org came from the JWT the room verified in ``onAuth``. Idempotent
+    on ``session_id`` so a bridge retry never double-counts a play.
+    """
+    # Org-membership check — a compromised bridge can't write across tenants.
+    if not await UserRepository(db).is_member_of_org(body.user_id, body.org_id):
+        logger.warning(
+            "minigame_result_user_not_in_org",
+            org_id=str(body.org_id),
+            user_id=str(body.user_id),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User is not a member of the specified organization",
+        )
+
+    repo = MinigameRepository(db, org_id=body.org_id)
+    claimed = await repo.try_claim_session(
+        session_id=body.session_id, user_id=body.user_id, game=body.game, score=body.score
+    )
+    if not claimed:
+        # Idempotent retry: this session was already recorded. Return the current
+        # aggregate without touching plays/streak again.
+        existing = await repo.get_user_game(body.user_id, body.game)
+        return MinigameResultsResponse(
+            recorded=False,
+            game=body.game,
+            score=body.score,
+            best_score=existing.best_score if existing else 0,
+            is_new_best=False,
+            current_streak=existing.current_streak if existing else 0,
+            best_streak=existing.best_streak if existing else 0,
+            first_play_today=False,
+        )
+
+    # Snapshot the standing record BEFORE recording, so is_new_org_record compares
+    # against the previous holder rather than the row we're about to update.
+    top_before = await get_leaderboard(db, org_id=body.org_id, game=body.game, limit=1)
+    try:
+        result = await submit_score(
+            db,
+            user_id=body.user_id,
+            org_id=body.org_id,
+            game=body.game,
+            score=body.score,
+        )
+    except MinigameValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    await db.commit()
+    logger.info(
+        "minigame_result_recorded",
+        user_id=str(body.user_id),
+        game=body.game,
+        score=body.score,
+        is_new_best=result["is_new_best"],
+    )
+
+    # New all-time org record (someone else's crown taken) → Slack DM everyone,
+    # after the response, without blocking it.
+    prev_top = top_before[0] if top_before else None
+    if prev_top is not None and is_new_org_record(
+        prev_top=prev_top, breaker_id=body.user_id, score=body.score
+    ):
+        background_tasks.add_task(
+            broadcast_high_score,
+            org_id=body.org_id,
+            game_name=GAMES[body.game].name,
+            breaker_user_id=body.user_id,
+            breaker_name=body.user_name or "",
+            score=body.score,
+            previous_best=prev_top.best_score,
+            previous_holder=prev_top.user_name,
+        )
+
+    return MinigameResultsResponse.model_validate({"recorded": True, **result})

@@ -23,7 +23,7 @@ import {
   isRoundComplete,
   matchStep,
   randomPad,
-} from '../colorRecall'
+} from '@shared/minigames/firefly'
 
 const PAD_IDS = PADS.map((p) => p.id)
 

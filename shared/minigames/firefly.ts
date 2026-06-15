@@ -15,13 +15,11 @@
 /**
  * Firefly Follow — pure game logic for the colour-sequence memory game.
  *
- * Framework-free on purpose: the component (`FireflyFollow.vue`) owns timers,
- * rendering, and animation, while this module owns the rules. That split keeps
- * the rules unit-testable under Vitest's node environment and keeps the SFC
- * small.
- *
- * The game shows a growing sequence of pad flashes; the player repeats it. Each
- * cleared level appends one pad (longer) and shortens the flash (faster).
+ * Framework-free and shared: the Colyseus server (authoritative) owns the
+ * sequence and validates taps with these functions, while the client component
+ * imports the same module to render. Keeping the rules here — not in the SFC —
+ * is what lets the score be computed server-side. `rng` is injectable so both
+ * the server (server-seeded RNG) and the tests stay deterministic.
  */
 
 /** A pad's stable identity. Order here is the 2×2 board order. */
@@ -65,8 +63,8 @@ export const FLOOR_FLASH_MS = 240
 export const FLASH_DECAY_PER_LEVEL = 0.93
 
 /**
- * Pick a pad id uniformly at random. `rng` is injectable so tests stay
- * deterministic; it defaults to `Math.random` in production.
+ * Pick a pad id uniformly at random. `rng` is injectable so the server and
+ * tests stay deterministic; it defaults to `Math.random`.
  */
 export function randomPad(rng: () => number = Math.random): PadId {
   return PAD_IDS[Math.floor(rng() * PAD_IDS.length)]
@@ -74,7 +72,7 @@ export function randomPad(rng: () => number = Math.random): PadId {
 
 /**
  * Return a new sequence with one fresh pad appended. Pure — never mutates the
- * input (the component holds the canonical sequence in a ref).
+ * input (the caller holds the canonical sequence).
  *
  * The new pad is never the same as the immediately-preceding one: on a 4-pad
  * board a back-to-back repeat of the same colour reads as a single box pulsing

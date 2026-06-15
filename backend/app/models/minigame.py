@@ -72,3 +72,35 @@ class MinigameScore(BaseModel):
             f"<MinigameScore(user={self.user_id}, game={self.game}, "
             f"best={self.best_score}, streak={self.current_streak})>"
         )
+
+
+class MinigameSession(BaseModel):
+    """One recorded server-authoritative play, keyed by its Colyseus room id.
+
+    Scores are only ever written by the multiplayer bridge (the client can no
+    longer self-report). This table makes that write idempotent: the bridge may
+    retry the POST, but a row already exists for that ``session_id`` so the
+    second attempt is a no-op and ``plays``/streak never double-count. Mirrors
+    the ``(room_id, user_id)`` idempotency guard on ``race_results``.
+    """
+
+    __tablename__ = "minigame_sessions"
+    __table_args__ = (
+        # One play per Colyseus session — the idempotency key.
+        UniqueConstraint("session_id", name="uq_minigame_sessions_session_id"),
+    )
+
+    session_id: Mapped[str] = mapped_column(nullable=False)
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
+    game: Mapped[str] = mapped_column(nullable=False)
+    score: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    def __repr__(self) -> str:
+        return (
+            f"<MinigameSession(session={self.session_id}, game={self.game}, score={self.score})>"
+        )

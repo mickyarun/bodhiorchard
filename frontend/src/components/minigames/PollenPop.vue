@@ -48,7 +48,7 @@
       <div v-if="done" class="pollen__overlay">
         <span class="pollen__overlay-emoji">🌼</span>
         <div class="text-h6 font-weight-bold mb-1">You popped {{ score }}!</div>
-        <v-btn color="success" rounded="lg" @click="$emit('finished', score)">
+        <v-btn color="success" rounded="lg" @click="collect">
           Collect points
         </v-btn>
       </div>
@@ -57,89 +57,104 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { GAME_SECONDS, MOTE_EMOJI } from '@shared/minigames/pollen'
+import type { MinigameResult } from '@/multiplayer/MinigameRoomClient'
+import { useMinigameRoom } from './useMinigameRoom'
 
-defineEmits<{ finished: [score: number] }>()
+const emit = defineEmits<{ finished: [result: MinigameResult | null] }>()
 
-const GAME_SECONDS = 25
-const SPAWN_EVERY_S = 0.55
-const MOTE_EMOJI = ['🌸', '🌼', '💮', '🌺']
-
-interface Mote {
+// A mote the server spawned; rendered locally from the moment it arrived, so
+// the visual tracks the server's deterministic motion (minus latency). Pops are
+// validated server-side, so the score is authoritative regardless.
+interface RenderMote {
   id: number
-  x: number   // percent
-  y: number   // percent
-  vy: number  // percent per second (upward)
-  vx: number
+  x: number // current render x (percent)
+  y: number // current render y (percent)
   scale: number
   emoji: string
+  vx: number
+  vy: number
+  x0: number
+  start: number // local performance.now() at receipt
 }
 
-const motes = ref<Mote[]>([])
+const motes = ref<RenderMote[]>([])
 const pops = ref<Array<{ id: number; x: number; y: number }>>([])
-const score = ref(0)
 const timeLeft = ref(GAME_SECONDS)
-const done = ref(false)
 const arena = ref<HTMLElement | null>(null)
+const result = ref<MinigameResult | null>(null)
+
+const room = useMinigameRoom('pollen_pop', { onEvent, onResult })
+const score = room.score // authoritative count of valid pops
+const done = computed(() => room.status.value === 'finished')
 
 let raf = 0
-let last = 0
-let spawnAcc = 0
-let nextId = 1
+let durationMs = GAME_SECONDS * 1000
+let startLocal = 0
+let popSeq = 1
 
-function spawn(): void {
-  motes.value.push({
-    id: nextId++,
-    x: 8 + Math.random() * 84,
-    y: 104,
-    vy: 9 + Math.random() * 10,
-    vx: (Math.random() - 0.5) * 6,
-    scale: 0.8 + Math.random() * 0.8,
-    emoji: MOTE_EMOJI[Math.floor(Math.random() * MOTE_EMOJI.length)],
-  })
+function onEvent(type: string, payload: unknown): void {
+  if (type === 'pollen_start') {
+    durationMs = (payload as { durationMs: number }).durationMs
+    startLocal = performance.now()
+    timeLeft.value = durationMs / 1000
+  } else if (type === 'pollen_spawn') {
+    const m = payload as { id: number; x: number; vx: number; vy: number; scale: number; emojiIndex: number }
+    motes.value.push({
+      id: m.id,
+      x: m.x,
+      y: 104,
+      scale: m.scale,
+      emoji: MOTE_EMOJI[m.emojiIndex] ?? MOTE_EMOJI[0],
+      vx: m.vx,
+      vy: m.vy,
+      x0: m.x,
+      start: performance.now(),
+    })
+  } else if (type === 'pollen_despawn') {
+    const { id } = payload as { id: number }
+    motes.value = motes.value.filter((m) => m.id !== id)
+  } else if (type === 'pollen_popped') {
+    const { id } = payload as { id: number }
+    motes.value = motes.value.filter((m) => m.id !== id)
+  }
+}
+
+function onResult(r: MinigameResult): void {
+  result.value = r
+  motes.value = []
 }
 
 function pop(id: number, _ev: PointerEvent): void {
   if (done.value) return
-  const idx = motes.value.findIndex((m) => m.id === id)
-  if (idx >= 0) {
-    const m = motes.value[idx]
-    motes.value.splice(idx, 1)
-    score.value += 1
-    const popId = nextId++
-    pops.value.push({ id: popId, x: m.x, y: m.y })
-    window.setTimeout(() => {
-      pops.value = pops.value.filter((p) => p.id !== popId)
-    }, 500)
-  }
+  const m = motes.value.find((mote) => mote.id === id)
+  if (!m) return
+  // Optimistic removal + feedback; the score itself comes from the server.
+  motes.value = motes.value.filter((mote) => mote.id !== id)
+  const popId = popSeq++
+  pops.value.push({ id: popId, x: m.x, y: m.y })
+  window.setTimeout(() => {
+    pops.value = pops.value.filter((p) => p.id !== popId)
+  }, 500)
+  room.send('pop', { id })
 }
 
 function loop(now: number): void {
-  if (last === 0) last = now
-  const dt = Math.min((now - last) / 1000, 0.1)
-  last = now
-
-  if (!done.value) {
-    timeLeft.value = Math.max(0, timeLeft.value - dt)
-    if (timeLeft.value <= 0) {
-      done.value = true
-      motes.value = []
-    }
-
-    spawnAcc += dt
-    while (spawnAcc >= SPAWN_EVERY_S) {
-      spawnAcc -= SPAWN_EVERY_S
-      spawn()
-    }
-
+  if (startLocal > 0 && !done.value) {
+    timeLeft.value = Math.max(0, (durationMs - (now - startLocal)) / 1000)
     for (const m of motes.value) {
-      m.y -= m.vy * dt
-      m.x += m.vx * dt
+      const e = (now - m.start) / 1000
+      m.x = m.x0 + m.vx * e
+      m.y = 104 - m.vy * e
     }
     motes.value = motes.value.filter((m) => m.y > -8)
   }
-
   raf = requestAnimationFrame(loop)
+}
+
+function collect(): void {
+  emit('finished', result.value)
 }
 
 onMounted(() => {

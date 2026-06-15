@@ -16,8 +16,8 @@
   FireflyFollow — watch the fireflies light up, then repeat the sequence.
 
   Each cleared level adds one flash (longer) and quickens the playback
-  (faster). A wrong tap ends the run. Rules live in ./colorRecall.ts; this
-  component owns timing, rendering, and the glow.
+  (faster). A wrong tap ends the run. Rules live in @shared/minigames/firefly;
+  this component owns timing, rendering, and the glow.
 -->
 <template>
   <div class="firefly d-flex flex-column ga-3">
@@ -54,7 +54,7 @@
         <div class="text-h6 font-weight-bold mb-1">
           You cleared {{ score }} {{ score === 1 ? 'level' : 'levels' }}!
         </div>
-        <v-btn color="primary" rounded="lg" @click="$emit('finished', score)">
+        <v-btn color="primary" rounded="lg" @click="collect">
           Collect points
         </v-btn>
       </div>
@@ -63,40 +63,43 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import {
-  PADS,
-  type PadId,
-  extendSequence,
-  flashDurationForLevel,
-  isRoundComplete,
-  matchStep,
-} from './colorRecall'
+import { computed, onUnmounted, ref } from 'vue'
+import { PADS, type PadId } from '@shared/minigames/firefly'
+import type { MinigameResult } from '@/multiplayer/MinigameRoomClient'
+import { useMinigameRoom } from './useMinigameRoom'
 
-defineEmits<{ finished: [score: number] }>()
+const emit = defineEmits<{ finished: [result: MinigameResult | null] }>()
 
-type Phase = 'watch' | 'input' | 'levelup' | 'over'
+// Local *rendering* phase, distinct from the server's playing/finished. The
+// server owns the sequence + score; this only decides what the board shows.
+type Phase = 'connecting' | 'watch' | 'input' | 'levelup' | 'over'
 
-const sequence = ref<PadId[]>([])
-const phase = ref<Phase>('watch')
+const phase = ref<Phase>('connecting')
 const lit = ref<PadId | null>(null)
 const wrongPad = ref<PadId | null>(null)
 const shake = ref(false)
-const inputIndex = ref(0)
-const score = ref(0)
+const result = ref<MinigameResult | null>(null)
 
-const level = computed(() => sequence.value.length)
-const statusText = computed(() =>
-  phase.value === 'watch'
-    ? 'Watch…'
-    : phase.value === 'input'
-      ? 'Your turn'
-      : phase.value === 'levelup'
-        ? 'Nice!'
-        : 'Game over',
-)
+const room = useMinigameRoom('firefly', { onEvent, onResult })
+const score = room.score // cleared levels (authoritative)
+const level = room.round // current round being played
 
-// A run generation: bumping it abandons any in-flight playback (restart/unmount).
+const statusText = computed(() => {
+  switch (phase.value) {
+    case 'connecting':
+      return 'Connecting…'
+    case 'watch':
+      return 'Watch…'
+    case 'input':
+      return 'Your turn'
+    case 'levelup':
+      return 'Nice!'
+    default:
+      return 'Game over'
+  }
+})
+
+// A run generation: bumping it abandons any in-flight playback (new round/unmount).
 let runId = 0
 const timers = new Set<number>()
 function sleep(ms: number): Promise<void> {
@@ -113,18 +116,18 @@ function clearTimers(): void {
   timers.clear()
 }
 
-async function playback(): Promise<void> {
+/** Render the server-sent sequence, then hand control to the player. */
+async function playback(sequence: PadId[], flashMs: number): Promise<void> {
   const myRun = ++runId
   phase.value = 'watch'
   lit.value = null
-  inputIndex.value = 0
-  const dur = flashDurationForLevel(level.value)
-  const gap = Math.max(120, Math.round(dur * 0.4))
-  await sleep(420) // beat before the sequence starts
-  for (const pad of sequence.value) {
+  wrongPad.value = null
+  const gap = Math.max(120, Math.round(flashMs * 0.4))
+  await sleep(420)
+  for (const pad of sequence) {
     if (myRun !== runId) return
     lit.value = pad
-    await sleep(dur)
+    await sleep(flashMs)
     if (myRun !== runId) return
     lit.value = null
     await sleep(gap)
@@ -133,39 +136,41 @@ async function playback(): Promise<void> {
   phase.value = 'input'
 }
 
+function onEvent(type: string, payload: unknown): void {
+  if (type === 'firefly_sequence') {
+    const { sequence, flashMs } = payload as { sequence: PadId[]; flashMs: number }
+    void playback(sequence, flashMs)
+  } else if (type === 'firefly_result') {
+    const { result: outcome, padId } = payload as { result: string; padId?: PadId }
+    if (outcome === 'wrong') {
+      runId++ // abandon any pending playback
+      clearTimers()
+      phase.value = 'over'
+      wrongPad.value = padId ?? null
+      shake.value = true
+      void sleep(420).then(() => (shake.value = false))
+    } else if (outcome === 'levelup') {
+      phase.value = 'levelup' // the next firefly_sequence resets to 'watch'
+    }
+  }
+}
+
+function onResult(r: MinigameResult): void {
+  result.value = r
+  phase.value = 'over'
+}
+
 function tap(pad: PadId): void {
   if (phase.value !== 'input') return
-  if (matchStep(sequence.value, inputIndex.value, pad) === 'wrong') {
-    gameOver(pad)
-    return
-  }
-  // Correct tap: confirming glow.
-  lit.value = pad
+  lit.value = pad // optimistic glow; the server confirms via firefly_result
   void sleep(160).then(() => {
     if (lit.value === pad) lit.value = null
   })
-  inputIndex.value += 1
-  if (isRoundComplete(sequence.value, inputIndex.value)) levelUp()
+  room.send('tap', { padId: pad })
 }
 
-function levelUp(): void {
-  score.value = level.value
-  phase.value = 'levelup'
-  const myRun = runId
-  void sleep(620).then(() => {
-    if (myRun !== runId || phase.value !== 'levelup') return
-    sequence.value = extendSequence(sequence.value)
-    void playback()
-  })
-}
-
-function gameOver(pad: PadId): void {
-  runId++ // abandon any pending playback
-  clearTimers()
-  phase.value = 'over'
-  wrongPad.value = pad
-  shake.value = true
-  void sleep(420).then(() => (shake.value = false))
+function collect(): void {
+  emit('finished', result.value)
 }
 
 /** Stable-but-scattered placement for the ambient firefly specks. */
@@ -180,10 +185,6 @@ function ambStyle(n: number): Record<string, string> {
   }
 }
 
-onMounted(() => {
-  sequence.value = extendSequence([])
-  void playback()
-})
 onUnmounted(() => {
   runId++
   clearTimers()

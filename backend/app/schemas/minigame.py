@@ -19,14 +19,29 @@ import uuid
 from pydantic import BaseModel, Field
 
 
-class MinigameScoreIn(BaseModel):
-    """A finished play of one mini-game."""
+class MinigameResultsBody(BaseModel):
+    """A finished, server-computed play posted by the Colyseus bridge.
 
+    The score is authoritative (computed by the multiplayer server), and the
+    user/org are taken from the JWT the room verified in ``onAuth`` — never from
+    a raw client claim. ``session_id`` is the Colyseus room id, used as the
+    idempotency key. camelCase aliases match the TS bridge payload.
+    """
+
+    session_id: str = Field(alias="sessionId", min_length=1, max_length=128)
+    org_id: uuid.UUID = Field(alias="orgId")
+    user_id: uuid.UUID = Field(alias="userId")
+    user_name: str = Field(alias="userName", default="", max_length=200)
     game: str = Field(min_length=1, max_length=64)
     score: int = Field(ge=0, le=1000)
 
+    model_config = {"populate_by_name": True}
 
-class MinigameScoreResult(BaseModel):
+
+class MinigameResultsResponse(BaseModel):
+    """Outcome of a bridge score post, relayed back to the client by the room."""
+
+    recorded: bool  # False on an idempotent retry (already processed)
     game: str
     score: int
     best_score: int

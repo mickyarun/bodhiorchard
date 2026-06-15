@@ -58,7 +58,7 @@ from app.models.feature_to_repo import FeatureToRepo, FeatureToRepoRole
 from app.models.jira_import import ImportStatus, JiraImportSession, JiraIssueBudMap, MapStatus
 from app.models.jwt_token import JWTToken
 from app.models.mcp_audit_log import MCPAuditLogEntry
-from app.models.minigame import MinigameScore
+from app.models.minigame import MinigameScore, MinigameSession
 from app.models.notification import Notification, NotificationType
 from app.models.organization import Organization
 from app.models.permission import Permission, PermissionCategory
@@ -215,6 +215,7 @@ __all__ = [
     "UserMCPToken",
     "MCPAuditLogEntry",
     "MinigameScore",
+    "MinigameSession",
     "UserRole",
     "VelocityAggregate",
     "WebhookLog",

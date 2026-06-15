@@ -21,11 +21,13 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.minigame import MinigameScore
+from app.models.minigame import MinigameScore, MinigameSession
 from app.models.user import User
+from app.repositories.base import rowcount
 
 
 @dataclass(slots=True, frozen=True)
@@ -89,6 +91,41 @@ class MinigameRepository:
             best_streak=row.best_streak,
             first_play_today=first_play_today,
         )
+
+    async def try_claim_session(
+        self, *, session_id: str, user_id: uuid.UUID, game: str, score: int
+    ) -> bool:
+        """Claim a play session for recording. Idempotency gate.
+
+        Inserts the session row; returns ``True`` the first time a session is
+        seen and ``False`` on a retry (the row already exists). The caller only
+        records the play when this returns ``True``, so a bridge retry can never
+        double-count ``plays`` or inflate the streak.
+        """
+        stmt = (
+            pg_insert(MinigameSession)
+            .values(
+                session_id=session_id,
+                org_id=self._org_id,
+                user_id=user_id,
+                game=game,
+                score=score,
+            )
+            .on_conflict_do_nothing(constraint="uq_minigame_sessions_session_id")
+        )
+        result = await self._db.execute(stmt)
+        await self._db.flush()
+        return rowcount(result) > 0
+
+    async def get_user_game(self, user_id: uuid.UUID, game: str) -> MinigameScore | None:
+        """The player's aggregate row for one game, or ``None`` if never played."""
+        stmt = (
+            select(MinigameScore)
+            .where(MinigameScore.org_id == self._org_id)
+            .where(MinigameScore.user_id == user_id)
+            .where(MinigameScore.game == game)
+        )
+        return (await self._db.execute(stmt)).scalar_one_or_none()
 
     async def list_for_user(self, user_id: uuid.UUID) -> list[MinigameScore]:
         stmt = (

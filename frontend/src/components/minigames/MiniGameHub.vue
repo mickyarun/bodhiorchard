@@ -126,7 +126,8 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useMinigamesStore, type MinigameScoreResult } from '@/stores/minigames'
+import { useMinigamesStore } from '@/stores/minigames'
+import type { MinigameResult } from '@/multiplayer/MinigameRoomClient'
 import FishingGame from './FishingGame.vue'
 import PollenPop from './PollenPop.vue'
 import FireflyFollow from './FireflyFollow.vue'
@@ -144,7 +145,7 @@ const MEDALS = ['🥇', '🥈', '🥉']
 const store = useMinigamesStore()
 const activeGame = ref<string | null>(null)
 const playing = ref(false)
-const lastResult = ref<MinigameScoreResult | null>(null)
+const lastResult = ref<MinigameResult | null>(null)
 
 const activeGameName = computed(
   () => store.games.find((g) => g.key === activeGame.value)?.name ?? '',
@@ -171,10 +172,14 @@ function openGame(key: string): void {
   void store.fetchLeaderboard(key)
 }
 
-async function onFinished(score: number): Promise<void> {
+async function onFinished(result: MinigameResult | null): Promise<void> {
   if (!activeGame.value) return
-  lastResult.value = await store.submitScore(activeGame.value, score)
+  // The score was already recorded server-side (via the multiplayer bridge);
+  // the room handed back the outcome. Just show it and refresh the boards.
+  lastResult.value = result
   playing.value = false
+  await store.fetchLeaderboard(activeGame.value)
+  void store.fetchStatus()
 }
 
 function replay(): void {

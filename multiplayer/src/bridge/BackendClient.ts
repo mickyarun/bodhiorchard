@@ -202,6 +202,58 @@ export async function postRaceResults(payload: RaceResultsPayload): Promise<bool
   }
 }
 
+/**
+ * POST a server-computed mini-game score. This is the ONLY way a mini-game
+ * score reaches the leaderboard now — the client can no longer self-report.
+ * Idempotent server-side on `sessionId` (the Colyseus room id), so a retry
+ * never double-counts a play. Returns the recorded outcome (best/streak) so the
+ * room can relay it to the player, or null on failure.
+ */
+export interface MinigameResultsPayload {
+  sessionId: string
+  orgId: string
+  userId: string
+  userName: string
+  game: string
+  score: number
+}
+
+export interface MinigameResultsResponse {
+  recorded: boolean
+  game: string
+  score: number
+  best_score: number
+  is_new_best: boolean
+  current_streak: number
+  best_streak: number
+  first_play_today: boolean
+}
+
+export async function postMinigameResults(
+  payload: MinigameResultsPayload,
+): Promise<MinigameResultsResponse | null> {
+  try {
+    const url = `${BACKEND_URL}/api/v1/internal/colyseus/minigame-results`
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "X-Bridge-Secret": BRIDGE_SECRET,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    })
+    if (!response.ok) {
+      console.warn(`[BackendClient] minigame-results HTTP ${response.status}`)
+      return null
+    }
+    return (await response.json()) as MinigameResultsResponse
+  } catch (err) {
+    console.warn(`[BackendClient] minigame-results unreachable:`, err)
+    return null
+  }
+}
+
 /** Verify a user JWT against the backend. */
 export async function verifyUserToken(
   token: string,

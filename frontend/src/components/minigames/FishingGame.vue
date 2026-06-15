@@ -63,79 +63,87 @@
     >
       Hook it!
     </v-btn>
-    <v-btn v-else color="success" rounded="lg" size="large" block @click="$emit('finished', score)">
+    <v-btn v-else color="success" rounded="lg" size="large" block @click="collect">
       Collect {{ score }} points
     </v-btn>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { CASTS, ZONE_WIDTH, bobberPositionAt } from '@shared/minigames/fishing'
+import type { MinigameResult } from '@/multiplayer/MinigameRoomClient'
+import { useMinigameRoom } from './useMinigameRoom'
 
-defineEmits<{ finished: [score: number] }>()
+const emit = defineEmits<{ finished: [result: MinigameResult | null] }>()
 
-const CASTS = 5
-const ZONE_WIDTH = 0.16
-
-const cast = ref(0)
-const score = ref(0)
-const marker = ref(0)
-const zoneStart = ref(0.42)
+const cast = ref(0) // current cast index (0-based), from the server
+const marker = ref(0.5) // bobber position 0..1 — client-rendered for display
+const zoneStart = ref(0.42) // server-chosen strike-zone start
 const message = ref('Tap when the fish swims over the bright water!')
-const done = ref(false)
 const flash = ref<{ id: number; text: string; kind: 'hit' | 'miss' } | null>(null)
+const result = ref<MinigameResult | null>(null)
+
+const room = useMinigameRoom('fishing', { onEvent, onResult })
+const score = room.score // authoritative running score
+const done = computed(() => room.status.value === 'finished')
 
 let raf = 0
-let t = 0
-let last = 0
-let sweeping = true
+let castStart = 0
+let sweeping = false
 let flashId = 0
 
-function newZone(): void {
-  zoneStart.value = 0.08 + Math.random() * (0.84 - ZONE_WIDTH)
-}
-
+// Render the bobber from the SAME deterministic curve the server scores with,
+// timed from when this cast was received. The server uses its own clock when a
+// hook arrives, so the score is authoritative; this is display only.
 function loop(now: number): void {
-  if (last === 0) last = now
-  const dt = (now - last) / 1000
-  last = now
-  if (sweeping) {
-    // Sweep speeds up slightly with each cast
-    t += dt * (0.9 + cast.value * 0.18)
-    marker.value = (Math.sin(t * Math.PI) + 1) / 2
-  }
+  if (sweeping) marker.value = bobberPositionAt(now - castStart, cast.value)
   raf = requestAnimationFrame(loop)
 }
 
-function hook(): void {
-  if (done.value || !sweeping) return
-  sweeping = false
-  const center = zoneStart.value + ZONE_WIDTH / 2
-  const offset = Math.abs(marker.value - center) / (ZONE_WIDTH / 2)
-  if (offset <= 1) {
-    const points = offset < 0.35 ? 10 : offset < 0.7 ? 7 : 4
-    score.value += points
-    flash.value = { id: ++flashId, text: points === 10 ? '🐠 +10!' : `🐟 +${points}`, kind: 'hit' }
-    message.value = points === 10 ? 'Perfect catch!' : 'Got one!'
-  } else {
-    flash.value = { id: ++flashId, text: '💦 missed', kind: 'miss' }
-    message.value = 'It got away…'
-  }
-  cast.value += 1
-  if (cast.value >= CASTS) {
-    done.value = true
-    message.value = `Final score: ${score.value}`
-    return
-  }
-  window.setTimeout(() => {
-    newZone()
-    flash.value = null
+function onEvent(type: string, payload: unknown): void {
+  if (type === 'fishing_cast') {
+    const p = payload as { cast: number; zoneStart: number }
+    cast.value = p.cast
+    zoneStart.value = p.zoneStart
+    castStart = performance.now()
     sweeping = true
-  }, 750)
+    flash.value = null
+  } else if (type === 'fishing_result') {
+    const p = payload as { points: number; marker: number }
+    sweeping = false
+    marker.value = p.marker // snap to where the server scored
+    if (p.points > 0) {
+      flash.value = {
+        id: ++flashId,
+        text: p.points === 10 ? '🐠 +10!' : `🐟 +${p.points}`,
+        kind: 'hit',
+      }
+      message.value = p.points === 10 ? 'Perfect catch!' : 'Got one!'
+    } else {
+      flash.value = { id: ++flashId, text: '💦 missed', kind: 'miss' }
+      message.value = 'It got away…'
+    }
+  }
+}
+
+function onResult(r: MinigameResult): void {
+  result.value = r
+  sweeping = false
+  message.value = `Final score: ${r.score}`
+}
+
+function hook(): void {
+  if (!sweeping || done.value) return
+  sweeping = false // freeze until the server's result lands
+  room.send('hook', {})
+}
+
+function collect(): void {
+  emit('finished', result.value)
 }
 
 onMounted(() => {
-  newZone()
   raf = requestAnimationFrame(loop)
 })
 onUnmounted(() => cancelAnimationFrame(raf))
