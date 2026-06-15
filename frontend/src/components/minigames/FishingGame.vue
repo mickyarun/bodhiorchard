@@ -71,7 +71,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { CASTS, ZONE_WIDTH, bobberPositionAt } from '@shared/minigames/fishing'
+import { CASTS, ZONE_WIDTH, bobberPositionAt, scoreForHook } from '@shared/minigames/fishing'
 import type { MinigameResult } from '@/multiplayer/MinigameRoomClient'
 import { useMinigameRoom } from './useMinigameRoom'
 
@@ -92,6 +92,9 @@ let raf = 0
 let castStart = 0
 let sweeping = false
 let flashId = 0
+// Points shown optimistically for the current cast (−1 = none yet), so the
+// server's authoritative result reconciles without a redundant second flash.
+let shownPoints = -1
 
 // Render the bobber from the SAME deterministic curve the server scores with,
 // timed from when this cast was received. The server uses its own clock when a
@@ -99,6 +102,20 @@ let flashId = 0
 function loop(now: number): void {
   if (sweeping) marker.value = bobberPositionAt(now - castStart, cast.value)
   raf = requestAnimationFrame(loop)
+}
+
+function showResult(points: number): void {
+  if (points > 0) {
+    flash.value = {
+      id: ++flashId,
+      text: points === 10 ? '🐠 +10!' : `🐟 +${points}`,
+      kind: 'hit',
+    }
+    message.value = points === 10 ? 'Perfect catch!' : 'Got one!'
+  } else {
+    flash.value = { id: ++flashId, text: '💦 missed', kind: 'miss' }
+    message.value = 'It got away…'
+  }
 }
 
 function onEvent(type: string, payload: unknown): void {
@@ -109,20 +126,15 @@ function onEvent(type: string, payload: unknown): void {
     castStart = performance.now()
     sweeping = true
     flash.value = null
+    shownPoints = -1
   } else if (type === 'fishing_result') {
-    const p = payload as { points: number; marker: number }
-    sweeping = false
-    marker.value = p.marker // snap to where the server scored
-    if (p.points > 0) {
-      flash.value = {
-        id: ++flashId,
-        text: p.points === 10 ? '🐠 +10!' : `🐟 +${p.points}`,
-        kind: 'hit',
-      }
-      message.value = p.points === 10 ? 'Perfect catch!' : 'Got one!'
-    } else {
-      flash.value = { id: ++flashId, text: '💦 missed', kind: 'miss' }
-      message.value = 'It got away…'
+    // Authoritative result. It normally equals what we already showed (the
+    // server scores from our reported in-cast time), so only re-render on a
+    // rare mismatch — and never snap the bobber, which caused a visible jump.
+    const p = payload as { points: number }
+    if (p.points !== shownPoints) {
+      shownPoints = p.points
+      showResult(p.points)
     }
   }
 }
@@ -135,9 +147,11 @@ function onResult(r: MinigameResult): void {
 
 function hook(): void {
   if (!sweeping || done.value) return
-  sweeping = false // freeze until the server's result lands
-  // Report how far into the cast we hooked so the server scores the bobber
-  // position we actually saw — not one network round-trip later.
+  sweeping = false // freeze the bobber where the player tapped
+  // Instant, optimistic feedback from the SAME curve the server scores with, so
+  // there's no round-trip wait and no bobber snap. The server confirms below.
+  shownPoints = scoreForHook(marker.value, zoneStart.value)
+  showResult(shownPoints)
   room.send('hook', { elapsedMs: performance.now() - castStart })
 }
 
