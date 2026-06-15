@@ -22,6 +22,10 @@ export interface MinigameHost {
   readonly state: MinigameRoomState
   /** Send a render/feedback message to the solo player. */
   notify(type: string, message: unknown): void
+  /** Run `fn` after `ms` on the room clock (auto-cleared on dispose). Lets an
+   *  engine pace rounds — e.g. hold a result on screen before the next round —
+   *  without trusting client timing. */
+  scheduleAfter(ms: number, fn: () => void): void
   /** Signal game over — the room computes the final score and posts it. */
   finish(): void
 }

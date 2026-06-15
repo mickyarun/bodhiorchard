@@ -127,6 +127,14 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
     this.broadcast(type, message)
   }
 
+  scheduleAfter(ms: number, fn: () => void): void {
+    // Room clock auto-clears on dispose; guard so a queued round-advance can't
+    // run after the game has already finished.
+    this.clock.setTimeout(() => {
+      if (this.state.phase === "playing") fn()
+    }, ms)
+  }
+
   finish(): void {
     this.endGame()
   }

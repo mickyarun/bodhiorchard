@@ -23,6 +23,9 @@ import {
 import type { MinigameEngine, MinigameHost } from "./MinigameEngine"
 
 const PAD_IDS = new Set<string>(PADS.map((p) => p.id))
+/** Pause after clearing a level so the client can show the level-up shimmer
+ *  before the next (longer, faster) sequence streams. */
+const LEVELUP_PAUSE_MS = 620
 
 /**
  * Server-authoritative Firefly Follow. The server generates the sequence (with
@@ -35,6 +38,8 @@ export class FireflyEngine implements MinigameEngine {
   private inputIndex = 0
   private level = 0
   private cleared = 0
+  /** False during the level-up pause — rejects taps until the next round streams. */
+  private accepting = false
 
   constructor(private readonly rng: () => number = Math.random) {}
 
@@ -43,11 +48,12 @@ export class FireflyEngine implements MinigameEngine {
   }
 
   input(host: MinigameHost, type: string, payload: unknown): void {
-    if (type !== "tap") return
+    if (type !== "tap" || !this.accepting) return
     const padId = readPad(payload)
     if (padId === null) return
 
     if (matchStep(this.sequence, this.inputIndex, padId) === "wrong") {
+      this.accepting = false
       host.notify("firefly_result", { result: "wrong", padId })
       host.finish()
       return
@@ -55,10 +61,14 @@ export class FireflyEngine implements MinigameEngine {
 
     this.inputIndex += 1
     if (isRoundComplete(this.sequence, this.inputIndex)) {
+      this.accepting = false
       this.cleared = this.level
       host.state.score = this.cleared
       host.notify("firefly_result", { result: "levelup", level: this.cleared })
-      this.beginRound(host, this.level + 1, this.sequence)
+      // Hold the shimmer before the next round streams — paced by the server.
+      const next = this.level + 1
+      const prev = this.sequence
+      host.scheduleAfter(LEVELUP_PAUSE_MS, () => this.beginRound(host, next, prev))
     } else {
       host.notify("firefly_result", { result: "ok", index: this.inputIndex })
     }
@@ -72,6 +82,7 @@ export class FireflyEngine implements MinigameEngine {
     this.level = level
     this.sequence = extendSequence(prev, this.rng)
     this.inputIndex = 0
+    this.accepting = true
     host.state.round = level
     host.notify("firefly_sequence", {
       level,

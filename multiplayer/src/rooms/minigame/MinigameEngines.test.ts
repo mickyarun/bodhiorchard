@@ -36,6 +36,7 @@ function makeHost(): {
   const host: MinigameHost = {
     state: state as unknown as MinigameRoomState,
     notify: (type, message) => sent.push({ type, message }),
+    scheduleAfter: (_ms, fn) => fn(), // run synchronously in tests
     finish: () => {
       finished = true
     },

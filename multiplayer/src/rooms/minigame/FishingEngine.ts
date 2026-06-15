@@ -18,6 +18,9 @@ import type { MinigameEngine, MinigameHost } from "./MinigameEngine"
 /** Clamp ceiling for server-measured cast elapsed — a stalled tab can't run the
  *  bobber phase off to a wild value. */
 const MAX_CAST_MS = 20000
+/** Pause after a hook so the client can show the catch/miss feedback before the
+ *  next cast begins (the next `fishing_cast` is what clears it). */
+const RESULT_PAUSE_MS = 700
 
 /**
  * Server-authoritative Lake Fishing. The server owns the strike zone (its RNG)
@@ -31,6 +34,9 @@ export class FishingEngine implements MinigameEngine {
   private score = 0
   private zoneStart = 0
   private castStartMs = 0
+  /** True only while a cast is live — rejects stray hooks during the inter-cast
+   *  pause (and any malicious double-hook). */
+  private canHook = false
 
   constructor(
     private readonly rng: () => number = Math.random,
@@ -44,7 +50,8 @@ export class FishingEngine implements MinigameEngine {
   }
 
   input(host: MinigameHost, type: string, _payload: unknown): void {
-    if (type !== "hook" || this.cast >= CASTS) return
+    if (type !== "hook" || !this.canHook) return
+    this.canHook = false
     const elapsed = Math.min(MAX_CAST_MS, Math.max(0, this.now() - this.castStartMs))
     const marker = bobberPositionAt(elapsed, this.cast)
     const points = scoreForHook(marker, this.zoneStart)
@@ -53,10 +60,12 @@ export class FishingEngine implements MinigameEngine {
     host.notify("fishing_result", { cast: this.cast, points, marker })
 
     this.cast += 1
+    // Hold the result on screen before advancing (or finishing), so the catch
+    // feedback is visible — the server paces this, not the client.
     if (this.cast >= CASTS) {
-      host.finish()
+      host.scheduleAfter(RESULT_PAUSE_MS, () => host.finish())
     } else {
-      this.beginCast(host)
+      host.scheduleAfter(RESULT_PAUSE_MS, () => this.beginCast(host))
     }
   }
 
@@ -67,6 +76,7 @@ export class FishingEngine implements MinigameEngine {
   private beginCast(host: MinigameHost): void {
     this.zoneStart = randomZoneStart(this.rng)
     this.castStartMs = this.now()
+    this.canHook = true
     host.state.round = this.cast + 1
     host.notify("fishing_cast", { cast: this.cast, zoneStart: this.zoneStart })
   }
