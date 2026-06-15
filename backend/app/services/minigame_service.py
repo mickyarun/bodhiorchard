@@ -51,9 +51,6 @@ GAMES: dict[str, GameSpec] = {
     "firefly": GameSpec(name="Firefly Follow", max_score=50),
 }
 
-# Absolute ceiling regardless of per-game cap — guards against tampering.
-MAX_SCORE = 1000
-
 
 async def submit_score(
     db: AsyncSession,
@@ -63,12 +60,19 @@ async def submit_score(
     game: str,
     score: int,
 ) -> dict[str, object]:
-    """Validate then record the play; returns best/streak state (no XP)."""
+    """Validate then record the play; returns best/streak state (no XP).
+
+    Scores reach here only from the trusted Colyseus bridge (server-computed),
+    but the per-game ``max_score`` is still enforced as defense-in-depth — a
+    buggy or compromised bridge can't post a score the game can't produce.
+    """
     spec = GAMES.get(game)
     if spec is None:
         raise MinigameValidationError(f"unknown game: {game}")
-    if not 0 <= score <= MAX_SCORE:
-        raise MinigameValidationError(f"score out of range 0..{MAX_SCORE}: {score}")
+    if not 0 <= score <= spec.max_score:
+        raise MinigameValidationError(
+            f"score out of range 0..{spec.max_score} for {game!r}: {score}"
+        )
 
     repo = MinigameRepository(db, org_id=org_id)
     today = datetime.now(UTC).date()
