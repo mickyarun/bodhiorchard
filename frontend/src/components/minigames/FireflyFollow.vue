@@ -224,6 +224,8 @@ onUnmounted(() => {
 
 .firefly__stage {
   position: relative;
+  /* Taps stay taps — don't let a touch-drag here pan/scroll the garden behind. */
+  touch-action: none;
   width: 100%;
   height: 340px;
   border-radius: 18px;
