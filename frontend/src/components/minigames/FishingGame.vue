@@ -147,12 +147,16 @@ function onResult(r: MinigameResult): void {
 
 function hook(): void {
   if (!sweeping || done.value) return
-  sweeping = false // freeze the bobber where the player tapped
-  // Instant, optimistic feedback from the SAME curve the server scores with, so
-  // there's no round-trip wait and no bobber snap. The server confirms below.
+  sweeping = false
+  // Score from the SAME instant we report to the server — not the last rendered
+  // frame, which can be ~16ms stale and flip the band (e.g. +10 vs +7). Freezing
+  // the bobber at this exact position keeps the optimistic result matching the
+  // authoritative one, so fishing_result never has to correct it.
+  const elapsedMs = performance.now() - castStart
+  marker.value = bobberPositionAt(elapsedMs, cast.value)
   shownPoints = scoreForHook(marker.value, zoneStart.value)
   showResult(shownPoints)
-  room.send('hook', { elapsedMs: performance.now() - castStart })
+  room.send('hook', { elapsedMs })
 }
 
 function collect(): void {
