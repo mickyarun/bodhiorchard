@@ -136,7 +136,9 @@ function onResult(r: MinigameResult): void {
 function hook(): void {
   if (!sweeping || done.value) return
   sweeping = false // freeze until the server's result lands
-  room.send('hook', {})
+  // Report how far into the cast we hooked so the server scores the bobber
+  // position we actually saw — not one network round-trip later.
+  room.send('hook', { elapsedMs: performance.now() - castStart })
 }
 
 function collect(): void {

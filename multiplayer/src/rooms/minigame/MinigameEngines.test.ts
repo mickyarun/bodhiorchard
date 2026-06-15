@@ -104,6 +104,32 @@ describe("FishingEngine", () => {
     engine.input(host, "hook", {})
     expect(engine.finalScore()).toBe(50)
   })
+
+  it("scores from the client's in-cast time, immune to server latency", () => {
+    let clock = 0
+    // zone centred at 0.5 (rng 0.5 → zoneStart 0.42).
+    const engine = new FishingEngine(() => 0.5, () => clock)
+    const { host, sent } = makeHost()
+    engine.start(host) // cast 0, castStartMs = 0
+    // 5s elapsed server-side (latency), but the client hooked at the very start
+    // (bobber at 0.5 = bullseye). The server's own 5000ms clock would have
+    // scored a miss; using the client's reported moment it's a bullseye.
+    clock = 5000
+    engine.input(host, "hook", { elapsedMs: 0 })
+    const r = last(sent, "fishing_result")?.message as { points: number }
+    expect(r.points).toBe(10)
+  })
+
+  it("clamps a client-reported time to the server-measured window", () => {
+    let clock = 0
+    const engine = new FishingEngine(() => 0.5, () => clock)
+    const { host, sent } = makeHost()
+    engine.start(host) // castStartMs = 0
+    clock = 0 // ~no server time elapsed → a hook can't be claimed from later
+    engine.input(host, "hook", { elapsedMs: 999999 })
+    const r = last(sent, "fishing_result")?.message as { marker: number }
+    expect(r.marker).toBeCloseTo(0.5, 6) // clamped to t=0, not the claimed future
+  })
 })
 
 describe("PollenEngine", () => {

@@ -49,10 +49,18 @@ export class FishingEngine implements MinigameEngine {
     this.beginCast(host)
   }
 
-  input(host: MinigameHost, type: string, _payload: unknown): void {
+  input(host: MinigameHost, type: string, payload: unknown): void {
     if (type !== "hook" || !this.canHook) return
     this.canHook = false
-    const elapsed = Math.min(MAX_CAST_MS, Math.max(0, this.now() - this.castStartMs))
+    // Score the bobber position the player saw. Trust the client's in-cast
+    // timing (so latency doesn't shift the bobber out from under a correct
+    // tap), but never beyond the time that actually elapsed server-side — so a
+    // client can't claim a hook from the future. The score is still computed
+    // here from the deterministic curve, never reported by the client.
+    const serverElapsed = Math.max(0, this.now() - this.castStartMs)
+    const cap = Math.min(MAX_CAST_MS, serverElapsed)
+    const reported = readElapsed(payload)
+    const elapsed = reported === null ? cap : Math.min(Math.max(0, reported), cap)
     const marker = bobberPositionAt(elapsed, this.cast)
     const points = scoreForHook(marker, this.zoneStart)
     this.score += points
@@ -80,4 +88,11 @@ export class FishingEngine implements MinigameEngine {
     host.state.round = this.cast + 1
     host.notify("fishing_cast", { cast: this.cast, zoneStart: this.zoneStart })
   }
+}
+
+/** Read the client's in-cast elapsed (ms), or null if absent/invalid. */
+function readElapsed(payload: unknown): number | null {
+  if (typeof payload !== "object" || payload === null) return null
+  const v = (payload as { elapsedMs?: unknown }).elapsedMs
+  return typeof v === "number" && Number.isFinite(v) ? v : null
 }
