@@ -4,3 +4,10 @@
 *.envsh text eol=lf
 *.sh text eol=lf
 nginx.conf.template text eol=lf
+
+# Reconcile package-lock.json on merge via npm-merge-driver (installed by the
+# package.json `prepare` script). The lockfile is a large generated file with
+# cross-referenced integrity hashes that cannot be hand-merged; the driver
+# takes one side and re-runs `npm install` against the merged package.json so
+# pins untouched by either branch stay exactly where they were.
+package-lock.json merge=npm-merge-driver
