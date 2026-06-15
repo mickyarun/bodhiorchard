@@ -31,6 +31,7 @@ import type { Application } from '../core/Application'
 import { AssetLoader } from '../assets/AssetLoader'
 import { randRange } from '../utils/MathUtils'
 import { END_TRIM, evalRouteAt, type PathRoute } from '@shared/world/paths'
+import { Theme } from '../rendering/Theme'
 
 // Layout primitives (`PathRoute`, `PathKind`, `END_TRIM`, `evalRouteAt`,
 // `buildRoutes`) live in `shared/world/paths.ts` — consumers should import
@@ -64,9 +65,12 @@ export class PathSystem {
     this.root = new pc.Entity('PathSystem')
 
     this.sandTexture = this.createSandTexture(app.app.graphicsDevice)
-    this.primaryMat = this.createStripMaterial(new pc.Color(1, 1, 1))
+    // Warm sand tint — the old pure-white tint read as a generic light strip.
+    const [pr, pg, pb] = Theme.PATHS.primaryTint
+    this.primaryMat = this.createStripMaterial(new pc.Color(pr, pg, pb))
     // Dirt tint: warmer and darker than sand — reads as worn-in secondary path.
-    this.secondaryMat = this.createStripMaterial(new pc.Color(0.65, 0.5, 0.38))
+    const [sr, sg, sb] = Theme.PATHS.secondaryTint
+    this.secondaryMat = this.createStripMaterial(new pc.Color(sr, sg, sb))
 
     const stoneAsset = await loader.load(PATH_ASSET)
 
@@ -218,7 +222,9 @@ export class PathSystem {
     return mat
   }
 
-  /** Procedural sand texture with soft alpha edges. */
+  /** Procedural packed-earth texture with embedded flagstones and soft
+   *  alpha edges — rebuilt from the old plain sand wash, which combined
+   *  with the warm tint + grading into glowing orange strips. */
   private createSandTexture(device: pc.GraphicsDevice): pc.Texture {
     const S = SAND_TEX_SIZE
     const canvas = document.createElement('canvas')
@@ -226,25 +232,52 @@ export class PathSystem {
     canvas.height = S
     const ctx = canvas.getContext('2d')!
 
-    ctx.fillStyle = 'rgb(195, 175, 135)'
+    const [br, bg, bb] = Theme.PATHS.surfaceBase
+    ctx.fillStyle = `rgb(${br}, ${bg}, ${bb})`
     ctx.fillRect(0, 0, S, S)
 
+    // Soft tonal patches — worn earth variation
     for (let i = 0; i < 40; i++) {
       const x = Math.random() * S
       const y = Math.random() * S
       const r = 5 + Math.random() * 20
-      const dr = Math.floor((Math.random() - 0.5) * 30)
+      const dr = Math.floor((Math.random() - 0.5) * 24)
       ctx.beginPath()
       ctx.arc(x, y, r, 0, Math.PI * 2)
-      ctx.fillStyle = `rgba(${195 + dr}, ${175 + dr * 0.8}, ${135 + dr * 0.6}, 0.3)`
+      ctx.fillStyle = `rgba(${br + dr}, ${bg + dr * 0.8}, ${bb + dr * 0.7}, 0.3)`
       ctx.fill()
     }
 
+    // Embedded flagstones — irregular rounded polygons a step greyer than
+    // the earth, with a darker rim so they read as set-in stones.
+    for (let i = 0; i < 14; i++) {
+      const cx = Math.random() * S
+      const cy = Math.random() * S
+      const r = 7 + Math.random() * 12
+      const grey = 150 + Math.floor(Math.random() * 35)
+      ctx.beginPath()
+      const verts = 7
+      for (let v = 0; v <= verts; v++) {
+        const a = (v / verts) * Math.PI * 2
+        const rr = r * (0.75 + Math.random() * 0.35)
+        const px = cx + Math.cos(a) * rr
+        const py = cy + Math.sin(a) * rr * 0.8
+        if (v === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+      }
+      ctx.closePath()
+      ctx.fillStyle = `rgba(${grey}, ${grey - 6}, ${grey - 16}, 0.85)`
+      ctx.fill()
+      ctx.strokeStyle = `rgba(${grey - 50}, ${grey - 54}, ${grey - 60}, 0.5)`
+      ctx.lineWidth = 1.5
+      ctx.stroke()
+    }
+
+    // Fine gravel speckle
     for (let i = 0; i < 300; i++) {
       const x = Math.random() * S
       const y = Math.random() * S
-      const dr = Math.floor((Math.random() - 0.5) * 40)
-      ctx.fillStyle = `rgba(${195 + dr}, ${175 + dr * 0.8}, ${135 + dr * 0.6}, 0.2)`
+      const dr = Math.floor((Math.random() - 0.5) * 36)
+      ctx.fillStyle = `rgba(${br + dr}, ${bg + dr * 0.8}, ${bb + dr * 0.7}, 0.2)`
       ctx.fillRect(x, y, 1 + Math.random(), 1 + Math.random())
     }
 

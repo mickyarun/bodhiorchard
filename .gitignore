@@ -108,7 +108,10 @@ examples/BUD-001-tech-spec.md
 # real-world tuning data (customer repo names, dataset measurements) that
 # don't belong in source control. Keep them local-only.
 # Pattern: exclude everything directly under docs/ but re-include the
-# README screenshots that ship with the repo.
+# README screenshots and the reference docs that ship with the repo.
 docs/*
 !docs/images/
+!docs/ai-engines.md
+!docs/api.md
+!docs/deployment.md
 backend/experiments/

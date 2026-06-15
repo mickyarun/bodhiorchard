@@ -164,6 +164,20 @@
               rounded="lg"
               class="pl-10"
             />
+            <v-list-item
+              v-if="canManageQuiz"
+              title="Quiz Game"
+              to="/settings/quiz-game"
+              rounded="lg"
+              class="pl-10"
+            />
+            <v-list-item
+              v-if="canManageQuiz"
+              title="Quiz Review"
+              to="/settings/quiz-review"
+              rounded="lg"
+              class="pl-10"
+            />
             <!-- MCP Connect is self-service (any authenticated user can
                  mint / revoke their own tokens); no canView* gate. -->
             <v-list-item
@@ -219,6 +233,13 @@
                 prepend-icon="mdi-key-variant"
                 title="MCP Token"
                 to="/profile/mcp-token"
+              />
+              <!-- Self-service Slack notification opt-outs — any member,
+                   no permission gate. -->
+              <v-list-item
+                prepend-icon="mdi-bell-cog-outline"
+                title="Notification Settings"
+                to="/profile/notifications"
               />
               <div class="theme-pref px-3 pt-2 pb-1">
                 <div class="text-caption text-medium-emphasis px-1 mb-1">Theme</div>
@@ -357,6 +378,7 @@ const {
   canViewQAAutomation,
   canViewPresenceSettings,
   canViewJiraImport,
+  canManageQuiz,
 } = usePermissions()
 
 // Collapsed-sidebar preference, persisted across reloads. `expand-on-hover`

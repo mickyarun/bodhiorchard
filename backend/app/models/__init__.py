@@ -58,11 +58,22 @@ from app.models.feature_to_repo import FeatureToRepo, FeatureToRepoRole
 from app.models.jira_import import ImportStatus, JiraImportSession, JiraIssueBudMap, MapStatus
 from app.models.jwt_token import JWTToken
 from app.models.mcp_audit_log import MCPAuditLogEntry
+from app.models.minigame import MinigameScore
 from app.models.notification import Notification, NotificationType
 from app.models.organization import Organization
 from app.models.permission import Permission, PermissionCategory
 from app.models.pull_request import PRReviewStatus, PRState, PullRequest
 from app.models.qa_test_evidence import QATestEvidence
+from app.models.quiz import Quiz, QuizStatus
+from app.models.quiz_answer import QuizAnswer
+from app.models.quiz_question import (
+    QuizDifficulty,
+    QuizQuestion,
+    QuizQuestionStatus,
+    QuizQuestionType,
+)
+from app.models.quiz_score import QuizScore
+from app.models.quiz_topic_history import QuizTopicHistory
 from app.models.race_result import RaceResult
 from app.models.repo_graph_cache import RepoGraphCache
 from app.models.repo_layer import RepoLayer
@@ -156,6 +167,15 @@ __all__ = [
     "PRState",
     "PullRequest",
     "QATestEvidence",
+    "Quiz",
+    "QuizAnswer",
+    "QuizDifficulty",
+    "QuizQuestion",
+    "QuizQuestionStatus",
+    "QuizQuestionType",
+    "QuizScore",
+    "QuizStatus",
+    "QuizTopicHistory",
     "RaceResult",
     "RepoStatus",
     "Role",
@@ -194,6 +214,7 @@ __all__ = [
     "UserEmailAlias",
     "UserMCPToken",
     "MCPAuditLogEntry",
+    "MinigameScore",
     "UserRole",
     "VelocityAggregate",
     "WebhookLog",

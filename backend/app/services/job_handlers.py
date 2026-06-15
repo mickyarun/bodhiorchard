@@ -41,6 +41,7 @@ from app.services.job_queue import (
     JOB_JIRA_DISCOVERY,
     JOB_JIRA_ENRICH,
     JOB_JIRA_IMPORT,
+    JOB_QUIZ_BATCH,
     JOB_REPO_BULK_ONBOARD,
     JOB_SKILL_RERUN,
     JOB_TRIAGE,
@@ -48,6 +49,7 @@ from app.services.job_queue import (
 )
 from app.services.job_repo_bulk_clone import handle_bulk_onboard_job
 from app.services.job_skill_rerun import handle_skill_rerun_job
+from app.services.quiz_batch_generation import handle_quiz_batch_job
 
 # Re-export all handlers so existing imports continue to work
 __all__ = [
@@ -117,3 +119,6 @@ def setup_job_handlers() -> None:
     # writes ``skill_profiles`` org-wide and would race with itself if
     # an admin double-clicked the button.
     register_job_type(JOB_SKILL_RERUN, handle_skill_rerun_job, worker_count=1)
+
+    # Company Quiz Game — one worker; generation is a once-a-day rolling top-up.
+    register_job_type(JOB_QUIZ_BATCH, handle_quiz_batch_job, worker_count=1)

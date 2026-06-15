@@ -51,6 +51,9 @@ export interface GlbScatterGroup {
 export interface InstancedScatterResult {
   entities: pc.Entity[]
   vbs:      pc.VertexBuffer[]
+  /** Tint-clone materials created when `opts.tint` was passed. Owned by the
+   *  caller — destroy alongside `vbs` (source GLB materials are never touched). */
+  materials: pc.Material[]
 }
 
 interface CollectedMeshInstance {
@@ -77,6 +80,11 @@ interface CollectedMeshInstance {
  * meaningfully to shadowing in this scene, and disabling shadows sidesteps
  * the shader-variant assertion that PlayCanvas's shadow renderer trips on
  * for instanced meshes that aren't pre-registered with the program library.
+ *
+ * `opts.tint` multiplies the diffuse of every batch material — applied to a
+ * CLONE (one per unique source material per call), never to the shared GLB
+ * material, honoring the no-mutation contract below. Clones are returned in
+ * `result.materials` and are the caller's to destroy.
  */
 export function buildInstancedGlbs(
   device: pc.GraphicsDevice,
@@ -86,10 +94,14 @@ export function buildInstancedGlbs(
     namePrefix?:     string
     castShadows?:    boolean
     receiveShadows?: boolean
+    tint?:           readonly [number, number, number]
   } = {},
 ): InstancedScatterResult {
-  const result: InstancedScatterResult = { entities: [], vbs: [] }
+  const result: InstancedScatterResult = { entities: [], vbs: [], materials: [] }
   const namePrefix = opts.namePrefix ?? 'InstancedGlb'
+  // One tint clone per unique source material across the whole call — a GLB
+  // whose mesh-instances share a material gets a single shared clone.
+  const tintClones = new Map<number, pc.Material>()
 
   for (let g = 0; g < groups.length; g++) {
     const group = groups[g]
@@ -102,6 +114,9 @@ export function buildInstancedGlbs(
     // instanced batch sized to the scatter group's transform count.
     for (let mi = 0; mi < meshInstances.length; mi++) {
       const collected = meshInstances[mi]
+      const material = opts.tint
+        ? tintedClone(collected.material, opts.tint, tintClones, result.materials)
+        : collected.material
       const matrices = composeInstanceMatrices(
         group.transforms, collected.localMatrix,
       )
@@ -111,7 +126,7 @@ export function buildInstancedGlbs(
       const { entity, vb } = createInstancedEntity(
         device,
         collected.mesh,
-        collected.material,
+        material,
         matrices,
         group.transforms.length,
         `${namePrefix}_${g}_${mi}`,
@@ -127,6 +142,33 @@ export function buildInstancedGlbs(
   }
 
   return result
+}
+
+/**
+ * Clone-and-tint a GLB material, memoized per source material id. The clone
+ * multiplies `diffuse` by the tint factors (values may exceed 1 for a lift);
+ * everything else (maps, gloss, etc.) is inherited from the source.
+ */
+function tintedClone(
+  source: pc.Material,
+  tint: readonly [number, number, number],
+  cache: Map<number, pc.Material>,
+  owned: pc.Material[],
+): pc.Material {
+  const cached = cache.get(source.id)
+  if (cached) return cached
+  const std = source as pc.StandardMaterial
+  const clone = std.clone()
+  clone.name = `${source.name}_tinted`
+  clone.diffuse = new pc.Color(
+    std.diffuse.r * tint[0],
+    std.diffuse.g * tint[1],
+    std.diffuse.b * tint[2],
+  )
+  clone.update()
+  cache.set(source.id, clone)
+  owned.push(clone)
+  return clone
 }
 
 /**

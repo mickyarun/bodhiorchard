@@ -61,6 +61,10 @@ import { drawColliderWireframes } from './physics'
 import { OrgRoomClient, type MemberStateSnapshot } from '../multiplayer'
 import type { CharacterSystem } from './characters/CharacterSystem'
 import { SerializedExecutor } from './utils/SerializedExecutor'
+import { PerfHud } from './utils/PerfHud'
+import { classifyDiff } from './core/SceneDiff'
+import { PostFX } from './rendering/PostFX'
+import { AmbientParticles } from './effects/AmbientParticles'
 import { VehicleController } from './vehicles/VehicleController'
 import { VehicleSystem } from './vehicles/VehicleSystem'
 import { getVehicleDef } from './vehicles/VehicleManifest'
@@ -94,6 +98,18 @@ export class GardenEngine {
   private canvas: HTMLCanvasElement | null = null
   private callbacks: EngineCallbacks = {}
   private picker: TreePickerSystem | null = null
+  // Dev-only perf overlay (?perf=1) — holds the detach fn while active.
+  private perfHudDetach: (() => void) | null = null
+  // Snapshot of the data the scene currently renders — SceneDiff input.
+  // Null until the first full build, and reset to null if an incremental
+  // update fails partway (forces the next setData to rebuild fully).
+  private lastBuiltData: EngineData | null = null
+  // True when a drain burst replaced subsystem instances (full rebuild) —
+  // gates the OrgRoom callback re-wiring in afterSceneBuildDrained.
+  private subsystemsReplaced = false
+  // Engine-lifetime visual extras — survive scene rebuilds.
+  private postFX: PostFX | null = null
+  private ambientParticles: AmbientParticles | null = null
 
   // Interior exploration
   private interior: InteriorManager | null = null
@@ -258,6 +274,19 @@ export class GardenEngine {
     // Show controls help overlay (auto-fades after 6s)
     this.camera.showControlsHelp(container)
 
+    if (PerfHud.shouldEnable()) {
+      this.perfHudDetach = new PerfHud().attach(this.app.app, container)
+    }
+
+    // Post-processing chain (bloom/grading/vignette + ACES handoff) and
+    // ambient pollen motes — engine-lifetime, unaffected by scene rebuilds.
+    if (PostFX.shouldEnable()) {
+      this.postFX = new PostFX()
+      this.postFX.enable(this.app)
+    }
+    this.ambientParticles = new AmbientParticles()
+    this.ambientParticles.build(this.app.app, this.app.root)
+
     this.callbacks.onSceneReady?.()
   }
 
@@ -295,14 +324,57 @@ export class GardenEngine {
    * ONLY runs the rebuild — post-build wiring lives in `afterSceneBuildDrained`
    * so it fires once per coalesced burst, not once per iteration.
    *
+   * Routes through SceneDiff: when the change is provably layout-invariant
+   * (same repos/members), only the affected trees and arcs are rebuilt and
+   * every other subsystem — buildings, characters, physics, OrgRoom-bound
+   * refs — stays alive. Everything else (or any uncertainty) takes today's
+   * full teardown+rebuild. The classifier is fail-closed; the kill switch
+   * is FORCE_FULL_REBUILD below.
+   *
    * Captures `sceneManager` as a local before the await so a destroy()
    * mid-rebuild can't NPE us. The signal is forwarded into SceneManager.rebuild
    * so it can bail at any internal await checkpoint via signal.throwIfAborted().
    */
+  private static readonly FORCE_FULL_REBUILD = false
+
   private async runSceneBuild(data: EngineData, signal: AbortSignal): Promise<void> {
     const sceneManager = this.sceneManager
     if (!sceneManager) return
+
+    const prev = this.lastBuiltData
+    const diff = !GardenEngine.FORCE_FULL_REBUILD && prev
+      ? classifyDiff(prev, data)
+      : null
+
+    if (diff?.kind === 'none') {
+      this.lastBuiltData = data
+      return
+    }
+
+    if (diff?.kind === 'incremental') {
+      try {
+        const handled = await sceneManager.applyIncremental(diff, data)
+        if (handled) {
+          if (import.meta.env.DEV) {
+            console.info(
+              `[Perf] incremental update: repos=[${diff.changedRepos.join(', ')}]`
+              + ` arcs=${diff.relationshipsChanged}`,
+            )
+          }
+          this.lastBuiltData = data
+          return
+        }
+      } catch (err) {
+        // Partial application leaves the scene out of sync with lastBuiltData
+        // — drop the snapshot so the NEXT setData classifies as full.
+        this.lastBuiltData = null
+        throw err
+      }
+    }
+
     await sceneManager.rebuild(data, signal)
+    this.lastBuiltData = data
+    this.subsystemsReplaced = true
   }
 
   /**
@@ -310,12 +382,19 @@ export class GardenEngine {
    * builds have drained successfully. Re-applies the server-driven flag
    * and re-binds OrgRoom callbacks against the freshly-built subsystems.
    *
+   * Skipped entirely when the drain burst was served by incremental
+   * updates only — the subsystem refs the OrgRoom callbacks close over
+   * were never replaced, and re-wiring would needlessly destroy/recreate
+   * the VehicleSystem (remote vehicles would flicker).
+   *
    * Re-captures `this.sceneManager` as a local in case a future refactor
    * adds awaits between checks (TOCTOU defense).
    */
   private afterSceneBuildDrained(): void {
     const sm = this.sceneManager
     if (!sm) return
+    if (!this.subsystemsReplaced) return
+    this.subsystemsReplaced = false
     if (this.serverDrivenEnabled) {
       sm.agentSystemRef?.setServerDriven(true)
     }
@@ -1851,6 +1930,12 @@ export class GardenEngine {
       this.materials = null
       safe('input.destroy', () => this.input?.destroy())
       this.input = null
+      safe('perfHud.detach', () => this.perfHudDetach?.())
+      this.perfHudDetach = null
+      safe('postFX.destroy', () => this.postFX?.destroy())
+      this.postFX = null
+      safe('ambientParticles.destroy', () => this.ambientParticles?.destroy())
+      this.ambientParticles = null
       safe('camera.destroyHelp', () => this.camera?.destroyHelp())
       this.camera = null
     } finally {

@@ -1,0 +1,121 @@
+// Copyright 2025-2026 Arun Rajkumar
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+/**
+ * Mini-games store — personal bests, daily play streak, and per-game
+ * leaderboards. Mini-games are pure engagement: NO XP is awarded (XP is
+ * reserved for real development work). Playing updates your best score
+ * (the leaderboard key) and keeps your consecutive-day streak alive.
+ */
+import { defineStore } from 'pinia'
+import { ref } from 'vue'
+import api from '@/services/api'
+
+export interface MinigameInfo {
+  key: string
+  name: string
+  max_score: number
+  best_score: number
+  played_today: boolean
+}
+
+export interface MinigameScoreResult {
+  game: string
+  score: number
+  best_score: number
+  is_new_best: boolean
+  current_streak: number
+  best_streak: number
+  first_play_today: boolean
+}
+
+export interface LeaderboardEntry {
+  user_id: string
+  user_name: string
+  best_score: number
+  plays: number
+}
+
+interface MinigameStatus {
+  games: MinigameInfo[]
+  streak_count: number
+}
+
+export const useMinigamesStore = defineStore('minigames', () => {
+  const games = ref<MinigameInfo[]>([])
+  const streakCount = ref(0)
+  const loading = ref(false)
+  const error = ref('')
+  const leaderboards = ref<Record<string, LeaderboardEntry[]>>({})
+
+  async function fetchStatus(): Promise<void> {
+    loading.value = true
+    error.value = ''
+    try {
+      const { data } = await api.get<MinigameStatus>('/v1/minigames/status')
+      games.value = data.games
+      streakCount.value = data.streak_count
+    } catch {
+      error.value = 'Failed to load mini-games'
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function fetchLeaderboard(game: string): Promise<void> {
+    try {
+      const { data } = await api.get<{ entries: LeaderboardEntry[] }>(
+        '/v1/minigames/leaderboard',
+        { params: { game, limit: 10 } },
+      )
+      leaderboards.value = { ...leaderboards.value, [game]: data.entries }
+    } catch {
+      error.value = 'Failed to load leaderboard'
+    }
+  }
+
+  async function submitScore(game: string, score: number): Promise<MinigameScoreResult | null> {
+    try {
+      const { data } = await api.post<MinigameScoreResult>('/v1/minigames/score', {
+        game,
+        score,
+      })
+      // streakCount is the global max across all games; a fresh play can
+      // only hold or raise it — never drop it to one game's streak.
+      streakCount.value = Math.max(streakCount.value, data.current_streak)
+      const entry = games.value.find((g) => g.key === game)
+      if (entry) {
+        entry.played_today = true
+        entry.best_score = data.best_score
+      }
+      // Refresh the leaderboard so a new best shows immediately.
+      void fetchLeaderboard(game)
+      return data
+    } catch {
+      error.value = 'Failed to submit score'
+      return null
+    }
+  }
+
+  return {
+    games,
+    streakCount,
+    loading,
+    error,
+    leaderboards,
+    fetchStatus,
+    fetchLeaderboard,
+    submitScore,
+  }
+})

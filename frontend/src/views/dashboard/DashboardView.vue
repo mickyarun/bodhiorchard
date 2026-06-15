@@ -50,6 +50,28 @@
       >
         Standup
       </v-chip>
+      <v-chip
+        v-if="displayData"
+        size="small"
+        variant="tonal"
+        :color="minigames.streakCount > 0 ? 'warning' : undefined"
+        prepend-icon="mdi-gamepad-variant-outline"
+        style="cursor: pointer;"
+        @click="showGames = true"
+      >
+        Games<template v-if="minigames.streakCount > 0"> · 🔥{{ minigames.streakCount }}</template>
+      </v-chip>
+      <v-chip
+        v-if="displayData"
+        size="small"
+        variant="tonal"
+        :color="quizPlayable ? 'primary' : undefined"
+        prepend-icon="mdi-head-question-outline"
+        style="cursor: pointer;"
+        @click="showQuiz = true"
+      >
+        Quiz<template v-if="quizPlayable"> · ●</template>
+      </v-chip>
 
       <v-spacer />
 
@@ -154,6 +176,12 @@
         <StandupPanel v-if="showStandup" @close="showStandup = false" />
       </Transition>
 
+      <!-- Garden games + daily streak dialog -->
+      <MiniGameHub v-model="showGames" />
+
+      <!-- Company quiz overlay (opened from the garden toolbar) -->
+      <QuizHub v-model="showQuiz" />
+
       <!-- Takeover hint overlay -->
       <div
         v-if="viewMode === 'tree' && displayData && !isTakeover"
@@ -183,6 +211,11 @@ import TreeContent from './TreeContent.vue'
 import GraphContent from './GraphContent.vue'
 import SetupChecklist from '@/components/SetupChecklist.vue'
 import StandupPanel from '@/components/standup/StandupPanel.vue'
+import MiniGameHub from '@/components/minigames/MiniGameHub.vue'
+import { useMinigamesStore } from '@/stores/minigames'
+import QuizHub from '@/components/quiz/QuizHub.vue'
+import { useQuizStore } from '@/stores/quiz'
+import { useQuizSocket } from '@/composables/useQuizSocket'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
 
 const route = useRoute()
@@ -216,6 +249,14 @@ watch(viewMode, (mode) => {
 
 const showRelations = ref(false)
 const showStandup = ref(false)
+const showGames = ref(false)
+const minigames = useMinigamesStore()
+
+const showQuiz = ref(false)
+const quizStore = useQuizStore()
+const quizPlayable = computed(() => !!quizStore.active && !quizStore.active.alreadyAnswered)
+// Keep the quiz chip + hub live as quizzes open/reveal over the socket.
+useQuizSocket()
 const isTakeover = ref(false)
 const visibleRepos = ref<string[]>([])
 
@@ -337,6 +378,13 @@ let takeoverSyncInterval: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
   store.fetchTreeData()
+  // Streak chip in the header needs play state before the hub is opened.
+  void minigames.fetchStatus()
+  // Quiz chip needs to know if there's an open quiz to play; load the reveal
+  // too if the user already answered, so the hub opens straight to results.
+  void quizStore.fetchActive().then(() => {
+    if (quizStore.active?.alreadyAnswered) void quizStore.fetchReveal(quizStore.active.id)
+  })
   window.addEventListener('keydown', onKeyDown)
 
   // Poll control state every 500ms so the hint stays in sync

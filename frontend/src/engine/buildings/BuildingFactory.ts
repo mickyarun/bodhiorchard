@@ -25,6 +25,7 @@ import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { InteractionPoint, InteractionAnim } from '../characters/InteractionPoint'
 import { SEAT_OFFSETS } from '../characters/InteractionPoint'
 import { SeatProber } from '../characters/SeatProber'
+import { Theme } from '../rendering/Theme'
 
 /** Kenney tile size — 1×1 units confirmed by GLB measurements + starter kit. */
 const TILE_SIZE = 1
@@ -231,22 +232,53 @@ export class BuildingFactory {
     return wrapper
   }
 
-  /** Create a simple flat roof using a box primitive. */
+  /** Create a warm clay roof slab with a slight overhang, light trim cap,
+   *  and a small stone chimney. The old bare box had NO material — it
+   *  rendered default PlayCanvas grey, which made every tier-1 hut in the
+   *  village read flat and unfinished from the overhead camera. */
   createRoof(
     parent: pc.Entity,
     width: number,
     depth: number,
     height: number,
   ): pc.Entity {
+    const w = width * TILE_SIZE
+    const d = depth * TILE_SIZE
+    const overhang = 0.25
+
     const roof = new pc.Entity('Roof')
     roof.addComponent('render', { type: 'box' })
-    roof.setLocalScale(width * TILE_SIZE, 0.08, depth * TILE_SIZE)
-    roof.setLocalPosition(
-      (width * TILE_SIZE) / 2,
-      height,
-      (depth * TILE_SIZE) / 2,
-    )
+    roof.setLocalScale(w + overhang, 0.1, d + overhang)
+    roof.setLocalPosition(w / 2, height, d / 2)
+    if (this.materials) {
+      roof.render!.meshInstances[0].material = this.materials.getColor(
+        'roof_clay', ...Theme.VILLAGE.roofClay, { gloss: 0.2 },
+      )
+    }
     parent.addChild(roof)
+
+    if (this.materials) {
+      // Light ridge cap — a thin lighter slab on top breaks up the flat
+      // clay rectangle when seen from the orbit camera.
+      const cap = new pc.Entity('RoofCap')
+      cap.addComponent('render', { type: 'box' })
+      cap.setLocalScale(w * 0.55, 0.06, d * 0.55)
+      cap.setLocalPosition(w / 2, height + 0.08, d / 2)
+      cap.render!.meshInstances[0].material = this.materials.getColor(
+        'roof_trim', ...Theme.VILLAGE.roofTrim, { gloss: 0.25 },
+      )
+      parent.addChild(cap)
+
+      // Stone chimney at the back-right corner.
+      const chimney = new pc.Entity('Chimney')
+      chimney.addComponent('render', { type: 'box' })
+      chimney.setLocalScale(0.28, 0.55, 0.28)
+      chimney.setLocalPosition(w - 0.55, height + 0.22, 0.55)
+      chimney.render!.meshInstances[0].material = this.materials.getColor(
+        'roof_chimney', ...Theme.VILLAGE.chimney, { gloss: 0.15 },
+      )
+      parent.addChild(chimney)
+    }
     return roof
   }
 

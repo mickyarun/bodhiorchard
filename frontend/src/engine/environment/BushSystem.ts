@@ -18,12 +18,21 @@
  * Places bushes near path edges for a landscaped look, plus sparse
  * decorative props (stumps, logs, large rocks) in open grass areas
  * to fill the empty spaces between zones.
+ *
+ * Hardware-instanced: ~25 bushes + ~8 props collapse into one draw call
+ * per (mesh, material) via buildInstancedGlbs instead of ~33 per-entity
+ * matrix uploads. Bushes get the Theme leaf-green tint (cloned materials,
+ * owned here); props keep their native GLB colors.
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import { AssetLoader } from '../assets/AssetLoader'
 import { SCATTER_BUSHES, SCATTER_PROPS } from '../assets/AssetManifest'
 import { isInsideAnyZone, randRange, type ExclusionZone } from '../utils/MathUtils'
+import {
+  buildInstancedGlbs, type GlbScatterGroup, type ScatterTransform,
+} from '../utils/GlbInstancing'
+import { Theme } from '../rendering/Theme'
 
 const BUSH_COUNT = 25
 const PROP_COUNT = 8
@@ -32,6 +41,8 @@ const MIN_DISTANCE = 3.5
 
 export class BushSystem {
   private root: pc.Entity | null = null
+  private vbs: pc.VertexBuffer[] = []
+  private materials: pc.Material[] = []
 
   async build(
     app: Application,
@@ -44,36 +55,50 @@ export class BushSystem {
     // Collect all placed points (shared between bushes + props for min distance)
     const allPoints: Array<{ x: number; z: number }> = []
 
-    // 1. Place bushes near paths (Quaternius models are ~2-4 units, scale down)
+    // 1. Bushes near paths (Quaternius models are ~2-4 units, scale down)
     const bushAssets = await loader.loadBatch(SCATTER_BUSHES)
+    const bushGroups: GlbScatterGroup[] = bushAssets.map(
+      (asset) => ({ asset, transforms: [] }),
+    )
     const bushPoints = this.scatterNearPaths(
       BUSH_COUNT, pathRoutes, exclusionZones, allPoints,
     )
     for (const pt of bushPoints) {
-      const asset = bushAssets[Math.floor(Math.random() * bushAssets.length)]
-      const instance = loader.instance(asset)
-      instance.setPosition(pt.x, 0, pt.z)
-      instance.setLocalEulerAngles(0, randRange(0, 360), 0)
-      const s = randRange(0.6, 1.3)
-      instance.setLocalScale(s, s, s)
-      this.root.addChild(instance)
+      appendTransform(bushGroups, pt.x, pt.z, randRange(0.6, 1.3))
     }
     allPoints.push(...bushPoints)
 
-    // 2. Place decorative props (stumps, logs, rocks) in open areas
+    // 2. Decorative props in open areas. The Kenney wood GLBs (stumps,
+    // logs) render plastic-white untinted, so they split into a
+    // warm-wood-tinted call; the plant bushes share the leaf tint.
     const propAssets = await loader.loadBatch(SCATTER_PROPS)
-    const propPoints = this.scatterOpen(
-      PROP_COUNT, exclusionZones, allPoints,
+    const propGroups: GlbScatterGroup[] = propAssets.map(
+      (asset) => ({ asset, transforms: [] }),
     )
-    for (const pt of propPoints) {
-      const asset = propAssets[Math.floor(Math.random() * propAssets.length)]
-      const instance = loader.instance(asset)
-      instance.setPosition(pt.x, 0, pt.z)
-      instance.setLocalEulerAngles(0, randRange(0, 360), 0)
-      const s = randRange(1.5, 3.0)
-      instance.setLocalScale(s, s, s)
-      this.root.addChild(instance)
+    for (const pt of this.scatterOpen(PROP_COUNT, exclusionZones, allPoints)) {
+      appendTransform(propGroups, pt.x, pt.z, randRange(1.2, 2.2))
     }
+    // AssetLoader names assets by their path, so the GLB filename is testable.
+    const isWood = (g: GlbScatterGroup): boolean => /stump|log/.test(g.asset.name)
+
+    const bushes = buildInstancedGlbs(
+      app.app.graphicsDevice, loader, bushGroups,
+      { namePrefix: 'BushInstanced', tint: Theme.SCATTER.bush },
+    )
+    const woodProps = buildInstancedGlbs(
+      app.app.graphicsDevice, loader, propGroups.filter(isWood),
+      { namePrefix: 'WoodPropInstanced', tint: Theme.SCATTER.wood },
+    )
+    const plantProps = buildInstancedGlbs(
+      app.app.graphicsDevice, loader, propGroups.filter((g) => !isWood(g)),
+      { namePrefix: 'PlantPropInstanced', tint: Theme.SCATTER.bush },
+    )
+    const results = [bushes, woodProps, plantProps]
+    for (const r of results) {
+      for (const e of r.entities) this.root.addChild(e)
+    }
+    this.vbs = results.flatMap((r) => r.vbs)
+    this.materials = results.flatMap((r) => r.materials)
 
     app.root.addChild(this.root)
     return this.root
@@ -160,9 +185,23 @@ export class BushSystem {
   }
 
   destroy(): void {
+    for (const vb of this.vbs) vb.destroy()
+    this.vbs = []
+    for (const mat of this.materials) mat.destroy()
+    this.materials = []
     if (this.root) {
       this.root.destroy()
       this.root = null
     }
   }
+}
+
+/** Append one yaw-randomized transform to a random group's bucket. */
+function appendTransform(groups: GlbScatterGroup[], x: number, z: number, scale: number): void {
+  const transform: ScatterTransform = {
+    x, y: 0, z,
+    yawDeg: randRange(0, 360),
+    scale,
+  }
+  groups[Math.floor(Math.random() * groups.length)].transforms.push(transform)
 }

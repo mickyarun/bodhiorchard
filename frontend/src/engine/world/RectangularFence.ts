@@ -24,6 +24,7 @@
 import * as pc from 'playcanvas'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { FenceBounds } from '@shared/world/VillageLayout'
+import { Theme } from '../rendering/Theme'
 import {
   POST_HEIGHT, POST_WIDTH, PANEL_HEIGHT, PANEL_THICKNESS,
   GATE_POST_W, GATE_POST_H, GATE_WIDTH,
@@ -53,9 +54,10 @@ export class RectangularFence {
     root.setLocalPosition(0, 0, 0)
     parent.addChild(root)
 
-    const postMat  = this.materials.getColor('fence_post',  0.55, 0.40, 0.24)
-    const panelMat = this.materials.getColor('fence_panel', 0.64, 0.50, 0.30)
-    const gateMat  = this.materials.getColor('fence_gate',  0.42, 0.30, 0.16)
+    const postMatA = this.materials.getColor('fence_post_a', ...Theme.VILLAGE.fencePostA)
+    const postMatB = this.materials.getColor('fence_post_b', ...Theme.VILLAGE.fencePostB)
+    const panelMat = this.materials.getColor('fence_panel', ...Theme.VILLAGE.fencePanel)
+    const gateMat  = this.materials.getColor('fence_gate',  ...Theme.VILLAGE.fenceGate)
 
     // Define 4 walls as line segments
     const walls: Array<{ sx: number; sz: number; ex: number; ez: number; yaw: number; side: string }> = [
@@ -67,7 +69,7 @@ export class RectangularFence {
 
     for (const wall of walls) {
       const isGateSide = wall.side === gateSide
-      this._buildWall(root, wall.sx, wall.sz, wall.ex, wall.ez, wall.yaw, postMat, panelMat, isGateSide ? GATE_WIDTH : 0)
+      this._buildWall(root, wall.sx, wall.sz, wall.ex, wall.ez, wall.yaw, [postMatA, postMatB], panelMat, isGateSide ? GATE_WIDTH : 0)
 
       // Gate pillars
       if (isGateSide) {
@@ -83,7 +85,7 @@ export class RectangularFence {
     sx: number, sz: number,
     ex: number, ez: number,
     yaw: number,
-    postMat: pc.Material,
+    postMats: readonly pc.Material[],
     panelMat: pc.Material,
     gateGap: number,
   ): void {
@@ -108,12 +110,13 @@ export class RectangularFence {
       const px = sx + dx * t
       const pz = sz + dz * t
 
-      // Post
+      // Post — alternate two wood tones so long fence runs don't read as
+      // one extruded brown strip.
       const post = new pc.Entity('Post')
       post.addComponent('render', { type: 'box' })
       post.setLocalScale(POST_WIDTH, POST_HEIGHT, POST_WIDTH)
       post.setLocalPosition(px, POST_HEIGHT / 2, pz)
-      post.render!.meshInstances[0].material = postMat
+      post.render!.meshInstances[0].material = postMats[i % postMats.length]
       root.addChild(post)
 
       // Panel

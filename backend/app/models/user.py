@@ -19,7 +19,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, ForeignKey, Index, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
@@ -75,6 +75,12 @@ class User(BaseModel):
     slack_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     github_username: Mapped[str | None] = mapped_column(String(100), nullable=True)
     character_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Opt-out map of ``notification_category -> bool``. Absent key = enabled.
+    # Resolved through ``app.services.notifications`` so the registry, the SQL
+    # recipient filter, and the profile UI share one defaulting rule.
+    notification_prefs: Mapped[dict[str, bool]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
 
     # org_id, role, role_id, role_ref are NOT columns.
     # They are set as transient instance attributes by get_current_user

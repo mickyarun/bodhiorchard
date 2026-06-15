@@ -34,18 +34,24 @@ and the shipped defaults fill any gaps.
 
 from typing import Any
 
+import structlog
+
 from app.schemas.settings import (
     BUDStageSettings,
     JiraSettings,
     PresenceSettings,
     QAAutomationSettings,
+    QuizGameSettings,
 )
 from app.services.estimation_engine import PHASE_ORDER
+
+logger = structlog.get_logger(__name__)
 
 # Shipped defaults as a module-level constant so callers that need the
 # raw dict (e.g. the internal_colyseus snapshot payload) do not pay the
 # Pydantic construction cost on every request.
 DEFAULT_PRESENCE_SETTINGS: PresenceSettings = PresenceSettings()
+DEFAULT_QUIZ_SETTINGS: QuizGameSettings = QuizGameSettings()
 
 
 def get_qa_settings(org_config: dict[str, Any] | None) -> QAAutomationSettings:
@@ -112,15 +118,40 @@ def get_presence_settings(org_config: dict[str, Any] | None) -> PresenceSettings
     try:
         return PresenceSettings(**raw)
     except Exception as exc:
-        import structlog
-
-        structlog.get_logger(__name__).error(
+        logger.error(
             "presence_settings_invalid",
             raw_keys=list(raw.keys()),
             error=str(exc),
             action="falling back to defaults — fix this org's config JSONB",
         )
         return DEFAULT_PRESENCE_SETTINGS
+
+
+def get_quiz_settings(org_config: dict[str, Any] | None) -> QuizGameSettings:
+    """Resolve per-org Company Quiz Game settings from an organization config dict.
+
+    The ONLY reader of the ``org.config["quiz"]`` key. Accepts ``None`` /
+    missing / partial sections and fills in shipped defaults. **Defensive:**
+    a corrupt stored section returns ``DEFAULT_QUIZ_SETTINGS`` rather than
+    raising, so the cross-org quiz scheduler sweep never aborts on one bad org.
+
+    Args:
+        org_config: The raw ``organization.config`` JSONB dict, or None.
+
+    Returns:
+        A ``QuizGameSettings`` with all fields populated.
+    """
+    raw = (org_config or {}).get("quiz") or {}
+    try:
+        return QuizGameSettings(**raw)
+    except Exception as exc:
+        logger.error(
+            "quiz_settings_invalid",
+            raw_keys=list(raw.keys()),
+            error=str(exc),
+            action="falling back to defaults — fix this org's config JSONB",
+        )
+        return DEFAULT_QUIZ_SETTINGS
 
 
 def get_bug_reject_threshold(org_config: dict[str, Any] | None) -> int:

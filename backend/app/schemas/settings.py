@@ -20,6 +20,26 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.models.quiz_question import QuizDifficulty, QuizQuestionType
+
+
+def validate_optional_timezone(value: str | None) -> str | None:
+    """Reject unknown IANA timezone names; ``None`` is allowed.
+
+    Uses ``ZoneInfo`` construction rather than ``available_timezones()`` so
+    legacy aliases (e.g. ``Asia/Calcutta``) resolve consistently across hosts
+    whose tz databases differ — Debian-slim images drop the ``backward`` zones
+    into a separate ``tzdata-legacy`` package, while macOS ships them by default.
+    Shared by every settings section that carries an optional timezone.
+    """
+    if value is None:
+        return None
+    try:
+        zoneinfo.ZoneInfo(value)
+    except zoneinfo.ZoneInfoNotFoundError as exc:
+        raise ValueError(f"Unknown IANA timezone: {value!r}") from exc
+    return value
+
 
 class SourceCodeSettings(BaseModel):
     """Source code path configuration."""
@@ -231,21 +251,8 @@ class PresenceSettings(BaseModel):
     @field_validator("timezone")
     @classmethod
     def _validate_timezone(cls, value: str | None) -> str | None:
-        """Reject unknown IANA timezone names. ``None`` is allowed.
-
-        Uses ``ZoneInfo`` construction rather than ``available_timezones()`` so
-        legacy aliases (e.g. ``Asia/Calcutta``) resolve consistently across
-        hosts whose tz databases differ — Debian-slim images drop the
-        ``backward`` zones into a separate ``tzdata-legacy`` package, while
-        macOS ships them by default.
-        """
-        if value is None:
-            return None
-        try:
-            zoneinfo.ZoneInfo(value)
-        except zoneinfo.ZoneInfoNotFoundError as exc:
-            raise ValueError(f"Unknown IANA timezone: {value!r}") from exc
-        return value
+        """Reject unknown IANA timezone names. ``None`` is allowed."""
+        return validate_optional_timezone(value)
 
     @model_validator(mode="after")
     def _start_before_end(self) -> "PresenceSettings":
@@ -258,6 +265,84 @@ class PresenceSettings(BaseModel):
         if to_tuple(self.working_hours_start) >= to_tuple(self.working_hours_end):
             raise ValueError("working_hours_start must be strictly before working_hours_end")
         return self
+
+    model_config = {"populate_by_name": True}
+
+
+def _default_quiz_weekdays() -> list[int]:
+    """Default quiz days — Monday (0) and Friday (4), Python weekday() convention."""
+    return [0, 4]
+
+
+def _default_question_types() -> list[QuizQuestionType]:
+    """Default to all v1 question types enabled."""
+    return [
+        QuizQuestionType.MULTIPLE_CHOICE,
+        QuizQuestionType.SCRAMBLE,
+        QuizQuestionType.FILL_BLANK,
+    ]
+
+
+class QuizGameSettings(BaseModel):
+    """Org-level Company Quiz Game configuration (read + update).
+
+    Stored under ``org.config["quiz"]``. The quiz runs on
+    ``active_weekdays`` (Python ``date.weekday()`` ints, Mon=0..Sun=6),
+    opening at ``quiz_time`` interpreted in ``timezone`` (``None`` =
+    server-local). AI-drafted questions always require admin approval before
+    going live — there is intentionally no toggle for that.
+    """
+
+    enabled: bool = True
+    active_weekdays: list[int] = Field(
+        default_factory=_default_quiz_weekdays,
+        alias="activeWeekdays",
+        min_length=1,
+    )
+    quiz_time: str = Field(
+        default="10:00",
+        alias="quizTime",
+        pattern=r"^([01]\d|2[0-3]):[0-5]\d$",
+    )
+    timezone: str | None = Field(default=None)
+    window_minutes: int = Field(default=480, alias="windowMinutes", ge=15, le=1440)
+    speed_grace_minutes: int = Field(default=60, alias="speedGraceMinutes", ge=1, le=1440)
+    difficulty: QuizDifficulty = QuizDifficulty.MEDIUM
+    enabled_question_types: list[QuizQuestionType] = Field(
+        default_factory=_default_question_types,
+        alias="enabledQuestionTypes",
+        min_length=1,
+    )
+    batch_lead_days: int = Field(default=3, alias="batchLeadDays", ge=0, le=14)
+    low_queue_nudge_threshold: int = Field(default=2, alias="lowQueueNudgeThreshold", ge=0, le=30)
+    slack_notify_open: bool = Field(default=True, alias="slackNotifyOpen")
+    slack_notify_reveal: bool = Field(default=False, alias="slackNotifyReveal")
+    monthly_sp_amount: float = Field(default=1.0, alias="monthlySpAmount", ge=0.0, le=10.0)
+
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone(cls, value: str | None) -> str | None:
+        """Reject unknown IANA timezone names. ``None`` is allowed."""
+        return validate_optional_timezone(value)
+
+    @field_validator("active_weekdays")
+    @classmethod
+    def _validate_weekdays(cls, value: list[int]) -> list[int]:
+        """Each entry must be a valid weekday (0=Mon..6=Sun); dedupe and sort."""
+        for day in value:
+            if day < 0 or day > 6:
+                raise ValueError(f"weekday out of range (0-6): {day}")
+        return sorted(set(value))
+
+    @field_validator("enabled_question_types")
+    @classmethod
+    def _dedupe_types(cls, value: list[QuizQuestionType]) -> list[QuizQuestionType]:
+        """Drop duplicates while preserving order; the list must stay non-empty."""
+        seen: list[QuizQuestionType] = []
+        for qt in value:
+            if qt not in seen:
+                seen.append(qt)
+        return seen
 
     model_config = {"populate_by_name": True}
 

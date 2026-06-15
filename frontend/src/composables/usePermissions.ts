@@ -26,6 +26,13 @@ export function usePermissions() {
     return permissions.some(p => hasPermission(p))
   }
 
+  // Org administrators — the org owner and platform admins. Role-based (not a
+  // granted permission) because it gates admin-only *detail* like raw play
+  // counts on the mini-game leaderboards, which ordinary players shouldn't see.
+  const isOrgAdmin = computed(
+    () => authStore.user?.role === 'org_owner' || authStore.user?.role === 'admin',
+  )
+
   // Sidebar visibility
   const canApprove = computed(() => hasPermission('backlog:approve'))
   const canManageMembers = computed(() => hasPermission('team:manage'))
@@ -48,6 +55,11 @@ export function usePermissions() {
   // ability rather than splitting view-only access from action access.
   const canViewCodeSettings = computed(() => hasPermission('integrations:configure'))
 
+  // Company Quiz Game admin (settings + question review/approval). Gated on a
+  // standalone permission so it can be granted to a "Quiz Master" custom role
+  // independently of org admin — keeping competing players out of the answers.
+  const canManageQuiz = computed(() => hasPermission('quiz:configure'))
+
   // Bug board. Each helper pairs the new ``bugs:*`` perm with the
   // legacy ``buds:*`` fallback so role tokens minted before the Step E
   // backend rollout don't lose access. Drop the legacy half once the
@@ -61,6 +73,7 @@ export function usePermissions() {
   return {
     hasPermission,
     hasAnyPermission,
+    isOrgAdmin,
     canApprove,
     canManageMembers,
     canViewSettings,
@@ -71,6 +84,7 @@ export function usePermissions() {
     canViewPresenceSettings,
     canViewJiraImport,
     canViewCodeSettings,
+    canManageQuiz,
     canViewBugs,
     canReportBugs,
     canEditBugs,

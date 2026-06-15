@@ -24,6 +24,8 @@ import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import { randRange } from '../utils/MathUtils'
+import { Theme } from '../rendering/Theme'
+import { createInstancedEntity, computeInstanceAabb } from '../treetest/instancing'
 
 const CLOUD_COUNT = 12
 const ALTITUDE_MIN = 100
@@ -44,17 +46,27 @@ interface CloudInstance {
 export class CloudSystem {
   private root: pc.Entity | null = null
   private clouds: CloudInstance[] = []
+  private vbs: pc.VertexBuffer[] = []
+  private sphereMesh: pc.Mesh | null = null
 
   build(app: Application, materials: MaterialFactory): pc.Entity {
     this.root = new pc.Entity('CloudSystem')
+    // Shared unit sphere for every instanced puff batch (destroyed with us).
+    this.sphereMesh = pc.Mesh.fromGeometry(
+      app.app.graphicsDevice, new pc.SphereGeometry(),
+    )
 
     const cloudMat = materials.getColor('cloud', 1, 1, 1, {
-      opacity: 0.45,
-      emissive: [0.92, 0.94, 0.97],
+      opacity: Theme.CLOUD.opacity,
+      emissive: [
+        Theme.CLOUD.emissive[0] / 255,
+        Theme.CLOUD.emissive[1] / 255,
+        Theme.CLOUD.emissive[2] / 255,
+      ],
     })
 
     for (let i = 0; i < CLOUD_COUNT; i++) {
-      const cloud = this.buildCloudCluster(i, cloudMat)
+      const cloud = this.buildCloudCluster(i, cloudMat, app.app.graphicsDevice)
       cloud.setPosition(
         randRange(-SPREAD, SPREAD),
         randRange(ALTITUDE_MIN, ALTITUDE_MAX),
@@ -72,33 +84,51 @@ export class CloudSystem {
     return this.root
   }
 
-  /** Create a single cloud from overlapping sphere "puffs". */
-  private buildCloudCluster(index: number, material: pc.Material): pc.Entity {
+  /**
+   * Create a single cloud as ONE instanced draw of overlapping sphere
+   * "puffs". Instance matrices are LOCAL to the cluster group — the
+   * renderer composes group.world × instance matrix, so the per-frame
+   * drift in update() still moves the whole cloud. Non-uniform puff
+   * scale (vertical flattening) is baked straight into each matrix,
+   * which the ScatterTransform-based helper can't express.
+   */
+  private buildCloudCluster(
+    index: number, material: pc.Material, device: pc.GraphicsDevice,
+  ): pc.Entity {
     const group = new pc.Entity(`Cloud_${index}`)
     const puffCount = Math.floor(randRange(PUFFS_MIN, PUFFS_MAX + 1))
 
     // Base scale for the whole cloud (variety between clouds)
     const cloudScale = randRange(1.0, 1.8)
 
+    const matrices = new Float32Array(puffCount * 16)
+    const mat = new pc.Mat4()
+    const pos = new pc.Vec3()
+    const rot = new pc.Quat()
+    const scl = new pc.Vec3()
     for (let p = 0; p < puffCount; p++) {
-      const puff = new pc.Entity(`Puff_${p}`)
-      puff.addComponent('render', { type: 'sphere' })
-
       // Spread puffs along the X axis (elongated), less on Y/Z
-      const px = randRange(-8, 8) * cloudScale
-      const py = randRange(-1.5, 1.5) * cloudScale
-      const pz = randRange(-4, 4) * cloudScale
-      puff.setLocalPosition(px, py, pz)
-
+      pos.set(
+        randRange(-8, 8) * cloudScale,
+        randRange(-1.5, 1.5) * cloudScale,
+        randRange(-4, 4) * cloudScale,
+      )
       // Each puff has slightly different scale for organic shape
       const s = randRange(4, 9) * cloudScale
-      const sy = s * randRange(0.4, 0.7) // flatten vertically
-      puff.setLocalScale(s, sy, s * randRange(0.7, 1.0))
-
-      puff.render!.meshInstances[0].material = material
-
-      group.addChild(puff)
+      scl.set(s, s * randRange(0.4, 0.7), s * randRange(0.7, 1.0))
+      mat.setTRS(pos, rot, scl)
+      matrices.set(mat.data, p * 16)
     }
+
+    // Margin covers the largest puff's half-extent (unit sphere radius 0.5
+    // × max scale ~16) so frustum culling never pops a visible cloud.
+    const aabb = computeInstanceAabb(matrices, puffCount, 9 * cloudScale)
+    const { entity, vb } = createInstancedEntity(
+      device, this.sphereMesh!, material, matrices, puffCount,
+      `CloudPuffs_${index}`, { aabb },
+    )
+    group.addChild(entity)
+    this.vbs.push(vb)
 
     return group
   }
@@ -120,9 +150,16 @@ export class CloudSystem {
 
   destroy(): void {
     this.clouds = []
+    for (const vb of this.vbs) vb.destroy()
+    this.vbs = []
     if (this.root) {
       this.root.destroy()
       this.root = null
+    }
+    if (this.sphereMesh) {
+      this.sphereMesh.vertexBuffer?.destroy()
+      this.sphereMesh.indexBuffer?.[0]?.destroy()
+      this.sphereMesh = null
     }
   }
 }

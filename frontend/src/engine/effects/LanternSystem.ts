@@ -22,9 +22,10 @@
  */
 import * as pc from 'playcanvas'
 import { evalRouteAt, type PathRoute } from '@shared/world/paths'
+import { Theme } from '../rendering/Theme'
 
 const LANTERN_SPACING = 6      // world units between lanterns along each path
-const POLE_WIDTH = 0.06
+const POLE_WIDTH = Theme.PATHS.lanternPoleWidth
 const POLE_HEIGHT = 1.5
 const LAMP_RADIUS = 0.12
 const PATH_OFFSET = 0.8        // offset perpendicular to path direction (left side)
@@ -40,15 +41,17 @@ export class LanternSystem {
 
     // Dark wood pole material
     this.poleMat = new pc.StandardMaterial()
-    this.poleMat.diffuse = new pc.Color(0.3, 0.2, 0.12)
+    const [plr, plg, plb] = Theme.PATHS.lanternPole
+    this.poleMat.diffuse = new pc.Color(plr, plg, plb)
     this.poleMat.metalness = 0
     this.poleMat.gloss = 0.15
     this.poleMat.update()
 
     // Warm emissive lamp material — no point light, just glow
     this.lampMat = new pc.StandardMaterial()
-    this.lampMat.diffuse = new pc.Color(1.0, 0.85, 0.4)
-    this.lampMat.emissive = new pc.Color(1.0, 0.85, 0.4)
+    const [glr, glg, glb] = Theme.PATHS.lanternGlow
+    this.lampMat.diffuse = new pc.Color(glr, glg, glb)
+    this.lampMat.emissive = new pc.Color(glr, glg, glb)
     this.lampMat.metalness = 0
     this.lampMat.gloss = 0.5
     this.lampMat.update()

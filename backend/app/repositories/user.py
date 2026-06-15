@@ -19,6 +19,7 @@ from typing import Any
 
 from sqlalchemy import Select, and_, case, func, or_, select, true
 from sqlalchemy import delete as sql_delete
+from sqlalchemy import update as sql_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -158,6 +159,55 @@ class UserRepository(BaseRepository[User]):
         )
         result = await self._db.execute(stmt)
         return [(row[0], row[1]) for row in result.all() if row[1]]
+
+    async def list_slack_recipients(
+        self, org_id: uuid.UUID, *, category: str, default_enabled: bool = True
+    ) -> list[tuple[uuid.UUID, str]]:
+        """``(user_id, slack_id)`` pairs for active members who allow ``category``.
+
+        Same shape as :meth:`list_active_slack_user_pairs` but applies the
+        per-user preference filter in SQL via
+        ``COALESCE(notification_prefs ->> category, <default>) <> 'false'``:
+
+        * A member is excluded only when the resolved value is ``'false'``.
+        * A missing key falls back to ``default_enabled`` — so an opt-out
+          category (``default_enabled=True``) keeps members who never set a
+          preference, while an opt-in category (``default_enabled=False``)
+          keeps only members who explicitly turned it on.
+
+        This mirrors ``app.services.notifications.is_category_enabled`` exactly.
+        ``category`` is the stable string key and ``default_enabled`` the
+        registry default (a ``NotificationCategory`` value / ``category_default``
+        result); passing them in keeps the repo free of the registry import.
+        """
+        default_text = "true" if default_enabled else "false"
+        stmt = (
+            select(User.id, User.slack_id)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .where(
+                OrgToUser.org_id == org_id,
+                User.slack_id.is_not(None),
+                User.is_active.is_(True),
+                func.coalesce(User.notification_prefs[category].astext, default_text) != "false",
+            )
+        )
+        result = await self._db.execute(stmt)
+        return [(row[0], row[1]) for row in result.all() if row[1]]
+
+    async def get_notification_prefs(self, user_id: uuid.UUID) -> dict[str, bool]:
+        """Return a member's stored opt-out map (``{}`` when never set)."""
+        result = await self._db.execute(select(User.notification_prefs).where(User.id == user_id))
+        return result.scalar_one_or_none() or {}
+
+    async def set_notification_prefs(
+        self, user_id: uuid.UUID, prefs: dict[str, bool]
+    ) -> dict[str, bool]:
+        """Overwrite a member's notification preference map; returns it back."""
+        await self._db.execute(
+            sql_update(User).where(User.id == user_id).values(notification_prefs=prefs)
+        )
+        await self._db.flush()
+        return prefs
 
     async def get_by_slack_id_with_role(
         self, org_id: uuid.UUID, slack_id: str

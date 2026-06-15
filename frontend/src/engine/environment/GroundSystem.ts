@@ -24,18 +24,10 @@ import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import type { WorldZone } from '../world/WorldLayout'
+import { Theme, toCss, type Rgb255 } from '../rendering/Theme'
 
 const TEXTURE_SIZE = 1024
 const OVERLAY_TEX_SIZE = 256
-
-// Zone-specific ground colors
-const ZONE_COLORS: Record<string, { r: number; g: number; b: number }> = {
-  pool:       { r: 210, g: 185, b: 140 },  // warm sand
-  housing:    { r: 190, g: 170, b: 130 },  // sandy dirt
-  coffee_bar: { r: 160, g: 140, b: 110 },  // packed earth
-  cafeteria:  { r: 165, g: 145, b: 115 },  // packed earth
-  pavilion:   { r: 170, g: 165, b: 155 },  // stone paving
-}
 
 export class GroundSystem {
   private entity: pc.Entity | null = null
@@ -59,9 +51,12 @@ export class GroundSystem {
 
     this.material = new pc.StandardMaterial()
     this.material.diffuseMap = this.texture
-    this.material.diffuse = new pc.Color(1, 1, 1)
+    // Warm spring tint multiplied over the grass texture — lifts the olive
+    // base toward a vibrant green without replacing the texture asset.
+    const [tr, tg, tb] = Theme.GROUND.tint
+    this.material.diffuse = new pc.Color(tr, tg, tb)
     this.material.metalness = 0
-    this.material.gloss = 0.05
+    this.material.gloss = Theme.GROUND.gloss
     this.material.update()
 
     const meshInstance = this.entity.render!.meshInstances[0]
@@ -112,9 +107,11 @@ export class GroundSystem {
       tex.setSource(img)
       this.pngTexture = tex
       this.material.diffuseMap = tex
-      // 60 tiles across 600 units → 10 world units per tile. Matches the
-      // low-poly stylized look in the target reference without visible seams.
-      this.material.diffuseMapTiling = new pc.Vec2(60, 60)
+      // Tiling from Theme — larger, softer patches read painterly under
+      // the blade carpet (fine tiling fought the blades with noise).
+      this.material.diffuseMapTiling = new pc.Vec2(
+        Theme.GROUND.tiling, Theme.GROUND.tiling,
+      )
       this.material.update()
     }
     img.onerror = (err) => {
@@ -129,13 +126,15 @@ export class GroundSystem {
    */
   addZoneOverlays(app: Application, zones: readonly WorldZone[]): void {
     for (const zone of zones) {
-      const colors = ZONE_COLORS[zone.name]
+      const colors = Theme.ZONE_COLORS[zone.name]
       if (!colors) continue  // skip orchard — stays grass
 
       const entity = new pc.Entity(`Ground_${zone.name}`)
       entity.addComponent('render', { type: 'plane' })
-      // Diameter = radius × 2, with slight padding for soft edge
-      const diameter = zone.radius * 2.4
+      // Tight fit: ×1.7 keeps a soft fade ring just past the fence line.
+      // The old ×2.4 discs reached far into the lawn and read as giant
+      // glowing halos around every zone once bloom/grading were live.
+      const diameter = zone.radius * 1.7
       entity.setLocalScale(diameter, 1, diameter)
       entity.setPosition(zone.x, 0.02, zone.z)  // just above grass
 
@@ -170,7 +169,7 @@ export class GroundSystem {
     const ctx = canvas.getContext('2d')!
 
     // Rich base green — darker, more natural
-    ctx.fillStyle = 'rgb(48, 95, 32)'
+    ctx.fillStyle = toCss(Theme.GROUND.base)
     ctx.fillRect(0, 0, S, S)
 
     // Layer 1: large natural color patches (light/dark variation like real turf)
@@ -316,8 +315,9 @@ export class GroundSystem {
   /** Generate a zone-specific ground texture with radial alpha fade. */
   private createZoneTexture(
     device: pc.GraphicsDevice,
-    color: { r: number; g: number; b: number },
+    zoneColor: Rgb255,
   ): pc.Texture {
+    const color = { r: zoneColor[0], g: zoneColor[1], b: zoneColor[2] }
     const S = OVERLAY_TEX_SIZE
     const canvas = document.createElement('canvas')
     canvas.width = S
@@ -364,14 +364,16 @@ export class GroundSystem {
         const dy = y - cy
         const dist = Math.sqrt(dx * dx + dy * dy) / maxR  // 0 at center, 1 at edge
 
-        // Fade starts at 55% radius, fully transparent at 100%
+        // Fade starts at 55% radius, fully transparent at 100%. Center
+        // caps at 0.85 so grass always bleeds through — opaque discs
+        // read as glowing pads under bloom.
         let alpha: number
         if (dist < 0.55) {
-          alpha = 1.0
+          alpha = 0.85
         } else if (dist < 1.0) {
           // Smooth cubic fade
           const t = (dist - 0.55) / 0.45
-          alpha = 1.0 - t * t * (3 - 2 * t)
+          alpha = (1.0 - t * t * (3 - 2 * t)) * 0.85
         } else {
           alpha = 0
         }

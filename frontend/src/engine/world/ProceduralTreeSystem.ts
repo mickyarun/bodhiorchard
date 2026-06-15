@@ -16,7 +16,8 @@
  * ProceduralTreeSystem — RepoVisualization using procedural Tree3DSystem growth.
  *
  * Replaces the static Kenney GLB trees. Each repo becomes an animated procedural tree:
- *   - Trunk color mapped from repo health (thriving→green … wilted→reddish)
+ *   - Trunk color is a per-repo identity hue, cycled by index from
+ *     Theme.TRUNK_PALETTE (health is signaled elsewhere, not by trunk color)
  *   - Feature branches colored by status (planned/in_progress/implemented)
  *   - Grows frame-by-frame via update(dt) — trees animate during scene load
  *   - Billboard label appears once growth completes (above canopy tip)
@@ -37,9 +38,11 @@ import { WORLD_SCALE } from '../treetest/TreeRules'
 import { LabelRenderer } from '../rendering/LabelRenderer'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
 import { setTreeData, type TreeFeatureNodeData } from './TreeNodeData'
+import { Theme } from '../rendering/Theme'
 import {
   loadTreeCache,
   saveTreeCache,
+  deleteTreeCache,
   pruneLRU,
   computeCacheKey,
   SCHEMA_VERSION,
@@ -49,28 +52,19 @@ import {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-/**
- * Distinct trunk base colors — one per repo, cycled by index.
- * Chosen to be visually differentiated in a daylit PBR scene (no emissive).
- */
-const TRUNK_PALETTE: Color3[] = [
-  [ 70, 160, 230],  // sky blue
-  [220, 120,  40],  // amber
-  [160,  80, 200],  // violet
-  [ 50, 190, 140],  // teal
-  [220,  60,  80],  // coral
-  [180, 200,  50],  // lime
-  [ 80, 120, 220],  // indigo
-  [230, 160,  50],  // gold
-  [100, 200,  80],  // grass green
-  [200,  80, 150],  // pink
-  [ 60, 180, 200],  // cyan
-  [200, 130,  70],  // tan
-]
-
-/** Pick trunk color by repo index — cycles through the palette. */
+/** Pick the repo's IDENTITY color by index — cycles through the curated
+ *  palette in Theme. Expressed in the canopy + feature branches (trunks
+ *  grow in natural bark). NOTE: the palette index is part of the
+ *  IndexedDB tree-cache key, so palette edits force a one-time regrow. */
 function trunkColor(index: number): Color3 {
-  return TRUNK_PALETTE[index % TRUNK_PALETTE.length]
+  const c = Theme.TRUNK_PALETTE[index % Theme.TRUNK_PALETTE.length]
+  return [c[0], c[1], c[2]]
+}
+
+/** Natural wood for trunk + structural branches. */
+function barkColor(): Color3 {
+  const c = Theme.TREE_BARK.root
+  return [c[0], c[1], c[2]]
 }
 
 /** Max features injected as colored branches per tree. */
@@ -174,7 +168,7 @@ export class ProceduralTreeSystem implements RepoVisualization {
       perRepoFeatures.push(repoFeatures)
       cacheKeys.push(computeCacheKey({
         repoName:        repo.repo_name,
-        trunkColorIndex: i % TRUNK_PALETTE.length,
+        trunkColorIndex: i % Theme.TRUNK_PALETTE.length,
         features:        repoFeatures.map(f => ({ title: f.title, status: f.status })),
       }))
     }
@@ -200,7 +194,9 @@ export class ProceduralTreeSystem implements RepoVisualization {
       this.root.addChild(container)
       this.treeMap.set(repo.repo_name, container)
 
-      // Map EngineFeature → Tree3DSystem feature format
+      // Map EngineFeature → Tree3DSystem feature format. The trunk grows
+      // in natural BARK; the repo's identity color shows in the canopy
+      // (leaf blend) and on the feature branches.
       const repoFeatures = perRepoFeatures[i]
       const color = trunkColor(i)
       const treeFeatures = repoFeatures.map(f => ({
@@ -239,17 +235,22 @@ export class ProceduralTreeSystem implements RepoVisualization {
       })
 
       const cached = cacheHits[i]
-      if (cached) {
+      const restored = cached
+        ? tree.loadFromCache(
+            { branchGroups: cached.branchGroups, primaries: cached.primaries },
+            barkColor(), pos.x, pos.z,
+          )
+        : 0
+      if (cached && restored > 0) {
         // Cache hit: skip growth, restore instanced state directly.
-        tree.loadFromCache(
-          { branchGroups: cached.branchGroups, primaries: cached.primaries },
-          color, pos.x, pos.z,
-        )
         if (cached.leafGroup) leaves.loadFromCache(cached.leafGroup)
         this.handleTreeReady(entry, cached.labelY)
         entry.done = true
       } else {
-        tree.startTree(color, pos.x, 0, pos.z)
+        // No cache, or the cached geometry restored to nothing (corrupt/empty
+        // entry → invisible tree). Evict the bad entry and grow fresh.
+        if (cached) void deleteTreeCache(cacheKeys[i])
+        tree.startTree(barkColor(), pos.x, 0, pos.z)
       }
     }
 
@@ -338,7 +339,8 @@ export class ProceduralTreeSystem implements RepoVisualization {
           const hasImplemented = [...entry.featuresByTitle.values()].some(f => f.status === 'implemented')
           let leafExport: BakedLeafGroup | null = null
           if (hasImplemented) {
-            entry.leaves.spawnLeaves(tips, entry.tree.getRootColor())
+            // Identity color (not bark) — the canopy carries the repo hue.
+            entry.leaves.spawnLeaves(tips, entry.rootColor)
             leafExport = entry.leaves.bakeInstanced()
           }
 
@@ -387,6 +389,93 @@ export class ProceduralTreeSystem implements RepoVisualization {
         setEntryVisible(entry, true)
       }
     }
+  }
+
+  /**
+   * Rebuild ONE repo's tree in place — the incremental-update path.
+   *
+   * Preconditions (enforced by SceneDiff's classifier): the repo set and
+   * order are unchanged, so this entry's position, trunk-color index, and
+   * every other tree stay exactly where they are. The old tree (entities,
+   * instanced VBs, label, pick proxies) is torn down and a fresh entry is
+   * built at the same coordinates. Changed features almost always mean a
+   * tree-cache miss, so the tree visibly regrows — deliberate: growth is
+   * the dashboard's "something changed here" signal.
+   */
+  async rebuildRepo(repo: EngineRepoData, features: EngineFeature[]): Promise<void> {
+    const idx = this.entries.findIndex(e => e.repoName === repo.repo_name)
+    if (idx < 0 || !this.appRef || !this.root) return
+    const old = this.entries[idx]
+
+    // Snapshot every pickable this entry registered BEFORE destroying —
+    // feature pick proxies live under the tree root and die with it.
+    const stale = new Set<pc.Entity>([old.container])
+    for (const proxy of old.tree.getFeatureEntityMap().keys()) stale.add(proxy)
+
+    if (old.label) LabelRenderer.cleanup(this.appRef, old.label)
+    old.leaves.destroy()
+    old.tree.destroy()
+    old.container.destroy()
+    this.allPickableEntities = this.allPickableEntities.filter(e => !stale.has(e))
+
+    // Rebuild at the SAME world position + palette index.
+    const repoFeatures = features.slice(0, MAX_FEATURES)
+    const color = trunkColor(idx)
+    const cacheKey = computeCacheKey({
+      repoName:        repo.repo_name,
+      trunkColorIndex: idx % Theme.TRUNK_PALETTE.length,
+      features:        repoFeatures.map(f => ({ title: f.title, status: f.status })),
+    })
+
+    const container = new pc.Entity(`Tree_${repo.repo_name}`)
+    container.setPosition(old.worldX, 0, old.worldZ)
+    container.tags.add('pickable')
+    setTreeData(container, {
+      type:         'tree_repo',
+      repoName:     repo.repo_name,
+      health:       repo.health,
+      growthStage:  repo.growth_stage,
+      branchCount:  repo.branches.length,
+      totalFiles:   repo.total_files,
+      totalCommits: repo.total_commits,
+    })
+    this.root.addChild(container)
+    this.treeMap.set(repo.repo_name, container)
+    this.allPickableEntities.push(container)
+
+    const featuresByTitle = new Map<string, EngineFeature>()
+    for (const f of repoFeatures) featuresByTitle.set(f.title, f)
+
+    const tree   = new Tree3DSystem(this.appRef.app, { useEmissive: false })
+    const leaves = new LeafSystem(this.appRef.app, this.materials, tree.getRoot())
+    tree.setFeatures(repoFeatures.map(f => ({ color, title: f.title, status: f.status })))
+
+    const entry: ProceduralEntry = {
+      tree, leaves, container, repoName: repo.repo_name, repo,
+      worldX: old.worldX, worldZ: old.worldZ,
+      label: null, done: false, featuresByTitle,
+      cacheKey, rootColor: color,
+      userHidden: old.userHidden,
+    }
+    this.entries[idx] = entry
+
+    const cached = await loadTreeCache(cacheKey)
+    const restored = cached
+      ? tree.loadFromCache(
+          { branchGroups: cached.branchGroups, primaries: cached.primaries },
+          barkColor(), old.worldX, old.worldZ,
+        )
+      : 0
+    if (cached && restored > 0) {
+      if (cached.leafGroup) leaves.loadFromCache(cached.leafGroup)
+      this.handleTreeReady(entry, cached.labelY)
+      entry.done = true
+    } else {
+      // Corrupt/empty cache entry restores to nothing — evict and grow fresh.
+      if (cached) void deleteTreeCache(cacheKey)
+      tree.startTree(barkColor(), old.worldX, 0, old.worldZ)
+    }
+    if (entry.userHidden) setEntryVisible(entry, false)
   }
 
   getTreePosition(repoName: string): pc.Vec3 | null {

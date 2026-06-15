@@ -44,7 +44,7 @@ export function defaultTrunk(): TreeRules {
     sizeWarp: 0.2,
     whorl: Math.PI * 2 / 3,    // 120°
     whorlWarp: 0,
-    colorWarp: 15,              // drives trunk-to-tip brightening via wiggleColor bias
+    colorWarp: 5,               // gentle trunk-to-tip lightening — stays woody, no white tips
     minSize: 5 * WORLD_SCALE,
   }
 }
@@ -58,7 +58,7 @@ export function defaultBranch(): TreeRules {
     sizeWarp: 0.3,
     whorl: 0,
     whorlWarp: 0,
-    colorWarp: 12,              // tips approach white after ~10 generations
+    colorWarp: 4,               // gentle lightening — branch tips stay in the wood family
     minSize: 10 * WORLD_SCALE,
   }
 }
@@ -75,6 +75,23 @@ function wiggle(value: number, warp: number): number {
 export function wiggleColor(color: Color3, level: number): Color3 {
   return color.map(c =>
     Math.max(0, Math.min(255, c + Math.round(level + (Math.random() - 0.5) * level * 2)))
+  ) as Color3
+}
+
+/**
+ * Channel step used to quantize branch colors for material/instancing
+ * grouping. wiggleColor gives almost every branch a unique RGB, which made
+ * the per-color instancing bake degenerate into one group (= one draw call)
+ * PER BRANCH — ~1,600 single-instance draws per tree. Quantizing the color
+ * used for grouping keeps the trunk-to-tip gradient (in ~5-8 visible bands
+ * per channel) while collapsing those groups into a few dozen per tree.
+ */
+export const COLOR_QUANT_STEP = 32
+
+/** Snap each channel to the nearest COLOR_QUANT_STEP multiple (clamped). */
+export function quantizeColor(color: Color3, step = COLOR_QUANT_STEP): Color3 {
+  return color.map(c =>
+    Math.max(0, Math.min(255, Math.round(c / step) * step))
   ) as Color3
 }
 

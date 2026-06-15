@@ -32,6 +32,7 @@ import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import { evalRouteAt, END_TRIM, type PathRoute } from '@shared/world/paths'
 import { PRIMARY_WIDTH, BEZIER_SEGMENTS } from './PathSystem'
+import { Theme, toCss } from '../rendering/Theme'
 
 /** Wear strip sits between ground and path strip. */
 const WEAR_Y = 0.008
@@ -107,7 +108,8 @@ export class GrassDressing {
     mat.diffuseMap = tex
     // Warm brown tint — not fully desaturated dirt, so the wear reads as
     // "packed earth" rather than "dead patch."
-    mat.diffuse = new pc.Color(0.62, 0.52, 0.38)
+    const [wr, wg, wb] = Theme.GROUND.wearTint
+    mat.diffuse = new pc.Color(wr, wg, wb)
     mat.opacityMap = tex
     mat.alphaTest = 0.01
     mat.blendType = pc.BLEND_NORMAL
@@ -133,10 +135,11 @@ export class GrassDressing {
     canvas.height = S
     const ctx = canvas.getContext('2d')!
 
-    ctx.fillStyle = 'rgb(95, 80, 55)'
+    ctx.fillStyle = toCss(Theme.GROUND.wear)
     ctx.fillRect(0, 0, S, S)
 
     // Noise patches for organic variation
+    const [br, bg, bb] = Theme.GROUND.wear
     for (let i = 0; i < 35; i++) {
       const x = Math.random() * S
       const y = Math.random() * S
@@ -144,7 +147,7 @@ export class GrassDressing {
       const dr = Math.floor((Math.random() - 0.5) * 25)
       ctx.beginPath()
       ctx.arc(x, y, r, 0, Math.PI * 2)
-      ctx.fillStyle = `rgba(${95 + dr}, ${80 + dr * 0.8}, ${55 + dr * 0.6}, 0.4)`
+      ctx.fillStyle = `rgba(${br + dr}, ${bg + dr * 0.8}, ${bb + dr * 0.6}, 0.4)`
       ctx.fill()
     }
 
@@ -153,12 +156,13 @@ export class GrassDressing {
     // bleeds through → "soft halo" not "second path."
     const imageData = ctx.getImageData(0, 0, S, S)
     const data = imageData.data
+    const peakAlpha = Theme.PATHS.wearAlpha
     for (let y = 0; y < S; y++) {
       for (let x = 0; x < S; x++) {
         const edgeDist = Math.min(x, S - 1 - x) / (S / 2)
-        // Smoothstep from edge (alpha=0) to center (alpha=0.6).
+        // Smoothstep from edge (alpha=0) to center (alpha=peak).
         const t = Math.min(edgeDist / 0.9, 1)
-        const alpha = t * t * (3 - 2 * t) * 0.6
+        const alpha = t * t * (3 - 2 * t) * peakAlpha
         const idx = (y * S + x) * 4
         data[idx + 3] = Math.floor(alpha * 255)
       }

@@ -45,6 +45,7 @@ import { getActiveScale } from '@shared/world/layoutScale'
 import {
   buildInstancedGlbs, type GlbScatterGroup, type ScatterTransform,
 } from '../utils/GlbInstancing'
+import { Theme } from '../rendering/Theme'
 
 // ─── Outer perimeter belt ────────────────────────────────────────────────
 const OUTER_PINE_COUNT = 32
@@ -84,6 +85,7 @@ const SPECIES_WEIGHTS: Array<{ groupIdx: number; weight: number }> = [
 export class PineTreeSystem {
   private root: pc.Entity | null = null
   private vbs: pc.VertexBuffer[] = []
+  private materials: pc.Material[] = []
 
   async build(
     app: Application,
@@ -115,14 +117,25 @@ export class PineTreeSystem {
       this.spawnClump(groups, angleDeg, exclusionZones)
     }
 
-    const { entities, vbs } = buildInstancedGlbs(
+    // Evergreens get the Theme tint (deeper blue-green so they stop reading
+    // grey); the rare autumn accent keeps its native warm GLB colors.
+    const evergreens = buildInstancedGlbs(
       app.app.graphicsDevice,
       loader,
-      groups,
-      { namePrefix: 'PineInstanced' },
+      groups.slice(0, 2),
+      { namePrefix: 'PineInstanced', tint: Theme.SCATTER.pine },
     )
-    for (const e of entities) this.root.addChild(e)
-    this.vbs = vbs
+    const autumn = buildInstancedGlbs(
+      app.app.graphicsDevice,
+      loader,
+      groups.slice(2),
+      { namePrefix: 'AutumnInstanced' },
+    )
+    for (const e of [...evergreens.entities, ...autumn.entities]) {
+      this.root.addChild(e)
+    }
+    this.vbs = [...evergreens.vbs, ...autumn.vbs]
+    this.materials = [...evergreens.materials, ...autumn.materials]
 
     app.root.addChild(this.root)
     return this.root
@@ -236,6 +249,8 @@ export class PineTreeSystem {
   destroy(): void {
     for (const vb of this.vbs) vb.destroy()
     this.vbs = []
+    for (const mat of this.materials) mat.destroy()
+    this.materials = []
     if (this.root) {
       this.root.destroy()
       this.root = null

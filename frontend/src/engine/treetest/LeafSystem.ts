@@ -34,6 +34,7 @@ import type { Color3 } from './TreeRules'
 import type { WindSystem } from './WindSystem'
 import type { BakedLeafGroup } from './treeCache'
 import { createInstancedEntity, computeInstanceAabb } from './instancing'
+import { Theme } from '../rendering/Theme'
 
 const MAX_TIPS        = 160    // cap terminal tips — max entities = 160 * 10 = 1600
 const LEAVES_PER_TIP  = 10
@@ -341,22 +342,27 @@ export class LeafSystem {
   }
 
   /**
-   * Two-sided emissive leaf material keyed on the selected tree color.
-   * Blends tree color (30%) with natural leaf green (70%) so leaves shift
-   * hue with the selected palette while staying recognizably green.
+   * Two-sided leaf material keyed on the selected tree color.
+   * Blends tree color into the Theme leaf green so leaves shift hue with
+   * the palette while staying recognizably green. A small emissive lift
+   * keeps shadowed canopies readable (Theme.LEAF.emissiveScale — the old
+   * 0.65 made canopies glow neon under ACES).
    * cull/twoSidedLighting are patched once per unique key (not on cache hits).
    */
   private getLeafMaterial(treeColor: Color3): pc.StandardMaterial {
-    const lr = Math.round(treeColor[0] * 0.3 +  60 * 0.7)
-    const lg = Math.round(treeColor[1] * 0.3 + 180 * 0.7)
-    const lb = Math.round(treeColor[2] * 0.3 +  50 * 0.7)
+    const blend = Theme.LEAF.blendTrunk
+    const base = Theme.LEAF.base
+    const lr = Math.round(treeColor[0] * blend + base[0] * (1 - blend))
+    const lg = Math.round(treeColor[1] * blend + base[1] * (1 - blend))
+    const lb = Math.round(treeColor[2] * blend + base[2] * (1 - blend))
     const r = lr / 255, g = lg / 255, b = lb / 255
     const key = `leaf_${lr}_${lg}_${lb}`
 
+    const es = Theme.LEAF.emissiveScale
     const mat = this.materials.getColor(key, r, g, b, {
       metalness: 0,
       gloss: 0.1,
-      emissive: [r * 0.65, g * 0.65, b * 0.65],
+      emissive: [r * es, g * es, b * es],
     })
 
     // Patch two-sided properties once — safe since mat object is reused from cache

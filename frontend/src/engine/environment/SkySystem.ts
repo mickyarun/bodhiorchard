@@ -26,6 +26,7 @@
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import type { MaterialFactory } from '../rendering/MaterialFactory'
+import { Theme, toCss } from '../rendering/Theme'
 
 const SKY_TEX_WIDTH = 256
 const SKY_TEX_HEIGHT = 128
@@ -67,15 +68,16 @@ export class SkySystem {
     canvas.height = SKY_TEX_HEIGHT
     const ctx = canvas.getContext('2d')!
 
-    // Sky gradient (bottom = horizon, top = zenith)
+    // Sky gradient (bottom = horizon, top = zenith) — stops from Theme.SKY
+    // so the dome, fog, IBL, and camera clearColor stay in one family.
     const gradient = ctx.createLinearGradient(0, canvas.height, 0, 0)
-    gradient.addColorStop(0.0, 'rgb(75, 120, 65)')     // below horizon — muted green
-    gradient.addColorStop(0.30, 'rgb(85, 130, 70)')    // ground fade
-    gradient.addColorStop(0.44, 'rgb(195, 215, 240)')  // near horizon — warm haze
-    gradient.addColorStop(0.50, 'rgb(180, 210, 245)')  // horizon line
-    gradient.addColorStop(0.65, 'rgb(135, 185, 240)')  // lower sky
-    gradient.addColorStop(0.80, 'rgb(100, 160, 235)')  // mid sky
-    gradient.addColorStop(1.0, 'rgb(70, 130, 220)')    // zenith — deeper blue
+    gradient.addColorStop(0.0, toCss(Theme.SKY.belowDeep))      // below horizon
+    gradient.addColorStop(0.30, toCss(Theme.SKY.belowHorizon))  // ground fade
+    gradient.addColorStop(0.44, toCss(Theme.SKY.nearHorizon))   // warm haze band
+    gradient.addColorStop(0.50, toCss(Theme.SKY.horizon))       // horizon line
+    gradient.addColorStop(0.65, toCss(Theme.SKY.lowerSky))      // lower sky
+    gradient.addColorStop(0.80, toCss(Theme.SKY.mid))           // mid sky
+    gradient.addColorStop(1.0, toCss(Theme.SKY.zenith))         // zenith
 
     ctx.fillStyle = gradient
     ctx.fillRect(0, 0, canvas.width, canvas.height)
@@ -84,27 +86,27 @@ export class SkySystem {
     const sunX = canvas.width * 0.65
     const sunY = canvas.height * 0.38 // higher in sky for visibility
 
-    // Outer halo glow (warm orange)
+    // Outer halo glow (warm)
     const halo = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 60)
-    halo.addColorStop(0, 'rgba(255, 240, 200, 0.6)')
-    halo.addColorStop(0.4, 'rgba(255, 220, 160, 0.2)')
-    halo.addColorStop(1, 'rgba(255, 220, 160, 0)')
+    halo.addColorStop(0, toCss(Theme.SKY.sunHalo, 0.6))
+    halo.addColorStop(0.4, toCss(Theme.SKY.sunHalo, 0.2))
+    halo.addColorStop(1, toCss(Theme.SKY.sunHalo, 0))
     ctx.fillStyle = halo
     ctx.fillRect(0, 0, canvas.width, canvas.height)
 
     // Inner glow (bright warm)
     const innerGlow = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 20)
-    innerGlow.addColorStop(0, 'rgba(255, 255, 240, 1.0)')
-    innerGlow.addColorStop(0.4, 'rgba(255, 250, 220, 0.9)')
-    innerGlow.addColorStop(0.7, 'rgba(255, 240, 190, 0.4)')
-    innerGlow.addColorStop(1, 'rgba(255, 235, 180, 0)')
+    innerGlow.addColorStop(0, toCss(Theme.SKY.sunCore, 1.0))
+    innerGlow.addColorStop(0.4, toCss(Theme.SKY.sunCore, 0.9))
+    innerGlow.addColorStop(0.7, toCss(Theme.SKY.sunHalo, 0.4))
+    innerGlow.addColorStop(1, toCss(Theme.SKY.sunHalo, 0))
     ctx.fillStyle = innerGlow
     ctx.fillRect(0, 0, canvas.width, canvas.height)
 
     // Bright sun core disc
     ctx.beginPath()
     ctx.arc(sunX, sunY, 6, 0, Math.PI * 2)
-    ctx.fillStyle = 'rgba(255, 255, 250, 1.0)'
+    ctx.fillStyle = toCss(Theme.SKY.sunCore, 1.0)
     ctx.fill()
 
     const texture = new pc.Texture(device, {

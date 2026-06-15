@@ -15,12 +15,21 @@
 /**
  * ForestLake — A natural circular pond with lily pads and fish,
  * surrounded by a dense cluster of pine trees forming a mini-forest.
+ *
+ * Forest trees + lily pads are hardware-instanced (one draw per
+ * mesh/material instead of ~41 entities). Instance transforms are LOCAL
+ * to the lake root — the renderer composes root.world × instance matrix,
+ * so the whole lake still moves as one unit. The animated fish and the
+ * bobbing water surface stay regular entities.
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
 import { AssetLoader } from '../assets/AssetLoader'
 import { FOREST_TREES } from '../assets/AssetManifest'
 import { randRange } from '../utils/MathUtils'
+import {
+  buildInstancedGlbs, type GlbScatterGroup, type ScatterTransform,
+} from '../utils/GlbInstancing'
 
 const LAKE_RADIUS = 7
 const CAUSTIC_SIZE = 128
@@ -42,6 +51,7 @@ export class ForestLake {
   private waterMaterial: pc.StandardMaterial | null = null
   private shoreMaterial: pc.StandardMaterial | null = null
   private bedMaterial: pc.StandardMaterial | null = null
+  private vbs: pc.VertexBuffer[] = []
 
   async build(
     app: Application,
@@ -101,25 +111,34 @@ export class ForestLake {
     this.surface.render!.meshInstances[0].material = this.waterMaterial
     this.root.addChild(this.surface)
 
+    // Lily pads + forest trees accumulate per-asset transform buckets and
+    // batch into instanced draws at the end. Transforms are LOCAL to root.
+    const groupsByAsset = new Map<pc.Asset, GlbScatterGroup>()
+    const bucket = (asset: pc.Asset): ScatterTransform[] => {
+      let group = groupsByAsset.get(asset)
+      if (!group) {
+        group = { asset, transforms: [] }
+        groupsByAsset.set(asset, group)
+      }
+      return group.transforms
+    }
+
     // Lily pads floating on the water
     const lilyAssets = await loader.loadBatch(LILY_GLBS)
     for (let i = 0; i < 6; i++) {
       const asset = lilyAssets[Math.floor(Math.random() * lilyAssets.length)]
-      const lily = loader.instance(asset)
       const angle = Math.random() * Math.PI * 2
       const dist = randRange(1, LAKE_RADIUS * 0.7)
-      lily.setLocalPosition(
-        Math.cos(angle) * dist,
-        0.08,
-        Math.sin(angle) * dist,
-      )
-      lily.setLocalEulerAngles(0, randRange(0, 360), 0)
-      const s = randRange(1.5, 3.0)
-      lily.setLocalScale(s, s, s)
-      this.root.addChild(lily)
+      bucket(asset).push({
+        x: Math.cos(angle) * dist,
+        y: 0.08,
+        z: Math.sin(angle) * dist,
+        yawDeg: randRange(0, 360),
+        scale: randRange(1.5, 3.0),
+      })
     }
 
-    // Fish near the water edge
+    // Fish near the water edge — animated per-frame, stays a live entity
     const fishAsset = await loader.load(FISH_GLB)
     this.fishEntity = loader.instance(fishAsset)
     this.fishEntity.setLocalPosition(LAKE_RADIUS * 0.3, 0.08, 0)
@@ -131,17 +150,22 @@ export class ForestLake {
     for (let i = 0; i < FOREST_TREE_COUNT; i++) {
       const angle = (i / FOREST_TREE_COUNT) * Math.PI * 2 + randRange(-0.4, 0.4)
       const dist = LAKE_RADIUS * 1.5 + randRange(2, FOREST_RADIUS - LAKE_RADIUS)
-      const tx = Math.cos(angle) * dist
-      const tz = Math.sin(angle) * dist
-
       const asset = forestAssets[Math.floor(Math.random() * forestAssets.length)]
-      const tree = loader.instance(asset)
-      tree.setLocalPosition(tx, 0, tz)
-      tree.setLocalEulerAngles(0, randRange(0, 360), 0)
-      const s = randRange(3, 8)
-      tree.setLocalScale(s, s, s)
-      this.root.addChild(tree)
+      bucket(asset).push({
+        x: Math.cos(angle) * dist,
+        y: 0,
+        z: Math.sin(angle) * dist,
+        yawDeg: randRange(0, 360),
+        scale: randRange(3, 8),
+      })
     }
+
+    const { entities, vbs } = buildInstancedGlbs(
+      app.app.graphicsDevice, loader, [...groupsByAsset.values()],
+      { namePrefix: 'LakeInstanced' },
+    )
+    for (const e of entities) this.root.addChild(e)
+    this.vbs = vbs
 
     app.root.addChild(this.root)
     return this.root
@@ -223,6 +247,8 @@ export class ForestLake {
   }
 
   destroy(): void {
+    for (const vb of this.vbs) vb.destroy()
+    this.vbs = []
     this.root?.destroy()
     this.root = null
     this.surface = null

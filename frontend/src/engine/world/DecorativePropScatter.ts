@@ -25,6 +25,10 @@
  *   - stumpOrLog   (10%) — rare accent
  *
  * Scatter region: annulus r=25..50, avoiding zones + path corridors.
+ *
+ * Hardware-instanced: every cluster member is appended as a transform and
+ * the whole system renders as one draw call per (mesh, material) via
+ * buildInstancedGlbs — ~20 clusters (~80 props) for a handful of draws.
  */
 import * as pc from 'playcanvas'
 import type { Application } from '../core/Application'
@@ -40,6 +44,10 @@ import {
   randRange,
   type ExclusionZone,
 } from '../utils/MathUtils'
+import {
+  buildInstancedGlbs, type GlbScatterGroup, type ScatterTransform,
+} from '../utils/GlbInstancing'
+import { Theme } from '../rendering/Theme'
 
 // ─── Scatter region (annulus) ────────────────────────────────────────────
 const INNER_R = 24          // outside orchard plaza rim (plaza = r~7, repo trees end ~r=14)
@@ -67,11 +75,11 @@ const CLUSTER_WEIGHTS: Array<{ type: ClusterType; weight: number }> = [
 const FLOWERS_PER_PATCH_MIN = 4
 const FLOWERS_PER_PATCH_MAX = 6
 const FLOWER_PATCH_SPREAD = 1.4
-/** Default flower GLBs are tiny — invisible at overhead camera. Scale up
- *  so the color accents actually read from distance. Matches the scale
- *  treatment in HubAnchor's bush ring. */
-const FLOWER_SCALE_MIN = 1.8
-const FLOWER_SCALE_MAX = 2.4
+/** Modest scale-up — the old 1.8-2.4 read as plastic toy tulips next to
+ *  the procedural grass carpet; the carpet's own flower tufts now carry
+ *  the color accents, these are just secondary garnish. */
+const FLOWER_SCALE_MIN = 1.1
+const FLOWER_SCALE_MAX = 1.5
 
 // ─── Rock cluster tuning ─────────────────────────────────────────────────
 const ROCKS_PER_CLUSTER_MIN = 2
@@ -92,6 +100,8 @@ const STUMP_LOG_PATHS = [
 
 export class DecorativePropScatter {
   private root: pc.Entity | null = null
+  private vbs: pc.VertexBuffer[] = []
+  private materials: pc.Material[] = []
 
   async build(
     app: Application,
@@ -110,6 +120,18 @@ export class DecorativePropScatter {
       loader.loadBatch(SCATTER_FLOWERS),
     ])
 
+    // One transform bucket per asset; every cluster appends transforms and
+    // a single buildInstancedGlbs call at the end batches everything.
+    const groupsByAsset = new Map<pc.Asset, GlbScatterGroup>()
+    const bucket = (asset: pc.Asset): ScatterTransform[] => {
+      let group = groupsByAsset.get(asset)
+      if (!group) {
+        group = { asset, transforms: [] }
+        groupsByAsset.set(asset, group)
+      }
+      return group.transforms
+    }
+
     // Pre-sample primary paths once so path-clearance checks are O(clusters × samples)
     // rather than O(clusters × bezier-eval-overhead).
     const pathSamples = this.precomputePathSamples(routes)
@@ -118,11 +140,27 @@ export class DecorativePropScatter {
     for (const c of centers) {
       const type = this.pickClusterType()
       switch (type) {
-        case 'flowerPatch': this.spawnFlowerPatch(loader, flowers, c.x, c.z); break
-        case 'rockCluster': this.spawnRockCluster(loader, rocks, c.x, c.z); break
-        case 'stumpOrLog':  this.spawnStumpOrLog(loader, stumps, c.x, c.z); break
+        case 'flowerPatch': this.spawnFlowerPatch(bucket, flowers, c.x, c.z); break
+        case 'rockCluster': this.spawnRockCluster(bucket, rocks, c.x, c.z); break
+        case 'stumpOrLog':  this.spawnStumpOrLog(bucket, stumps, c.x, c.z); break
       }
     }
+
+    // Wood assets (stumps, log stacks) get the warm tint — the raw Kenney
+    // GLBs render plastic-white in the daylit scene. Rocks/flowers untinted.
+    const groups = [...groupsByAsset.values()]
+    const isWood = (g: GlbScatterGroup): boolean => /stump|log/.test(g.asset.name)
+    const wood = buildInstancedGlbs(
+      app.app.graphicsDevice, loader, groups.filter(isWood),
+      { namePrefix: 'DecorWoodInstanced', tint: Theme.SCATTER.wood },
+    )
+    const rest = buildInstancedGlbs(
+      app.app.graphicsDevice, loader, groups.filter((g) => !isWood(g)),
+      { namePrefix: 'DecorPropInstanced' },
+    )
+    for (const e of [...wood.entities, ...rest.entities]) this.root.addChild(e)
+    this.vbs = [...wood.vbs, ...rest.vbs]
+    this.materials = [...wood.materials, ...rest.materials]
 
     return this.root
   }
@@ -198,52 +236,53 @@ export class DecorativePropScatter {
   }
 
   private spawnFlowerPatch(
-    loader: AssetLoader, assets: pc.Asset[], cx: number, cz: number,
+    bucket: (asset: pc.Asset) => ScatterTransform[], assets: pc.Asset[], cx: number, cz: number,
   ): void {
     const n = Math.floor(randRange(FLOWERS_PER_PATCH_MIN, FLOWERS_PER_PATCH_MAX + 1))
     for (let i = 0; i < n; i++) {
       const asset = assets[Math.floor(Math.random() * assets.length)]
-      const flower = loader.instance(asset)
-      const fx = cx + randRange(-FLOWER_PATCH_SPREAD, FLOWER_PATCH_SPREAD)
-      const fz = cz + randRange(-FLOWER_PATCH_SPREAD, FLOWER_PATCH_SPREAD)
-      flower.setPosition(fx, 0, fz)
-      flower.setLocalEulerAngles(0, randRange(0, 360), 0)
-      const s = randRange(FLOWER_SCALE_MIN, FLOWER_SCALE_MAX)
-      flower.setLocalScale(s, s, s)
-      this.root!.addChild(flower)
+      bucket(asset).push({
+        x: cx + randRange(-FLOWER_PATCH_SPREAD, FLOWER_PATCH_SPREAD),
+        y: 0,
+        z: cz + randRange(-FLOWER_PATCH_SPREAD, FLOWER_PATCH_SPREAD),
+        yawDeg: randRange(0, 360),
+        scale: randRange(FLOWER_SCALE_MIN, FLOWER_SCALE_MAX),
+      })
     }
   }
 
   private spawnRockCluster(
-    loader: AssetLoader, assets: pc.Asset[], cx: number, cz: number,
+    bucket: (asset: pc.Asset) => ScatterTransform[], assets: pc.Asset[], cx: number, cz: number,
   ): void {
     const n = Math.floor(randRange(ROCKS_PER_CLUSTER_MIN, ROCKS_PER_CLUSTER_MAX + 1))
     for (let i = 0; i < n; i++) {
       const asset = assets[Math.floor(Math.random() * assets.length)]
-      const rock = loader.instance(asset)
-      const rx = cx + randRange(-ROCK_CLUSTER_SPREAD, ROCK_CLUSTER_SPREAD)
-      const rz = cz + randRange(-ROCK_CLUSTER_SPREAD, ROCK_CLUSTER_SPREAD)
-      rock.setPosition(rx, 0, rz)
-      rock.setLocalEulerAngles(0, randRange(0, 360), 0)
-      const s = randRange(ROCK_SCALE_MIN, ROCK_SCALE_MAX)
-      rock.setLocalScale(s, s, s)
-      this.root!.addChild(rock)
+      bucket(asset).push({
+        x: cx + randRange(-ROCK_CLUSTER_SPREAD, ROCK_CLUSTER_SPREAD),
+        y: 0,
+        z: cz + randRange(-ROCK_CLUSTER_SPREAD, ROCK_CLUSTER_SPREAD),
+        yawDeg: randRange(0, 360),
+        scale: randRange(ROCK_SCALE_MIN, ROCK_SCALE_MAX),
+      })
     }
   }
 
   private spawnStumpOrLog(
-    loader: AssetLoader, assets: pc.Asset[], x: number, z: number,
+    bucket: (asset: pc.Asset) => ScatterTransform[], assets: pc.Asset[], x: number, z: number,
   ): void {
     const asset = assets[Math.floor(Math.random() * assets.length)]
-    const prop = loader.instance(asset)
-    prop.setPosition(x, 0, z)
-    prop.setLocalEulerAngles(0, randRange(0, 360), 0)
-    const s = randRange(STUMP_SCALE_MIN, STUMP_SCALE_MAX)
-    prop.setLocalScale(s, s, s)
-    this.root!.addChild(prop)
+    bucket(asset).push({
+      x, y: 0, z,
+      yawDeg: randRange(0, 360),
+      scale: randRange(STUMP_SCALE_MIN, STUMP_SCALE_MAX),
+    })
   }
 
   destroy(): void {
+    for (const vb of this.vbs) vb.destroy()
+    this.vbs = []
+    for (const mat of this.materials) mat.destroy()
+    this.materials = []
     if (this.root) {
       this.root.destroy()
       this.root = null

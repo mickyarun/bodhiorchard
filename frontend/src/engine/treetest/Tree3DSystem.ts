@@ -36,7 +36,10 @@
 import * as pc from 'playcanvas'
 import { Vec3 } from './Vec3'
 import { TreeBranch } from './TreeBranch'
-import { defaultTrunk, defaultBranch, type TreeRules, type Color3, WORLD_SCALE } from './TreeRules'
+import {
+  defaultTrunk, defaultBranch, quantizeColor,
+  type TreeRules, type Color3, WORLD_SCALE,
+} from './TreeRules'
 import type { WindSystem } from './WindSystem'
 import type { BakedBranchGroup, BakedFeaturePrimary } from './treeCache'
 import { createInstancedEntity, computeInstanceAabb } from './instancing'
@@ -483,8 +486,12 @@ export class Tree3DSystem {
     entity.setRotation(quat)
   }
 
-  /** Direct StandardMaterial — bypasses MaterialFactory to avoid ref-count issues. */
-  private getMaterial(color: Color3): pc.StandardMaterial {
+  /** Direct StandardMaterial — bypasses MaterialFactory to avoid ref-count issues.
+   *  Colors are quantized (COLOR_QUANT_STEP bands) so the wiggleColor drift
+   *  doesn't mint a near-unique material per branch — the same quantization
+   *  keys the instancing bake, so materials and instance groups stay 1:1. */
+  private getMaterial(rawColor: Color3): pc.StandardMaterial {
+    const color = quantizeColor(rawColor)
     const key = `${color[0]}_${color[1]}_${color[2]}`
     let mat = this.matCache.get(key)
     if (!mat) {
@@ -559,25 +566,34 @@ export class Tree3DSystem {
    * + bakeInstanced(): per-color instanced MeshInstances, primary pick-proxy
    * entities at midpoints, no live growth, ready for wind + picking.
    */
+  /**
+   * Restore a baked tree from cache. Returns the number of instanced branch
+   * entities actually attached — 0 means the cached geometry produced nothing
+   * renderable (a corrupt/empty entry), so the caller should grow fresh
+   * instead of leaving an invisible tree.
+   */
   loadFromCache(
     exported: BakedTreeExport,
     rootColor: Color3,
     worldX: number,
     worldZ: number,
-  ): void {
+  ): number {
     this.resetGrowthState(rootColor, worldX, 0, worldZ)
     // Cache hit means the tree is already fully grown — enable wind immediately
     // instead of waiting for buildWindEntries() after a growth-complete event.
     this.windReady = true
 
     // Recreate per-color instanced mesh instances + their materials.
+    let attached = 0
     for (const group of exported.branchGroups) {
       // Re-seed the material cache so later getMaterial() lookups hit (e.g. if
       // a later re-grow ever goes through the per-entity path again).
       if (!this.matCache.has(group.colorKey)) {
         this.getMaterial(group.color)
       }
-      this.attachInstancedBranchEntity(group.colorKey, group.matrices, group.count)
+      if (this.attachInstancedBranchEntity(group.colorKey, group.matrices, group.count)) {
+        attached++
+      }
     }
 
     // Recreate primary-feature pick proxies. Render-less entities — picked by
@@ -589,6 +605,8 @@ export class Tree3DSystem {
       this.treeRoot.addChild(entity)
       this.featureEntityMap.set(entity, { title: p.title, status: p.status })
     }
+
+    return attached
   }
 
   // Shared full reset used by startTree() (before growth) and loadFromCache()
@@ -627,9 +645,11 @@ export class Tree3DSystem {
     this.growSpeed     = GROW_SPEED
   }
 
-  private attachInstancedBranchEntity(colorKey: string, matrices: Float32Array, count: number): void {
+  private attachInstancedBranchEntity(
+    colorKey: string, matrices: Float32Array, count: number,
+  ): boolean {
     const material = this.matCache.get(colorKey)
-    if (!material || count === 0) return
+    if (!material || count === 0) return false
     // Margin covers a unit cylinder's worst-case extent under the instance's
     // rotation/scale (branches up to ~1 unit long) plus slack for wind sway.
     const aabb = computeInstanceAabb(matrices, count, BRANCH_AABB_MARGIN)
@@ -645,6 +665,7 @@ export class Tree3DSystem {
     this.treeRoot.addChild(entity)
     this.bakedEntities.push(entity)
     this.bakedVertexBuffers.push(vb)
+    return true
   }
 
   // Converts each surviving primary-feature branch entity into a render-less
@@ -683,12 +704,16 @@ export class Tree3DSystem {
   ): void {
     if (depth > COLLECT_MAX_DEPTH) return
     if (branch.growthSize > 0) {
-      const key = `${branch.color[0]}_${branch.color[1]}_${branch.color[2]}`
+      // Quantized key — MUST match getMaterial's key derivation, otherwise
+      // attachInstancedBranchEntity misses the matCache lookup and the
+      // group is silently dropped.
+      const q = quantizeColor(branch.color)
+      const key = `${q[0]}_${q[1]}_${q[2]}`
       const entry = out.get(key)
       if (entry) {
         entry.count++
       } else {
-        out.set(key, { color: [...branch.color] as Color3, count: 1 })
+        out.set(key, { color: q, count: 1 })
       }
     }
     for (const baby of branch.babies) this.countBranchesByColor(baby, out, depth + 1)
@@ -701,7 +726,8 @@ export class Tree3DSystem {
   ): void {
     if (depth > COLLECT_MAX_DEPTH) return
     if (branch.growthSize > 0) {
-      const key = `${branch.color[0]}_${branch.color[1]}_${branch.color[2]}`
+      const q = quantizeColor(branch.color)
+      const key = `${q[0]}_${q[1]}_${q[2]}`
       const buf = buffers.get(key)
       if (buf) {
         this.writeBranchMatrixAt(branch, buf.matrices, buf.offset)

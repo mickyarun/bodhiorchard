@@ -63,6 +63,12 @@ export class MountainBackdrop {
       const sy = s * randRange(0.8, 1.5)
       instance.setLocalScale(s, sy, s)
 
+      // A 60×-scaled mountain inside the shadow frustum casts a giant
+      // shadow blob across half the playable world. Distant scenery
+      // should never contribute to the shadow map.
+      const renders = instance.findComponents('render') as pc.RenderComponent[]
+      for (const rc of renders) rc.castShadows = false
+
       this.root.addChild(instance)
     }
 

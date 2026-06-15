@@ -44,6 +44,7 @@ import type { InteractionPoint } from "../characters/InteractionPoint"
 import type { ExclusionZone } from "../utils/MathUtils"
 import { WaterSurface } from "../effects/WaterSurface"
 import { BUILDING, DECOR } from "../assets/AssetManifest"
+import { Theme } from "../rendering/Theme"
 
 export interface PoolResortResult {
   entity: pc.Entity
@@ -61,8 +62,7 @@ const DECK_TOP_Y = 0.18         // top of deck, just above water surface (0.15)
 const COPING_Y = 0.22           // thin white tile ring above the deck edge
 
 // ─── Material colors (RGB, 0-1 linear space) ────────────────────────────
-const SANDSTONE: [number, number, number] = [0.92, 0.84, 0.66]
-const COPING_WHITE: [number, number, number] = [0.96, 0.94, 0.88]
+const COPING_WHITE: [number, number, number] = [...Theme.POOL.coping]
 const BOARD_WHITE: [number, number, number] = [0.93, 0.93, 0.90]
 const METAL_SILVER: [number, number, number] = [0.82, 0.85, 0.88]
 const UMBRELLA_COLORS: ReadonlyArray<[number, number, number]> = [
@@ -118,16 +118,25 @@ const SIDE_TABLE_SLOTS: ReadonlyArray<{ x: number; z: number }> = [
   { x:  0.0, z: 4.2 },   // between north pair
 ]
 
-/** Flower pots flanking the entrance path (+Z side of the deck). */
+/** Flower pots flanking the entrance path (+Z side) and the deck corners —
+ *  the corners were bare, which read as an empty concrete slab. */
 const POTTED_PLANT_SLOTS: ReadonlyArray<{ x: number; z: number }> = [
   { x: -1.6, z: 7.2 },
   { x:  1.6, z: 7.2 },
+  { x: -6.9, z: 6.9 },
+  { x:  6.9, z: 6.9 },
+  { x: -6.9, z: -6.9 },
+  { x:  6.9, z: -6.9 },
 ]
 
-/** Decor bushes on grass behind the diving board (-Z, outside deck). */
+/** Decor bushes on grass around the resort perimeter (outside deck). */
 const BUSH_SLOTS: ReadonlyArray<{ x: number; z: number }> = [
   { x: -5.5, z: -7.8 },
   { x:  5.5, z: -7.8 },
+  { x: -8.2, z:  0.0 },
+  { x:  8.2, z:  0.0 },
+  { x: -8.0, z:  4.5 },
+  { x:  8.0, z: -4.5 },
 ]
 
 export class PoolResortBuilder {
@@ -205,20 +214,26 @@ export class PoolResortBuilder {
   // Deck & coping
   // ───────────────────────────────────────────────────────────────────────
 
-  /** Four sandstone slabs forming a picture frame around the pool. The
-   *  middle (6×6) stays open so the water surface is the only thing the
-   *  camera sees inside the pool footprint. */
+  /** Teak plank deck framing the pool — boards run north-south in two
+   *  alternating wood tones, replacing the flat sandstone slabs that read
+   *  as a bare concrete pad. The middle (6×6) stays open so the water
+   *  surface is the only thing the camera sees inside the pool footprint. */
   private buildDeck(parent: pc.Entity): void {
     if (!this.materials) return
-    const mat = this.materials.getColor('pool_deck', ...SANDSTONE, {
+    const matA = this.materials.getColor('pool_plank_a', ...Theme.POOL.plankA, {
       metalness: 0,
-      gloss: 0.15,
+      gloss: 0.22,
+    })
+    const matB = this.materials.getColor('pool_plank_b', ...Theme.POOL.plankB, {
+      metalness: 0,
+      gloss: 0.18,
     })
 
     const hp = POOL_WIDTH / 2         // pool half-width = 3
     const hd = POOL_DEPTH / 2
     const outer = DECK_OUTER          // 7.5
     const thick = DECK_TOP_Y           // 0.18 (box centered at thick/2)
+    const plankW = 0.58
 
     const slabs: Array<{ cx: number; cz: number; sx: number; sz: number }> = [
       // North slab (beyond +z pool edge) — spans full outer width
@@ -232,12 +247,18 @@ export class PoolResortBuilder {
     ]
 
     for (const s of slabs) {
-      const slab = new pc.Entity('DeckSlab')
-      slab.addComponent('render', { type: 'box' })
-      slab.setLocalScale(s.sx, thick, s.sz)
-      slab.setLocalPosition(s.cx, thick / 2, s.cz)
-      slab.render!.meshInstances[0].material = mat
-      parent.addChild(slab)
+      const startX = s.cx - s.sx / 2
+      const boards = Math.ceil(s.sx / plankW)
+      for (let b = 0; b < boards; b++) {
+        const w = Math.min(plankW, s.sx - b * plankW)
+        if (w <= 0.01) break
+        const plank = new pc.Entity('DeckPlank')
+        plank.addComponent('render', { type: 'box' })
+        plank.setLocalScale(w, thick, s.sz)
+        plank.setLocalPosition(startX + b * plankW + w / 2, thick / 2, s.cz)
+        plank.render!.meshInstances[0].material = b % 2 === 0 ? matA : matB
+        parent.addChild(plank)
+      }
     }
   }
 

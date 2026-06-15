@@ -156,6 +156,14 @@ const router = createRouter({
           component: () => import('@/views/profile/ProfileMcpToken.vue'),
         },
         {
+          // Self-service per-user notification opt-outs. No permission gate —
+          // any authenticated member manages their own Slack DM preferences
+          // via /v1/me/notification-preferences.
+          path: 'profile/notifications',
+          name: 'profile-notifications',
+          component: () => import('@/views/profile/NotificationSettings.vue'),
+        },
+        {
           path: 'skills',
           name: 'skills',
           component: () => import('@/views/skills/SkillProfilesView.vue'),
@@ -224,6 +232,18 @@ const router = createRouter({
           name: 'settings-jira-import',
           meta: { permission: 'integrations:configure' },
           component: () => import('@/views/settings/SettingsJiraImport.vue'),
+        },
+        {
+          path: 'settings/quiz-game',
+          name: 'settings-quiz-game',
+          meta: { permission: 'quiz:configure' },
+          component: () => import('@/views/settings/SettingsQuizGame.vue'),
+        },
+        {
+          path: 'settings/quiz-review',
+          name: 'settings-quiz-review',
+          meta: { permission: 'quiz:configure' },
+          component: () => import('@/views/quiz/QuizReviewView.vue'),
         },
         {
           path: 'settings/code',

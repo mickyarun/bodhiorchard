@@ -54,7 +54,18 @@ from app.core.security import hash_password
 from app.mcp.auth import compute_token_prefix
 from app.models.user import User
 from app.models.user_mcp_token import DEFAULT_TOKEN_NAME, UserMCPToken
+from app.repositories.user import UserRepository
 from app.repositories.user_mcp_token import UserMCPTokenRepository
+from app.schemas.notification_prefs import (
+    NotificationPreferenceItem,
+    NotificationPreferencesRead,
+    NotificationPreferencesUpdate,
+)
+from app.services.notifications import (
+    NOTIFICATION_CATEGORIES,
+    is_category_enabled,
+    resolve_category,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -267,3 +278,67 @@ async def revoke_my_mcp_token(
         user=current_user.email,
         token_id=str(token_id),
     )
+
+
+def _prefs_to_items(prefs: dict[str, bool]) -> list[NotificationPreferenceItem]:
+    """Project the static category registry through a member's opt-out map.
+
+    The registry is the source of order and copy; ``prefs`` only supplies the
+    ``enabled`` flag, resolved with the same opt-out rule the SQL filter uses.
+    """
+    return [
+        NotificationPreferenceItem(
+            key=definition.category.value,
+            label=definition.label,
+            description=definition.description,
+            group=definition.group,
+            enabled=is_category_enabled(prefs, definition.category),
+        )
+        for definition in NOTIFICATION_CATEGORIES
+    ]
+
+
+@router.get("/notification-preferences", response_model=NotificationPreferencesRead)
+async def get_my_notification_preferences(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationPreferencesRead:
+    """List every notification category with the caller's current choice.
+
+    Self-service: gated only by authentication. Categories default to enabled,
+    so a member who never touched settings sees everything on.
+    """
+    prefs = await UserRepository(db).get_notification_prefs(current_user.id)
+    return NotificationPreferencesRead(items=_prefs_to_items(prefs))
+
+
+@router.patch("/notification-preferences", response_model=NotificationPreferencesRead)
+async def update_my_notification_preferences(
+    body: NotificationPreferencesUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationPreferencesRead:
+    """Mute or unmute notification categories for the caller.
+
+    Accepts a partial map — only changed toggles need be sent — and merges it
+    onto the stored map. Unknown category keys are rejected so a stale client
+    can't persist junk that no sender reads.
+    """
+    unknown = sorted(k for k in body.preferences if resolve_category(k) is None)
+    if unknown:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown notification categories: {', '.join(unknown)}",
+        )
+
+    repo = UserRepository(db)
+    merged = dict(await repo.get_notification_prefs(current_user.id))
+    merged.update(body.preferences)
+    await repo.set_notification_prefs(current_user.id, merged)
+    logger.info(
+        "notification_prefs_updated",
+        org_id=str(current_user.org_id),
+        user=current_user.email,
+        changed=sorted(body.preferences.keys()),
+    )
+    return NotificationPreferencesRead(items=_prefs_to_items(merged))

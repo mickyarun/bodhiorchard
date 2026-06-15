@@ -1079,3 +1079,14 @@ export interface RewardEvent {
   multiplier: number
   created_at: string
 }
+
+// One togglable Slack notification category, resolved for the current member.
+// Mirrors the backend NotificationPreferenceItem schema; the registry there is
+// the single source of order, copy, and which categories exist.
+export interface NotificationPreferenceItem {
+  key: string
+  label: string
+  description: string
+  group: string
+  enabled: boolean
+}
