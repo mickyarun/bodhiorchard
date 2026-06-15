@@ -51,9 +51,6 @@ GAMES: dict[str, GameSpec] = {
     "firefly": GameSpec(name="Firefly Follow", max_score=50),
 }
 
-# Absolute ceiling regardless of per-game cap — guards against tampering.
-MAX_SCORE = 1000
-
 
 async def submit_score(
     db: AsyncSession,
@@ -63,12 +60,23 @@ async def submit_score(
     game: str,
     score: int,
 ) -> dict[str, object]:
-    """Validate then record the play; returns best/streak state (no XP)."""
+    """Validate then record the play; returns best/streak state (no XP).
+
+    The score is client-supplied, so it is bounded to the game's own
+    ``max_score`` here — not a loose global ceiling. This stops a tampered
+    request (e.g. a hand-crafted ``fetch`` from the browser console) from
+    posting an impossible score and stuffing the leaderboard. It does NOT make
+    scoring server-authoritative — a determined client can still submit up to
+    the legitimate maximum — but it caps the blast radius to an achievable
+    score for a no-stakes engagement game.
+    """
     spec = GAMES.get(game)
     if spec is None:
         raise MinigameValidationError(f"unknown game: {game}")
-    if not 0 <= score <= MAX_SCORE:
-        raise MinigameValidationError(f"score out of range 0..{MAX_SCORE}: {score}")
+    if not 0 <= score <= spec.max_score:
+        raise MinigameValidationError(
+            f"score out of range 0..{spec.max_score} for {game!r}: {score}"
+        )
 
     repo = MinigameRepository(db, org_id=org_id)
     today = datetime.now(UTC).date()
