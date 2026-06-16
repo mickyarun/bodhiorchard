@@ -13,23 +13,21 @@
 // limitations under the License.
 
 import {
-  GAME_SECONDS,
+  GAME_MS,
   type Mote,
-  SPAWN_EVERY_S,
   isMoteAlive,
+  spawnIntervalMs,
   spawnMote,
 } from "../../../../shared/minigames/pollen"
 import type { MinigameEngine, MinigameHost } from "./MinigameEngine"
 
-const SPAWN_EVERY_MS = SPAWN_EVERY_S * 1000
-const DURATION_MS = GAME_SECONDS * 1000
-
 /**
  * Server-authoritative Pollen Pop. The server owns the mote field: it spawns
- * motes (its RNG) on a fixed tick and streams them; the client renders but
- * never invents motes. A pop is validated against the server's live set at the
- * server's clock, so a mote that never existed or already drifted off-screen
- * can't be popped. Score is the count of valid pops.
+ * motes (its RNG) and streams them; the client renders but never invents motes.
+ * A pop is validated against the server's live set at the server's clock, so a
+ * mote that never existed or already drifted off-screen can't be popped. Score
+ * is the count of valid pops. Spawn cadence and rise speed ramp up over the
+ * round (see shared/minigames/pollen), so the late game is faster and busier.
  */
 export class PollenEngine implements MinigameEngine {
   private readonly motes = new Map<number, Mote>()
@@ -46,17 +44,21 @@ export class PollenEngine implements MinigameEngine {
   start(host: MinigameHost): void {
     this.startMs = this.now()
     this.lastSpawnMs = this.startMs
-    host.notify("pollen_start", { durationMs: DURATION_MS })
+    host.notify("pollen_start", { durationMs: GAME_MS })
   }
 
   tick(host: MinigameHost, nowMs: number): void {
-    if (nowMs - this.startMs >= DURATION_MS) {
+    if (nowMs - this.startMs >= GAME_MS) {
       host.finish()
       return
     }
-    while (nowMs - this.lastSpawnMs >= SPAWN_EVERY_MS) {
-      this.lastSpawnMs += SPAWN_EVERY_MS
-      const mote = spawnMote(this.nextId++, nowMs, this.rng)
+    // Spawn cadence shortens as the round goes on; each mote's rise speed is
+    // ramped by the elapsed time it spawns at.
+    for (;;) {
+      const interval = spawnIntervalMs(this.lastSpawnMs - this.startMs)
+      if (nowMs - this.lastSpawnMs < interval) break
+      this.lastSpawnMs += interval
+      const mote = spawnMote(this.nextId++, nowMs, this.rng, nowMs - this.startMs)
       this.motes.set(mote.id, mote)
       host.notify("pollen_spawn", mote)
     }
