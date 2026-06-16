@@ -13,128 +13,116 @@
 // limitations under the License.
 
 /**
- * RaceCameraOverhead — fixed-position spectator camera.
+ * RaceCameraOverhead — dynamic pack-framing spectator camera.
  *
- * Unlike `RaceCamera` (which trails the leader), this camera never moves
- * after activation: spectators should see all racers at once so they can
- * follow the pack, not just the leader. Positioned high above the track
- * midpoint and angled steeply down, with its FOV tuned so a full 200 m
- * 10-lane track fits inside a 16:9 viewport with generous margin.
+ * A static bird's-eye sized to the whole track left the racers as tiny dots.
+ * Instead this camera frames the PACK: each frame it centres on the racers'
+ * bounding box and picks a height that fits them (zooming in when bunched,
+ * out as they spread), so the runners stay as large as the action allows. The
+ * centre + zoom are exponentially smoothed for a gentle spectator pan, and a
+ * fixed oblique pull-back keeps depth readable (never pure straight-down, which
+ * also avoids the degenerate lookAt up-vector case).
  *
- * No per-frame work — `activate()` sets the transform once and the PlayCanvas
- * update loop never touches this camera again. `destroy()` exists only for
- * symmetry with `RaceCamera` so the scene's teardown code is uniform.
+ * Per-frame allocation hygiene: module-level scratch Vec3s; no `new` in tick.
  */
 import * as pc from 'playcanvas'
-import { loopBounds } from '@shared/race/LoopPath'
-import { LOOP_LENGTH_M } from '@shared/race/RaceConstants'
-import type { TrackShape } from '@shared/race/types'
 
-/**
- * Pitch (degrees) — straight down is -90, horizon is 0. At -80 the ground
- * plane reads as a gentle oblique (not pure top-down) so depth still reads.
- */
-const CAM_PITCH_DEG = -80
-
-/**
- * Height above the ground plane in metres. Tuned so a 200 m × 15 m track
- * fits inside a 16:9 viewport with the FOV below — leave margin for HUD.
- */
-const CAM_HEIGHT_M = 70
-
-/**
- * Camera offset from the midpoint along -X. A small pull-back stops the
- * near edge of the track from clipping the camera and gives spectators a
- * slight "looking-down-the-straight" sense of direction.
- */
-const CAM_BEHIND_MIDPOINT_M = 12
-
-/**
- * Vertical FOV in degrees. 40° + 70 m height frames a 200 m track without
- * the racers dropping below 6px at full-HD; tighter than this and 10-lane
- * 200 m races start to crop on narrow viewports.
- */
+/** Vertical FOV in degrees. */
 const CAM_FOV_DEG = 40
-
-/** Ground Y the camera is pointed at. Zero puts the focus on the track surface. */
+/** Ground Y the camera aims at — the track surface. */
 const CAM_TARGET_Y_M = 0
+/** Metres of slack kept around the pack so racers never sit at the frame edge. */
+const FRAME_MARGIN_M = 12
+/** Closest the camera comes (m) — stops it diving in when the pack is bunched (the start grid). */
+const MIN_HEIGHT_M = 30
+/** Farthest the camera pulls back (m) — caps zoom-out when the field is strung out. */
+const MAX_HEIGHT_M = 95
+/** Oblique pull-back as a fraction of height (≈ -76° pitch) for a depth cue. */
+const OBLIQUE_RATIO = 0.25
+/** Exponential smoothing rate (per second). Gentle, so spectating reads as a calm pan. */
+const FOLLOW_RATE = 2.5
 
-/**
- * Extra metres of grass kept visible beyond the circuit's outer edge so
- * the ring never kisses the viewport border.
- */
-const CIRCUIT_FIT_MARGIN_M = 8
+const _pos = new pc.Vec3()
+const _target = new pc.Vec3()
+
+/** The pack's framing: centre on the ground plane + the larger XZ spread. */
+export interface PackFraming {
+  x: number
+  z: number
+  spreadM: number
+}
 
 export interface RaceCameraOverheadOptions {
-  /** Race distance in metres — straight midpoint X, or circuit circumference. */
-  distanceM: number
-  /** Road width in metres — sizes the circuit fit; unused for straight. */
-  trackWidthM: number
-  /** Track layout — picks the straight-midpoint or circuit-centre framing. */
-  trackShape: TrackShape
+  /** Returns the current pack framing, or null when there are no racers to frame. */
+  framingProvider: () => PackFraming | null
+  /** Fallback centre (course midpoint) used before any framing is available. */
+  fallbackCenter: { x: number; z: number }
 }
 
 export class RaceCameraOverhead {
   private camera: pc.Entity
+  private app: pc.AppBase
   private opts: RaceCameraOverheadOptions
+  private updateHandler: ((dt: number) => void) | null = null
+  private readonly halfFovRad = (CAM_FOV_DEG / 2) * (Math.PI / 180)
+  // Smoothed framing state.
+  private curX = 0
+  private curZ = 0
+  private curHeight = MAX_HEIGHT_M
 
-  constructor(camera: pc.Entity, opts: RaceCameraOverheadOptions) {
+  constructor(camera: pc.Entity, app: pc.AppBase, opts: RaceCameraOverheadOptions) {
     this.camera = camera
+    this.app = app
     this.opts = opts
   }
 
-  /**
-   * Place the camera at its fixed viewpoint. Called once by `RaceScene`
-   * when the spectator path is taken. No update subscription — the
-   * transform never changes after this call.
-   */
   activate(): void {
     const cam = this.camera.camera
     if (cam) cam.fov = CAM_FOV_DEG
 
-    if (this.opts.trackShape === 'circuit') {
-      this.activateCircuit()
-      return
-    }
+    const target = this.resolveTarget()
+    this.curX = target.x
+    this.curZ = target.z
+    this.curHeight = target.height
+    this.applyTransform()
 
-    const midpointX = this.opts.distanceM / 2
-    this.camera.setPosition(midpointX - CAM_BEHIND_MIDPOINT_M, CAM_HEIGHT_M, 0)
-    this.camera.setLocalEulerAngles(CAM_PITCH_DEG, 0, 0)
-    // `setLocalEulerAngles` alone gets the pitch right but we want the camera
-    // facing toward +X (finish direction). Re-orient by looking at a point
-    // a bit past the midpoint at ground level.
-    this.camera.lookAt(midpointX, CAM_TARGET_Y_M, 0)
-  }
-
-  /**
-   * Circuit framing: hover over the centre of the loop's bounding box —
-   * the organic loop isn't symmetric, so the centre comes from LoopPath's
-   * bounds rather than a circle radius — at a height where the larger
-   * box half-extent (plus road width and a grass margin) fits the
-   * vertical FOV: height = halfExtent / tan(fov / 2). Sizing to the
-   * larger axis keeps the whole course on screen even in a square
-   * viewport. The same small -X pull-back as the straight path keeps the
-   * view obliquely angled (and keeps lookAt away from the degenerate
-   * straight-down up-vector case).
-   */
-  private activateCircuit(): void {
-    // Frame the fixed physical loop (LOOP_LENGTH_M), not the race distance —
-    // a 1-lap and 2-lap race share the same-sized course.
-    const bounds = loopBounds(LOOP_LENGTH_M)
-    const centerX = (bounds.minX + bounds.maxX) / 2
-    const centerZ = (bounds.minZ + bounds.maxZ) / 2
-    const halfSpanM = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) / 2
-    const halfExtentM = halfSpanM + this.opts.trackWidthM / 2 + CIRCUIT_FIT_MARGIN_M
-    const halfFovRad = (CAM_FOV_DEG / 2) * (Math.PI / 180)
-    const heightM = halfExtentM / Math.tan(halfFovRad)
-
-    this.camera.setPosition(centerX - CAM_BEHIND_MIDPOINT_M, heightM, centerZ)
-    this.camera.lookAt(centerX, CAM_TARGET_Y_M, centerZ)
+    this.updateHandler = (dt) => this.tick(dt)
+    this.app.on('update', this.updateHandler)
   }
 
   destroy(): void {
-    // Intentional no-op — no listeners, no allocations. Present for API
-    // symmetry with `RaceCamera` so `RaceScene.destroy()` can call both
-    // without branching on camera type.
+    if (this.updateHandler) {
+      this.app.off('update', this.updateHandler)
+      this.updateHandler = null
+    }
+  }
+
+  private tick(dt: number): void {
+    const target = this.resolveTarget()
+    const alpha = 1 - Math.exp(-FOLLOW_RATE * dt)
+    this.curX += (target.x - this.curX) * alpha
+    this.curZ += (target.z - this.curZ) * alpha
+    this.curHeight += (target.height - this.curHeight) * alpha
+    this.applyTransform()
+  }
+
+  /** Centre + height that frames the current pack (clamped), or the fallback. */
+  private resolveTarget(): { x: number; z: number; height: number } {
+    const framing = this.opts.framingProvider()
+    if (framing === null) {
+      return { x: this.opts.fallbackCenter.x, z: this.opts.fallbackCenter.z, height: MAX_HEIGHT_M }
+    }
+    // Height that fits the half-spread (plus margin) in the vertical FOV; the
+    // wider horizontal FOV then comfortably covers the other axis.
+    const desired = (framing.spreadM / 2 + FRAME_MARGIN_M) / Math.tan(this.halfFovRad)
+    const height = Math.min(MAX_HEIGHT_M, Math.max(MIN_HEIGHT_M, desired))
+    return { x: framing.x, z: framing.z, height }
+  }
+
+  private applyTransform(): void {
+    _pos.set(this.curX - this.curHeight * OBLIQUE_RATIO, this.curHeight, this.curZ)
+    _target.set(this.curX, CAM_TARGET_Y_M, this.curZ)
+    this.camera.setPosition(_pos)
+    this.camera.lookAt(_target)
   }
 }

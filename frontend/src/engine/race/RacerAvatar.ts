@@ -271,6 +271,17 @@ export class RacerAvatar {
     return this.displayX
   }
 
+  /**
+   * The avatar's current ground position (world XZ), projected at its real
+   * lane offset — the same point `applyPose` renders it at, minus the jump
+   * arc. The spectator camera frames the pack from these, so the lateral
+   * spread across lanes (and a circuit's lane curvature) is honoured.
+   */
+  getGroundXZ(): { x: number; z: number } {
+    const pose = this.projection.pose(this.displayX, this.laneOffsetM)
+    return { x: pose.x, z: pose.z }
+  }
+
   destroy(): void {
     if (!this.wrapper) return
 

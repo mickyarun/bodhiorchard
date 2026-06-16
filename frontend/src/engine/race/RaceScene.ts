@@ -43,12 +43,14 @@ import {
   MAX_RACERS,
   ALLOWED_DISTANCES_M,
   ALLOWED_TRACK_SHAPES,
+  LOOP_LENGTH_M,
 } from '@shared/race/RaceConstants'
+import { loopBounds } from '@shared/race/LoopPath'
 import type { TrackShape } from '@shared/race/types'
 import { buildTrackAssembly, type TrackAssembly } from './RaceSceneTrack'
 import { RacerAvatar } from './RacerAvatar'
 import { RaceCamera } from './RaceCamera'
-import { RaceCameraOverhead } from './RaceCameraOverhead'
+import { RaceCameraOverhead, type PackFraming } from './RaceCameraOverhead'
 import type { RacerKinematics } from './types'
 
 export type RaceCameraMode = 'participant' | 'spectator'
@@ -161,6 +163,40 @@ export class RaceScene {
     return 0
   }
 
+  /**
+   * Bounding box of every racer's current world position, as a centre + the
+   * larger XZ spread — what the spectator camera frames each frame. Null before
+   * any avatars exist (the camera falls back to the course centre).
+   */
+  private computePackFraming(): PackFraming | null {
+    if (this.avatars.length === 0) return null
+    let minX = Infinity
+    let maxX = -Infinity
+    let minZ = Infinity
+    let maxZ = -Infinity
+    for (const a of this.avatars) {
+      const p = a.getGroundXZ()
+      if (p.x < minX) minX = p.x
+      if (p.x > maxX) maxX = p.x
+      if (p.z < minZ) minZ = p.z
+      if (p.z > maxZ) maxZ = p.z
+    }
+    return {
+      x: (minX + maxX) / 2,
+      z: (minZ + maxZ) / 2,
+      spreadM: Math.max(maxX - minX, maxZ - minZ),
+    }
+  }
+
+  /** Centre of the course — the spectator camera's pre-race fallback target. */
+  private courseCenter(trackShape: TrackShape, distanceM: number): { x: number; z: number } {
+    if (trackShape === 'circuit') {
+      const b = loopBounds(LOOP_LENGTH_M)
+      return { x: (b.minX + b.maxX) / 2, z: (b.minZ + b.maxZ) / 2 }
+    }
+    return { x: distanceM / 2, z: 0 }
+  }
+
   destroy(): void {
     // Reverse-order teardown mirrors the build order so dependents disappear
     // before their dependencies.
@@ -225,10 +261,9 @@ export class RaceScene {
     trackShape: TrackShape,
   ): void {
     if (opts.cameraMode === 'spectator') {
-      this.overheadCamera = new RaceCameraOverhead(application.camera, {
-        distanceM: opts.distanceM,
-        trackWidthM: this.assembly?.trackWidthM ?? 0,
-        trackShape,
+      this.overheadCamera = new RaceCameraOverhead(application.camera, application.app, {
+        framingProvider: () => this.computePackFraming(),
+        fallbackCenter: this.courseCenter(trackShape, opts.distanceM),
       })
       this.overheadCamera.activate()
       return
