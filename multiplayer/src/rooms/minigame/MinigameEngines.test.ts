@@ -52,29 +52,54 @@ const last = (sent: SentMessage[], type: string): SentMessage | undefined =>
 describe("FireflyEngine", () => {
   it("computes the score server-side from validated taps", () => {
     // rng → 0 always: first pad 'emerald', then no-repeat pool picks index 0.
-    const engine = new FireflyEngine(() => 0)
+    let clock = 0
+    const engine = new FireflyEngine(() => 0, () => clock)
     const { host, sent, state, finished } = makeHost()
     engine.start(host)
 
-    const seq1 = last(sent, "firefly_sequence")?.message as { sequence: string[]; level: number }
+    const seq1 = last(sent, "firefly_sequence")?.message as {
+      sequence: string[]
+      level: number
+      flashMs: number
+    }
     expect(seq1.level).toBe(1)
     expect(seq1.sequence).toEqual(["emerald"])
 
-    // Clear level 1 → score 1, level 2 streams.
+    // Clear level 1 → score 1, level 2 streams. Wait out the sequence display
+    // first, or the tap is dropped as too-fast-to-have-watched-it.
+    clock += seq1.sequence.length * seq1.flashMs + 50
     engine.input(host, "tap", { padId: "emerald" })
     expect(state.score).toBe(1)
-    const seq2 = last(sent, "firefly_sequence")?.message as { sequence: string[] }
+    const seq2 = last(sent, "firefly_sequence")?.message as { sequence: string[]; flashMs: number }
     expect(seq2.sequence).toEqual(["emerald", "amber"])
 
-    // Clear level 2 → score 2.
+    // Clear level 2 → score 2 (space the two taps past the rate cap).
+    clock += seq2.sequence.length * seq2.flashMs + 50
     engine.input(host, "tap", { padId: "emerald" })
+    clock += 100
     engine.input(host, "tap", { padId: "amber" })
     expect(state.score).toBe(2)
 
     // A wrong tap ends the game at the last cleared level.
+    const seq3 = last(sent, "firefly_sequence")?.message as { sequence: string[]; flashMs: number }
+    clock += seq3.sequence.length * seq3.flashMs + 50
     engine.input(host, "tap", { padId: "rose" })
     expect(finished()).toBe(true)
     expect(engine.finalScore()).toBe(2)
+  })
+
+  it("drops an instant replay of the streamed sequence", () => {
+    let clock = 0
+    const engine = new FireflyEngine(() => 0, () => clock)
+    const { host, sent, state, finished } = makeHost()
+    engine.start(host)
+    const seq = last(sent, "firefly_sequence")?.message as { sequence: string[] }
+    // A bot echoes the answer the instant it arrives (clock barely moved) → the
+    // reaction floor drops it: no score, game still running.
+    clock += 10
+    engine.input(host, "tap", { padId: seq.sequence[0] })
+    expect(state.score).toBe(0)
+    expect(finished()).toBe(false)
   })
 
   it("ignores invalid pad payloads", () => {

@@ -26,12 +26,21 @@ const PAD_IDS = new Set<string>(PADS.map((p) => p.id))
 /** Pause after clearing a level so the client can show the level-up shimmer
  *  before the next (longer, faster) sequence streams. */
 const LEVELUP_PAUSE_MS = 620
+/** Minimum gap between accepted taps. Humans tap a sequence at a few per second;
+ *  this only bites a script replaying the streamed answer at machine speed. */
+const TAP_MIN_GAP_MS = 80
 
 /**
  * Server-authoritative Firefly Follow. The server generates the sequence (with
  * its own RNG), streams it for the client to render, and validates each tap
  * against its own sequence — the score is the number of levels cleared, decided
  * entirely server-side.
+ *
+ * The sequence has to be sent (the player must watch it), so a script can read
+ * it off the wire and replay it. Two server-side guards make that cost real-time
+ * play rather than an instant sweep: the first tap of a round can't land before
+ * the sequence has finished flashing (you can't repeat what you haven't seen),
+ * and taps can't arrive faster than a human can press.
  */
 export class FireflyEngine implements MinigameEngine {
   private sequence: PadId[] = []
@@ -40,8 +49,14 @@ export class FireflyEngine implements MinigameEngine {
   private cleared = 0
   /** False during the level-up pause — rejects taps until the next round streams. */
   private accepting = false
+  private roundStartMs = 0
+  private minFirstTapMs = 0
+  private lastTapMs = Number.NEGATIVE_INFINITY
 
-  constructor(private readonly rng: () => number = Math.random) {}
+  constructor(
+    private readonly rng: () => number = Math.random,
+    private readonly now: () => number = () => Date.now(),
+  ) {}
 
   start(host: MinigameHost): void {
     this.beginRound(host, 1, [])
@@ -51,6 +66,13 @@ export class FireflyEngine implements MinigameEngine {
     if (type !== "tap" || !this.accepting) return
     const padId = readPad(payload)
     if (padId === null) return
+    const now = this.now()
+    // Can't repeat a sequence before it's finished flashing, and can't tap
+    // faster than a human — both drop an instant bot replaying the streamed
+    // answer (dropped, not counted wrong, so a stray double-tap isn't punished).
+    if (this.inputIndex === 0 && now - this.roundStartMs < this.minFirstTapMs) return
+    if (now - this.lastTapMs < TAP_MIN_GAP_MS) return
+    this.lastTapMs = now
 
     if (matchStep(this.sequence, this.inputIndex, padId) === "wrong") {
       this.accepting = false
@@ -83,12 +105,15 @@ export class FireflyEngine implements MinigameEngine {
     this.sequence = extendSequence(prev, this.rng)
     this.inputIndex = 0
     this.accepting = true
+    const flashMs = flashDurationForLevel(level)
+    this.roundStartMs = this.now()
+    // A conservative lower bound on how long the client takes to flash the whole
+    // sequence (it adds gaps too, so the real display is longer) — the player
+    // can't have watched it before this, so a correct tap before it is a bot.
+    this.minFirstTapMs = this.sequence.length * flashMs
+    this.lastTapMs = Number.NEGATIVE_INFINITY
     host.state.round = level
-    host.notify("firefly_sequence", {
-      level,
-      sequence: this.sequence,
-      flashMs: flashDurationForLevel(level),
-    })
+    host.notify("firefly_sequence", { level, sequence: this.sequence, flashMs })
   }
 }
 
