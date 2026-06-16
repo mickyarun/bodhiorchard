@@ -17,30 +17,57 @@ import {
   FISHING_MAX_SCORE,
   ZONE_WIDTH,
   bobberPositionAt,
+  randomPhase,
+  randomSweepRate,
   randomZoneStart,
   scoreForHook,
   sweepRateForCast,
 } from '@shared/minigames/fishing'
 
 describe('bobberPositionAt', () => {
-  it('starts at the centre (0.5) and is deterministic', () => {
-    expect(bobberPositionAt(0, 0)).toBeCloseTo(0.5, 6)
-    // Same elapsed + cast always gives the same position (server can replay it).
-    expect(bobberPositionAt(123, 2)).toBe(bobberPositionAt(123, 2))
+  it('is centred at elapsed 0 with phase 0, and deterministic in its params', () => {
+    expect(bobberPositionAt(0, 1, 0)).toBeCloseTo(0.5, 6)
+    // Same (elapsed, rate, phase) always gives the same position (server replays it).
+    expect(bobberPositionAt(123, 1.2, 0.4)).toBe(bobberPositionAt(123, 1.2, 0.4))
   })
 
-  it('stays within [0, 1]', () => {
-    for (let cast = 0; cast < 5; cast++) {
-      for (let ms = 0; ms <= 4000; ms += 50) {
-        const p = bobberPositionAt(ms, cast)
-        expect(p).toBeGreaterThanOrEqual(0)
-        expect(p).toBeLessThanOrEqual(1)
+  it('opens at a phase-shifted point, not always the centre', () => {
+    // A non-zero phase moves the start away from 0.5 — that's the per-play variety.
+    expect(bobberPositionAt(0, 1, 0.5)).not.toBeCloseTo(0.5, 3)
+  })
+
+  it('stays within [0, 1] across rates and phases', () => {
+    for (const rate of [0.8, 1.2, 1.6, 2.2]) {
+      for (const ph of [0, 0.5, 1, 1.5]) {
+        for (let ms = 0; ms <= 4000; ms += 50) {
+          const p = bobberPositionAt(ms, rate, ph)
+          expect(p).toBeGreaterThanOrEqual(0)
+          expect(p).toBeLessThanOrEqual(1)
+        }
       }
     }
   })
 
-  it('later casts sweep faster', () => {
+  it('later casts sweep faster (base rate)', () => {
     expect(sweepRateForCast(4)).toBeGreaterThan(sweepRateForCast(0))
+  })
+})
+
+describe('randomSweepRate', () => {
+  it('jitters around the per-cast base and is always positive', () => {
+    const base = sweepRateForCast(2)
+    expect(randomSweepRate(2, () => 0)).toBeCloseTo(base * 0.85, 6) // slow extreme
+    expect(randomSweepRate(2, () => 1)).toBeCloseTo(base * 1.35, 6) // fast extreme
+    expect(randomSweepRate(2, () => 0.5)).toBeCloseTo(base * 1.1, 6)
+    expect(randomSweepRate(0, () => 0)).toBeGreaterThan(0)
+  })
+})
+
+describe('randomPhase', () => {
+  it('spans a full sine period (0..2)', () => {
+    expect(randomPhase(() => 0)).toBe(0)
+    expect(randomPhase(() => 0.5)).toBe(1)
+    expect(randomPhase(() => 0.999)).toBeLessThan(2)
   })
 })
 

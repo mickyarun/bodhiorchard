@@ -88,8 +88,8 @@ describe("FireflyEngine", () => {
 
 describe("FishingEngine", () => {
   it("scores hooks server-side and finishes after five casts", () => {
-    // zoneStart = 0.08 + 0.5*(0.84-0.16) = 0.42 → centre 0.5.
-    // now constant → elapsed 0 → bobber at 0.5 → bullseye (10) every cast.
+    // zoneStart = 0.08 + 0.5*(0.84-0.16) = 0.42 → centre 0.5. rng 0.5 also gives
+    // phase = 1.0, so sin(1·π) = 0 → elapsed 0 → bobber at 0.5 → bullseye (10).
     const engine = new FishingEngine(() => 0.5, () => 1000)
     const { host, state, finished } = makeHost()
     engine.start(host)
@@ -112,8 +112,9 @@ describe("FishingEngine", () => {
     const { host, sent } = makeHost()
     engine.start(host) // cast 0, castStartMs = 0
     // 5s elapsed server-side (latency), but the client hooked at the very start
-    // (bobber at 0.5 = bullseye). The server's own 5000ms clock would have
-    // scored a miss; using the client's reported moment it's a bullseye.
+    // (bobber at 0.5 = bullseye). Scoring at the server's own 5000ms clock would
+    // put the bobber well off-centre (a worse band); using the client's reported
+    // moment it's a bullseye.
     clock = 5000
     engine.input(host, "hook", { elapsedMs: 0 })
     const r = last(sent, "fishing_result")?.message as { points: number }

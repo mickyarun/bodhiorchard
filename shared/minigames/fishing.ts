@@ -28,22 +28,46 @@ export const CASTS = 5
 /** Strike-zone width as a fraction of the water (0..1). */
 export const ZONE_WIDTH = 0.16
 
+/** Sweep speed jitter band: the per-cast base is scaled by 0.85×..1.35×. */
+const SWEEP_JITTER_MIN = 0.85
+const SWEEP_JITTER_SPAN = 0.5
+
 /**
- * The bobber sweep speed (Hz-ish) for a given cast. Speeds up slightly each
+ * Base bobber sweep speed (Hz-ish) for a given cast. Speeds up slightly each
  * cast so later casts are harder. `cast` is 0-indexed (0 is the first cast).
+ * The live rate is this jittered per cast (see `randomSweepRate`).
  */
 export function sweepRateForCast(cast: number): number {
   return 0.9 + cast * 0.18
 }
 
 /**
- * Bobber position (0..1) `elapsedMs` into the given cast. A sine sweep:
- * `(sin(t·π) + 1) / 2`, where `t` advances at `sweepRateForCast(cast)` per
- * second. Deterministic — the same elapsed time always yields the same
- * position, which is what lets the server validate a hook authoritatively.
+ * A cast's actual sweep speed: the per-cast base, jittered, so the bobber moves
+ * at a different speed every play — not just the strike-zone moving. The server
+ * picks it (server-seeded) and sends it so the client renders the same curve.
  */
-export function bobberPositionAt(elapsedMs: number, cast: number): number {
-  const t = (elapsedMs / 1000) * sweepRateForCast(cast)
+export function randomSweepRate(cast: number, rng: () => number = Math.random): number {
+  return sweepRateForCast(cast) * (SWEEP_JITTER_MIN + rng() * SWEEP_JITTER_SPAN)
+}
+
+/**
+ * A cast's starting phase (0..2 — one full sine period in `t`). With it the
+ * bobber no longer always opens dead-centre rising: each cast starts at a
+ * different point and direction, so the timing can't be memorised play-to-play.
+ */
+export function randomPhase(rng: () => number = Math.random): number {
+  return rng() * 2
+}
+
+/**
+ * Bobber position (0..1) `elapsedMs` into a cast with sweep speed `sweepRate`
+ * and starting `phase`. A sine sweep: `(sin((t + phase)·π) + 1) / 2`, where `t`
+ * advances at `sweepRate` per second. Deterministic in its arguments — the same
+ * (elapsed, rate, phase) always yields the same position, which is what lets the
+ * server validate a hook authoritatively from the params it chose and sent.
+ */
+export function bobberPositionAt(elapsedMs: number, sweepRate: number, phase: number): number {
+  const t = (elapsedMs / 1000) * sweepRate + phase
   return (Math.sin(t * Math.PI) + 1) / 2
 }
 

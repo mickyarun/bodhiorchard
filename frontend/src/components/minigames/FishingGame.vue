@@ -90,6 +90,8 @@ const done = computed(() => room.status.value === 'finished')
 
 let raf = 0
 let castStart = 0
+let sweepRate = 0 // server-chosen sweep speed for this cast
+let phase = 0 // server-chosen starting phase for this cast
 let sweeping = false
 let flashId = 0
 // Points shown optimistically for the current cast (−1 = none yet), so the
@@ -100,7 +102,7 @@ let shownPoints = -1
 // timed from when this cast was received. The server uses its own clock when a
 // hook arrives, so the score is authoritative; this is display only.
 function loop(now: number): void {
-  if (sweeping) marker.value = bobberPositionAt(now - castStart, cast.value)
+  if (sweeping) marker.value = bobberPositionAt(now - castStart, sweepRate, phase)
   raf = requestAnimationFrame(loop)
 }
 
@@ -120,9 +122,11 @@ function showResult(points: number): void {
 
 function onEvent(type: string, payload: unknown): void {
   if (type === 'fishing_cast') {
-    const p = payload as { cast: number; zoneStart: number }
+    const p = payload as { cast: number; zoneStart: number; sweepRate: number; phase: number }
     cast.value = p.cast
     zoneStart.value = p.zoneStart
+    sweepRate = p.sweepRate
+    phase = p.phase
     castStart = performance.now()
     sweeping = true
     flash.value = null
@@ -153,7 +157,7 @@ function hook(): void {
   // the bobber at this exact position keeps the optimistic result matching the
   // authoritative one, so fishing_result never has to correct it.
   const elapsedMs = performance.now() - castStart
-  marker.value = bobberPositionAt(elapsedMs, cast.value)
+  marker.value = bobberPositionAt(elapsedMs, sweepRate, phase)
   shownPoints = scoreForHook(marker.value, zoneStart.value)
   showResult(shownPoints)
   room.send('hook', { elapsedMs })

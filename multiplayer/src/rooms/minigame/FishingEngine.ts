@@ -12,7 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { CASTS, bobberPositionAt, randomZoneStart, scoreForHook } from "../../../../shared/minigames/fishing"
+import {
+  CASTS,
+  bobberPositionAt,
+  randomPhase,
+  randomSweepRate,
+  randomZoneStart,
+  scoreForHook,
+} from "../../../../shared/minigames/fishing"
 import type { MinigameEngine, MinigameHost } from "./MinigameEngine"
 
 /** Clamp ceiling for server-measured cast elapsed — a stalled tab can't run the
@@ -33,6 +40,8 @@ export class FishingEngine implements MinigameEngine {
   private cast = 0
   private score = 0
   private zoneStart = 0
+  private sweepRate = 0
+  private phase = 0
   private castStartMs = 0
   /** True only while a cast is live — rejects stray hooks during the inter-cast
    *  pause (and any malicious double-hook). */
@@ -61,7 +70,7 @@ export class FishingEngine implements MinigameEngine {
     const cap = Math.min(MAX_CAST_MS, serverElapsed)
     const reported = readElapsed(payload)
     const elapsed = reported === null ? cap : Math.min(Math.max(0, reported), cap)
-    const marker = bobberPositionAt(elapsed, this.cast)
+    const marker = bobberPositionAt(elapsed, this.sweepRate, this.phase)
     const points = scoreForHook(marker, this.zoneStart)
     this.score += points
     host.state.score = this.score
@@ -83,10 +92,17 @@ export class FishingEngine implements MinigameEngine {
 
   private beginCast(host: MinigameHost): void {
     this.zoneStart = randomZoneStart(this.rng)
+    this.sweepRate = randomSweepRate(this.cast, this.rng)
+    this.phase = randomPhase(this.rng)
     this.castStartMs = this.now()
     this.canHook = true
     host.state.round = this.cast + 1
-    host.notify("fishing_cast", { cast: this.cast, zoneStart: this.zoneStart })
+    host.notify("fishing_cast", {
+      cast: this.cast,
+      zoneStart: this.zoneStart,
+      sweepRate: this.sweepRate,
+      phase: this.phase,
+    })
   }
 }
 
