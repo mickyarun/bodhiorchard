@@ -16,9 +16,11 @@ import { describe, expect, it } from 'vitest'
 import {
   GAME_MS,
   MOTE_EMOJI,
+  SPAWN_JITTER,
   SPAWN_MIN_MS,
   SPAWN_START_MS,
   isMoteAlive,
+  jitteredIntervalMs,
   motePositionAt,
   spawnIntervalMs,
   spawnMote,
@@ -49,6 +51,19 @@ describe('spawnIntervalMs', () => {
     expect(spawnIntervalMs(GAME_MS)).toBe(SPAWN_MIN_MS)
     expect(spawnIntervalMs(GAME_MS / 2)).toBeLessThan(SPAWN_START_MS)
     expect(spawnIntervalMs(GAME_MS / 2)).toBeGreaterThan(SPAWN_MIN_MS)
+  })
+})
+
+describe('jitteredIntervalMs', () => {
+  it('is neutral at rng=0.5 (returns the base cadence)', () => {
+    expect(jitteredIntervalMs(0, () => 0.5)).toBeCloseTo(spawnIntervalMs(0), 6)
+    expect(jitteredIntervalMs(GAME_MS, () => 0.5)).toBeCloseTo(spawnIntervalMs(GAME_MS), 6)
+  })
+
+  it('stays within ±SPAWN_JITTER of the base cadence at the extremes', () => {
+    const base = spawnIntervalMs(GAME_MS / 2)
+    expect(jitteredIntervalMs(GAME_MS / 2, () => 0)).toBeCloseTo(base * (1 - SPAWN_JITTER), 6)
+    expect(jitteredIntervalMs(GAME_MS / 2, () => 1)).toBeCloseTo(base * (1 + SPAWN_JITTER), 6)
   })
 })
 

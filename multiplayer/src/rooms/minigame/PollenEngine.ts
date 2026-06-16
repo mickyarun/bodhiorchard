@@ -14,9 +14,10 @@
 
 import {
   GAME_MS,
+  MAX_CONCURRENT_MOTES,
   type Mote,
   isMoteAlive,
-  spawnIntervalMs,
+  jitteredIntervalMs,
   spawnMote,
 } from "../../../../shared/minigames/pollen"
 import type { MinigameEngine, MinigameHost } from "./MinigameEngine"
@@ -26,8 +27,9 @@ import type { MinigameEngine, MinigameHost } from "./MinigameEngine"
  * motes (its RNG) and streams them; the client renders but never invents motes.
  * A pop is validated against the server's live set at the server's clock, so a
  * mote that never existed or already drifted off-screen can't be popped. Score
- * is the count of valid pops. Spawn cadence and rise speed ramp up over the
- * round (see shared/minigames/pollen), so the late game is faster and busier.
+ * is the count of valid pops. Spawn cadence (jittered) and rise speed ramp up
+ * over the round, but the live count is capped (see shared/minigames/pollen),
+ * so the late game is fast and fleeting rather than a flooded click-farm.
  */
 export class PollenEngine implements MinigameEngine {
   private readonly motes = new Map<number, Mote>()
@@ -52,21 +54,27 @@ export class PollenEngine implements MinigameEngine {
       host.finish()
       return
     }
-    // Spawn cadence shortens as the round goes on; each mote's rise speed is
-    // ramped by the elapsed time it spawns at.
-    for (;;) {
-      const interval = spawnIntervalMs(this.lastSpawnMs - this.startMs)
-      if (nowMs - this.lastSpawnMs < interval) break
-      this.lastSpawnMs += interval
-      const mote = spawnMote(this.nextId++, nowMs, this.rng, nowMs - this.startMs)
-      this.motes.set(mote.id, mote)
-      host.notify("pollen_spawn", mote)
-    }
+    // Reap dead motes first so the concurrency cap below sees freed slots this
+    // same tick.
     for (const [id, mote] of this.motes) {
       if (!isMoteAlive(mote, nowMs)) {
         this.motes.delete(id)
         host.notify("pollen_despawn", { id })
       }
+    }
+    // Spawn cadence shortens (with jitter) as the round goes on and each mote's
+    // rise speed ramps with elapsed time — but the live count is capped, so the
+    // late game stays fast and fleeting instead of carpeting the arena. When at
+    // the cap we still advance the clock, dropping the surplus spawn rather than
+    // queueing a burst for when a slot frees.
+    for (;;) {
+      const interval = jitteredIntervalMs(this.lastSpawnMs - this.startMs, this.rng)
+      if (nowMs - this.lastSpawnMs < interval) break
+      this.lastSpawnMs += interval
+      if (this.motes.size >= MAX_CONCURRENT_MOTES) continue
+      const mote = spawnMote(this.nextId++, nowMs, this.rng, nowMs - this.startMs)
+      this.motes.set(mote.id, mote)
+      host.notify("pollen_spawn", mote)
     }
   }
 

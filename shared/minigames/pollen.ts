@@ -20,10 +20,11 @@
  * renders them deterministically. A pop the client sends is validated
  * server-side, so the client can never invent a mote or pop one twice.
  *
- * The round RAMPS: flowers spawn faster and rise faster as time runs out, with
- * wide variance in position, drift, size, and speed. So there's no fixed ~45
- * ceiling (the achievable score keeps climbing) and the late game demands
- * quicker, less predictable reactions.
+ * The round RAMPS: flowers rise faster and spawn on a quicker (jittered)
+ * cadence as time runs out, with wide variance in position, drift, size, and
+ * speed. On-screen density is hard-capped (MAX_CONCURRENT_MOTES), so the late
+ * game is fast and fleeting rather than a flooded click-farm — yet the score
+ * keeps climbing (motes cycle), so there's no fixed ceiling.
  */
 
 /** Game length in seconds, and the same in milliseconds. */
@@ -32,11 +33,20 @@ export const GAME_MS = GAME_SECONDS * 1000
 /** Renderable blossom glyphs; index is server-chosen so both sides agree. */
 export const MOTE_EMOJI = ['🌸', '🌼', '💮', '🌺'] as const
 
-/** Spawn interval (ms): starts here and ramps down to the floor below. */
-export const SPAWN_START_MS = 550
-export const SPAWN_MIN_MS = 180
+/** Spawn interval (ms): starts here and ramps down to the floor below. The
+ * floor is deliberately well above zero so the late game speeds up without
+ * carpeting the arena in spawns — density is bounded by MAX_CONCURRENT_MOTES. */
+export const SPAWN_START_MS = 600
+export const SPAWN_MIN_MS = 320
 /** Motes rise up to (1 + SPEED_RAMP)× faster by the final second. */
-export const SPEED_RAMP = 0.8
+export const SPEED_RAMP = 1.6
+/** Hard ceiling on live motes. The screen never crowds past this, so the late
+ * game is a reaction test (fast, fleeting targets) rather than a click-farm of
+ * a flooded arena. Not a score cap — motes cycle, so pops keep accruing. */
+export const MAX_CONCURRENT_MOTES = 8
+/** Cadence jitter (±fraction). Spawns land off a fixed metronome so the rhythm
+ * can't be memorised; 0.5 RNG is neutral, keeping the cadence deterministic. */
+export const SPAWN_JITTER = 0.3
 
 /** Below this y (percent, 0 = top) a mote has drifted off the top and dies. */
 const DESPAWN_Y = -8
@@ -50,11 +60,20 @@ function progress(elapsedMs: number): number {
 
 /**
  * Time between spawns at a point in the round — eases from SPAWN_START_MS down
- * to SPAWN_MIN_MS, so flowers come thick and fast near the end (more total
- * flowers than a fixed cadence, no flat ~45 cap).
+ * to SPAWN_MIN_MS so the cadence quickens near the end. The floor stays well
+ * above zero; the live count, not the cadence, bounds on-screen density.
  */
 export function spawnIntervalMs(elapsedMs: number): number {
   return SPAWN_START_MS - progress(elapsedMs) * (SPAWN_START_MS - SPAWN_MIN_MS)
+}
+
+/**
+ * The base cadence with ±SPAWN_JITTER randomness applied, so spawns don't fall
+ * on a predictable metronome. `rng() === 0.5` is neutral (returns the base),
+ * which keeps seeded callers deterministic.
+ */
+export function jitteredIntervalMs(elapsedMs: number, rng: () => number = Math.random): number {
+  return spawnIntervalMs(elapsedMs) * (1 - SPAWN_JITTER + rng() * 2 * SPAWN_JITTER)
 }
 
 /**
@@ -89,7 +108,7 @@ export function spawnMote(
     spawnAtMs,
     x: 6 + rng() * 88,
     vy: (8 + rng() * 14) * speed,
-    vx: (rng() - 0.5) * 11,
+    vx: (rng() - 0.5) * 14,
     scale: 0.7 + rng() * 1.0,
     emojiIndex: Math.floor(rng() * MOTE_EMOJI.length),
   }
