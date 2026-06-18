@@ -35,6 +35,10 @@ export function usePermissions() {
 
   // Sidebar visibility
   const canApprove = computed(() => hasPermission('backlog:approve'))
+  // Gates the "New BUD" affordance. Mirrors the POST /v1/buds backend
+  // gate (buds:create) so roles without it — developer, qa, viewer —
+  // don't see a button that would 403.
+  const canCreateBuds = computed(() => hasPermission('buds:create'))
   const canManageMembers = computed(() => hasPermission('team:manage'))
   const canViewSettings = computed(() =>
     hasAnyPermission('org:view_settings', 'integrations:view'),
@@ -75,6 +79,7 @@ export function usePermissions() {
     hasAnyPermission,
     isOrgAdmin,
     canApprove,
+    canCreateBuds,
     canManageMembers,
     canViewSettings,
     canViewConnections,

@@ -95,6 +95,21 @@
             />
           </template>
         </v-tooltip>
+        <!-- Discarded BUDs are hidden by default — they're terminal and
+             clutter the active pipeline. This toggle appends a Discarded
+             column so they stay reachable for review/audit. -->
+        <v-tooltip :text="showDiscarded ? 'Hide discarded BUDs' : 'Show discarded BUDs'" location="bottom">
+          <template #activator="{ props: tipProps }">
+            <v-btn
+              v-bind="tipProps"
+              :icon="showDiscarded ? 'mdi-delete' : 'mdi-delete-outline'"
+              variant="text"
+              size="small"
+              :color="showDiscarded ? 'primary' : undefined"
+              @click="showDiscarded = !showDiscarded"
+            />
+          </template>
+        </v-tooltip>
         <!-- Customize lifecycle stages — same permission gate as the
              settings route. Visible to users who can actually change
              the UAT toggle / framework; hidden for plain viewers. -->
@@ -109,7 +124,7 @@
             />
           </template>
         </v-tooltip>
-        <v-btn color="primary" prepend-icon="mdi-plus" @click="showCreateDialog = true">
+        <v-btn v-if="canCreateBuds" color="primary" prepend-icon="mdi-plus" @click="showCreateDialog = true">
           New BUD
         </v-btn>
       </div>
@@ -144,7 +159,7 @@
       <div class="text-body-2 text-medium-emphasis mb-6">
         Create your first Business Understanding Document to plant a seed.
       </div>
-      <v-btn color="primary" prepend-icon="mdi-plus" @click="showCreateDialog = true">
+      <v-btn v-if="canCreateBuds" color="primary" prepend-icon="mdi-plus" @click="showCreateDialog = true">
         Create BUD
       </v-btn>
     </v-card>
@@ -444,6 +459,9 @@ const assigneeFilter = ref<string | null>(null)
 const priorityFilter = ref<BUDPriority | null>(null)
 const teamFilter = ref<string | null>(null)
 const sortByPriority = ref(false)
+// Off by default: discarded BUDs are terminal and excluded from the
+// active pipeline; flip on to surface them as a trailing column.
+const showDiscarded = ref(false)
 
 // Team filter options + placeholder. When no teams exist yet, the
 // dropdown is disabled with a placeholder pointing at Settings →
@@ -699,9 +717,9 @@ function priorityColor(priority: BUDPriority): string {
 // kanban columns and progress-bar denominator both use this so the board
 // reacts when the org toggles UAT off, without a page reload.
 const { phaseOrder } = usePhaseOrder()
-const { canViewQAAutomation } = usePermissions()
+const { canViewQAAutomation, canCreateBuds } = usePermissions()
 const boardColumns = computed<BUDStatus[]>(() =>
-  phaseOrder.value.filter(s => s !== 'discarded'),
+  phaseOrder.value.filter(s => s !== 'discarded' || showDiscarded.value),
 )
 const activePhaseCount = computed<number>(
   () => phaseOrder.value.filter(s => s !== 'discarded' && s !== 'closed').length,

@@ -60,6 +60,7 @@ async def bugs_to_list_items(
     return [
         BugListItem(
             id=str(b.id),
+            bug_number=b.bug_number,
             title=b.title,
             severity=b.severity.value,
             status=b.status.value,
@@ -108,6 +109,7 @@ async def bug_to_read(
 
     return BugRead(
         id=str(bug.id),
+        bug_number=bug.bug_number,
         title=bug.title,
         description=bug.description,
         severity=bug.severity.value,

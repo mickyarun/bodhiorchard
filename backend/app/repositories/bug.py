@@ -36,6 +36,21 @@ class BugRepository(BaseRepository[Bug]):
     def __init__(self, db: AsyncSession, *, org_id: uuid.UUID) -> None:
         super().__init__(Bug, db, org_id=org_id)
 
+    async def next_bug_number(self) -> int:
+        """Next auto-incremented bug number for this organization.
+
+        Returns ``max(bug_number) + 1`` within the tenant, or 1 when the
+        org has no bugs yet. Mirrors ``BUDRepository.next_bud_number``;
+        the ``uq_bug_org_number`` constraint is the integrity backstop for
+        the max+1 race window.
+        """
+        result = await self._db.execute(
+            select(func.coalesce(func.max(Bug.bug_number), 0)).where(
+                Bug.org_id == self._org_id
+            )
+        )
+        return result.scalar_one() + 1
+
     async def count_open_for_bud_with_statuses(
         self, bud_id: uuid.UUID, statuses: tuple[BugStatus, ...]
     ) -> int:

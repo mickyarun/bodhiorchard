@@ -19,7 +19,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -71,11 +71,16 @@ class Bug(BaseModel):
         Index("ix_bugs_org_status_created", "org_id", "status", "created_at"),
         Index("ix_bugs_bud_id_status", "bud_id", "status"),
         Index("ix_bugs_feature_id_status", "feature_id", "status"),
+        UniqueConstraint("org_id", "bug_number", name="uq_bug_org_number"),
     )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
+    # Human-readable, org-scoped sequence (rendered as BUG-001). Mirrors
+    # ``BUDDocument.bud_number``: assigned at creation as max+1 per org and
+    # protected by ``uq_bug_org_number``.
+    bug_number: Mapped[int] = mapped_column(Integer, nullable=False)
     bud_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("bud_documents.id"), nullable=True, index=True
     )

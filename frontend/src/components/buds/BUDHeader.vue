@@ -15,8 +15,8 @@
  -->
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useMembersStore } from '@/stores/members'
+import { ref, onMounted } from 'vue'
+import { useMemberDirectory } from '@/composables/useMemberDirectory'
 import { BUD_STATUS_LABELS, BUD_PRIORITIES } from '@/types'
 import type { BUDDocument, BUDStatus, BUDPriority } from '@/types'
 import { formatDate } from '@/utils/date'
@@ -60,7 +60,15 @@ const emit = defineEmits<{
   'open-history': []
 }>()
 
-const membersStore = useMembersStore()
+// Assignee picker reads the permission-free member directory rather than
+// the admin-only /members list (gated by team:manage). Roles that can edit
+// a BUD — e.g. PM — have buds:* but not team:manage, so the full list 403s
+// and leaves the dropdown empty. The directory only needs an authenticated
+// org member, so any assigner can populate it.
+const { entries: directoryMembers, ensureLoaded: ensureDirectory } = useMemberDirectory()
+onMounted(() => {
+  void ensureDirectory()
+})
 
 const editingTitle = ref(false)
 const editTitle = ref('')
@@ -182,8 +190,8 @@ function saveTitle(): void {
                 <v-list-item-title class="text-body-2">Unassign</v-list-item-title>
               </v-list-item>
               <v-list-item
-                v-for="m in membersStore.members.filter(
-                  mm => mm.isActive && mm.name.toLowerCase().includes(assigneeSearch.toLowerCase())
+                v-for="m in directoryMembers.filter(
+                  mm => mm.name.toLowerCase().includes(assigneeSearch.toLowerCase())
                 )"
                 :key="m.id"
                 :active="bud.assignee_id === m.id"
@@ -191,11 +199,11 @@ function saveTitle(): void {
               >
                 <template #prepend>
                   <v-avatar size="28" color="surface-variant" class="mr-2">
-                    <span class="text-body-2">{{ m.name.charAt(0).toUpperCase() }}</span>
+                    <span class="text-body-2">{{ (m.name || '?').charAt(0).toUpperCase() }}</span>
                   </v-avatar>
                 </template>
                 <v-list-item-title class="text-body-2">{{ m.name }}</v-list-item-title>
-                <v-list-item-subtitle class="text-caption">{{ m.role }}</v-list-item-subtitle>
+                <v-list-item-subtitle class="text-caption">{{ m.email }}</v-list-item-subtitle>
               </v-list-item>
             </v-list>
           </v-card>

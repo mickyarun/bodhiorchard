@@ -760,6 +760,7 @@ export type BugType = 'testing' | 'production'
 
 export interface BugListItem {
   id: string
+  bugNumber: number
   title: string
   severity: BugSeverity
   status: BugStatusValue
@@ -779,6 +780,7 @@ export interface BugListItem {
 
 export interface BugRead {
   id: string
+  bugNumber: number
   title: string
   description: string | null
   severity: BugSeverity

@@ -79,6 +79,7 @@ class BugRead(BaseModel):
     """Full bug response with resolved names."""
 
     id: str
+    bug_number: int = Field(alias="bugNumber")
     title: str
     description: str | None = None
     severity: BugSeverityValue
@@ -107,6 +108,7 @@ class BugListItem(BaseModel):
     """Lightweight bug for list / board views."""
 
     id: str
+    bug_number: int = Field(alias="bugNumber")
     title: str
     severity: BugSeverityValue
     status: BugStatusValue

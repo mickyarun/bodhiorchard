@@ -17,6 +17,9 @@
 <template>
   <v-card v-if="bugsStore.currentBug" color="surface" class="pa-6" flat>
     <div class="d-flex align-center ga-2 mb-3">
+      <span class="text-caption text-medium-emphasis font-weight-medium">
+        BUG-{{ String(bugsStore.currentBug.bugNumber).padStart(3, '0') }}
+      </span>
       <v-chip
         :color="BUG_SEVERITY_COLORS[bugsStore.currentBug.severity]"
         size="small"

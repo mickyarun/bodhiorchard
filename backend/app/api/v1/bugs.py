@@ -94,8 +94,10 @@ async def create_bug(
         db, current_user.org_id, body.bug_type, bud_uuid, feature_uuid
     )
 
+    bug_repo = BugRepository(db, org_id=current_user.org_id)
     bug = Bug(
         org_id=current_user.org_id,
+        bug_number=await bug_repo.next_bug_number(),
         title=body.title,
         description=body.description,
         severity=body.severity,
@@ -106,7 +108,6 @@ async def create_bug(
         reporter_id=current_user.id,
     )
 
-    bug_repo = BugRepository(db, org_id=current_user.org_id)
     bug = await bug_repo.create(bug)
 
     # Embed + auto-link inline so the response includes the resolved link.

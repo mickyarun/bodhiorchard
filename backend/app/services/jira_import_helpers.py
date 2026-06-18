@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.bud import BUDDocument
 from app.models.bug import Bug, BugType
 from app.models.jira_import import ImportStatus, JiraIssueBudMap
+from app.repositories.bug import BugRepository
 from app.repositories.jira_import import JiraImportSessionRepository, JiraIssueBudMapRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.user import UserRepository
@@ -64,6 +65,7 @@ async def create_bug(
 
     bug = Bug(
         org_id=org_id,
+        bug_number=await BugRepository(db, org_id=org_id).next_bug_number(),
         bud_id=bud_id,
         title=fields["title"],
         description=fields.get("description"),

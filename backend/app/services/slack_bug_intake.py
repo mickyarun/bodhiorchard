@@ -25,9 +25,11 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument
+from app.models.bug import Bug
 from app.models.organization import Organization
 from app.models.triage_session import TriageSession, TriageStatus
 from app.models.user import UserRole
+from app.repositories.bug import BugRepository
 from app.repositories.triage_session import TriageSessionRepository
 from app.repositories.user import UserRepository
 from app.services import slack_client
@@ -154,10 +156,10 @@ async def handle_bug_approval(
 
     # Build bug from triage context
     ctx = session.triage_context or {}
-    from app.models.bug import Bug
 
     bug = Bug(
         org_id=org.id,
+        bug_number=await BugRepository(db, org_id=org.id).next_bug_number(),
         title=ctx.get("title", session.feature_name or "Untitled bug"),
         description=ctx.get("description", session.original_text),
         severity=ctx.get("severity", "medium"),

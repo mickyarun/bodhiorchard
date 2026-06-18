@@ -120,6 +120,9 @@
                 @click="openBug(element)"
               >
                 <div class="d-flex align-center ga-2 mb-1">
+                  <span class="text-caption text-medium-emphasis font-weight-medium">
+                    BUG-{{ String(element.bugNumber).padStart(3, '0') }}
+                  </span>
                   <v-chip
                     :color="BUG_SEVERITY_COLORS[element.severity]"
                     size="x-small"

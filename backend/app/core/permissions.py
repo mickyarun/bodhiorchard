@@ -287,7 +287,7 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
         description="Engineering manager",
         permission_specs=[
             "backlog:view/edit/approve",
-            "buds:view/edit/approve",
+            "buds:view/create/edit/approve",
             "bugs:*",
             "team:view/manage/assign_roles",
             "settings:view",
