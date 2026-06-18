@@ -45,9 +45,7 @@ class BugRepository(BaseRepository[Bug]):
         the max+1 race window.
         """
         result = await self._db.execute(
-            select(func.coalesce(func.max(Bug.bug_number), 0)).where(
-                Bug.org_id == self._org_id
-            )
+            select(func.coalesce(func.max(Bug.bug_number), 0)).where(Bug.org_id == self._org_id)
         )
         return result.scalar_one() + 1
 
