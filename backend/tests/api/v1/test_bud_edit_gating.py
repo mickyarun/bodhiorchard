@@ -57,6 +57,7 @@ def _make_bud(status: BUDStatus) -> SimpleNamespace:
         code_review_comments=None,
         impacted_repos=None,
         qa_manual_cases=None,
+        figma_url=None,
     )
 
 

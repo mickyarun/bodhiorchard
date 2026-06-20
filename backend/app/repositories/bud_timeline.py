@@ -96,6 +96,75 @@ class BUDTimelineRepository(BaseRepository[BUDTimelineEvent]):
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
 
+    async def first_status_change_to(
+        self, bud_id: uuid.UUID, to_status: str
+    ) -> tuple[uuid.UUID | None, datetime] | None:
+        """Earliest ``status_change`` into ``to_status`` → ``(actor_id, created_at)``.
+
+        Answers "who first moved this BUD into <stage>, and when?" — the
+        signal behind the PM requirement→design credit (actor) and the
+        tech-arch / on-time timing rules (timestamp). ``actor_id`` may be
+        ``None`` for system-driven (auto) transitions. Returns ``None`` when
+        the BUD never entered that stage.
+
+        ``to_status`` must be the ``BUDStatus`` *value* (e.g.
+        ``BUDStatus.DEVELOPMENT.value`` → ``"development"``), matching the
+        ``detail["to"]`` string written by the status-change recorder — not
+        the enum member or its ``.name``.
+        """
+        stmt = self._scoped(
+            select(BUDTimelineEvent.actor_id, BUDTimelineEvent.created_at)
+            .where(
+                BUDTimelineEvent.bud_id == bud_id,
+                BUDTimelineEvent.event_type == "status_change",
+                BUDTimelineEvent.detail["to"].astext == to_status,
+            )
+            .order_by(BUDTimelineEvent.created_at.asc())
+            .limit(1)
+        )
+        result = await self._db.execute(stmt)
+        row = result.first()
+        if row is None:
+            return None
+        return (row[0], row[1])
+
+    async def distinct_actors_for_event(
+        self, bud_id: uuid.UUID, event_type: str
+    ) -> set[uuid.UUID]:
+        """Distinct non-null ``actor_id`` across a BUD's events of one type.
+
+        Backs the designer "design contribution" credit: the set of people who
+        emitted a ``design_updated`` event (figma link / MCP / AI chat).
+        """
+        stmt = self._scoped(
+            select(BUDTimelineEvent.actor_id).where(
+                BUDTimelineEvent.bud_id == bud_id,
+                BUDTimelineEvent.event_type == event_type,
+                BUDTimelineEvent.actor_id.is_not(None),
+            )
+        ).distinct()
+        result = await self._db.execute(stmt)
+        return {row[0] for row in result.all() if row[0] is not None}
+
+    async def has_qa_skip_override(self, bud_id: uuid.UUID) -> bool:
+        """True if QA left testing having skipped/overridden a manual test case.
+
+        Matches the ``status_override`` event tagged ``detail.kind == "qa_skip"``
+        (recorded by the testing→uat transition). Used by the QA "tests not
+        skipped/overridden" SP rule to drop the full credit to the reduced one.
+        """
+        stmt = self._scoped(
+            select(BUDTimelineEvent.id)
+            .where(
+                BUDTimelineEvent.bud_id == bud_id,
+                BUDTimelineEvent.event_type == "status_override",
+                BUDTimelineEvent.detail["kind"].astext == "qa_skip",
+            )
+            .limit(1)
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
     async def latest_assignee_for_phase(
         self, bud_id: uuid.UUID, phase_value: str
     ) -> tuple[uuid.UUID, datetime, str | None] | None:

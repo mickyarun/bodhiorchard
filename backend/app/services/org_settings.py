@@ -162,6 +162,32 @@ def get_bug_reject_threshold(org_config: dict[str, Any] | None) -> int:
     return get_qa_settings(org_config).bug_reject_threshold
 
 
+def get_bug_threshold(org_config: dict[str, Any] | None, complexity: int | None) -> int:
+    """Return the acceptable bug count for a BUD of the given complexity.
+
+    Used by both the developer "bugs over threshold" SP deduction and the
+    QA "found more than the threshold" SP credit so the two rules always
+    agree on the same number. A missing or out-of-range ``complexity``
+    (BUD never estimated) clamps to the 1-5 range; a complexity with no
+    explicit entry falls back to the nearest defined level — searching
+    lower first, then higher — so a partially-configured map never raises
+    and never silently returns 0.
+    """
+    table = get_qa_settings(org_config).bug_threshold_by_complexity
+    if not table:
+        return get_bug_reject_threshold(org_config)
+    level = max(1, min(5, complexity or 1))
+    # Nearest lower defined level first (a higher-complexity BUD must not
+    # inherit a stricter low-complexity budget), then nearest higher.
+    for candidate in range(level, 0, -1):
+        if candidate in table:
+            return table[candidate]
+    for candidate in range(level + 1, 6):
+        if candidate in table:
+            return table[candidate]
+    return min(table.values())
+
+
 def get_phase_order(org_config: dict[str, Any] | None) -> list[str]:
     """Return the BUD phase order for this org, filtered by toggles.
 

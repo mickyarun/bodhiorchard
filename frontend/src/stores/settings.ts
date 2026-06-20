@@ -65,6 +65,10 @@ export interface ConnectionsState {
     enabled: boolean
     framework: string
     bugRejectThreshold: number
+    // Acceptable testing-bug count per BUD complexity (1-5). Drives the
+    // developer over-threshold SP deduction and the QA over-threshold credit.
+    // JSON object keyed by the complexity number as a string ("1".."5").
+    bugThresholdByComplexity: Record<string, number>
   }
   // Per-org BUD lifecycle stage toggles.
   budStages: {
@@ -117,6 +121,7 @@ function emptyState(): ConnectionsState {
       enabled: true,
       framework: 'playwright',
       bugRejectThreshold: 5,
+      bugThresholdByComplexity: { '1': 1, '2': 2, '3': 4, '4': 6, '5': 9 },
     },
     budStages: {
       uatEnabled: true,

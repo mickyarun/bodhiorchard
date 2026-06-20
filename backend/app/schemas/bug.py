@@ -20,7 +20,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 BugSeverityValue = Literal["low", "medium", "high", "critical"]
-BugStatusValue = Literal["open", "in-progress", "resolved", "closed", "blocked"]
+BugStatusValue = Literal["open", "in-progress", "resolved", "closed", "blocked", "rejected"]
 BugTypeValue = Literal["testing", "production"]
 
 
@@ -98,6 +98,7 @@ class BugRead(BaseModel):
     assignee_name: str | None = Field(None, alias="assigneeName")
     comment_count: int = Field(0, alias="commentCount")
     resolved_at: datetime | None = Field(None, alias="resolvedAt")
+    rejected_at: datetime | None = Field(None, alias="rejectedAt")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
 

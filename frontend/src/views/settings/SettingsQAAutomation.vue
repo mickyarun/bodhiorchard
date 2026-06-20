@@ -138,16 +138,52 @@
             style="max-width: 200px"
             hide-details
           />
+
+          <v-divider class="my-4" />
+
+          <div class="text-body-1 font-weight-medium mb-1">Bug Budget by Complexity</div>
+          <AppCallout
+            variant="info"
+            eyebrow="Drives Skill Points"
+            icon="mdi-target"
+            class="mb-3"
+          >
+            The acceptable number of testing bugs for a BUD at each complexity
+            level. Stay at or under the budget and the developers earn the
+            quality bonus; exceed it and they take the over-threshold deduction
+            while the QA who found the extra bugs earns credit.
+          </AppCallout>
+
+          <div class="d-flex flex-wrap ga-3">
+            <v-text-field
+              v-for="level in COMPLEXITY_LEVELS"
+              :key="level"
+              v-model.number="qa.bugThresholdByComplexity[String(level)]"
+              type="number"
+              :label="`Complexity ${level}`"
+              variant="outlined"
+              density="compact"
+              :min="0"
+              :max="100"
+              style="max-width: 130px"
+              hide-details
+            />
+          </div>
         </v-card>
   </SettingsPageShell>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import AppCallout from '@/components/common/AppCallout.vue'
 import SettingsPageShell from '@/components/settings/SettingsPageShell.vue'
 import { useSettingsStore } from '@/stores/settings'
 
 const settingsStore = useSettingsStore()
+
+// Complexity buckets (1 = trivial … 5 = architectural) for the per-complexity
+// bug-budget editor. Mirrors backend QAAutomationSettings.bug_threshold_by_complexity.
+const COMPLEXITY_LEVELS = [1, 2, 3, 4, 5] as const
 
 // Two-way bindings against the store's reactive connections object. Mutating
 // these writes back through the store and is persisted by saveConnections().

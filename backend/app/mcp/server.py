@@ -1084,7 +1084,6 @@ TOOL_HANDLERS: dict[str, Any] = {
     "get_design_system": handle_get_design_system,
     "get_prompt": handle_get_prompt,
     "get_bud_designs": handle_get_bud_designs,
-    "write_bud_design": handle_write_bud_design,
     "code_impact": handle_code_impact,
     "code_query": handle_code_query,
     "code_context": handle_code_context,
@@ -1102,6 +1101,8 @@ AUTH_TOOL_HANDLERS: dict[str, Any] = {
     "create_bud": handle_create_bud,
     "update_bud": handle_update_bud,
     "get_bud_by_id": handle_get_bud_by_id,
+    # Needs the caller identity to attribute the design_updated event.
+    "write_bud_design": handle_write_bud_design,
 }
 
 

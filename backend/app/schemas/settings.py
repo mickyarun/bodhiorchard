@@ -187,6 +187,15 @@ class QAAutomationSettings(BaseModel):
         ge=1,
         le=50,
     )
+    # Acceptable bug count per BUD complexity (1-5). Drives both the
+    # developer "bugs over threshold" SP deduction and the QA "found more
+    # than the threshold" SP credit. Tunable per org; missing complexity
+    # keys fall back to the nearest defined level (see
+    # ``org_settings.get_bug_threshold``).
+    bug_threshold_by_complexity: dict[int, int] = Field(
+        default_factory=lambda: {1: 1, 2: 2, 3: 4, 4: 6, 5: 9},
+        alias="bugThresholdByComplexity",
+    )
 
     model_config = {"populate_by_name": True}
 

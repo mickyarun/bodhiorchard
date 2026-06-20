@@ -55,6 +55,7 @@ class BUDTimelineEventType(StrEnum):
     AI_AGENT_FAILED = "ai_agent_failed"
     CONTENT_UPDATED = "content_updated"
     DESIGN_GENERATED = "design_generated"
+    DESIGN_UPDATED = "design_updated"
     COMMENT = "comment"
     TECH_ARCH_STARTED = "tech_arch_started"
     TECH_ARCH_APPROVED = "tech_arch_approved"

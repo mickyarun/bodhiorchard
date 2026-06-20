@@ -94,6 +94,45 @@ class BUDTodoRepository(BaseRepository[BUDTodo]):
         result = await self._db.execute(stmt)
         return int(result.scalar_one())
 
+    async def completed_assignee_counts(self, bud_id: uuid.UUID) -> dict[uuid.UUID, int]:
+        """Per-assignee count of COMPLETED non-checkpoint todos for a BUD.
+
+        Drives the developer BUD-shipped SP split: each assignee's completed
+        count is the weight (later scaled by the substance judge). Rows with a
+        NULL assignee are excluded. Returns an empty dict when nobody completed
+        an assigned todo (callers then fall back to all-assigned, then commits).
+        """
+        stmt = self._scoped(
+            select(BUDTodo.assignee_id, func.count(BUDTodo.id))
+            .where(
+                BUDTodo.bud_id == bud_id,
+                BUDTodo.status == BUDTodoStatus.COMPLETED.value,
+                BUDTodo.is_checkpoint.is_(False),
+                BUDTodo.assignee_id.is_not(None),
+            )
+            .group_by(BUDTodo.assignee_id)
+        )
+        result = await self._db.execute(stmt)
+        return {row[0]: int(row[1]) for row in result.all() if row[0] is not None}
+
+    async def assigned_distinct_assignees(self, bud_id: uuid.UUID) -> set[uuid.UUID]:
+        """Distinct assignees across ALL assigned non-checkpoint todos (any status).
+
+        The fallback recipient set when no todo reached COMPLETED but work was
+        clearly assigned.
+        """
+        stmt = self._scoped(
+            select(BUDTodo.assignee_id)
+            .where(
+                BUDTodo.bud_id == bud_id,
+                BUDTodo.is_checkpoint.is_(False),
+                BUDTodo.assignee_id.is_not(None),
+            )
+            .distinct()
+        )
+        result = await self._db.execute(stmt)
+        return {row[0] for row in result.all() if row[0] is not None}
+
     async def list_for_bud(self, bud_id: uuid.UUID) -> list[BUDTodo]:
         """Return all TODOs for a BUD ordered by sequence, with assignee eager-loaded."""
         stmt = self._scoped(

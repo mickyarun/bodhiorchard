@@ -46,7 +46,7 @@ from app.schemas.bug import (
 from app.services.bug_linker import embed_and_link_bug
 from app.services.bug_testing_gate import check_bug_threshold
 from app.services.embedding_service import embedding_service
-from app.services.sp_service import award_for_bug_created
+from app.services.sp_qa import award_qa_sp_on_bug_status
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["bugs"])
@@ -84,8 +84,11 @@ async def create_bug(
     - The AI linker auto-fills ``bud_id`` or ``feature_id`` (depending
       on ``bug_type``) when the caller left both blank. See
       :mod:`app.services.bug_linker` for the dispatch rules.
-    - SP attribution runs after persist via
-      :func:`app.services.sp_service.award_for_bug_created`. Best-effort.
+    - SP attribution is NOT applied at bug creation. QA / developer SP is
+      settled at outcome time: per-complexity bug-threshold rules fire at
+      BUD close (:mod:`app.services.sp_qa` / :mod:`app.services.dev_quality_sp`),
+      and the production-bug-closed reward / bug-rejected penalty fire on the
+      bug status transition (:func:`app.services.sp_qa.award_qa_sp_on_bug_status`).
     """
     bud_uuid = uuid.UUID(body.bud_id) if body.bud_id else None
     feature_uuid = uuid.UUID(body.feature_id) if body.feature_id else None
@@ -150,8 +153,6 @@ async def create_bug(
                 bug_id=str(bug.id),
                 exc_info=True,
             )
-
-    await award_for_bug_created(db, current_user, bug)
 
     return await bug_to_read(db, bug, current_user.org_id)
 
@@ -306,10 +307,21 @@ async def update_bug(
     ):
         update["resolved_at"] = datetime.now(UTC)
 
+    # Stamp ``rejected_at`` on first transition to rejected. This marks the
+    # bug as never-valid (vs ``closed`` = fixed) and is the signal the QA
+    # false-positive SP penalty keys off.
+    if "status" in update and update["status"] == BugStatus.REJECTED and not bug.rejected_at:
+        update["rejected_at"] = datetime.now(UTC)
+
     for field, value in update.items():
         setattr(bug, field, value)
     await db.flush()
     await db.refresh(bug)
+
+    # Settle QA SP on a status change: reward a confirmed (closed) production
+    # bug, penalise a rejected one. Best-effort + deduped inside the service.
+    if "status" in update:
+        await award_qa_sp_on_bug_status(db, bug, BugStatus(bug.status))
 
     return await bug_to_read(db, bug, current_user.org_id)
 

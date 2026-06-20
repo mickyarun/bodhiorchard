@@ -34,6 +34,7 @@ from app.schemas.bud_constants import (
 )
 from app.schemas.jobs import ChatJobCreatedResponse, ChatJobPayload, JobState, JobStatusRead
 from app.services.bud_chat_cancel import BUDChatCancelError, cancel_chat
+from app.services.bud_timeline import record_event
 from app.services.job_queue import (
     JOB_BUD_CHAT,
     create_job_with_id,
@@ -329,6 +330,20 @@ async def chat_bud(
         session_id=session_id,
     )
     await db.flush()
+
+    # A design-section chat message is design activity by this user. Record
+    # it so the designer "design contribution" SP rule can credit whoever
+    # iterated the design at BUD close (role checked at award time).
+    if body.section == "design":
+        await record_event(
+            db,
+            current_user.org_id,
+            bud.id,
+            "design_updated",
+            actor_id=current_user.id,
+            actor_name=current_user.name,
+            detail={"source": "chat"},
+        )
 
     payload = ChatJobPayload(
         bud_id=str(bud.id),

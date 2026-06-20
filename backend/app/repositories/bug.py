@@ -107,20 +107,22 @@ class BugRepository(BaseRepository[Bug]):
         result = await self._db.execute(stmt)
         return {row.assignee_id: row.cnt for row in result.all()}
 
-    async def count_testing_bugs_by_reporter(self, reporter_id: uuid.UUID) -> int:
-        """Total testing bugs ever filed by a reporter, all-time.
+    async def distinct_testing_reporters_for_bud(self, bud_id: uuid.UUID) -> set[uuid.UUID]:
+        """Distinct reporters of valid (non-rejected) testing bugs on a BUD.
 
-        Used by the QA SP batch rule — every Nth testing bug awards SP.
-        Tenant-scoped via :meth:`_scoped`.
+        The recipient set for the QA "found more than the threshold" credit —
+        the people who actually filed the testing bugs. Rejected (false-
+        positive) bugs are excluded so a noisy reporter can't pad the count.
         """
         stmt = self._scoped(
-            select(func.count(Bug.id)).where(
-                Bug.reporter_id == reporter_id,
+            select(Bug.reporter_id).where(
+                Bug.bud_id == bud_id,
                 Bug.bug_type == BugType.TESTING,
+                Bug.status != BugStatus.REJECTED,
             )
-        )
+        ).distinct()
         result = await self._db.execute(stmt)
-        return result.scalar() or 0
+        return {row[0] for row in result.all() if row[0] is not None}
 
     async def count_critical_open(self) -> int:
         """Count bugs with severity=critical and status in (open, in_progress)."""
@@ -306,6 +308,24 @@ class BugRepository(BaseRepository[Bug]):
                 Bug.bud_id == bud_id,
                 Bug.status.in_(_OPEN_STATUSES),
             ),
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar() or 0
+
+    async def count_valid_testing_bugs_for_bud(self, bud_id: uuid.UUID) -> int:
+        """Count testing bugs raised against a BUD, excluding rejected ones.
+
+        Rejected (false-positive) bugs are excluded so they neither count
+        against the developer's "bugs over threshold" deduction nor toward
+        the QA "found more than the threshold" credit. Both rules read this
+        single number so they always agree on what counts as a real bug.
+        """
+        stmt = self._scoped(
+            select(func.count(Bug.id)).where(
+                Bug.bud_id == bud_id,
+                Bug.bug_type == BugType.TESTING,
+                Bug.status != BugStatus.REJECTED,
+            )
         )
         result = await self._db.execute(stmt)
         return result.scalar() or 0

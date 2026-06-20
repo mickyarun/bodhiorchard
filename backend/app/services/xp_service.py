@@ -197,6 +197,9 @@ async def check_and_award_streak(
     if row.last_active_date == today:
         return row.streak_count
 
+    # A streak day counts on any activity during the full calendar day — we do
+    # NOT restrict to a working-hours window (a contributor who ships at night
+    # or on a weekend still builds their streak).
     yesterday = today - timedelta(days=1)
 
     if row.last_active_date == yesterday:

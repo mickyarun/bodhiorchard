@@ -50,6 +50,7 @@ class BugStatus(StrEnum):
     RESOLVED = "resolved"
     CLOSED = "closed"
     BLOCKED = "blocked"
+    REJECTED = "rejected"
 
 
 class Bug(BaseModel):
@@ -117,6 +118,7 @@ class Bug(BaseModel):
     linked_pr: Mapped[str | None] = mapped_column(String(500), nullable=True)
     embedding = mapped_column(Vector(384), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
         return f"<Bug(id={self.id}, title={self.title!r})>"

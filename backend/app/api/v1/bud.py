@@ -719,6 +719,7 @@ async def update_bud(
     old_status = bud.status
     old_assignee_id = bud.assignee_id
     old_title = bud.title
+    old_figma_url = bud.figma_url
 
     # Handle manual assignee_id changes (before status logic which may auto-assign)
     if "assignee_id" in update_data:
@@ -765,9 +766,7 @@ async def update_bud(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="Reason required when manually advancing to testing",
                     )
-                from app.services.bud_timeline import record_event as _record
-
-                await _record(
+                await record_event(
                     db,
                     current_user.org_id,
                     bud.id,
@@ -819,8 +818,40 @@ async def update_bud(
                     ),
                 )
 
+            # Record a ``status_override`` when QA leaves testing having
+            # marked any manual case ``skipped`` rather than executing it.
+            # This is the signal the QA "tests not skipped/overridden" SP
+            # rule keys off: a clean exit earns the full credit, a skipped
+            # exit earns the reduced amount. ``record_event`` is imported at
+            # module level (top of file).
+            skipped_cases = [
+                tc
+                for tc in (bud.qa_manual_cases or [])
+                if isinstance(tc, dict) and tc.get("result") == "skipped"
+            ]
+            if skipped_cases:
+                await record_event(
+                    db,
+                    current_user.org_id,
+                    bud.id,
+                    "status_override",
+                    actor_id=current_user.id,
+                    actor_name=current_user.name,
+                    detail={
+                        # ``kind`` discriminates this QA test-skip override from
+                        # the manual code_review→testing advance override (which
+                        # carries ``reason`` instead). The QA "tests not skipped"
+                        # SP rule filters on ``kind == "qa_skip"`` so the two
+                        # status_override shapes never get confused.
+                        "kind": "qa_skip",
+                        "from": old_status.value,
+                        "to": new_status.value,
+                        "phase": "testing",
+                        "skipped_case_ids": [str(tc.get("id", "?")) for tc in skipped_cases],
+                    },
+                )
+
         from app.services.bud_assignment import auto_assign_for_phase
-        from app.services.bud_timeline import record_event
 
         await record_event(
             db,
@@ -866,8 +897,6 @@ async def update_bud(
 
     # Record title change
     if "title" in update_data and update_data["title"] != old_title:
-        from app.services.bud_timeline import record_event
-
         await record_event(
             db,
             current_user.org_id,
@@ -876,6 +905,21 @@ async def update_bud(
             actor_id=current_user.id,
             actor_name=current_user.name,
             detail={"section": "title", "old_title": old_title, "new_title": update_data["title"]},
+        )
+
+    # Record a design-activity event when the Figma link changes. Captures
+    # the actor so the designer "design contribution" SP rule can credit
+    # whoever updated the design at BUD close (role is checked at award
+    # time, not here, so non-designer edits are recorded but not paid).
+    if "figma_url" in update_data and update_data["figma_url"] != old_figma_url:
+        await record_event(
+            db,
+            current_user.org_id,
+            bud.id,
+            "design_updated",
+            actor_id=current_user.id,
+            actor_name=current_user.name,
+            detail={"source": "figma_url"},
         )
 
     old_tech_spec_md = bud.tech_spec_md if "tech_spec_md" in update_data else None

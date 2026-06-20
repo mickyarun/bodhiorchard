@@ -48,12 +48,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument, BUDStatus
 from app.models.dev_activity import DevActivityLog
+from app.models.organization import Organization
 from app.models.pull_request import PullRequest
 from app.services.bud_agent_trigger import (
     create_agent_task_for_stage,
     should_auto_generate_phase,
 )
 from app.services.bud_metrics import compute_and_persist as compute_bud_metrics
+from app.services.sp_designer import award_designer_sp_on_close
+from app.services.sp_developer import award_developer_sp_on_close
+from app.services.sp_pm import award_pm_sp_on_close
+from app.services.sp_qa import award_qa_sp_on_close
+from app.services.sp_tech_arch import award_tech_arch_sp_on_close
 
 logger = structlog.get_logger(__name__)
 
@@ -78,7 +84,6 @@ async def on_bud_closed(
     happens later via auto-close).
     """
     await _award_contributor_xp(db, org_id, bud)
-    await _award_bud_shipped_sp(db, org_id, bud)
 
     if bud.status == BUDStatus.CLOSED:
         # SAVEPOINT so a metrics-compute failure rolls back any side
@@ -117,6 +122,26 @@ async def on_bud_closed(
                     bud_number=bud.bud_number,
                     exc_info=True,
                 )
+
+    # Developer SP runs AFTER the metrics block so the quality bonus can read
+    # the freshly-computed development drift at the CLOSED firing. At the
+    # earlier PROD firing the envelope doesn't exist yet — the shipped split,
+    # review, and threshold awards still land, and quality is granted on the
+    # CLOSED pass (every award dedups on source_ref, so the prod awards aren't
+    # repeated). Recipients come from the BUD's todos/contributors, never the
+    # closer, so a BUD closed by anyone still credits the right people.
+    await award_developer_sp_on_close(db, org_id, bud)
+
+    # QA close rules settle on the CLOSED pass only — like the metrics block —
+    # so the bug-threshold and clean-testing-exit credits read the final,
+    # settled testing outcome once (the PROD firing could read a not-yet-final
+    # bug set, and the awards are monotonic via source_ref dedup).
+    if bud.status == BUDStatus.CLOSED:
+        org = await db.get(Organization, org_id)
+        await award_qa_sp_on_close(db, org_id, bud, org_config=org.config if org else None)
+        await award_pm_sp_on_close(db, org_id, bud)
+        await award_designer_sp_on_close(db, org_id, bud)
+        await award_tech_arch_sp_on_close(db, org_id, bud)
 
 
 async def _award_contributor_xp(
@@ -201,31 +226,3 @@ async def _award_contributor_xp(
             contributors=awarded,
             total_found=len(contributor_ids),
         )
-
-
-async def _award_bud_shipped_sp(
-    db: AsyncSession,
-    org_id: uuid.UUID,
-    bud: BUDDocument,
-) -> None:
-    """Award role-based SP to the BUD assignee when a BUD ships to PROD."""
-    if not bud.assignee_id:
-        return
-
-    try:
-        from app.services.sp_rules import BUD_SHIPPED_SP
-        from app.services.sp_service import award_sp, get_user_role
-
-        role = await get_user_role(db, bud.assignee_id, org_id)
-        sp_amount = BUD_SHIPPED_SP.get(role)
-        if sp_amount:
-            await award_sp(
-                db,
-                user_id=bud.assignee_id,
-                org_id=org_id,
-                amount=sp_amount,
-                source="sp_bud_shipped",
-                source_ref=f"sp_bud_shipped:{bud.bud_number}:{bud.assignee_id}",
-            )
-    except Exception:
-        logger.warning("sp_award_failed_bud_shipped", exc_info=True)

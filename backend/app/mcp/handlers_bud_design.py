@@ -26,10 +26,12 @@ from typing import Any
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.mcp.auth import MCPAuthResult
 from app.mcp.handler_utils import require_non_empty
 from app.models.bud import BUDDesignStatus
 from app.models.organization import Organization
 from app.repositories.bud import BUDDesignRepository
+from app.services.bud_timeline import record_event
 from app.services.html_sanitizer import sanitize_design_html
 
 logger = structlog.get_logger(__name__)
@@ -123,7 +125,7 @@ async def handle_get_bud_designs(
 
 async def handle_write_bud_design(
     db: AsyncSession,
-    org: Organization,
+    auth: MCPAuthResult,
     params: dict[str, Any],
 ) -> dict[str, Any]:
     """Persist an iterated wireframe HTML for a BUD/repo design row.
@@ -140,7 +142,13 @@ async def handle_write_bud_design(
        by ``job_design`` when the row doesn't exist yet.
 
     ``notes`` are optional free-form override text.
+
+    Records a ``design_updated`` timeline event crediting the MCP token
+    owner so the designer "design contribution" SP rule can attribute the
+    work at BUD close. Agent-driven writes (no token user) record the event
+    with a NULL actor and are simply not credited.
     """
+    org = auth.org
     error = require_non_empty(params, "bud_id", "html")
     if error:
         return error
@@ -208,6 +216,18 @@ async def handle_write_bud_design(
             notes=notes,
         )
         await db.commit()
+
+    # Credit the human who iterated the design (NULL for agent-driven writes).
+    await record_event(
+        db,
+        org.id,
+        bud_uuid,
+        "design_updated",
+        actor_id=auth.user.id if auth.user else None,
+        actor_name=auth.user.name if auth.user else None,
+        detail={"source": "mcp"},
+    )
+    await db.commit()
 
     logger.info(
         "mcp_write_bud_design",

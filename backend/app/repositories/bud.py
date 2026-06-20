@@ -409,6 +409,20 @@ class BUDRepository(BaseRepository[BUDDocument]):
         result = await self._db.execute(stmt)
         return [(row.bud_number, row.title, row.status) for row in result.all()]
 
+    async def list_full_in_statuses(self, statuses: list[BUDStatus]) -> list[BUDDocument]:
+        """Full BUD rows in any of ``statuses``, ordered by bud_number.
+
+        Used by the developer-SP backfill to re-run the close-time awards
+        over already-shipped BUDs (idempotent via ``source_ref``).
+        """
+        stmt = self._scoped(
+            select(BUDDocument)
+            .where(BUDDocument.status.in_(statuses))
+            .order_by(BUDDocument.bud_number)
+        )
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
     async def list_lagging_in_statuses(
         self, statuses: list[BUDStatus]
     ) -> list[tuple[int, str | None, BUDStatus]]:
