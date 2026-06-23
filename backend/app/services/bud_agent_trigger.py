@@ -20,11 +20,15 @@ and triage approval flows (Slack + UI).
 """
 
 import uuid
+from typing import TYPE_CHECKING
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument
+
+if TYPE_CHECKING:
+    from app.models.bud_agent_task import BUDAgentTask
 
 logger = structlog.get_logger(__name__)
 
@@ -53,7 +57,7 @@ async def create_agent_task_for_stage(
     *,
     triggered_by: uuid.UUID | None = None,
     force: bool = False,
-) -> None:
+) -> "BUDAgentTask | None":
     """Look up stage mapping and create an agent task if configured.
 
     Args:
@@ -63,6 +67,14 @@ async def create_agent_task_for_stage(
         db: Async database session.
         triggered_by: Optional user UUID who triggered the transition.
         force: If True, skip the content-exists check (used on initial BUD creation).
+
+    Returns:
+        The enqueued ``BUDAgentTask``, or ``None`` when the call
+        short-circuited (no stage mapping, mapping disabled, output
+        already has content, or an agent is already running). Callers
+        that need to confirm a task actually started — e.g. a user-facing
+        regenerate endpoint — branch on this; the fire-and-forget
+        transition callers ignore it.
     """
     from app.agents.skill_mapping import BUD_STAGE_AGENT_TYPE, resolve_skill_for_agent
     from app.models.bud import BUDStatus
@@ -74,12 +86,12 @@ async def create_agent_task_for_stage(
     stage_repo = AgentSkillBudStageRepository(db, org_id=org_id)
     mappings = await stage_repo.get_for_status(bud_status)
     if not mappings:
-        return
+        return None
 
     # Trigger first enabled mapping (pipeline: execution_order=1)
     first = next((m for m in mappings if m.enabled), None)
     if not first:
-        return
+        return None
 
     # Skip if the output section already has content — prevents re-runs on
     # status back-and-forth. Callers pass force=True on initial creation
@@ -94,14 +106,14 @@ async def create_agent_task_for_stage(
                 status=bud_status,
                 section=output_section,
             )
-            return
+            return None
 
     # Skip if an agent is already running for this BUD
     from app.repositories.bud_agent_task import BUDAgentTaskRepository
 
     task_repo = BUDAgentTaskRepository(db, org_id=org_id)
     if await task_repo.get_active_for_bud(bud.id):
-        return
+        return None
 
     # Resolve the skill that should actually run: per-BUD override
     # (set via the create-BUD Advanced Settings) > org default
@@ -164,3 +176,4 @@ async def create_agent_task_for_stage(
         task_type=bud_status,
         skill_id=str(first.skill_id),
     )
+    return task

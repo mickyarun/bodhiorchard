@@ -65,6 +65,7 @@ export function useBudLearning() {
   const learning = ref<BudLearning | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
+  const regenerating = ref(false)
 
   async function fetchLearning(budId: string): Promise<void> {
     loading.value = true
@@ -87,5 +88,24 @@ export function useBudLearning() {
     }
   }
 
-  return { learning, loading, error, fetchLearning }
+  // Re-run the post-close Learning Agent. Resolves once the job is
+  // accepted (202) — the recap itself lands asynchronously, and the
+  // parent's `bud:{id}:activity` → `learning_recorded` subscription
+  // triggers the eventual `fetchLearning` refresh. Throws on 4xx so the
+  // panel can surface why nothing ran (e.g. 409 not-closed / no agent).
+  async function regenerateLearning(budId: string): Promise<void> {
+    regenerating.value = true
+    error.value = null
+    try {
+      await api.post(`/v1/buds/${budId}/learning/regenerate`)
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      error.value = detail || (err as Error).message || 'Failed to regenerate learning'
+      throw err
+    } finally {
+      regenerating.value = false
+    }
+  }
+
+  return { learning, loading, error, regenerating, fetchLearning, regenerateLearning }
 }

@@ -228,12 +228,17 @@ async def _bud_response(
             "metadata": latest_failure.metadata_ or {},
         }
 
-    # ``has_learning`` is a cheap tab-visibility flag: the BUD detail
-    # page hides the "Learnings" tab when no feature_learning row has a
-    # retrospective yet. The full markdown is fetched lazily via
-    # GET /buds/{id}/learning so the BUD list payload stays small.
+    # ``has_learning`` is a cheap tab-visibility flag. The tab shows once
+    # a feature_learning row carries *either* the metrics envelope or the
+    # retrospective: gating on the recap alone hid the quantitative
+    # metrics (and the regenerate-recap control) whenever the post-close
+    # Learning Agent failed but compute_and_persist succeeded — or vice
+    # versa. The full payload is fetched lazily via GET /buds/{id}/learning
+    # so the BUD list stays small.
     learning_row = await FeatureLearningRepository(db, org_id=org_id).get_for_bud(bud.id)
-    bud_data.has_learning = bool(learning_row and learning_row.retrospective_md)
+    bud_data.has_learning = bool(
+        learning_row and (learning_row.retrospective_md or learning_row.metrics)
+    )
 
     return bud_data
 
@@ -557,6 +562,79 @@ async def get_bud_learning(
         )
         read = read.model_copy(update={"metrics": {**read.metrics, "contributors": contribs}})
     return read
+
+
+@router.post(
+    "/{bud_id}/learning/regenerate",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def regenerate_learning(
+    bud_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Re-run the post-close Learning Agent to (re)generate the recap.
+
+    The Learnings tab exposes this when a recap is missing — the usual
+    cause is a transient ``compute_and_persist`` failure at close that
+    left the ``feature_learnings`` row partial (metrics but no
+    ``retrospective_md``) or absent. The agent attaches its recap to the
+    existing row, or ``set_retrospective`` creates one if metrics never
+    landed.
+
+    Requires the BUD to be closed (learnings are a post-close artifact),
+    the BUD to have opted into close-time AI via
+    ``auto_generate_phases.closed`` (the same External-LLM gate the
+    automatic close path honours — we never spawn server-side LLM work
+    for orgs that bring their own AI tooling), and no agent task in
+    flight. Returns 409 in each of those cases so the FE can surface why
+    nothing ran rather than spin forever waiting on a task that was never
+    created.
+    """
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id_for_update(bud_id)
+    if bud is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+    if bud.status != BUDStatus.CLOSED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Learnings are generated on close (current: {bud.status.value})",
+        )
+    if not should_auto_generate_phase(bud.auto_generate_phases, "closed"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Close-time AI is disabled for this BUD "
+                "(enable auto_generate_phases.closed to generate a recap)"
+            ),
+        )
+
+    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
+    if await task_repo.get_active_for_bud(bud_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot regenerate while an agent task is running",
+        )
+
+    # force=True so the per-section content-exists guard doesn't short
+    # the re-run, and we branch on the returned task: a None means no
+    # enabled ``closed`` stage mapping exists, which is a config gap the
+    # caller should see — not a silent 202 that never produces a recap.
+    task = await create_agent_task_for_stage(
+        bud,
+        str(BUDStatus.CLOSED.value),
+        current_user.org_id,
+        db,
+        triggered_by=current_user.id,
+        force=True,
+    )
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No Learning Agent is configured for the closed stage in this org",
+        )
+    return {"status": "accepted", "bud_id": str(bud_id), "task_id": str(task.id)}
 
 
 # Status transitions QA owns directly via PATCH. Matches the manual-testing

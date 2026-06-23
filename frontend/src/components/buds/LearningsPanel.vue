@@ -27,6 +27,10 @@
 
 <template>
   <div class="learnings-panel">
+    <!-- Cold state. Reachable only if the row is fetched as null while the
+         tab is open (the tab itself is gated on has_learning), so this is
+         purely informational — the regenerate affordance lives on the
+         recap-missing branch below, which is the real entry point. -->
     <AppCallout
       v-if="!learning && !loading"
       variant="info"
@@ -126,23 +130,72 @@
 
       <!-- Retrospective markdown -->
       <section v-if="learning.retrospective_md" class="learnings-panel__section">
-        <h3 class="learnings-panel__section-title">Retrospective</h3>
+        <div class="learnings-panel__section-head">
+          <h3 class="learnings-panel__section-title">Retrospective</h3>
+          <v-btn
+            variant="text"
+            size="x-small"
+            prepend-icon="mdi-refresh"
+            :loading="regenerating"
+            @click="onRegenerate"
+          >
+            Regenerate
+          </v-btn>
+        </div>
         <!-- eslint-disable-next-line vue/no-v-html -->
         <article class="markdown-body markdown-body--numeric" v-html="renderedRetro" />
+      </section>
+
+      <!-- Recap missing (metrics landed but the Learning Agent left no
+           retrospective — usually a transient compute/agent failure at
+           close). Offer a one-click re-run. -->
+      <section v-else class="learnings-panel__section">
+        <h3 class="learnings-panel__section-title">Retrospective</h3>
+        <AppCallout
+          variant="info"
+          eyebrow="No recap"
+          icon="mdi-book-open-page-variant-outline"
+        >
+          The metrics above were captured, but the Learning Agent didn't
+          leave a written recap. Re-run it to generate one.
+        </AppCallout>
+        <div class="learnings-panel__actions">
+          <v-btn
+            variant="tonal"
+            size="small"
+            color="primary"
+            prepend-icon="mdi-refresh"
+            :loading="regenerating"
+            @click="onRegenerate"
+          >
+            Generate retrospective
+          </v-btn>
+          <span v-if="queued" class="learnings-panel__hint">
+            Queued — the recap will appear here once the agent finishes.
+          </span>
+          <span v-else-if="error" class="learnings-panel__hint text-error">{{ error }}</span>
+        </div>
       </section>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import { useBudLearning, type BudLearningPhaseMetric } from '@/composables/useBudLearning'
 import { renderMarkdown } from '@/utils/markdown'
 
 const props = defineProps<{ budId: string; refreshKey?: number }>()
 
-const { learning, loading, fetchLearning } = useBudLearning()
+const { learning, loading, error, regenerating, fetchLearning, regenerateLearning } =
+  useBudLearning()
+
+// Set once the regenerate request is accepted (202). The recap lands
+// asynchronously; the parent's `learning_recorded` socket event bumps
+// `refreshKey`, which re-fetches and reveals the recap — at which point
+// this hint is no longer needed.
+const queued = ref(false)
 
 watch(
   () => [props.budId, props.refreshKey] as const,
@@ -153,6 +206,25 @@ watch(
   },
   { immediate: true },
 )
+
+// Clear the "queued" hint once the recap actually arrives.
+watch(
+  () => learning.value?.retrospective_md,
+  (retro) => {
+    if (retro) queued.value = false
+  },
+)
+
+async function onRegenerate(): Promise<void> {
+  if (regenerating.value) return
+  try {
+    await regenerateLearning(props.budId)
+    queued.value = true
+  } catch {
+    // `error` is set by the composable; surfaced inline below.
+    queued.value = false
+  }
+}
 
 interface PhaseRow extends BudLearningPhaseMetric {
   phase: string
@@ -237,6 +309,26 @@ function driftClass(value: number | null | undefined): string {
   text-transform: uppercase;
   color: rgba(var(--v-theme-on-surface), 0.7);
   margin: 0 0 8px;
+}
+
+.learnings-panel__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.learnings-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.learnings-panel__hint {
+  font-size: 12px;
+  color: rgb(var(--v-theme-on-surface-variant));
 }
 
 .learnings-panel__table {

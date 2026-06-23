@@ -100,11 +100,30 @@ class FeatureLearningRepository(BaseRepository[FeatureLearning]):
         *,
         retrospective_md: str,
         embedding: list[float] | None,
-    ) -> FeatureLearning | None:
-        """Attach the LLM-generated recap + embedding to an existing row."""
+    ) -> FeatureLearning:
+        """Attach the LLM-generated recap + embedding to the BUD's row.
+
+        Creates the row if ``compute_and_persist`` never managed to —
+        e.g. a transient metrics-compute failure at close (a contributor
+        provisioning race, an infra hiccup). The qualitative recap must
+        not be lost just because the quantitative ``metrics`` envelope is
+        absent: ``metrics`` stays NULL and is backfilled by the next
+        successful ``compute_and_persist`` pass (its skip-if-rich guard
+        keys on ``metrics is not None``, so it still runs on this row).
+        """
         row = await self.get_for_bud(bud_id)
         if row is None:
-            return None
+            row = FeatureLearning(
+                org_id=self._org_id,
+                bud_id=bud_id,
+                bug_count=0,
+                retrospective_md=retrospective_md,
+                embedding=embedding,
+            )
+            self._db.add(row)
+            await self._db.flush()
+            await self._db.refresh(row)
+            return row
         row.retrospective_md = retrospective_md
         if embedding is not None:
             row.embedding = embedding

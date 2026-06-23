@@ -862,13 +862,16 @@ async def handle_learning_result(
         retrospective_md=recap_md,
         embedding=embedding,
     )
-    if row is None:
+    if row.metrics is None:
+        # The recap was saved onto a freshly-created row because
+        # compute_and_persist never landed the metrics envelope (a
+        # transient close-time failure). Surface it so the missing
+        # quantitative half stays visible; the next compute pass backfills.
         logger.warning(
-            "learning_result_no_feature_learning_row",
+            "learning_result_metrics_missing",
             bud_id=str(bud_id),
-            note="bud_metrics.compute_and_persist should have created the row first",
+            note="recap persisted; metrics envelope absent — compute likely failed at close",
         )
-        return {"section": "retrospective_md", "output_length": len(recap_md)}
 
     await record_event(
         db,
