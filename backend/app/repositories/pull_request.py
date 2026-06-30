@@ -153,6 +153,21 @@ class PullRequestRepository(BaseRepository[PullRequest]):
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
 
+    async def has_merged_for_bud(self, bud_id: uuid.UUID) -> bool:
+        """True if the BUD has at least one merged PR.
+
+        Used by the estimator as a strong "the code work is done" signal for
+        the development / code_review phases — independent of whether todos
+        were ticked off.
+        """
+        stmt = self._scoped(
+            select(func.count(PullRequest.id)).where(
+                PullRequest.bud_id == bud_id,
+                PullRequest.state == PRState.MERGED,
+            )
+        )
+        return int((await self._db.execute(stmt)).scalar_one()) > 0
+
     async def get_open_for_bud(self, bud_id: uuid.UUID) -> list[PullRequest]:
         """List open (non-merged, non-closed) PRs for a BUD."""
         stmt = self._scoped(

@@ -94,6 +94,28 @@ class BUDTodoRepository(BaseRepository[BUDTodo]):
         result = await self._db.execute(stmt)
         return int(result.scalar_one())
 
+    async def phase_completion(self, bud_id: uuid.UUID, phase: str) -> tuple[int, int]:
+        """Return ``(completed, total)`` non-checkpoint todos for one phase.
+
+        Drives the estimator's progress-aware discount: a phase whose todos
+        are all done shouldn't be re-budgeted at full effort just because the
+        BUD hasn't been transitioned yet. Checkpoints are excluded (they're
+        inert gating rows, not work). A phase with no todos returns ``(0, 0)``
+        so the caller can treat "no signal" distinctly from "nothing done".
+        """
+        stmt = self._scoped(
+            select(
+                func.count().filter(BUDTodo.status == BUDTodoStatus.COMPLETED.value),
+                func.count(),
+            ).where(
+                BUDTodo.bud_id == bud_id,
+                BUDTodo.phase == phase,
+                BUDTodo.is_checkpoint.is_(False),
+            )
+        )
+        row = (await self._db.execute(stmt)).one()
+        return int(row[0]), int(row[1])
+
     async def completed_assignee_counts(self, bud_id: uuid.UUID) -> dict[uuid.UUID, int]:
         """Per-assignee count of COMPLETED non-checkpoint todos for a BUD.
 
