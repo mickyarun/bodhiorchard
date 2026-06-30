@@ -48,7 +48,7 @@ from app.services.estimation_context import (
 )
 from app.services.estimation_engine import monte_carlo_simulate
 from app.services.estimation_gates import gate_pert, gate_turnaround_days
-from app.services.estimation_heuristics import default_pert_spread
+from app.services.estimation_heuristics import default_pert_spread, reconcile_complexity
 from app.services.estimation_llm import llm_pert_estimate
 from app.services.org_settings import get_phase_order
 from app.services.phase_roles import is_gate_phase
@@ -129,7 +129,10 @@ async def estimate_bud_dates(
     )
     if llm_result is not None:
         pert_estimates = llm_result.phases
-        complexity = llm_result.complexity or heuristic_complexity
+        # Trust the LLM's independent rating, bounded to ±1 of the heuristic
+        # so a short spec across many repos (which the heuristic over-scores)
+        # can come back down without letting a hallucinated rating run free.
+        complexity = reconcile_complexity(llm_result.complexity, heuristic_complexity)
     else:
         all_defaults = default_pert_spread(
             heuristic_complexity,

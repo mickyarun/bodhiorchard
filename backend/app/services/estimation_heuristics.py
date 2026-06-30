@@ -35,6 +35,22 @@ _QA_HIGH = 20
 _QA_MEDIUM = 10
 _QA_LOW = 5
 
+# Repo count is a *coordination* signal, not a scope signal on its own: a
+# 4-repo change with a one-paragraph spec and no QA is small work spread
+# thin, not a complex feature. The raw bump below is scaled by how much
+# real scope the content + QA signals show (``_REPO_SCOPE_*``), with a
+# floor so genuine multi-repo coordination still counts for something.
+_REPO_BUMP_HIGH = 2.0  # >= 4 repos
+_REPO_BUMP_MEDIUM = 1.5  # 3 repos
+_REPO_BUMP_LOW = 0.5  # 2 repos
+_REPO_SCOPE_FLOOR = 0.25  # min fraction of the repo bump always credited
+_REPO_SCOPE_FULL_AT = 1.0  # content+QA evidence at which the full bump applies
+
+# The LLM rates complexity independently from the feature's actual
+# substance (which the length/repo heuristic can't see); we keep its
+# rating only within ±this of the heuristic, as a sanity bound.
+_COMPLEXITY_CLAMP = 1
+
 # ``default_pert_spread`` scaling factors. ``complexity / 3`` keeps a
 # complexity-3 BUD at the per-phase baseline; queue and workload each
 # stretch the estimate proportionally to load.
@@ -62,29 +78,57 @@ def compute_complexity(
     content length is a weak signal because AI-generated specs are
     verbose even for trivial work.
     """
-    score = 1.0
-
+    content_bump = 0.0
     content_len = requirements_len + tech_spec_len
     if content_len > _CONTENT_LEN_HIGH:
-        score += 1.0
+        content_bump = 1.0
     elif content_len > _CONTENT_LEN_MEDIUM:
-        score += 0.5
+        content_bump = 0.5
 
-    if impacted_repo_count >= 4:
-        score += 2.0
-    elif impacted_repo_count >= 3:
-        score += 1.5
-    elif impacted_repo_count >= 2:
-        score += 0.5
-
+    qa_bump = 0.0
     if qa_case_count > _QA_HIGH:
-        score += 1.5
+        qa_bump = 1.5
     elif qa_case_count > _QA_MEDIUM:
-        score += 1.0
+        qa_bump = 1.0
     elif qa_case_count > _QA_LOW:
-        score += 0.5
+        qa_bump = 0.5
 
+    repo_raw = 0.0
+    if impacted_repo_count >= 4:
+        repo_raw = _REPO_BUMP_HIGH
+    elif impacted_repo_count >= 3:
+        repo_raw = _REPO_BUMP_MEDIUM
+    elif impacted_repo_count >= 2:
+        repo_raw = _REPO_BUMP_LOW
+
+    # Scale the repo bump by content+QA scope evidence: a thin-spec change
+    # across many repos stays small; a substantial multi-repo change still
+    # scores high. The floor keeps multi-repo coordination from counting
+    # as exactly zero.
+    scope_signal = content_bump + qa_bump
+    repo_scale = _REPO_SCOPE_FLOOR + (1.0 - _REPO_SCOPE_FLOOR) * min(
+        1.0, scope_signal / _REPO_SCOPE_FULL_AT
+    )
+
+    score = 1.0 + content_bump + qa_bump + repo_raw * repo_scale
     return max(1, min(5, round(score)))
+
+
+def reconcile_complexity(llm_complexity: int | None, heuristic_complexity: int) -> int:
+    """Blend the LLM's independent complexity rating with the heuristic.
+
+    The LLM sees the feature's actual substance the length/repo heuristic
+    cannot (a 4-repo change that is really a one-line version bump, or a
+    short spec hiding deep work). We trust its rating, but only within
+    ``±_COMPLEXITY_CLAMP`` of the heuristic, so neither a hallucinated 5 nor
+    a lazy 1 escapes the signal-based bound. ``None`` (LLM gave no rating)
+    falls back to the heuristic unchanged.
+    """
+    if llm_complexity is None:
+        return heuristic_complexity
+    low = max(1, heuristic_complexity - _COMPLEXITY_CLAMP)
+    high = min(5, heuristic_complexity + _COMPLEXITY_CLAMP)
+    return max(low, min(high, llm_complexity))
 
 
 def default_pert_spread(
