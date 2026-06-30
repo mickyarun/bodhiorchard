@@ -18,8 +18,11 @@ WORKDIR /app
 # Runtime system dependencies for Full Docker mode:
 #   - libpq5         : PostgreSQL client (asyncpg)
 #   - git            : clone/fetch target repos agents will analyze
-#   - nodejs (20.x)  : runs the Claude Code CLI
-#   - claude-code    : Anthropic's CLI; invoked as a subprocess by the backend
+#   - nodejs (20.x)  : runs the agent provider CLIs
+#   - agent CLIs     : claude-code / copilot / codex — invoked as subprocesses
+#                      by the backend. All three are baked in so an org can
+#                      select any provider (Settings → AI Config) without a
+#                      custom image; the active one is chosen at runtime.
 # Code-graph indexing now runs in-process via the Python ``code_indexer``
 # module (graphify-based, MIT) — no npm dependency for that step.
 # curl/gnupg fetch the NodeSource repo key; removed after use.
@@ -28,7 +31,7 @@ RUN apt-get update && \
         libpq5 git openssh-client curl ca-certificates gnupg && \
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
-    npm install -g @anthropic-ai/claude-code@latest && \
+    npm install -g @anthropic-ai/claude-code@latest @github/copilot @openai/codex && \
     apt-get purge -y --auto-remove curl gnupg && \
     rm -rf /var/lib/apt/lists/* /root/.npm && \
     groupadd --gid 1000 appuser && \

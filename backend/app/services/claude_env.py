@@ -33,8 +33,9 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import decrypt_secret
-from app.models.organization import Organization
+from app.models.organization import AIProvider, Organization
 from app.repositories.organization import OrganizationRepository
+from app.services.ai_runner.capabilities import AuthModeSpec, capabilities_for
 
 logger = structlog.get_logger(__name__)
 
@@ -54,46 +55,83 @@ CREDENTIAL_AUTH_MODES = frozenset({AUTH_MODE_API_KEY, AUTH_MODE_SUBSCRIPTION})
 _API_KEY_ENV_VAR = "ANTHROPIC_API_KEY"
 _OAUTH_ENV_VAR = "CLAUDE_CODE_OAUTH_TOKEN"
 
+# Every credential env var the app injects, across all providers. On apply we
+# clear the ones the active mode doesn't set, so a deselected provider's token
+# can't shadow the active one. GH_TOKEN is deliberately EXCLUDED — it's the
+# host's git/gh credential, never app-managed, so we must not clear it.
+_MANAGED_CRED_VARS = frozenset(
+    {_API_KEY_ENV_VAR, _OAUTH_ENV_VAR, "COPILOT_GITHUB_TOKEN", "OPENAI_API_KEY"}
+)
+
+def _provider_of(org: Organization) -> AIProvider:
+    """The org's selected provider, defaulting to Claude."""
+    return org.ai_provider or AIProvider.claude
+
+
+def _auth_mode_spec(provider: AIProvider, mode: str) -> AuthModeSpec | None:
+    """Find the provider's spec for ``mode`` (None if it doesn't support it)."""
+    for spec in capabilities_for(provider).auth_modes:
+        if spec.value == mode:
+            return spec
+    return None
+
+
+def _host_preserved_vars(provider: AIProvider) -> set[str]:
+    """Env vars the host/compose owns for ``provider`` — never cleared.
+
+    Sourced from the provider's ``host`` auth-mode ``env_vars`` so the
+    capability table is the single source of truth (e.g. a compose-level
+    ``ANTHROPIC_API_KEY`` for Claude, the host's ``GH_TOKEN`` for Copilot).
+    """
+    host_spec = _auth_mode_spec(provider, AUTH_MODE_HOST)
+    return set(host_spec.env_vars) if host_spec else set()
+
 
 def apply_claude_auth_to_env(org: Organization) -> None:
-    """Push an organization's Claude auth choice into ``os.environ``.
+    """Push an organization's AI-provider auth choice into ``os.environ``.
 
-    - ``api_key`` mode with a stored key → set ``ANTHROPIC_API_KEY``.
-    - ``subscription`` mode with a stored token → set ``CLAUDE_CODE_OAUTH_TOKEN``.
-    - ``host`` mode → leave whatever the process started with (compose-level
-      env, or the host's ``claude login`` session in Hybrid mode) untouched.
+    Provider-aware: the env var the stored credential maps to is looked up
+    from the provider's capability table (Claude → ``ANTHROPIC_API_KEY`` /
+    ``CLAUDE_CODE_OAUTH_TOKEN``; Copilot → ``COPILOT_GITHUB_TOKEN``; Codex →
+    ``OPENAI_API_KEY``). Applying a credentialed mode clears the other
+    providers' app-managed vars so a deselected token can't shadow the active
+    one. ``host`` mode leaves the process env alone except for clearing
+    app-managed vars the host doesn't own (a compose ``ANTHROPIC_API_KEY`` for
+    Claude, or the host's ``GH_TOKEN`` for Copilot, are preserved).
 
-    api_key and subscription are mutually exclusive: applying one clears the
-    other's env var so a leftover/compose ``ANTHROPIC_API_KEY`` can't shadow a
-    subscription token (the CLI prefers the API key when both are present).
-
-    Callers should invoke this on app startup and again whenever the org's
-    setting is changed via the Settings UI.
+    The function name is kept for back-compat with existing call sites.
+    Invoke on app startup and whenever the org's setting changes.
     """
-    if org.claude_auth_mode in CREDENTIAL_AUTH_MODES and org.claude_api_key_encrypted:
+    provider = _provider_of(org)
+    spec = _auth_mode_spec(provider, org.claude_auth_mode)
+
+    if spec is not None and spec.requires_secret and org.claude_api_key_encrypted:
         decrypted = decrypt_secret(org.claude_api_key_encrypted)
         if decrypted:
-            # Don't log any portion of the secret — even a short prefix is a
-            # partial credential that shouldn't reach centralized log aggregators.
-            if org.claude_auth_mode == AUTH_MODE_SUBSCRIPTION:
-                os.environ[_OAUTH_ENV_VAR] = decrypted
-                os.environ.pop(_API_KEY_ENV_VAR, None)
-                logger.info("claude_env_subscription_applied", org_id=str(org.id))
-            else:
-                os.environ[_API_KEY_ENV_VAR] = decrypted
-                os.environ.pop(_OAUTH_ENV_VAR, None)
-                logger.info("claude_env_api_key_applied", org_id=str(org.id))
+            # Never log any portion of the secret — even a prefix is a partial
+            # credential that shouldn't reach log aggregators.
+            for var in spec.env_vars:
+                os.environ[var] = decrypted
+            for var in _MANAGED_CRED_VARS - set(spec.env_vars):
+                os.environ.pop(var, None)
+            logger.info(
+                "ai_env_credential_applied",
+                org_id=str(org.id),
+                provider=provider.value,
+                mode=org.claude_auth_mode,
+            )
             return
 
-    # host mode (or a credentialed mode with an empty/corrupt secret): don't
-    # override the process env — a compose/host ANTHROPIC_API_KEY stays
-    # authoritative. But clear any OAuth token we injected on a prior call: the
-    # app is its only source, so a leftover would keep a deselected subscription
-    # token authenticating agent runs.
-    os.environ.pop(_OAUTH_ENV_VAR, None)
+    # host mode (or a credentialed mode with an empty/corrupt secret): clear
+    # app-managed vars the host doesn't own for this provider, but preserve
+    # host/compose-supplied credentials (e.g. Claude's ANTHROPIC_API_KEY).
+    preserve = _host_preserved_vars(provider)
+    for var in _MANAGED_CRED_VARS - preserve:
+        os.environ.pop(var, None)
     logger.info(
-        "claude_env_host_mode",
+        "ai_env_host_mode",
         org_id=str(org.id),
+        provider=provider.value,
         has_process_env_key=_API_KEY_ENV_VAR in os.environ,
     )
 

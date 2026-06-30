@@ -21,11 +21,19 @@
         <v-icon icon="mdi-console" size="22" />
       </v-avatar>
       <div class="flex-grow-1">
-        <div class="text-body-1 font-weight-medium">Claude Code</div>
+        <div class="text-body-1 font-weight-medium">AI Provider</div>
         <div class="text-caption text-medium-emphasis">
-          Required for codebase-aware agents. Configure how the backend authenticates with Claude.
+          Choose which agent CLI runs codebase-aware tasks and how the backend authenticates with it.
         </div>
       </div>
+      <v-chip
+        v-if="deploymentMode"
+        :color="deploymentMode === 'docker' ? 'info' : 'success'"
+        variant="tonal" size="small"
+        :prepend-icon="deploymentMode === 'docker' ? 'mdi-docker' : 'mdi-laptop'"
+      >
+        {{ deploymentMode === 'docker' ? 'Full Docker' : 'Hybrid' }}
+      </v-chip>
       <v-chip
         v-if="claudeStatus === 'passed'"
         color="success" variant="flat" size="small"
@@ -43,6 +51,38 @@
     </div>
 
     <v-divider class="my-4" />
+
+    <div class="text-body-2 font-weight-medium mb-3">Provider</div>
+    <div role="radiogroup" aria-label="AI provider" class="auth-mode-tiles mb-4">
+      <button
+        v-for="prov in providerOptions"
+        :key="prov.value"
+        type="button"
+        role="radio"
+        :aria-checked="provider === prov.value"
+        class="auth-tile"
+        :class="{ 'auth-tile--active': provider === prov.value }"
+        @click="selectProvider(prov.value)"
+        @keydown.space.prevent="selectProvider(prov.value)"
+      >
+        <div class="auth-tile__indicator">
+          <v-icon
+            :icon="provider === prov.value ? 'mdi-radiobox-marked' : 'mdi-radiobox-blank'"
+            :color="provider === prov.value ? 'primary' : undefined"
+            size="20"
+          />
+        </div>
+        <div class="auth-tile__body">
+          <div class="auth-tile__header">
+            <v-icon :icon="prov.icon" size="18" class="auth-tile__icon" />
+            <span class="text-body-2 font-weight-medium">{{ prov.title }}</span>
+          </div>
+          <div class="text-caption text-medium-emphasis auth-tile__desc">
+            Runs via the <code>{{ prov.cli }}</code> CLI.
+          </div>
+        </div>
+      </button>
+    </div>
 
     <div class="text-body-2 font-weight-medium mb-3">Authentication mode</div>
     <div role="radiogroup" aria-label="Authentication mode" class="auth-mode-tiles mb-4">
@@ -70,10 +110,7 @@
             <span class="text-body-2 font-weight-medium">{{ opt.title }}</span>
             <v-chip
               v-if="opt.badge"
-              size="x-small"
-              variant="tonal"
-              color="primary"
-              class="auth-tile__badge"
+              size="x-small" variant="tonal" color="primary" class="auth-tile__badge"
             >
               {{ opt.badge }}
             </v-chip>
@@ -86,11 +123,11 @@
     </div>
 
     <v-expand-transition>
-      <div v-if="authMode === 'api_key'" class="mb-3">
+      <div v-if="requiresSecret" class="mb-3">
         <v-text-field
-          v-model="apiKey"
-          label="Anthropic API key"
-          :placeholder="hasStoredKey ? '•••••••••••••••• (stored — leave blank to keep)' : 'sk-ant-…'"
+          v-model="credential"
+          :label="credentialLabel"
+          :placeholder="hasStoredCredential ? '•••••••••••••••• (stored — leave blank to keep)' : credentialPlaceholder"
           type="password"
           variant="outlined"
           density="compact"
@@ -98,57 +135,23 @@
           hide-details
           class="mb-2"
         />
-        <div class="text-caption text-medium-emphasis">
-          Generate one at
-          <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">
-            console.anthropic.com
-          </a>.
-        </div>
-      </div>
-    </v-expand-transition>
-
-    <v-expand-transition>
-      <div v-if="authMode === 'subscription'" class="mb-3">
-        <v-text-field
-          v-model="oauthToken"
-          label="Claude Code OAuth token"
-          :placeholder="hasStoredKey ? '•••••••••••••••• (stored — leave blank to keep)' : 'sk-ant-oat…'"
-          type="password"
-          variant="outlined"
-          density="compact"
-          autocomplete="off"
-          hide-details
-          class="mb-2"
-        />
-        <div class="text-caption text-medium-emphasis">
-          Generate one with <code>npx @anthropic-ai/claude-code setup-token</code>.
-          From <strong>June 15, 2026</strong>, subscription agent runs draw from a
-          monthly Agent-SDK credit — use an API key, or run the backend on your host
-          (<a
-            href="https://github.com/mickyarun/bodhiorchard#hybrid-mode-hot-reload"
-            target="_blank"
-            rel="noopener"
-          >hybrid setup</a>), for unmetered use.
+        <div v-if="docsUrl" class="text-caption text-medium-emphasis">
+          Credentials docs:
+          <a :href="docsUrl" target="_blank" rel="noopener">{{ docsUrl }}</a>.
         </div>
       </div>
     </v-expand-transition>
 
     <div class="d-flex ga-2 mt-2 flex-wrap">
       <v-btn
-        color="primary"
-        variant="flat"
-        prepend-icon="mdi-content-save"
-        :loading="saving"
-        :disabled="!canSave"
-        @click="save"
+        color="primary" variant="flat" prepend-icon="mdi-content-save"
+        :loading="saving" :disabled="!canSave" @click="save"
       >
         Save
       </v-btn>
       <v-btn
-        variant="tonal"
-        prepend-icon="mdi-connection"
-        :loading="claudeStatus === 'checking'"
-        @click="checkClaudeCode"
+        variant="tonal" prepend-icon="mdi-connection"
+        :loading="claudeStatus === 'checking'" @click="checkConnection"
       >
         {{ claudeStatus === 'idle' ? 'Test connection' : 'Retest' }}
       </v-btn>
@@ -158,9 +161,8 @@
       <div v-if="claudeStatus === 'failed'" class="mt-3">
         <v-alert type="warning" variant="tonal" density="compact">
           <div class="text-body-2 mb-2">{{ claudeError }}</div>
-          <div v-if="showInstallHint" class="text-caption">
-            Install Claude Code:
-            <code>curl -fsSL https://claude.ai/install.sh | bash</code>
+          <div v-if="showInstallHint && installHint" class="text-caption">
+            <code>{{ installHint }}</code>
           </div>
         </v-alert>
       </div>
@@ -181,71 +183,152 @@
 import { computed, onMounted, ref } from 'vue'
 import api from '@/services/api'
 
-type AuthMode = 'host' | 'api_key' | 'subscription'
 type Status = 'idle' | 'checking' | 'passed' | 'failed'
 
-const authMode = ref<AuthMode>('host')
-const apiKey = ref('')
-const oauthToken = ref('')
-const hasStoredKey = ref(false)
-const saving = ref(false)
+interface AuthModeSpec { value: string; label: string; requires_secret: boolean }
+interface ProviderCaps {
+  provider: string
+  cli: string
+  auth_modes: AuthModeSpec[]
+  install_hint: string
+  docs_url: string
+}
 
-const authOptions: ReadonlyArray<{
-  value: AuthMode
-  title: string
-  icon: string
-  description: string
-  badge?: string
-}> = [
-  {
-    value: 'host',
-    title: 'Hybrid / host login',
-    icon: 'mdi-laptop',
-    badge: 'Recommended',
-    description:
-      "Uses the host machine's claude login session or an ANTHROPIC_API_KEY env var. Nothing is stored in the database.",
-  },
-  {
-    value: 'api_key',
-    title: 'API key (Full Docker)',
-    icon: 'mdi-key-variant',
-    description:
-      'Paste an Anthropic API key. Stored encrypted with Fernet AES-128 and applied to every agent run.',
-  },
-  {
-    value: 'subscription',
-    title: 'Claude Code subscription',
-    icon: 'mdi-account-key-outline',
-    description:
-      'Paste an OAuth token from `claude setup-token`. Uses your Claude Pro/Max plan, stored encrypted.',
-  },
-]
+const PROVIDER_META: Record<string, { title: string; icon: string }> = {
+  claude: { title: 'Claude', icon: 'mdi-robot-happy-outline' },
+  copilot: { title: 'GitHub Copilot', icon: 'mdi-github' },
+  codex: { title: 'OpenAI Codex', icon: 'mdi-alpha-c-box-outline' },
+}
+const MODE_META: Record<string, { icon: string }> = {
+  host: { icon: 'mdi-laptop' },
+  api_key: { icon: 'mdi-key-variant' },
+  subscription: { icon: 'mdi-account-key-outline' },
+}
+
+const providersCaps = ref<ProviderCaps[]>([])
+const deploymentMode = ref<string>('')
+const provider = ref<string>('claude')
+const loadedProvider = ref<string>('claude')
+const authMode = ref<string>('host')
+const credential = ref('')
+const hasStoredCredential = ref(false)
+const saving = ref(false)
 
 const claudeStatus = ref<Status>('idle')
 const claudeError = ref('')
 const claudeVersion = ref('')
 const showInstallHint = ref(false)
 
-const canSave = computed(() => {
-  if (authMode.value === 'host') return true
-  // Credentialed modes: require a fresh secret unless one is already stored.
-  const entered = authMode.value === 'subscription' ? oauthToken.value : apiKey.value
-  return hasStoredKey.value || entered.trim().length > 0
+const currentCaps = computed<ProviderCaps | undefined>(() =>
+  providersCaps.value.find((p) => p.provider === provider.value),
+)
+
+const providerOptions = computed(() =>
+  providersCaps.value.map((p) => ({
+    value: p.provider,
+    title: PROVIDER_META[p.provider]?.title ?? p.provider,
+    icon: PROVIDER_META[p.provider]?.icon ?? 'mdi-robot',
+    cli: p.cli,
+  })),
+)
+
+function modeDescription(mode: AuthModeSpec): string {
+  if (!mode.requires_secret) {
+    return 'Inherits the host login / process environment. Nothing is stored in the database.'
+  }
+  if (mode.value === 'subscription') {
+    return 'Paste an OAuth token from `claude setup-token`. Uses your Claude plan, stored encrypted.'
+  }
+  return `Paste a ${mode.label}. Stored encrypted (Fernet AES-128) and applied to every agent run.`
+}
+
+const authOptions = computed(() => {
+  const caps = currentCaps.value
+  if (!caps) return []
+  // Full Docker can't reach a host login session — hide the host tile there.
+  const modes = caps.auth_modes.filter(
+    (m) => !(deploymentMode.value === 'docker' && m.value === 'host'),
+  )
+  const recommended = recommendedMode(caps)
+  return modes.map((m) => ({
+    value: m.value,
+    title: m.label,
+    icon: MODE_META[m.value]?.icon ?? 'mdi-key',
+    description: modeDescription(m),
+    badge: m.value === recommended ? 'Recommended' : undefined,
+  }))
 })
+
+function recommendedMode(caps: ProviderCaps): string {
+  if (deploymentMode.value === 'docker') {
+    const cred = caps.auth_modes.find((m) => m.requires_secret)
+    return cred?.value ?? caps.auth_modes[0]?.value ?? 'api_key'
+  }
+  const host = caps.auth_modes.find((m) => m.value === 'host')
+  return host?.value ?? caps.auth_modes[0]?.value ?? 'host'
+}
+
+const selectedMode = computed<AuthModeSpec | undefined>(() =>
+  currentCaps.value?.auth_modes.find((m) => m.value === authMode.value),
+)
+const requiresSecret = computed(() => selectedMode.value?.requires_secret ?? false)
+const credentialLabel = computed(() => selectedMode.value?.label ?? 'Credential')
+const credentialPlaceholder = computed(() => {
+  if (provider.value === 'copilot') return 'ghp_…'
+  if (provider.value === 'codex') return 'sk-…'
+  return authMode.value === 'subscription' ? 'sk-ant-oat…' : 'sk-ant-…'
+})
+const docsUrl = computed(() => currentCaps.value?.docs_url ?? '')
+const installHint = computed(() => currentCaps.value?.install_hint ?? '')
+
+const canSave = computed(() => {
+  if (!requiresSecret.value) return true
+  // A stored credential only counts when we haven't switched provider —
+  // a stored Anthropic key can't be reused as a GitHub/OpenAI token.
+  const storedUsable = hasStoredCredential.value && provider.value === loadedProvider.value
+  return storedUsable || credential.value.trim().length > 0
+})
+
+function selectProvider(value: string): void {
+  if (provider.value === value) return
+  provider.value = value
+  credential.value = ''
+  const caps = providersCaps.value.find((p) => p.provider === value)
+  if (caps) authMode.value = recommendedMode(caps)
+}
 
 onMounted(async () => {
   try {
-    const { data } = await api.get('/v1/settings/claude')
-    authMode.value = data.auth_mode
-    hasStoredKey.value = data.has_api_key
+    const { data } = await api.get('/v1/settings/ai/capabilities')
+    providersCaps.value = data.providers ?? []
+    deploymentMode.value = data.deployment_mode ?? ''
+    provider.value = data.current_provider ?? 'claude'
+    loadedProvider.value = provider.value
   } catch (err: unknown) {
-    // 401 is expected here during first-time setup (no JWT yet). Anything
-    // else — 500, network error — is worth leaving a breadcrumb for when
-    // the Settings card quietly stays on defaults.
+    const axiosErr = err as { response?: { status?: number } }
+    if (axiosErr?.response?.status !== 401) {
+      console.warn('[SettingsClaudeCode] failed to load capabilities', err)
+    }
+  }
+  try {
+    const { data } = await api.get('/v1/settings/claude')
+    provider.value = data.provider ?? provider.value
+    loadedProvider.value = provider.value
+    authMode.value = data.auth_mode
+    hasStoredCredential.value = data.has_api_key
+  } catch (err: unknown) {
     const axiosErr = err as { response?: { status?: number } }
     if (axiosErr?.response?.status !== 401) {
       console.warn('[SettingsClaudeCode] failed to load state', err)
     }
+  }
+  // Reconcile: a stored mode invalid for the current provider × deployment
+  // (e.g. a host-configured org now running in Full Docker, where the host
+  // tile is hidden) would leave no tile selected. Fall back to the
+  // recommended mode so the selection is always valid.
+  const caps = currentCaps.value
+  if (caps && !authOptions.value.some((o) => o.value === authMode.value)) {
+    authMode.value = recommendedMode(caps)
   }
 })
 
@@ -253,53 +336,45 @@ async function save(): Promise<void> {
   saving.value = true
   claudeError.value = ''
   try {
-    const payload: { auth_mode: AuthMode; api_key?: string; oauth_token?: string } = {
-      auth_mode: authMode.value,
-    }
-    if (authMode.value === 'api_key' && apiKey.value.trim().length > 0) {
-      payload.api_key = apiKey.value.trim()
-    }
-    if (authMode.value === 'subscription' && oauthToken.value.trim().length > 0) {
-      payload.oauth_token = oauthToken.value.trim()
+    const payload: {
+      provider: string
+      auth_mode: string
+      api_key?: string
+      oauth_token?: string
+    } = { provider: provider.value, auth_mode: authMode.value }
+    const secret = credential.value.trim()
+    if (requiresSecret.value && secret.length > 0) {
+      if (authMode.value === 'subscription') payload.oauth_token = secret
+      else payload.api_key = secret
     }
     const { data } = await api.patch('/v1/settings/claude', payload)
-    hasStoredKey.value = data.has_api_key
-    apiKey.value = ''
-    oauthToken.value = ''
-    await checkClaudeCode()
+    provider.value = data.provider
+    loadedProvider.value = data.provider
+    hasStoredCredential.value = data.has_api_key
+    credential.value = ''
+    await checkConnection()
   } catch (err: unknown) {
     claudeStatus.value = 'failed'
     const axiosErr = err as { response?: { data?: { detail?: string } } }
     claudeError.value = axiosErr?.response?.data?.detail
-      || 'Failed to save Claude settings. Try again, and check the console for details.'
+      || 'Failed to save AI settings. Try again, and check the console for details.'
     console.warn('[SettingsClaudeCode] save failed', err)
   } finally {
     saving.value = false
   }
 }
 
-async function checkClaudeCode(): Promise<void> {
+async function checkConnection(): Promise<void> {
   claudeStatus.value = 'checking'
   claudeError.value = ''
   claudeVersion.value = ''
   showInstallHint.value = false
-
-  // Try the authenticated, org-aware endpoint first. Fall back to the
-  // unauthenticated setup check for first-time setup flows.
   try {
     const { data } = await api.post('/v1/settings/claude/test', null, { timeout: 120_000 })
     applyTestResult(data)
-    return
-  } catch (err) {
-    console.debug('[SettingsClaudeCode] authed test endpoint failed, trying setup fallback', err)
-  }
-
-  try {
-    const { data } = await api.get('/setup/check-claude', { timeout: 120_000 })
-    applyTestResult(data)
   } catch (err) {
     claudeStatus.value = 'failed'
-    claudeError.value = 'Could not reach the server to test Claude Code.'
+    claudeError.value = 'Could not reach the server to test the provider CLI.'
     console.warn('[SettingsClaudeCode] test failed', err)
   }
 }
@@ -313,7 +388,7 @@ function applyTestResult(data: {
 }): void {
   if (!data.cli_available) {
     claudeStatus.value = 'failed'
-    claudeError.value = data.error || 'Claude CLI not found in the backend.'
+    claudeError.value = data.error || 'Provider CLI not found in the backend.'
     showInstallHint.value = true
     return
   }

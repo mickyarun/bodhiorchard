@@ -30,17 +30,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.core.encryption import encrypt_secret
-from app.models.organization import Organization
+from app.models.organization import AIProvider, Organization
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
+from app.services.ai_runner.capabilities import capabilities_for
+from app.services.ai_runner.connection_check import check_provider_connection
 from app.services.claude_env import (
     AUTH_MODE_API_KEY,
     AUTH_MODE_HOST,
     AUTH_MODE_SUBSCRIPTION,
-    VALID_AUTH_MODES,
     apply_claude_auth_to_env,
 )
-from app.services.claude_runner import test_claude_connection
 
 logger = structlog.get_logger(__name__)
 
@@ -48,24 +48,40 @@ router = APIRouter(tags=["settings-claude"])
 
 
 class ClaudeSettingsRead(BaseModel):
-    """Current Claude auth state for the org — key itself is never returned."""
+    """Current AI-provider auth state for the org — key itself never returned."""
 
+    provider: str
     auth_mode: str
     has_api_key: bool
 
 
 class ClaudeSettingsUpdate(BaseModel):
-    """Update the org's Claude auth mode and (optionally) its credential.
+    """Update the org's AI provider, auth mode, and (optionally) its credential.
 
-    ``api_key`` is consumed in ``api_key`` mode, ``oauth_token`` in
-    ``subscription`` mode. Omitting the credential while staying in the same
-    mode keeps the stored one; switching modes requires the new credential.
-    Switching to ``host`` mode clears the stored credential.
+    ``provider`` selects the agent CLI (claude / copilot / codex). ``api_key``
+    is consumed in ``api_key`` mode (an Anthropic key, GitHub token, or OpenAI
+    key depending on provider), ``oauth_token`` in Claude ``subscription`` mode.
+    Omitting the credential while staying in the same mode keeps the stored one;
+    switching modes requires the new credential. ``host`` mode clears it.
     """
 
-    auth_mode: str = Field(..., description="One of 'host', 'api_key', 'subscription'.")
+    provider: str | None = Field(None, description="One of 'claude', 'copilot', 'codex'.")
+    auth_mode: str = Field(..., description="An auth mode valid for the chosen provider.")
     api_key: str | None = None
     oauth_token: str | None = None
+
+
+def _resolve_provider(value: str | None, current: AIProvider) -> AIProvider:
+    """Validate an incoming provider string, defaulting to the org's current."""
+    if value is None:
+        return current
+    try:
+        return AIProvider(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"provider must be one of {[p.value for p in AIProvider]}",
+        ) from exc
 
 
 def _apply_credential(
@@ -99,9 +115,10 @@ async def get_claude_settings(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ClaudeSettingsRead:
-    """Return the org's current Claude auth configuration."""
+    """Return the org's current AI-provider auth configuration."""
     org = await OrganizationRepository(db).get_for_user(current_user)
     return ClaudeSettingsRead(
+        provider=(org.ai_provider or AIProvider.claude).value,
         auth_mode=org.claude_auth_mode,
         has_api_key=bool(org.claude_api_key_encrypted),
     )
@@ -117,19 +134,27 @@ async def update_claude_settings(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ClaudeSettingsRead:
-    """Update Claude auth mode and optionally the API key.
+    """Update the org's AI provider + auth mode and optionally the credential.
 
-    On save, the decrypted key is also pushed into the backend process's
-    ``os.environ`` so subsequent agent runs pick it up without a restart.
+    On save, the decrypted credential is also pushed into the backend
+    process's ``os.environ`` so subsequent agent runs pick it up without a
+    restart. Switching provider requires a fresh credential (an Anthropic key
+    must never be reinterpreted as a GitHub/OpenAI token).
     """
-    if body.auth_mode not in VALID_AUTH_MODES:
+    org = await OrganizationRepository(db).get_for_user(current_user)
+    current_provider = org.ai_provider or AIProvider.claude
+    target_provider = _resolve_provider(body.provider, current_provider)
+
+    valid_modes = {m.value for m in capabilities_for(target_provider).auth_modes}
+    if body.auth_mode not in valid_modes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"auth_mode must be one of {sorted(VALID_AUTH_MODES)}",
+            detail=f"auth_mode must be one of {sorted(valid_modes)} for {target_provider.value}",
         )
 
-    org = await OrganizationRepository(db).get_for_user(current_user)
     previous_mode = org.claude_auth_mode
+    provider_changed = target_provider != current_provider
+    org.ai_provider = target_provider
     org.claude_auth_mode = body.auth_mode
 
     if body.auth_mode == AUTH_MODE_API_KEY:
@@ -137,14 +162,14 @@ async def update_claude_settings(
             org,
             supplied=body.api_key,
             field="api_key",
-            mode_unchanged=previous_mode == AUTH_MODE_API_KEY,
+            mode_unchanged=previous_mode == AUTH_MODE_API_KEY and not provider_changed,
         )
     elif body.auth_mode == AUTH_MODE_SUBSCRIPTION:
         _apply_credential(
             org,
             supplied=body.oauth_token,
             field="oauth_token",
-            mode_unchanged=previous_mode == AUTH_MODE_SUBSCRIPTION,
+            mode_unchanged=previous_mode == AUTH_MODE_SUBSCRIPTION and not provider_changed,
         )
     elif body.auth_mode == AUTH_MODE_HOST:
         org.claude_api_key_encrypted = None
@@ -153,14 +178,16 @@ async def update_claude_settings(
     apply_claude_auth_to_env(org)
 
     logger.info(
-        "claude_settings_updated",
+        "ai_settings_updated",
         org_id=str(org.id),
+        provider=org.ai_provider.value,
         auth_mode=org.claude_auth_mode,
         has_api_key=bool(org.claude_api_key_encrypted),
         by=current_user.email,
     )
 
     return ClaudeSettingsRead(
+        provider=org.ai_provider.value,
         auth_mode=org.claude_auth_mode,
         has_api_key=bool(org.claude_api_key_encrypted),
     )
@@ -171,9 +198,9 @@ async def test_claude_settings(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Run ``claude --version`` + a trivial prompt against the current auth."""
-    # Ensure the most recent stored key (if any) is in process env first, in
-    # case the backend was restarted since the last PATCH.
+    """Run the org's provider version check + a trivial prompt against its auth."""
+    # Ensure the most recent stored credential (if any) is in process env
+    # first, in case the backend was restarted since the last PATCH.
     org = await OrganizationRepository(db).get_for_user(current_user)
     apply_claude_auth_to_env(org)
-    return await test_claude_connection()
+    return await check_provider_connection(org)

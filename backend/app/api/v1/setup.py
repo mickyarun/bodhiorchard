@@ -23,7 +23,9 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.ai_settings import serialize_provider
 from app.core.deps import get_current_user, get_db
+from app.models.organization import AIProvider
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
@@ -210,6 +212,21 @@ async def get_deployment_info() -> dict[str, Any]:
     so no guard.
     """
     return deployment_info()
+
+
+@router.get("/ai-capabilities")
+async def get_ai_capabilities() -> dict[str, Any]:
+    """Provider capability table for the setup wizard (unauthenticated).
+
+    Mirrors the authenticated ``/v1/settings/ai/capabilities`` but without an
+    org context (there's no JWT yet during first-run setup). Exposes only
+    non-sensitive metadata — models, effort levels, auth-mode shapes, install
+    hints — so the wizard can build provider-aware, deployment-gated controls.
+    """
+    return {
+        "deployment_mode": deployment_info()["mode"],
+        "providers": [serialize_provider(p) for p in AIProvider],
+    }
 
 
 # Removed: GET /setup/deploy-key, POST /setup/clone-repo.

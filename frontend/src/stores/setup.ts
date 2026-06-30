@@ -59,6 +59,7 @@ export const useSetupStore = defineStore('setup', () => {
       maxTurns: 40,
     },
     claude: {
+      provider: 'claude',
       authMode: 'host',
       apiKey: '',
       oauthToken: '',

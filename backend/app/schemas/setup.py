@@ -68,11 +68,13 @@ class SetupClaude(BaseModel):
     with a compose-level ``ANTHROPIC_API_KEY``). ``api_key`` = Full Docker
     with a user-supplied key. ``subscription`` = Full Docker with a Claude
     Pro/Max OAuth token from ``claude setup-token``. Both credentials are
-    stored encrypted on the org.
+    stored encrypted on the org. ``provider`` selects the agent CLI
+    (claude / copilot / codex); auth_mode is validated against it.
     """
 
     model_config = {"populate_by_name": True}
 
+    provider: str = Field(default="claude", alias="provider")
     auth_mode: str = Field(default="host", alias="authMode")
     api_key: str | None = Field(default=None, alias="apiKey")
     oauth_token: str | None = Field(default=None, alias="oauthToken")

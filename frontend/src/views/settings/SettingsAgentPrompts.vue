@@ -280,7 +280,7 @@
                       hide-details
                     />
                   </div>
-                  <div class="field col-2">
+                  <div v-if="providerSupportsIterationModel" class="field col-2">
                     <label class="field-label">Iteration model</label>
                     <v-select
                       v-model="editForm.iterationModel"
@@ -292,7 +292,7 @@
                       hide-details
                     />
                   </div>
-                  <div class="field col-2">
+                  <div v-if="providerSupportsEffort" class="field col-2">
                     <label class="field-label">Effort</label>
                     <v-select
                       v-model="editForm.effort"
@@ -517,6 +517,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import CustomSkillDialog from './CustomSkillDialog.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
+import api from '@/services/api'
 
 const PREVIEW_MODE_OPTIONS: { label: string; value: 'edit' | 'preview' }[] = [
   { label: 'Edit', value: 'edit' },
@@ -663,28 +664,71 @@ const filteredGroups = computed<AgentGroup[]>(() => {
   return ordered
 })
 
-const modelOptions = [
-  { title: 'Default', value: '' },
-  { title: 'Sonnet', value: 'sonnet' },
-  { title: 'Opus', value: 'opus' },
-  { title: 'Haiku', value: 'haiku' },
-]
+// Model/effort options are provider-aware: fetched from the AI capabilities
+// endpoint for the org's active provider so the dropdowns never offer a value
+// the backend would reject. Effort is hidden entirely when the provider
+// doesn't support it (e.g. a provider with no reasoning levels).
+interface CapModel { id: string; label: string }
+const capModels = ref<CapModel[]>([{ id: '', label: 'Default' }])
+const capEffortValues = ref<string[]>([])
+const providerSupportsEffort = ref(true)
+const providerSupportsIterationModel = ref(true)
 
-const iterationModelOptions = [
-  { title: 'Same as model', value: '' },
-  { title: 'Sonnet', value: 'sonnet' },
-  { title: 'Opus', value: 'opus' },
-  { title: 'Haiku', value: 'haiku' },
-  { title: 'Haiku 4.5', value: 'claude-haiku-4-5' },
-]
+function titleCase(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
 
-const effortOptions = [
-  { title: 'Default', value: '' },
-  { title: 'Low', value: 'low' },
-  { title: 'Medium', value: 'medium' },
-  { title: 'High', value: 'high' },
-  { title: 'Max', value: 'max' },
-]
+// Show a saved value the active provider no longer lists as a clearly-labelled
+// fallback option, so the select isn't blank and the user understands it.
+function withFallback(
+  base: { title: string; value: string }[],
+  saved: string | undefined,
+): { title: string; value: string }[] {
+  if (!saved || base.some((o) => o.value === saved)) return base
+  return [...base, { title: `${saved} (falls back to default)`, value: saved }]
+}
+
+const modelOptions = computed(() =>
+  withFallback(
+    capModels.value.map((m) => ({ title: m.label, value: m.id })),
+    editForm.value?.model,
+  ),
+)
+
+const iterationModelOptions = computed(() =>
+  withFallback(
+    capModels.value.map((m) => ({
+      title: m.id === '' ? 'Same as model' : m.label,
+      value: m.id,
+    })),
+    editForm.value?.iterationModel,
+  ),
+)
+
+const effortOptions = computed(() => {
+  const base = [{ title: 'Default', value: '' }]
+  return base.concat(capEffortValues.value.map((v) => ({ title: titleCase(v), value: v })))
+})
+
+async function loadProviderCapabilities(): Promise<void> {
+  try {
+    const { data } = await api.get('/v1/settings/ai/capabilities')
+    const current = data.current_provider ?? 'claude'
+    const caps = (data.providers ?? []).find(
+      (p: { provider: string }) => p.provider === current,
+    )
+    if (!caps) return
+    capModels.value = caps.models?.length ? caps.models : [{ id: '', label: 'Default' }]
+    capEffortValues.value = caps.supports_effort ? caps.effort_values ?? [] : []
+    providerSupportsEffort.value = !!caps.supports_effort
+    providerSupportsIterationModel.value = !!caps.supports_iteration_model
+  } catch (err: unknown) {
+    const axiosErr = err as { response?: { status?: number } }
+    if (axiosErr?.response?.status !== 401) {
+      console.warn('[SettingsAgentPrompts] failed to load provider capabilities', err)
+    }
+  }
+}
 
 const editForm = ref({
   name: '',
@@ -773,6 +817,7 @@ function onCustomCreated(): void {
 
 onMounted(() => {
   store.fetchSkills()
+  loadProviderCapabilities()
 })
 </script>
 

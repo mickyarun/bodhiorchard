@@ -79,6 +79,7 @@ export async function submitOrgInit(ctx: SubmitContext): Promise<OrgInitResult |
       admin: s.admin,
       scan: s.scan,
       claude: {
+        provider: s.claude.provider,
         authMode: s.claude.authMode,
         apiKey:
           s.claude.authMode === 'api_key' && s.claude.apiKey

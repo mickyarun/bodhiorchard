@@ -14,13 +14,28 @@
 
 """Organization model for multi-tenant isolation."""
 
+from enum import StrEnum
 from typing import Any
 
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy import Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
+
+
+class AIProvider(StrEnum):
+    """Which agent CLI an organization runs its AI tasks through.
+
+    Selected in setup / Settings → AI Config. ``claude`` is the default and
+    today's only fully-wired provider; ``copilot`` and ``codex`` are added by
+    the provider-adapter work. Stored as a Postgres enum.
+    """
+
+    claude = "claude"
+    copilot = "copilot"
+    codex = "codex"
 
 
 class Organization(BaseModel):
@@ -61,6 +76,15 @@ class Organization(BaseModel):
         String(20), nullable=False, server_default="host"
     )
     claude_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Which agent CLI provider this org runs (claude / copilot / codex). The
+    # auth mode above and the encrypted credential are reused per provider:
+    # the secret holds an Anthropic key, a GitHub token, or an OpenAI key
+    # depending on ``ai_provider``. Defaults to claude for backward-compat.
+    ai_provider: Mapped[AIProvider] = mapped_column(
+        SAEnum(AIProvider, name="ai_provider", values_callable=lambda e: [m.value for m in e]),
+        nullable=False,
+        server_default=AIProvider.claude.value,
+    )
 
     def __repr__(self) -> str:
         return f"<Organization(id={self.id}, slug={self.slug!r})>"

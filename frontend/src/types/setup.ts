@@ -37,6 +37,8 @@ export interface SetupRepoConfig {
 export type ClaudeAuthMode = 'host' | 'api_key' | 'subscription'
 
 export interface SetupClaudeConfig {
+  // Selected agent CLI provider (claude / copilot / codex).
+  provider: string
   authMode: ClaudeAuthMode
   apiKey: string
   // Claude Pro/Max OAuth token (from `claude setup-token`), used in

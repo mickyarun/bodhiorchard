@@ -35,16 +35,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import encrypt_secret
 from app.core.security import create_access_token, hash_password
-from app.models.organization import Organization
+from app.models.organization import AIProvider, Organization
 from app.models.user import OrgToUser, User
 from app.repositories.organization import OrganizationRepository
 from app.repositories.role import RoleRepository
 from app.schemas.setup import InitOrgRequest
+from app.services.ai_runner.capabilities import capabilities_for
 from app.services.bud_stage_seeder import seed_stage_mappings_for_org
 from app.services.claude_env import (
     AUTH_MODE_API_KEY,
     AUTH_MODE_SUBSCRIPTION,
-    VALID_AUTH_MODES,
     apply_claude_auth_to_env,
 )
 from app.services.permission_seeder import seed_permissions
@@ -91,13 +91,22 @@ def _build_org_config(req: InitOrgRequest) -> dict[str, object]:
     }
 
 
-def _resolve_claude_auth(req: InitOrgRequest) -> tuple[str, str | None]:
-    """Validate the wizard's Claude-auth choice and return ``(mode, encrypted_key)``."""
-    claude_auth_mode = req.claude.auth_mode
-    if claude_auth_mode not in VALID_AUTH_MODES:
+def _resolve_claude_auth(req: InitOrgRequest) -> tuple[AIProvider, str, str | None]:
+    """Validate the wizard's AI-provider choice → ``(provider, mode, key)``."""
+    try:
+        provider = AIProvider(req.claude.provider)
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"claude.auth_mode must be one of {sorted(VALID_AUTH_MODES)}",
+            detail=f"claude.provider must be one of {[p.value for p in AIProvider]}",
+        ) from exc
+
+    claude_auth_mode = req.claude.auth_mode
+    valid_modes = {m.value for m in capabilities_for(provider).auth_modes}
+    if claude_auth_mode not in valid_modes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"claude.auth_mode must be one of {sorted(valid_modes)} for {provider.value}",
         )
     encrypted_key: str | None = None
     if claude_auth_mode == AUTH_MODE_API_KEY:
@@ -116,7 +125,7 @@ def _resolve_claude_auth(req: InitOrgRequest) -> tuple[str, str | None]:
                 detail="claude.oauth_token is required when auth_mode is 'subscription'",
             )
         encrypted_key = encrypt_secret(token)
-    return claude_auth_mode, encrypted_key
+    return provider, claude_auth_mode, encrypted_key
 
 
 async def setup_init_org(req: InitOrgRequest, db: AsyncSession) -> InitOrgResult:
@@ -133,7 +142,7 @@ async def setup_init_org(req: InitOrgRequest, db: AsyncSession) -> InitOrgResult
             detail="Organization slug already exists. Setup may have been completed already.",
         )
 
-    claude_auth_mode, encrypted_key = _resolve_claude_auth(req)
+    provider, claude_auth_mode, encrypted_key = _resolve_claude_auth(req)
 
     mcp_token = secrets.token_urlsafe(_MCP_TOKEN_NUM_BYTES)
 
@@ -142,6 +151,7 @@ async def setup_init_org(req: InitOrgRequest, db: AsyncSession) -> InitOrgResult
         slug=req.organization.slug,
         config=_build_org_config(req),
         mcp_token_hash=hash_password(mcp_token),
+        ai_provider=provider,
         claude_auth_mode=claude_auth_mode,
         claude_api_key_encrypted=encrypted_key,
     )
