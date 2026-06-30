@@ -64,6 +64,32 @@ PHASE_ROLE_MAP: dict[str, UserRole] = {
     phase: chain[0] for phase, chain in PHASE_ROLE_CHAIN.items()
 }
 
+# How each phase consumes time.
+#
+# - ``build`` phases are hands-on-keyboard work: their wall-clock is
+#   ``effort ÷ role-pool capacity`` (the queueing curve in
+#   ``capacity_provider``). A loaded pool genuinely delays the start.
+# - ``gate`` phases are review / sign-off (a PM approving a BUD, a UAT
+#   validation, a PR review). Their wall-clock is *review latency* — how
+#   long until a reviewer turns it around — which is bounded and largely
+#   independent of effort-days. Running a gate through ``effort ÷ capacity``
+#   over-stretches it (a swamped PM at 0.21 capacity turned a 4-day UAT
+#   estimate into ~20 wall-clock days). The estimator models gates with a
+#   small capped turnaround instead — see ``estimation_gates``.
+GATE_PHASE = "gate"
+BUILD_PHASE = "build"
+
+PHASE_KIND: dict[str, str] = {
+    "bud": GATE_PHASE,
+    "design": BUILD_PHASE,
+    "tech_arch": BUILD_PHASE,
+    "development": BUILD_PHASE,
+    "code_review": GATE_PHASE,
+    "testing": BUILD_PHASE,
+    "uat": GATE_PHASE,
+    "prod": BUILD_PHASE,
+}
+
 
 def get_role_for_phase(phase: str) -> UserRole | None:
     """Return the canonical role that owns this phase, or None for unknown phases.
@@ -73,3 +99,13 @@ def get_role_for_phase(phase: str) -> UserRole | None:
     (no adjustment) rather than crashing the whole forecast.
     """
     return PHASE_ROLE_MAP.get(phase)
+
+
+def is_gate_phase(phase: str) -> bool:
+    """True when a phase is a review / sign-off gate rather than build work.
+
+    Unknown phases default to build (False) so a renamed/added phase keeps
+    the existing effort ÷ capacity treatment until ``PHASE_KIND`` catches
+    up — never silently switches to the turnaround model.
+    """
+    return PHASE_KIND.get(phase) == GATE_PHASE

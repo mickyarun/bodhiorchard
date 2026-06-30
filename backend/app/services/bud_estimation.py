@@ -47,9 +47,11 @@ from app.services.estimation_context import (
     get_skill_context,
 )
 from app.services.estimation_engine import monte_carlo_simulate
+from app.services.estimation_gates import gate_pert, gate_turnaround_days
 from app.services.estimation_heuristics import default_pert_spread
 from app.services.estimation_llm import llm_pert_estimate
 from app.services.org_settings import get_phase_order
+from app.services.phase_roles import is_gate_phase
 
 logger = structlog.get_logger(__name__)
 
@@ -138,6 +140,47 @@ async def estimate_bud_dates(
         pert_estimates = {p: all_defaults[p] for p in remaining if p in all_defaults}
         complexity = heuristic_complexity
 
+    # Review-gate phases (bud/uat/code_review) are sign-off latency, not
+    # effort ÷ capacity work. Override their effort PERT with a small capped
+    # turnaround budget and neutralise the capacity divisor (1.0) so the
+    # generic Monte Carlo engine renders gate wall-clock with no phase-kind
+    # knowledge of its own. The LLM's gate effort is intentionally unused —
+    # a swamped reviewer adds bounded latency, it does not multiply effort —
+    # but the discarded triple is captured in the snapshot below so the
+    # override is auditable. Historical wall-clock for a gate still blends in
+    # downstream (those samples are already wall-clock); the turnaround is the
+    # model draw, not the only source.
+    gate_turnaround_by_phase: dict[str, float] = {}
+    gate_llm_effort_overridden: dict[str, list[float]] = {}
+    for phase in pert_estimates:
+        if not is_gate_phase(phase):
+            continue
+        prior = pert_estimates[phase]
+        gate_llm_effort_overridden[phase] = [
+            prior.optimistic,
+            prior.most_likely,
+            prior.pessimistic,
+        ]
+        turnaround = gate_turnaround_days(role_loads, phase)
+        gate_turnaround_by_phase[phase] = turnaround
+        pert_estimates[phase] = gate_pert(turnaround)
+        cap_by_phase[phase] = 1.0
+
+    # A gate in scope but absent from pert_estimates would silently keep the
+    # effort ÷ capacity model — the exact over-stretch this override exists to
+    # kill. Surface that divergence rather than letting it pass unnoticed.
+    missing_gates = [
+        p for p in remaining if is_gate_phase(p) and p not in gate_turnaround_by_phase
+    ]
+    if missing_gates:
+        logger.warning(
+            "gate_phase_missing_from_pert_estimates",
+            bud_id=str(bud.id),
+            missing_gates=missing_gates,
+            source="llm" if llm_result is not None else "heuristic",
+            action="gate left on effort/capacity model; estimate may over-stretch it",
+        )
+
     # Historical reference-class (Magennis-style bootstrap) reuses the
     # same per-phase data fetched for the prompt above; weight ramps with
     # sample size and caps at HISTORICAL_WEIGHT_CAP so the LLM never
@@ -189,6 +232,8 @@ async def estimate_bud_dates(
             "skill": skill_ctx,
             "has_historical": bool(historical_ctx),
             "capacity_by_phase": cap_by_phase,
+            "gate_turnaround_by_phase": gate_turnaround_by_phase,
+            "gate_llm_effort_overridden": gate_llm_effort_overridden,
             "open_bug_count": bug_ctx["open_bug_count"],
             "historical_n_used": historical_n,
             "historical_weight": historical_weight,
