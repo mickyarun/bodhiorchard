@@ -97,6 +97,7 @@ from app.services.bud_assignment_actions import assign_bud, unassign_bud
 from app.services.bud_edit_policy import assert_section_editable
 from app.services.bud_estimation import estimate_bud_dates
 from app.services.bud_learning_alias_resolver import resolve_aliased_contributors
+from app.services.bud_metrics import compute_and_persist as compute_bud_metrics
 from app.services.bud_timeline import record_event
 from app.services.job_queue import JOB_BUD_AGENT, create_job
 
@@ -228,17 +229,25 @@ async def _bud_response(
             "metadata": latest_failure.metadata_ or {},
         }
 
-    # ``has_learning`` is a cheap tab-visibility flag. The tab shows once
-    # a feature_learning row carries *either* the metrics envelope or the
-    # retrospective: gating on the recap alone hid the quantitative
-    # metrics (and the regenerate-recap control) whenever the post-close
-    # Learning Agent failed but compute_and_persist succeeded — or vice
-    # versa. The full payload is fetched lazily via GET /buds/{id}/learning
-    # so the BUD list stays small.
+    # ``has_learning`` is a cheap tab-visibility flag. The tab shows when:
+    #  - a row carries *either* the metrics envelope or the retrospective
+    #    (gating on the recap alone hid restored metrics + the regenerate
+    #    control when the Learning Agent failed but metrics succeeded), OR
+    #  - the BUD is closed and opted into close-time AI but has no recap
+    #    yet. That last case is the recovery path for a transient
+    #    close-time failure that left *no* row at all (the prod incident on
+    #    BUD-029/036): without it the tab stays hidden and the failure
+    #    hides its own remedy — the user can never trigger a regenerate.
+    # The full payload is fetched lazily via GET /buds/{id}/learning so the
+    # BUD list stays small.
     learning_row = await FeatureLearningRepository(db, org_id=org_id).get_for_bud(bud.id)
-    bud_data.has_learning = bool(
+    row_has_content = bool(
         learning_row and (learning_row.retrospective_md or learning_row.metrics)
     )
+    awaiting_recap = bud.status == BUDStatus.CLOSED and should_auto_generate_phase(
+        bud.auto_generate_phases, "closed"
+    )
+    bud_data.has_learning = row_has_content or awaiting_recap
 
     return bud_data
 
@@ -574,14 +583,20 @@ async def regenerate_learning(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Re-run the post-close Learning Agent to (re)generate the recap.
+    """Re-run the post-close learnings pipeline to (re)generate them.
 
-    The Learnings tab exposes this when a recap is missing — the usual
+    The Learnings tab exposes this when learnings are missing — the usual
     cause is a transient ``compute_and_persist`` failure at close that
     left the ``feature_learnings`` row partial (metrics but no
-    ``retrospective_md``) or absent. The agent attaches its recap to the
-    existing row, or ``set_retrospective`` creates one if metrics never
-    landed.
+    ``retrospective_md``) or absent entirely.
+
+    Full recovery, mirroring ``on_bud_closed``: first (re)compute the
+    metrics envelope — idempotent, so it is a no-op when metrics already
+    landed and a backfill when they didn't — then spawn the Learning
+    Agent for the recap. A metrics-compute failure is isolated in a
+    savepoint and never blocks the recap (``set_retrospective`` creates
+    the row if metrics still never landed), so the user always gets at
+    least the qualitative half from one click.
 
     Requires the BUD to be closed (learnings are a post-close artifact),
     the BUD to have opted into close-time AI via
@@ -616,6 +631,16 @@ async def regenerate_learning(
             status_code=status.HTTP_409_CONFLICT,
             detail="Cannot regenerate while an agent task is running",
         )
+
+    # (Re)compute the metrics envelope first so a row that lost its
+    # quantitative half — or never got one — is made whole, not just given
+    # a recap. Isolated in a savepoint: if the same transient failure that
+    # caused the gap recurs, the recap still gets generated below.
+    try:
+        async with db.begin_nested():
+            await compute_bud_metrics(db, current_user.org_id, bud)
+    except Exception:
+        logger.warning("regenerate_metrics_compute_failed", bud_id=str(bud_id), exc_info=True)
 
     # force=True so the per-section content-exists guard doesn't short
     # the re-run, and we branch on the returned task: a None means no

@@ -409,6 +409,7 @@
                   v-if="bud"
                   :bud-id="bud.id"
                   :refresh-key="learningRefreshKey"
+                  :can-regenerate="canRegenerateLearning"
                 />
               </v-tabs-window-item>
 
@@ -649,10 +650,18 @@ const isClosed = computed(
   () => bud.value?.status === 'closed' || bud.value?.status === 'discarded',
 )
 
-// Learnings tab visibility. Backend sets ``has_learning`` true only when
-// the BUD has a feature_learnings row AND a retrospective_md \u2014 so the
-// tab appears precisely when there is something for it to render.
+// Learnings tab visibility. Backend sets ``has_learning`` when the BUD has
+// learning content (metrics or recap) OR is a closed, opted-in BUD whose
+// recap is still missing \u2014 so the tab also surfaces the recovery path.
 const hasLearning = computed(() => Boolean(bud.value?.has_learning))
+
+// Whether the regenerate control should offer to (re)run the Learning
+// Agent: only meaningful for a closed BUD that opted into close-time AI,
+// which is exactly the gate the backend endpoint enforces. Passing it
+// avoids showing a button that would only ever 409.
+const canRegenerateLearning = computed(
+  () => bud.value?.status === 'closed' && Boolean(bud.value?.auto_generate_phases?.closed),
+)
 
 // Bumped each time a ``learning_recorded`` activity event fires so the
 // panel re-fetches without us having to expose a separate refresh API.
