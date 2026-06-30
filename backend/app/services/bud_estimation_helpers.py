@@ -26,6 +26,7 @@ from typing import Any
 
 from app.models.bud import BUDDocument
 from app.models.user import UserRole
+from app.services.capacity_provider import RoleLoad, phase_capacity
 from app.services.estimation_engine import (
     PERTEstimate,
     add_business_days,
@@ -85,21 +86,30 @@ def historical_mix_weight(historical_by_phase: dict[str, list[float]]) -> float:
 
 
 def build_capacity_summary(
-    role_capacity: dict[UserRole, float],
+    role_loads: dict[UserRole, RoleLoad],
     remaining_phases: list[str],
 ) -> list[tuple[str, float, str]]:
-    """Convert role-capacity floats into prompt-ready tuples.
+    """Convert raw role loads into prompt-ready capacity tuples.
 
     Filters to roles actually involved in the remaining phases so the
     prompt does not list e.g. ``DESIGNER`` capacity for a BUD that has
-    already passed the design phase. Returned tuples are
-    ``(role_value, capacity, narration)`` — narration is a short human
-    string the prompt formatter quotes verbatim.
+    already passed the design phase. The capacity shown per role is the
+    chain-aware queueing capacity of that role's owned phase — the exact
+    number the engine divides by — so prompt and divisor never drift.
+    Returned tuples are ``(role_value, capacity, narration)``; narration
+    is a short human string the prompt formatter quotes verbatim.
     """
-    needed_roles = {PHASE_ROLE_MAP[p] for p in remaining_phases if p in PHASE_ROLE_MAP}
+    # One representative phase per needed role (a role can own several —
+    # they share a chain, so any one yields the role's capacity).
+    role_phase: dict[UserRole, str] = {}
+    for phase in remaining_phases:
+        role = PHASE_ROLE_MAP.get(phase)
+        if role is not None and role not in role_phase:
+            role_phase[role] = phase
+
     rows: list[tuple[str, float, str]] = []
-    for role in sorted(needed_roles, key=lambda r: r.value):
-        capacity = role_capacity.get(role, 1.0)
+    for role in sorted(role_phase, key=lambda r: r.value):
+        capacity = phase_capacity(role_loads, role_phase[role])
         if capacity >= 1.0:
             narration = "fully available"
         elif capacity <= _HEAVILY_LOADED_CAPACITY:

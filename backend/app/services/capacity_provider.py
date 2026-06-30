@@ -14,24 +14,39 @@
 
 """Role-pool capacity provider for the AI-PERT estimation engine.
 
-Capacity here is "what fraction of one full working day across this role
-pool is free right now?". The estimator divides each phase's effort
-sample by this number to get wall-clock days. Capacity = 1.0 means a
-fresh role pool sitting idle; capacity = 0.4 means the pool is 60 %
-loaded.
+Capacity here is "what fraction of one full working day across the pool
+that can serve this phase is free right now?". The estimator divides each
+phase's effort sample by this number to get wall-clock days. Capacity =
+1.0 means a fresh pool sitting idle; capacity = 0.4 means the pool is
+~60 % loaded.
 
 Why role-level (not per-person): the smart-assignment agent picks the
 actual assignee at the start of each phase. Per-person availability is
 unknowable at estimation time, so we work at the role-pool granularity
 and let the assignment agent do its own load balancing later.
 
-Math: ``capacity = max(MIN_CAPACITY, 1 − active_buds_in_role / pool_size)``.
-The floor exists so the wall-clock divisor never explodes when a single
-role is over-subscribed (the 0.1 floor implies a 10× stretch ceiling,
-which is the sane upper bound for "this team is in firefighting mode").
+Why the *chain* pool (not the single owning role): every phase has a
+``PHASE_ROLE_CHAIN`` — a primary owner plus degrade-by-adjacency
+fallbacks (a small team with one designer still gets design done by a PM
+or developer). The assignment agent already routes through that chain, so
+capacity counts the same pool; otherwise a lone specialist (1 designer,
+1 tech-lead) reads as permanently maxed-out even though the work clearly
+ships. Active load is taken from the *primary* role only — a deliberate
+optimism about fallbacks: we credit the fallback pool's headcount without
+subtracting its own primary commitments. Modelling that cross-phase
+contention properly needs a global allocation solver; here we err toward
+the fallback being available, which is the right direction given the
+old subtractive model bottomed every understaffed role out at the floor.
+
+Math: ``capacity = chain_pool / (chain_pool + primary_active)``. This
+M/M/1-style availability ratio is bounded in (0, 1] and degrades
+smoothly toward (never to) zero as load grows — no cliff. The engine
+still floors the divisor at ``MIN_CAPACITY`` as a divide-by-zero guard
+for pathological overload (active ≫ pool).
 """
 
 import uuid
+from typing import NamedTuple
 
 import structlog
 from sqlalchemy import func, select
@@ -40,28 +55,40 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.bud import BUDDocument, BUDStatus
 from app.models.user import UserRole
 from app.repositories.user import UserRepository
-from app.services.estimation_engine import MIN_CAPACITY
-from app.services.phase_roles import PHASE_ROLE_MAP
+from app.services.phase_roles import PHASE_ROLE_CHAIN, PHASE_ROLE_MAP
 
 logger = structlog.get_logger(__name__)
 
 _TERMINAL_STATUSES = {BUDStatus.PROD, BUDStatus.CLOSED, BUDStatus.DISCARDED}
 
 
-async def get_role_capacity(
+class RoleLoad(NamedTuple):
+    """Raw pool size and active in-flight load for one role.
+
+    Kept un-collapsed (not pre-divided into a capacity float) so the
+    chain-aware phase projection downstream can sum pools across a
+    fallback chain before applying the queueing curve.
+    """
+
+    pool: int
+    active: int
+
+
+async def get_role_loads(
     db: AsyncSession,
     org_id: uuid.UUID,
-) -> dict[UserRole, float]:
-    """Return current capacity per role for one org.
+) -> dict[UserRole, RoleLoad]:
+    """Return raw ``(pool, active)`` per role for one org.
 
     Issues two aggregate queries (no per-row work):
       1. Pool size: how many users hold each role in this org.
       2. Active load: how many non-terminal BUDs are in a status whose
          mapped role matches each role.
 
-    Roles with zero pool size return 1.0 with a structlog warning so the
-    gap is observable rather than silently absorbing the over-load
-    signal. Roles never seen in this org default to 1.0 too.
+    The queueing curve and chain pooling live in the pure ``*_capacity``
+    helpers below so they can be unit-tested without a session. Every
+    role in :class:`UserRole` is present in the result (pool/active
+    default to 0) so callers never KeyError.
     """
     pool_by_role = await UserRepository(db).count_active_by_role(org_id)
 
@@ -87,40 +114,55 @@ async def get_role_capacity(
             continue
         active_by_role[role] = active_by_role.get(role, 0) + count
 
-    capacity: dict[UserRole, float] = {}
-    for role in UserRole:
-        pool_size = pool_by_role.get(role, 0)
-        active = active_by_role.get(role, 0)
-        if pool_size == 0:
-            if active > 0:
-                logger.warning(
-                    "capacity_role_pool_empty_but_active",
-                    org_id=str(org_id),
-                    role=role.value,
-                    active_buds=active,
-                    action="defaulting capacity to 1.0; assign at least one user this role",
-                )
-            capacity[role] = 1.0
-            continue
-        capacity[role] = max(MIN_CAPACITY, 1.0 - active / pool_size)
-    return capacity
+    return {
+        role: RoleLoad(pool=pool_by_role.get(role, 0), active=active_by_role.get(role, 0))
+        for role in UserRole
+    }
+
+
+def phase_capacity(
+    role_loads: dict[UserRole, RoleLoad],
+    phase: str,
+) -> float:
+    """Chain-aware queueing capacity in (0, 1] for a single phase.
+
+    Pool is summed across the phase's full ``PHASE_ROLE_CHAIN`` (primary
+    owner + fallbacks); active load is the primary role's in-flight count
+    (which already aggregates every phase that role owns). Returns 1.0 —
+    no adjustment — for an unknown phase or one with literally nobody in
+    its chain (an unstaffable phase is the assignment banner's problem,
+    not a number we should silently inflate). A pool with zero active
+    load yields exactly 1.0.
+    """
+    chain = PHASE_ROLE_CHAIN.get(phase)
+    if not chain:
+        return 1.0
+
+    pool = sum(role_loads.get(role, RoleLoad(0, 0)).pool for role in chain)
+    active = role_loads.get(chain[0], RoleLoad(0, 0)).active
+
+    if pool == 0:
+        if active > 0:
+            logger.warning(
+                "capacity_chain_pool_empty_but_active",
+                phase=phase,
+                chain=[r.value for r in chain],
+                active_buds=active,
+                action="defaulting capacity to 1.0; staff at least one role in this chain",
+            )
+        return 1.0
+
+    return pool / (pool + active)
 
 
 def capacity_by_phase(
-    role_capacity: dict[UserRole, float],
+    role_loads: dict[UserRole, RoleLoad],
     phase_order: list[str],
 ) -> dict[str, float]:
-    """Project per-role capacity onto a per-phase dict the engine can consume.
+    """Project raw role loads onto a per-phase capacity dict for the engine.
 
     Pure function — kept separate from the DB query so it can be
-    exercised without a session and so any future per-org overrides on
-    the phase→role map slot in here without touching the SQL path.
+    exercised without a session. Each phase is independently scored via
+    :func:`phase_capacity`.
     """
-    out: dict[str, float] = {}
-    for phase in phase_order:
-        role = PHASE_ROLE_MAP.get(phase)
-        if role is None:
-            out[phase] = 1.0
-            continue
-        out[phase] = role_capacity.get(role, 1.0)
-    return out
+    return {phase: phase_capacity(role_loads, phase) for phase in phase_order}

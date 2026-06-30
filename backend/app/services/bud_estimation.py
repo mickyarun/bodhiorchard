@@ -37,7 +37,7 @@ from app.services.bud_estimation_helpers import (
     parse_iso,
 )
 from app.services.bud_timeline import record_event
-from app.services.capacity_provider import capacity_by_phase, get_role_capacity
+from app.services.capacity_provider import capacity_by_phase, get_role_loads
 from app.services.estimation_context import (
     compute_bud_complexity,
     get_backlog_context,
@@ -92,13 +92,14 @@ async def estimate_bud_dates(
     # Bugs feed the heuristic complexity (more work, not less throughput).
     heuristic_complexity = compute_bud_complexity(bud, bug_ctx["open_bug_count"])
 
-    # Capacity: per-role pool availability today, projected onto each
-    # remaining phase via PHASE_ROLE_MAP. Both the engine (post-MC
-    # divisor) and the prompt (context block for the LLM) read from
-    # the same numbers — single source of truth.
-    role_capacity = await get_role_capacity(db, org_id)
-    cap_by_phase = capacity_by_phase(role_capacity, remaining)
-    capacity_summary = build_capacity_summary(role_capacity, remaining)
+    # Capacity: raw per-role pool + active load today, projected onto
+    # each remaining phase via its fallback chain (PHASE_ROLE_CHAIN) and
+    # the queueing curve. Both the engine (post-MC divisor) and the
+    # prompt (context block for the LLM) read from the same loads —
+    # single source of truth.
+    role_loads = await get_role_loads(db, org_id)
+    cap_by_phase = capacity_by_phase(role_loads, remaining)
+    capacity_summary = build_capacity_summary(role_loads, remaining)
 
     # The historical sampler is fetched once and used both by the LLM
     # call (so the prompt can mention how many past BUDs are blending in)
