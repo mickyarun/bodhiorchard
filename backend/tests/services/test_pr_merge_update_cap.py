@@ -642,6 +642,77 @@ async def test_advance_tracked_head_sha_commits_advance(
     assert commits == [True]
 
 
+# --- _trigger_repo_scan records the scan_id onto the delivery ----------------
+
+
+async def test_trigger_repo_scan_stamps_scan_id_on_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The full-scan branch must stamp the resulting scan_id onto the
+    delivery row so the operator "Scan now" button (which got a null
+    scan_id from the 202) can resolve it by delivery_id and poll.
+    """
+    scan_id = uuid.uuid4()
+    stamped: dict[str, Any] = {}
+
+    async def _fake_start_scan(*, org_id: uuid.UUID, repo_ids: list[uuid.UUID]) -> uuid.UUID:
+        return scan_id
+
+    class _FakeRepo:
+        def __init__(self, _db: Any) -> None:
+            pass
+
+        async def set_triggered_scan_id(self, *, delivery_id: str, scan_id: uuid.UUID) -> None:
+            stamped["delivery_id"] = delivery_id
+            stamped["scan_id"] = scan_id
+
+    class _FakeDb:
+        async def commit(self) -> None:
+            stamped["committed"] = True
+
+    class _FakeSessionCtx:
+        async def __aenter__(self) -> _FakeDb:
+            return _FakeDb()
+
+        async def __aexit__(self, *_a: Any) -> None:
+            return None
+
+    monkeypatch.setattr(mod, "start_scan", _fake_start_scan)
+    monkeypatch.setattr(mod, "WebhookLogRepository", _FakeRepo)
+    monkeypatch.setattr(mod, "AsyncSessionLocal", lambda: _FakeSessionCtx())
+
+    await mod._trigger_repo_scan(
+        org_id=uuid.uuid4(), repo_id=uuid.uuid4(), reason="cache_miss", delivery_id="d-stamp"
+    )
+
+    assert stamped == {"delivery_id": "d-stamp", "scan_id": scan_id, "committed": True}
+
+
+async def test_trigger_repo_scan_records_nothing_when_already_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When a scan is already active, no scan_id is minted, so the delivery
+    row must be left untouched (the UI surfaces the in-flight scan via the
+    409 path instead)."""
+    touched = {"set": False}
+
+    async def _busy_start_scan(*, org_id: uuid.UUID, repo_ids: list[uuid.UUID]) -> uuid.UUID:
+        raise mod.ScanAlreadyActiveError(scan_id=uuid.uuid4(), status="running")
+
+    class _ExplodingRepo:
+        def __init__(self, _db: Any) -> None:
+            touched["set"] = True
+
+    monkeypatch.setattr(mod, "start_scan", _busy_start_scan)
+    monkeypatch.setattr(mod, "WebhookLogRepository", _ExplodingRepo)
+
+    await mod._trigger_repo_scan(
+        org_id=uuid.uuid4(), repo_id=uuid.uuid4(), reason="cache_miss", delivery_id="d-busy"
+    )
+
+    assert touched["set"] is False
+
+
 # --- effective_narrow_cap (adaptive cap formula) ----------------------------
 
 

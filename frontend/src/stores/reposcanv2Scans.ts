@@ -126,7 +126,26 @@ interface ResumeResponse {
   requeued: number
 }
 
+/** Status of one rescan delivery — mirrors the backend
+ *  `GET /scans/rescan/{delivery_id}` response. ``scan_id`` is non-null once
+ *  the worker's cache-miss branch has triggered a full scan; it stays null
+ *  for narrow/no-op rescans that never create a Scan row. */
+interface RescanDeliveryStatus {
+  delivery_id: string
+  status: string
+  scan_id: string | null
+}
+
 const POLL_INTERVAL_MS = 2000
+// How long to wait for the rescan worker to resolve a delivery to a Scan
+// row before giving up. The worker decides asynchronously (typically a few
+// seconds) whether the diff warrants a full scan; a narrow/no-op rescan
+// resolves with no scan_id at all, which is why this bounds out.
+const RESCAN_RESOLVE_TIMEOUT_MS = 30000
+// Terminal webhook-delivery states — mirrors
+// ``app.models.webhook_log.WebhookDeliveryStatus``. A rescan delivery that
+// reaches one of these WITHOUT a scan_id took the narrow/no-op path.
+const DELIVERY_TERMINAL: ReadonlySet<string> = new Set(['done', 'failed', 'skipped'])
 const TERMINAL_REPO_RUN: ReadonlySet<RepoRunStatus> = new Set([
   'done', 'failed', 'skipped_unchanged', 'cancelled',
 ])
@@ -280,7 +299,7 @@ export const useReposcanV2ScansStore = defineStore('reposcanv2Scans', () => {
       if (data.scan_id) {
         await fetchScan(data.scan_id)
       } else {
-        await restoreActiveScan()
+        await resolveRescanScan(data.rescan_delivery_ids ?? [])
       }
       return data.scan_id
     } catch (err) {
@@ -326,11 +345,53 @@ export const useReposcanV2ScansStore = defineStore('reposcanv2Scans', () => {
       error.value = null
       ensurePolling()
     } catch (err) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const status = (err as { response?: { status?: number } }).response?.status
-        if (status === 404) return
-      }
+      if (isNotFound(err)) return
       error.value = extractMessage(err, 'Failed to load last scan')
+    } finally {
+      loadingScan.value = false
+    }
+  }
+
+  /**
+   * Resolve the Scan row a rescan produced, then hand off to normal polling.
+   *
+   * A rescan returns 202 with a null scan_id and the delivery ids it
+   * enqueued: the PR-merge worker decides asynchronously whether the diff
+   * warrants a full scan. Only the cache-miss / above-cap branch creates a
+   * Scan row, and it stamps the resulting scan_id onto its delivery. Poll
+   * each delivery by id until one reports a scan_id (→ load + poll it), or
+   * every delivery reaches a terminal status with none (→ narrow/no-op
+   * rescan: nothing to show, so refresh the cards and stay idle).
+   */
+  async function resolveRescanScan(deliveryIds: string[]): Promise<void> {
+    if (deliveryIds.length === 0) return
+    loadingScan.value = true
+    const deadline = Date.now() + RESCAN_RESOLVE_TIMEOUT_MS
+    try {
+      for (;;) {
+        let allTerminal = true
+        for (const deliveryId of deliveryIds) {
+          try {
+            const { data } = await api.get<RescanDeliveryStatus>(
+              `/v1/reposcanv2/scans/rescan/${deliveryId}`,
+            )
+            if (data.scan_id) {
+              await fetchScan(data.scan_id)
+              return
+            }
+            if (!DELIVERY_TERMINAL.has(data.status)) allTerminal = false
+          } catch (err) {
+            // A 404 means the delivery row is gone (nothing more to wait
+            // for); any other error is transient, so keep polling.
+            if (!isNotFound(err)) allTerminal = false
+          }
+        }
+        if (allTerminal || Date.now() >= deadline) {
+          void fetchRepos()
+          return
+        }
+        await delay(POLL_INTERVAL_MS)
+      }
     } finally {
       loadingScan.value = false
     }
@@ -450,6 +511,18 @@ export const useReposcanV2ScansStore = defineStore('reposcanv2Scans', () => {
     pausePolling,
   }
 })
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => window.setTimeout(resolve, ms))
+}
+
+/** True when ``err`` is an Axios error carrying an HTTP 404 response. */
+function isNotFound(err: unknown): boolean {
+  if (err && typeof err === 'object' && 'response' in err) {
+    return (err as { response?: { status?: number } }).response?.status === 404
+  }
+  return false
+}
 
 function extractMessage(err: unknown, fallback: string): string {
   if (err && typeof err === 'object' && 'response' in err) {

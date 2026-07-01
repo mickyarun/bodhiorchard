@@ -261,3 +261,22 @@ class WebhookLogRepository:
             set_clauses.append("attempts = attempts + 1")
         sql = f"UPDATE webhook_logs SET {', '.join(set_clauses)} WHERE delivery_id = :did"
         await self._db.execute(text(sql).bindparams(**params))
+
+    async def set_triggered_scan_id(self, *, delivery_id: str, scan_id: uuid.UUID) -> None:
+        """Record the full-scan ``scan_id`` a delivery triggered.
+
+        The operator "Scan now" button (and a real PR-merge webhook) enqueue
+        a delivery and get a null scan_id back — the diff-based worker decides
+        asynchronously whether a full scan is even needed. When the cache-miss
+        / above-cap branch fires ``start_scan``, we stamp the resulting
+        scan_id into ``payload_summary`` so the frontend can resolve it by
+        delivery_id and poll the scan timeline. Merged into the existing
+        summary JSONB (``|| jsonb_build_object``) rather than overwriting it.
+        """
+        sql = (
+            "UPDATE webhook_logs "
+            "SET payload_summary = COALESCE(payload_summary, '{}'::jsonb) "
+            "|| jsonb_build_object('triggered_scan_id', :sid) "
+            "WHERE delivery_id = :did"
+        )
+        await self._db.execute(text(sql).bindparams(sid=str(scan_id), did=delivery_id))

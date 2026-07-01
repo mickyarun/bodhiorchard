@@ -175,6 +175,28 @@ async def test_update_status_bump_attempts_increments_in_same_statement() -> Non
 
 
 @pytest.mark.asyncio
+async def test_set_triggered_scan_id_merges_into_payload_summary() -> None:
+    """The rescan → full-scan link is merged into ``payload_summary`` JSONB
+    (``|| jsonb_build_object``) so it doesn't clobber the audit summary, and
+    the scan_id is bound as a string (asyncpg can't bind a raw UUID into a
+    text JSONB value).
+    """
+    db = _make_db()
+    repo = WebhookLogRepository(db)
+    scan_id = uuid.uuid4()
+
+    await repo.set_triggered_scan_id(delivery_id="d6", scan_id=scan_id)
+
+    sent = db.execute.call_args.args[0]
+    sent_text = str(sent)
+    assert "jsonb_build_object('triggered_scan_id', :sid)" in sent_text
+    assert "COALESCE(payload_summary, '{}'::jsonb)" in sent_text
+    params = sent.compile().params
+    assert params["sid"] == str(scan_id)
+    assert params["did"] == "d6"
+
+
+@pytest.mark.asyncio
 async def test_list_in_status_filters_by_enum_and_orders_by_received_at() -> None:
     """Orphan-recovery query: filtered by status, ordered oldest first."""
     scalars = MagicMock()

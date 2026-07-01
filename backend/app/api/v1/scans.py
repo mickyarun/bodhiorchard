@@ -36,8 +36,10 @@ from app.repositories.organization import OrganizationRepository
 from app.repositories.scan import ScanRepository
 from app.repositories.scan_run import ScanRunRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
+from app.repositories.webhook_log import WebhookLogRepository
 from app.schemas.scan import (
     LegacyScanStatusResponse,
+    RescanDeliveryStatusResponse,
     ResumeScanResponse,
     ScanDetailResponse,
     StartScanRequest,
@@ -324,6 +326,41 @@ async def get_latest_scan(
         status=scan.status,
         started_at=scan.created_at.isoformat(),
         repo_runs=repo_runs,
+    )
+
+
+@router.get(
+    "/scans/rescan/{delivery_id}",
+    response_model=RescanDeliveryStatusResponse,
+    dependencies=[Depends(require_permissions(_REQUIRED_PERMISSION))],
+)
+async def get_rescan_delivery_status(
+    delivery_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RescanDeliveryStatusResponse:
+    """Resolve a rescan delivery to the full scan it triggered, if any.
+
+    The operator "Scan now" button gets a null scan_id from the 202 because
+    the diff-based worker decides asynchronously whether a full scan is
+    needed. The frontend polls this by ``delivery_id`` (returned in
+    :class:`StartScanResponse`): once the cache-miss branch stamps a
+    ``scan_id`` onto the delivery, the client switches to the timeline; a
+    narrow/no-op rescan reaches a terminal status with scan_id still null.
+
+    Declared BEFORE ``/scans/{scan_id}`` so ``rescan`` is matched as a
+    literal path segment instead of being parsed as a UUID.
+    """
+    org_id = await _resolve_org_id(current_user, db)
+    row = await WebhookLogRepository(db).find_by_delivery_id(delivery_id)
+    if row is None or row.org_id != org_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    raw_scan_id = (row.payload_summary or {}).get("triggered_scan_id")
+    scan_id = uuid.UUID(raw_scan_id) if isinstance(raw_scan_id, str) else None
+    return RescanDeliveryStatusResponse(
+        delivery_id=delivery_id,
+        status=row.status.value,
+        scan_id=scan_id,
     )
 
 

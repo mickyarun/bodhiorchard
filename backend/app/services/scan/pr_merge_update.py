@@ -153,6 +153,7 @@ async def handle_pr_merge_delivery(delivery_id: str) -> None:
         base_sha=base_sha,
         head_sha=head_sha,
         full_name=full_name,
+        delivery_id=delivery_id,
     )
     if narrow_params is None:
         return
@@ -192,6 +193,7 @@ async def _run_dispatch(
     base_sha: str,
     head_sha: str,
     full_name: str,
+    delivery_id: str,
 ) -> NarrowSynthesisParams | None:
     """Run the cluster-diff dispatch logic.
 
@@ -245,7 +247,9 @@ async def _run_dispatch(
             base_sha=base_sha[:8],
             head_sha=head_sha[:8],
         )
-        await _trigger_repo_scan(org_id=org_id, repo_id=repo_id, reason="cache_miss")
+        await _trigger_repo_scan(
+            org_id=org_id, repo_id=repo_id, reason="cache_miss", delivery_id=delivery_id
+        )
         return None
 
     affected, effective_base_sha, total_head_clusters = affected_result
@@ -298,6 +302,7 @@ async def _run_dispatch(
             f"(above narrow cap {cap}: max({NARROW_CAP_ABS}, "
             f"{NARROW_CAP_PCT:.2f}*{total_head_clusters}))"
         ),
+        delivery_id=delivery_id,
     )
     return None
 
@@ -483,6 +488,7 @@ async def _trigger_repo_scan(
     org_id: uuid.UUID,
     repo_id: uuid.UUID,
     reason: str,
+    delivery_id: str,
 ) -> None:
     """Enqueue a regular scan, swallowing the already-active branch.
 
@@ -490,6 +496,12 @@ async def _trigger_repo_scan(
     lifecycle: ``start_scan`` schedules its own pipeline and reports
     its own status, so the WebhookLog row reaches ``done`` once we
     return from here.
+
+    The resulting ``scan_id`` is stamped onto the delivery row so the
+    operator "Scan now" button — which got a null scan_id from the 202 —
+    can resolve it by ``delivery_id`` and poll the timeline. The
+    already-active branch records nothing: the caller's UI will surface the
+    existing in-flight scan via the 409 path instead.
     """
     try:
         scan_id = await start_scan(org_id=org_id, repo_ids=[repo_id])
@@ -501,11 +513,17 @@ async def _trigger_repo_scan(
             existing_status=exc.status,
         )
         return
+    async with AsyncSessionLocal() as db:
+        await WebhookLogRepository(db).set_triggered_scan_id(
+            delivery_id=delivery_id, scan_id=scan_id
+        )
+        await db.commit()
     logger.info(
         "pr_merge_update_scan_triggered",
         org_id=str(org_id),
         repo_id=str(repo_id),
         scan_id=str(scan_id),
+        delivery_id=delivery_id,
         reason=reason,
     )
 

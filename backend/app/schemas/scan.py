@@ -198,6 +198,23 @@ class ResumeScanResponse(BaseModel):
     requeued: int
 
 
+class RescanDeliveryStatusResponse(BaseModel):
+    """Resolution state of one rescan delivery.
+
+    A rescan returns 202 with a null ``scan_id`` (see
+    :class:`StartScanResponse`); the diff-based worker decides
+    asynchronously whether a full scan is needed. ``scan_id`` becomes
+    non-null once the cache-miss / above-cap branch has triggered one — the
+    frontend polls this endpoint by ``delivery_id`` to pick it up and switch
+    to the timeline. A narrow/no-op rescan reaches a terminal ``status``
+    (``done``/``skipped``) with ``scan_id`` still null.
+    """
+
+    delivery_id: str
+    status: str
+    scan_id: uuid.UUID | None = None
+
+
 class StepRow(BaseModel):
     """One row of the scan timeline UI."""
 
