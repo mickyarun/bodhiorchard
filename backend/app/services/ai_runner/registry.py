@@ -26,14 +26,22 @@ from app.services.ai_runner.codex_provider import CodexProvider
 from app.services.ai_runner.copilot_provider import CopilotProvider
 
 
+def provider_instance(provider: AIProvider) -> AgentProvider:
+    """Map an :class:`AIProvider` to its adapter (no org needed).
+
+    Used by the pre-init setup connection test, which has no organization yet.
+    """
+    if provider == AIProvider.copilot:
+        return CopilotProvider()
+    if provider == AIProvider.codex:
+        return CodexProvider()
+    return ClaudeProvider()
+
+
 def provider_for(org: Organization | None = None) -> AgentProvider:
     """Return the agent provider for ``org`` based on ``org.ai_provider``.
 
     Defaults to Claude when no org is given or the provider is unset.
     """
     provider = org.ai_provider if org is not None else AIProvider.claude
-    if provider == AIProvider.copilot:
-        return CopilotProvider()
-    if provider == AIProvider.codex:
-        return CodexProvider()
-    return ClaudeProvider()
+    return provider_instance(provider)

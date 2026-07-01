@@ -43,6 +43,8 @@ from app.schemas.setup import (
     SetupSourceCode,
     SetupStatusResponse,
 )
+from app.services.ai_runner.capabilities import capabilities_for
+from app.services.ai_runner.connection_check import check_connection
 from app.services.claude_env import (
     AUTH_MODE_HOST,
     AUTH_MODE_SUBSCRIPTION,
@@ -301,6 +303,60 @@ async def check_claude_with_credentials(
             detail="api_key is required when auth_mode is 'api_key'",
         )
     return await test_claude_connection(env_extra={"ANTHROPIC_API_KEY": api_key})
+
+
+@router.post("/check-ai")
+async def check_ai_with_credentials(
+    body: ClaudeCheckRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Provider-aware connection test during setup (Claude / Copilot / Codex).
+
+    Validates the provider + auth_mode against the capability table, then runs
+    the provider's version check + a trivial prompt. Provisional credentials
+    are passed to the subprocess via ``env_extra`` only — never mutating the
+    backend's process env. Host mode runs against the unmodified env (host
+    ``gh``/``claude``/``codex`` login).
+    """
+    await _require_setup_incomplete(db)
+
+    try:
+        provider = AIProvider(body.provider)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown provider: {body.provider!r}",
+        ) from exc
+
+    caps = capabilities_for(provider)
+    spec = next((m for m in caps.auth_modes if m.value == body.auth_mode), None)
+    if spec is None:
+        valid = sorted(m.value for m in caps.auth_modes)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"auth_mode {body.auth_mode!r} is not supported by {provider.value}; "
+            f"choose one of {valid}",
+        )
+
+    # Host mode: no stored secret — rely on the host CLI login / process env.
+    if not spec.requires_secret:
+        return await check_connection(provider)
+
+    # Credentialed mode: subscription uses the OAuth token field, others the
+    # api_key field. The secret is injected only into this subprocess's env.
+    secret = (body.oauth_token if body.auth_mode == AUTH_MODE_SUBSCRIPTION else body.api_key) or ""
+    secret = secret.strip()
+    if not secret:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"A credential is required for {provider.value} '{body.auth_mode}' mode",
+        )
+    env_extra = {var: secret for var in spec.env_vars}
+    # Subscription: drop any inherited ANTHROPIC_API_KEY so it can't shadow the
+    # OAuth token and pass the test against the wrong credential.
+    if body.auth_mode == AUTH_MODE_SUBSCRIPTION:
+        env_extra["ANTHROPIC_API_KEY"] = ""
+    return await check_connection(provider, env_extra)
 
 
 @router.post("/init-org", response_model=InitOrgResponse, status_code=status.HTTP_201_CREATED)

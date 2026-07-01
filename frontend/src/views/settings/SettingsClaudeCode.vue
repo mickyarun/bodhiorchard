@@ -180,7 +180,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import api from '@/services/api'
 
 type Status = 'idle' | 'checking' | 'passed' | 'failed'
@@ -296,6 +296,17 @@ function selectProvider(value: string): void {
   const caps = providersCaps.value.find((p) => p.provider === value)
   if (caps) authMode.value = recommendedMode(caps)
 }
+
+// Clear a stale "Connected"/"Not Available" result when the selection changes
+// (provider, auth mode, or credential) so the user always re-tests the current
+// choice. Provider is included because two providers can share an auth mode.
+watch([provider, authMode, credential], () => {
+  if (claudeStatus.value === 'passed' || claudeStatus.value === 'failed') {
+    claudeStatus.value = 'idle'
+    claudeError.value = ''
+    claudeVersion.value = ''
+  }
+})
 
 onMounted(async () => {
   try {

@@ -91,6 +91,7 @@ class ClaudeCheckRequest(BaseModel):
 
     model_config = {"populate_by_name": True}
 
+    provider: str = Field(default="claude", alias="provider")
     auth_mode: str = Field(default="host", alias="authMode")
     api_key: str | None = Field(default=None, alias="apiKey")
     oauth_token: str | None = Field(default=None, alias="oauthToken")

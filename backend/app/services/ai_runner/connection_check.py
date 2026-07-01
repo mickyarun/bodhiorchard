@@ -26,7 +26,7 @@ from typing import Any
 
 from app.models.organization import AIProvider, Organization
 from app.services.ai_runner.capabilities import capabilities_for
-from app.services.ai_runner.registry import provider_for
+from app.services.ai_runner.registry import provider_instance
 from app.services.ai_runner.subprocess_env import build_provider_env
 from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig
 
@@ -59,19 +59,19 @@ async def _cli_version(provider: AIProvider, env: dict[str, str]) -> str | None:
     return None
 
 
-async def check_provider_connection(org: Organization) -> dict[str, Any]:
-    """Verify the org's provider CLI is installed and authenticated.
+async def check_connection(
+    provider: AIProvider, env_extra: dict[str, str] | None = None
+) -> dict[str, Any]:
+    """Verify ``provider``'s CLI is installed and can authenticate.
 
-    Callers must apply the org's auth to the process env first (the same
-    contract the Claude-only test had). Returns ``cli_available``,
+    Org-independent core. ``env_extra`` carries provisional credentials for
+    the pre-init setup wizard (where no org/process-env exists yet); for the
+    authenticated settings path it's ``None`` and the caller has already put
+    the org's auth into ``os.environ``. Returns ``cli_available``,
     ``cli_version``, ``test_passed``, ``output``, ``error``, ``provider``.
     """
-    provider = org.ai_provider or AIProvider.claude
     caps = capabilities_for(provider)
-    # ``env`` is only for the version probe below; the provider's ``.run()``
-    # rebuilds its own env from ``os.environ`` (which the caller already
-    # populated via ``apply_claude_auth_to_env``).
-    env = build_provider_env(provider, None)
+    env = build_provider_env(provider, env_extra)
 
     version = await _cli_version(provider, env)
     result: dict[str, Any] = {
@@ -86,12 +86,17 @@ async def check_provider_connection(org: Organization) -> dict[str, Any]:
         result["error"] = caps.install_hint
         return result
 
-    run = await provider_for(org).run(
+    run = await provider_instance(provider).run(
         _PING_PROMPT,
         NO_REPO_CONTEXT,
-        ClaudeRunnerConfig(max_turns=1, timeout_seconds=90),
+        ClaudeRunnerConfig(max_turns=1, timeout_seconds=90, env_extra=env_extra),
     )
     result["test_passed"] = run.success
     result["output"] = (run.output or "")[:200]
     result["error"] = run.error
     return result
+
+
+async def check_provider_connection(org: Organization) -> dict[str, Any]:
+    """Verify the org's provider CLI (auth already applied to process env)."""
+    return await check_connection(org.ai_provider or AIProvider.claude)
