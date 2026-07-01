@@ -162,7 +162,15 @@ def resolve_model(
     caps = CAPABILITIES[provider]
 
     if provider == AIProvider.claude:
-        return (model or None, effort or None)
+        resolved = (model or None, effort or None)
+        logger.debug(
+            "ai_model_resolved",
+            provider="claude",
+            requested_model=model or "",
+            resolved_model=resolved[0],
+            resolved_effort=resolved[1],
+        )
+        return resolved
 
     valid_ids = {m.id for m in caps.models if m.id}
     if model and model in valid_ids:
@@ -184,4 +192,11 @@ def resolve_model(
         if effort:
             logger.info("ai_effort_dropped", provider=provider.value, requested=effort)
 
+    logger.debug(
+        "ai_model_resolved",
+        provider=provider.value,
+        requested_model=model or "",
+        resolved_model=resolved_model,
+        resolved_effort=resolved_effort,
+    )
     return (resolved_model, resolved_effort)

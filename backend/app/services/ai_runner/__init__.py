@@ -22,7 +22,9 @@ result handlers are provider-agnostic.
 
 from pathlib import Path
 
-from app.models.organization import Organization
+import structlog
+
+from app.models.organization import AIProvider, Organization
 from app.services.ai_runner.base import AgentProvider
 from app.services.ai_runner.claude_provider import ClaudeProvider
 from app.services.ai_runner.registry import provider_for
@@ -31,6 +33,8 @@ from app.services.claude_runner import (
     ClaudeRunResult,
     ProgressCallback,
 )
+
+logger = structlog.get_logger(__name__)
 
 __all__ = [
     "AgentProvider",
@@ -53,4 +57,11 @@ async def run_agent(
     per-org via :func:`provider_for`.
     """
     provider = provider_for(org)
-    return await provider.run(prompt, working_dir, config, progress_callback)
+    cfg = config or ClaudeRunnerConfig()
+    logger.info(
+        "agent_run",
+        provider=(org.ai_provider if org is not None else AIProvider.claude).value,
+        requested_model=cfg.model or "(cli default)",
+        requested_effort=cfg.effort or "(cli default)",
+    )
+    return await provider.run(prompt, working_dir, cfg, progress_callback)

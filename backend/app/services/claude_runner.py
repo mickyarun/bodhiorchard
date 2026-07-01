@@ -725,6 +725,8 @@ async def run_claude_code(
         cmd=cmd,
         prompt_preview=prompt[:100],
         cwd=cwd,
+        model=config.model or "(cli default)",
+        effort=config.effort or "(cli default)",
         max_turns=config.max_turns,
         timeout_seconds=config.timeout_seconds,
         output_format=output_format,
