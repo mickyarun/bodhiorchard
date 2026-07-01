@@ -284,6 +284,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.warning("pr_merge_worker_start_failed", exc_info=True)
 
+    # Surface the worker's availability: without it, re-scans enqueue but never
+    # run. Log at ERROR (not the worker's internal warning) and stash on
+    # app.state so request handlers / health checks can refuse work loudly
+    # instead of returning a silent 202.
+    app.state.pr_merge_worker_available = pr_merge_pool is not None
+    if pr_merge_pool is None:
+        logger.error(
+            "pr_merge_worker_unavailable",
+            hint=(
+                "Redis unreachable at startup — re-scans will NOT run until Redis is up "
+                "and the backend is restarted."
+            ),
+        )
+
     yield
 
     cleanup_task.cancel()

@@ -94,15 +94,15 @@
   </div>
 
   <v-alert
-    v-if="scanStore.error"
+    v-if="scanStore.startError || scanStore.error"
     type="error"
     variant="tonal"
     density="compact"
     class="mx-5 mb-3"
     closable
-    @click:close="scanStore.error = null"
+    @click:close="scanStore.clearErrors()"
   >
-    {{ scanStore.error }}
+    {{ scanStore.startError || scanStore.error }}
   </v-alert>
 
   <ConfirmDialog

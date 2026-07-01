@@ -151,6 +151,10 @@ export const useReposcanV2ScansStore = defineStore('reposcanv2Scans', () => {
   const startingScan = ref(false)
   const cancellingScan = ref(false)
   const error = ref<string | null>(null)
+  // Dedicated error for the Scan button. Kept separate from ``error`` so a
+  // background ``restoreActiveScan``/poll success (which nulls ``error``)
+  // can't silently wipe a failed-to-start message before the user sees it.
+  const startError = ref<string | null>(null)
 
   let pollHandle: number | null = null
 
@@ -240,9 +244,16 @@ export const useReposcanV2ScansStore = defineStore('reposcanv2Scans', () => {
     selectedRepoIds.value = new Set()
   }
 
+  /** Dismiss any surfaced error (load or scan-start). */
+  function clearErrors(): void {
+    error.value = null
+    startError.value = null
+  }
+
   async function startScan(): Promise<string | null> {
+    startError.value = null
     if (selectedRepoIds.value.size === 0) {
-      error.value = 'Select at least one repository to scan'
+      startError.value = 'Select at least one repository to scan'
       return null
     }
     // Wipe the prior scan immediately so the timeline doesn't keep
@@ -261,13 +272,15 @@ export const useReposcanV2ScansStore = defineStore('reposcanv2Scans', () => {
         config: { full_rescan: false },
       }
       const { data } = await api.post<StartScanResponse>('/v1/reposcanv2/scans', body)
-      error.value = null
+      startError.value = null
       // ``scan_id`` is null when every requested repo took the rescan
-      // fast path — there's no Scan row to poll. The diff-based work
-      // runs on the PR-merge Redis stream and progress shows up in
-      // the deliveries log, not the timeline.
+      // fast path — there's no Scan row returned by this call. Hydrate
+      // from the latest scan so the timeline + polling start immediately
+      // instead of only after a manual page refresh.
       if (data.scan_id) {
         await fetchScan(data.scan_id)
+      } else {
+        await restoreActiveScan()
       }
       return data.scan_id
     } catch (err) {
@@ -276,11 +289,11 @@ export const useReposcanV2ScansStore = defineStore('reposcanv2Scans', () => {
       // wants to watch the in-flight one rather than queue a new request.
       const conflict = extractConflictScanId(err)
       if (conflict !== null) {
-        error.value = 'A scan is already running — switched to it.'
+        startError.value = 'A scan is already running — switched to it.'
         await fetchScan(conflict)
         return conflict
       }
-      error.value = extractMessage(err, 'Failed to start scan')
+      startError.value = extractMessage(err, 'Failed to start scan')
       return null
     } finally {
       startingScan.value = false
@@ -417,6 +430,8 @@ export const useReposcanV2ScansStore = defineStore('reposcanv2Scans', () => {
     startingScan,
     cancellingScan,
     error,
+    startError,
+    clearErrors,
     // derived
     isCurrentScanActive,
     aggregateCounts,

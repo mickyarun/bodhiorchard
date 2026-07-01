@@ -31,6 +31,7 @@ indexer → empty file list → ``"no source files found in repo"``.
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -70,6 +71,20 @@ def _scan_worktree_parent(repo_path: str) -> Path:
 async def _has_origin_remote(repo_path: str) -> bool:
     """Return True iff the repo has an ``origin`` remote configured."""
     _, _, rc = await run_git(["remote", "get-url", "origin"], cwd=repo_path)
+    return rc == 0
+
+
+async def _worktree_is_healthy(worktree_path: str) -> bool:
+    """True iff ``worktree_path`` is a usable git worktree.
+
+    A leftover directory whose ``.git`` gitdir link dangles — e.g. the base
+    repo was moved/renamed, or a *different* repo with the same basename (the
+    worktree slug is the basename) left a stale worktree here — still passes
+    ``Path.exists()`` but fails every git command with
+    ``fatal: not a git repository``. Detecting it lets the caller rebuild the
+    worktree instead of resetting into a broken tree.
+    """
+    _, _, rc = await run_git(["rev-parse", "--is-inside-work-tree"], cwd=worktree_path)
     return rc == 0
 
 
@@ -122,6 +137,16 @@ async def ensure_scan_test_worktree(
     # remove it so the subsequent ``worktree add`` doesn't trip on
     # "branch already used elsewhere".
     await _remove_conflicting_worktree(repo_path, main_branch, keep=wt_str)
+
+    # An existing dir may be a *dangling* worktree — its gitdir points at a
+    # base repo that was moved/renamed, or at a same-basename repo's now-gone
+    # worktree admin dir. Such a dir passes ``exists()`` but breaks
+    # ``git reset`` with "not a git repository". Remove it so the ``worktree
+    # add`` below rebuilds it cleanly against the current ``repo_path``.
+    if wt_path.exists() and not await _worktree_is_healthy(wt_str):
+        logger.info("scan_ingest_rebuilding_dangling_worktree", path=wt_str, repo=repo_path)
+        shutil.rmtree(wt_path, ignore_errors=True)
+        await run_git(["worktree", "prune"], cwd=repo_path)
 
     if not wt_path.exists():
         _, stderr, rc = await run_git(

@@ -45,6 +45,7 @@ from app.schemas.scan import (
     TrackedRepoCard,
     V2ConfigResponse,
 )
+from app.services.redis_client import get_redis
 from app.services.scan.rescan_enqueue import (
     RescanHeadResolutionError,
     RescanRepoNotFoundError,
@@ -169,6 +170,19 @@ async def create_scan(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="None of the requested repo_ids are tracked by this organisation",
+        )
+    # Re-scans are driven by the PR-merge Redis-stream consumer. If Redis is
+    # unreachable, the consumer isn't running (it's started at boot only when
+    # Redis is up), so an enqueued delivery would sit forever as ``pending``
+    # and the UI would show a silent 202 with no progress. Fail loud instead.
+    if rescan_ids and await get_redis() is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Scan worker unavailable: Redis is not reachable, so re-scans can't be "
+                "processed. Start Redis (e.g. `docker compose -f docker-compose.infra.yml "
+                "up -d redis`), restart the backend, then retry."
+            ),
         )
     scan_id: uuid.UUID | None = None
     if first_scan_ids:
