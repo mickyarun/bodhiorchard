@@ -211,7 +211,7 @@
                 <div class="skill-meta">
                   <span class="skill-meta-chip">
                     <v-icon icon="mdi-cube-outline" size="12" />
-                    {{ skill.model || 'default' }}
+                    {{ coerceModel(skill.model) || 'default' }}
                   </span>
                   <code class="skill-slug">{{ skill.skillSlug }}</code>
                 </div>
@@ -278,9 +278,13 @@
                       variant="outlined"
                       density="compact"
                       hide-details
+                      :disabled="!providerSupportsModelChoice"
                     />
                   </div>
-                  <div v-if="providerSupportsIterationModel" class="field col-2">
+                  <div
+                    v-if="providerSupportsIterationModel && providerSupportsModelChoice"
+                    class="field col-2"
+                  >
                     <label class="field-label">Iteration model</label>
                     <v-select
                       v-model="editForm.iterationModel"
@@ -670,12 +674,39 @@ const filteredGroups = computed<AgentGroup[]>(() => {
 // doesn't support it (e.g. a provider with no reasoning levels).
 interface CapModel { id: string; label: string }
 const capModels = ref<CapModel[]>([{ id: '', label: 'Default' }])
+const capDefaultModel = ref('')
 const capEffortValues = ref<string[]>([])
 const providerSupportsEffort = ref(true)
 const providerSupportsIterationModel = ref(true)
 
+// Providers that expose a single model (e.g. Copilot, whose only choice is
+// "auto — Copilot picks the model") give the user nothing to select, so the
+// model dropdowns are shown read-only rather than as a one-item picker.
+const providerSupportsModelChoice = computed(() => capModels.value.length > 1)
+
 function titleCase(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+// A skill's stored model is tuned for whatever provider it was saved under
+// (e.g. a Claude ``sonnet``). When the active provider doesn't list it, the
+// backend's ``resolve_model`` falls back to that provider's default at run
+// time — so surface the DEFAULT here rather than a stale foreign id, which
+// reads as "this skill runs on sonnet" when it doesn't. Returns '' (the
+// provider default) for any model/effort the active provider can't honour.
+function coerceModel(saved: string | null | undefined): string {
+  const v = saved ?? ''
+  // Coerce to the provider's DEFAULT model (not a bare ''), so a provider
+  // whose default isn't the empty-string option — e.g. Copilot's "auto" —
+  // preselects a real, listed value instead of showing a blank dropdown.
+  if (v && capModels.value.some((m) => m.id === v)) return v
+  return capDefaultModel.value
+}
+
+function coerceEffort(saved: string | null | undefined): string {
+  const v = saved ?? ''
+  if (!v || !providerSupportsEffort.value) return ''
+  return capEffortValues.value.includes(v) ? v : ''
 }
 
 // Show a saved value the active provider no longer lists as a clearly-labelled
@@ -719,6 +750,7 @@ async function loadProviderCapabilities(): Promise<void> {
     )
     if (!caps) return
     capModels.value = caps.models?.length ? caps.models : [{ id: '', label: 'Default' }]
+    capDefaultModel.value = caps.default_model ?? ''
     capEffortValues.value = caps.supports_effort ? caps.effort_values ?? [] : []
     providerSupportsEffort.value = !!caps.supports_effort
     providerSupportsIterationModel.value = !!caps.supports_iteration_model
@@ -760,10 +792,13 @@ function toggle(skill: AgentSkill): void {
     prompt: skill.prompt,
     maxTurns: skill.maxTurns,
     timeoutSeconds: skill.timeoutSeconds ?? 0,
-    model: skill.model ?? '',
-    iterationModel: skill.iterationModel ?? '',
+    // Preselect the active provider's model/effort — a foreign saved id
+    // (e.g. Claude ``sonnet`` under a Codex org) coerces to the provider
+    // default so the dropdown shows what actually runs, not a fallback label.
+    model: coerceModel(skill.model),
+    iterationModel: coerceModel(skill.iterationModel),
     iterationMaxTurns: skill.iterationMaxTurns ?? 0,
-    effort: skill.effort ?? '',
+    effort: coerceEffort(skill.effort),
   }
 }
 
