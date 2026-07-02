@@ -67,18 +67,18 @@ def _patch_repos(
     pr_repo = MagicMock(
         get_repo_ids_with_prs=AsyncMock(return_value=repo_ids_with_prs),
     )
-    tr_repo = MagicMock(
-        get_active_id_path_name=AsyncMock(return_value=[]),
-    )
     todo_repo = MagicMock(
         count_remaining_for_bud=AsyncMock(return_value=remaining_todos),
     )
     return (
         patch("app.services.pr_auto_transition.PullRequestRepository", return_value=pr_repo),
         patch("app.services.pr_auto_transition.BUDTodoRepository", return_value=todo_repo),
+        # confirmed_repos population is delegated to this shared resolver
+        # (also used by the manual repo-selection endpoint); stub it so the
+        # gate test stays focused on the TODO/PR semantics.
         patch(
-            "app.repositories.tracked_repository.TrackedRepoRepository",
-            return_value=tr_repo,
+            "app.services.bud_repo_paths.resolve_confirmed_repos",
+            AsyncMock(return_value=[]),
         ),
     )
 

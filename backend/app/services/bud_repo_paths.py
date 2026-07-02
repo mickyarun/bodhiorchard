@@ -23,9 +23,41 @@ change (e.g. renaming the key or moving to a relation) only edits this
 module, not every caller.
 """
 
-from app.models.bud import BUDDocument
+import uuid
+from typing import Any
 
-__all__ = ["confirmed_repo_paths"]
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.bud import BUDDocument
+from app.repositories.tracked_repository import TrackedRepoRepository
+
+__all__ = ["confirmed_repo_paths", "resolve_confirmed_repos"]
+
+
+async def resolve_confirmed_repos(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    repo_ids: set[str],
+) -> list[dict[str, Any]]:
+    """Map repo ids to the ``confirmed_repos`` metadata shape.
+
+    Returns ``[{"repo_path", "repo_name"}, ...]`` for every id in
+    ``repo_ids`` that resolves to an *active* tracked repository with a
+    clone path. Ids that don't resolve (inactive, no path, unknown) are
+    dropped — the caller decides whether an empty result is an error.
+
+    Single source of truth for "which impacted repos can the code-review /
+    testing agent actually run against", shared by the automatic
+    PR-merge transition and the manual repo-selection endpoint so the two
+    paths can't drift.
+    """
+    tr_repo = TrackedRepoRepository(db, org_id=org_id)
+    triples = await tr_repo.get_active_id_path_name()
+    return [
+        {"repo_path": path, "repo_name": name}
+        for rid, path, name in triples
+        if str(rid) in repo_ids and path
+    ]
 
 
 def confirmed_repo_paths(

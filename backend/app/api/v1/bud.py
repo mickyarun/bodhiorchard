@@ -66,6 +66,7 @@ from app.schemas.bud import (
 )
 from app.schemas.bud_code_review import (
     CodeReviewOverrideRequest,
+    CodeReviewRepoSelectRequest,
     CodeReviewRepoStatus,
     CodeReviewRerunRequest,
     CodeReviewStatusResponse,
@@ -1405,6 +1406,7 @@ async def get_code_review_status(
 ) -> CodeReviewStatusResponse:
     """Return PR status + comment count per impacted repo for the Code Review tab."""
     from app.services.bud_code_review_status import get_last_run_status, get_pr_status_summary
+    from app.services.bud_repo_paths import confirmed_repo_paths
 
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     bud = await bud_repo.get_by_id(bud_id)
@@ -1413,11 +1415,96 @@ async def get_code_review_status(
 
     rows = await get_pr_status_summary(db, current_user.org_id, bud)
     last_run_status, last_run_message = await get_last_run_status(db, current_user.org_id, bud_id)
+    # In code_review with no confirmed repo paths, the agent can't run —
+    # the BUD was advanced manually and never had confirmed_repos populated.
+    # Tell the FE to prompt for repo selection rather than showing a dead
+    # "check the logs" failure.
+    needs_repo_selection = bud.status == BUDStatus.CODE_REVIEW and not confirmed_repo_paths(bud)
     return CodeReviewStatusResponse(
         repos=[CodeReviewRepoStatus(**r) for r in rows],
         last_run_status=last_run_status,
         last_run_message=last_run_message,
+        needs_repo_selection=needs_repo_selection,
     )
+
+
+@router.post(
+    "/{bud_id}/code-review/repos",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def select_code_review_repos(
+    bud_id: uuid.UUID,
+    payload: CodeReviewRepoSelectRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Pick which repos the code-review agent runs against, then spawn it.
+
+    Used by the Code Review tab when the BUD reached code_review manually
+    and ``confirmed_repos`` was never auto-populated (the automatic
+    PR-merge path is the only other writer). The selected repo_ids are
+    resolved to active tracked-repo clone paths, written to
+    ``metadata.confirmed_repos``, and a code-review agent task is spawned.
+
+    Guarded to ``code_review`` status, blocked while another agent task is
+    running, and rejects a selection that resolves to zero reviewable repos
+    (all inactive / no clone path) so the user sees why nothing ran.
+    """
+    from app.services.bud_repo_paths import resolve_confirmed_repos
+
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id_for_update(bud_id)
+    if bud is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+    if bud.status != BUDStatus.CODE_REVIEW:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"BUD is not in code_review status (current: {bud.status.value})",
+        )
+
+    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
+    if await task_repo.get_active_for_bud(bud_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot start code review while an agent task is running",
+        )
+
+    # Restrict the selection to the BUD's own impacted repos, then resolve
+    # to clone paths. A selection that resolves to nothing (inactive repos
+    # or no local path) is a 400 rather than a silent agent failure.
+    impacted_ids = {str(r.get("repo_id")) for r in (bud.impacted_repos or []) if r.get("repo_id")}
+    selected_ids = {str(rid) for rid in payload.repo_ids} & impacted_ids
+    confirmed = await resolve_confirmed_repos(db, current_user.org_id, selected_ids)
+    if not confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="None of the selected repos are active with a local clone path",
+        )
+
+    meta = dict(bud.metadata_ or {})
+    meta["confirmed_repos"] = confirmed
+    bud.metadata_ = meta
+
+    task = await create_agent_task_for_stage(
+        bud,
+        str(BUDStatus.CODE_REVIEW.value),
+        current_user.org_id,
+        db,
+        triggered_by=current_user.id,
+        force=True,
+    )
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No code-review agent is configured for this org",
+        )
+    return {
+        "status": "accepted",
+        "bud_id": str(bud_id),
+        "task_id": str(task.id),
+        "repo_count": len(confirmed),
+    }
 
 
 @router.post(

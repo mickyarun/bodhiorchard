@@ -428,11 +428,38 @@ export const useBUDStore = defineStore('bud', () => {
         repos: data?.repos ?? [],
         last_run_status: data?.last_run_status ?? 'never_run',
         last_run_message: data?.last_run_message ?? null,
+        needs_repo_selection: data?.needs_repo_selection ?? false,
       }
     } catch {
       // Soft failure: keep the tab usable even if the status endpoint
       // is down. The component should never block on a banner load.
-      return { repos: [], last_run_status: 'never_run', last_run_message: null }
+      return {
+        repos: [],
+        last_run_status: 'never_run',
+        last_run_message: null,
+        needs_repo_selection: false,
+      }
+    }
+  }
+
+  // Pick which impacted repos the code-review agent runs against, then
+  // spawn it. Used when the BUD reached code_review manually and no
+  // confirmed_repos were auto-populated. Returns the accepted task id, or
+  // null on failure (error message set for the caller to surface).
+  async function selectCodeReviewRepos(
+    budId: string,
+    repoIds: string[],
+  ): Promise<{ taskId: string; repoCount: number } | null> {
+    error.value = ''
+    try {
+      const { data } = await api.post(`/v1/buds/${budId}/code-review/repos`, {
+        repo_ids: repoIds,
+      })
+      return { taskId: data.task_id, repoCount: data.repo_count }
+    } catch (err) {
+      const axiosErr = err as AxiosError<{ detail?: string }>
+      error.value = axiosErr.response?.data?.detail || 'Failed to start code review'
+      return null
     }
   }
 
@@ -626,6 +653,7 @@ export const useBUDStore = defineStore('bud', () => {
     fetchTimeline,
     fetchPRChecklist,
     fetchCodeReviewStatus,
+    selectCodeReviewRepos,
     overrideCodeReview,
     requestReassignment,
     dismissPhaseFailure,

@@ -38,6 +38,20 @@ const lastRunStatus = ref<CodeReviewRunStatus>('never_run')
 const lastRunMessage = ref<string | null>(null)
 const loading = ref(false)
 
+// Repo-selection state. When the BUD reached code_review manually the
+// agent has no repo paths to diff against; the user picks repos here and
+// we spawn the agent. `selectedRepoIds` pre-fills with repos that have a
+// PR (the likely-intended review set); no-PR repos stay selectable.
+const needsRepoSelection = ref(false)
+const selectedRepoIds = ref<string[]>([])
+const startingReview = ref(false)
+const startReviewError = ref('')
+const reviewQueued = ref(false)
+
+const canStartReview = computed(
+  () => selectedRepoIds.value.length > 0 && !startingReview.value,
+)
+
 // Re-review dialog state. `startFresh` controls whether the backend
 // resumes the prior Claude CLI session (default, faster) or mints a
 // brand new one (use when the PR has new commits since the last run
@@ -51,8 +65,13 @@ const rerunError = ref('')
 // ok, never_run) communicate via the existing per-repo PR list and the
 // agent-running indicators elsewhere on the BUD page — a banner for
 // "ok" or "running" would be noisy duplication.
+// Suppress the generic failure banner when we're showing the repo picker:
+// the "no confirmed repos" failure IS the repo-selection case, and the
+// picker is the actionable replacement for a dead "check the logs" banner.
 const showRunBanner = computed(
-  () => lastRunStatus.value === 'parse_failed' || lastRunStatus.value === 'failed',
+  () =>
+    !needsRepoSelection.value &&
+    (lastRunStatus.value === 'parse_failed' || lastRunStatus.value === 'failed'),
 )
 
 // Override dialog state
@@ -79,7 +98,31 @@ async function loadStatus(): Promise<void> {
   repos.value = data.repos
   lastRunStatus.value = data.last_run_status
   lastRunMessage.value = data.last_run_message
+  needsRepoSelection.value = data.needs_repo_selection
+  if (needsRepoSelection.value) {
+    // Default the selection to repos that have a PR — the likely-intended
+    // review set. No-PR repos remain unchecked but selectable.
+    selectedRepoIds.value = data.repos
+      .filter(r => r.pr_state !== 'not_raised')
+      .map(r => r.repo_id)
+  }
   loading.value = false
+}
+
+async function startReview(): Promise<void> {
+  if (!canStartReview.value) return
+  startingReview.value = true
+  startReviewError.value = ''
+  const result = await budStore.selectCodeReviewRepos(props.budId, selectedRepoIds.value)
+  startingReview.value = false
+  if (result) {
+    reviewQueued.value = true
+    // Refresh so the picker clears (confirmed_repos now set) and the banner
+    // flips to running; the agent worker drives further updates via socket.
+    await loadStatus()
+  } else {
+    startReviewError.value = budStore.error || 'Failed to start code review'
+  }
 }
 
 onMounted(loadStatus)
@@ -188,7 +231,7 @@ function commentBadgeTooltip(repo: CodeReviewRepoStatus): string {
       <span class="text-subtitle-1 font-weight-medium">Code Review</span>
       <v-spacer />
       <v-btn
-        v-if="!loading && repos.length > 0 && lastRunStatus !== 'running'"
+        v-if="!loading && repos.length > 0 && lastRunStatus !== 'running' && !needsRepoSelection"
         variant="outlined"
         size="small"
         prepend-icon="mdi-refresh"
@@ -216,6 +259,9 @@ function commentBadgeTooltip(repo: CodeReviewRepoStatus): string {
       <template v-else-if="repos.length === 0">
         No impacted repos for this BUD. Use <strong>Override to QA</strong> if this is intentional.
       </template>
+      <template v-else-if="needsRepoSelection">
+        This BUD was moved to code review manually. Pick the repos to review below to start the agent.
+      </template>
       <template v-else-if="allMerged">
         All PRs merged. This BUD will auto-advance to QA shortly.
       </template>
@@ -241,8 +287,71 @@ function commentBadgeTooltip(repo: CodeReviewRepoStatus): string {
       {{ lastRunMessage }}
     </v-alert>
 
+    <!-- Repo selection: the BUD reached code_review manually so no repos
+         are confirmed with a clone path. Let the user pick which to review
+         and spawn the agent — instead of a dead-end failure. -->
+    <v-card
+      v-if="needsRepoSelection && repos.length > 0"
+      variant="outlined"
+      rounded="lg"
+      class="mb-1"
+    >
+      <div class="pa-3">
+        <div class="d-flex align-center ga-2 mb-1">
+          <v-icon size="18" color="warning">mdi-source-branch-check</v-icon>
+          <span class="text-body-2 font-weight-medium">Select repos to review</span>
+        </div>
+        <div class="text-caption text-medium-emphasis mb-2">
+          This BUD was moved to code review without a repo set. Choose which
+          impacted repos the agent should review — repos with a PR are
+          pre-selected.
+        </div>
+        <v-checkbox
+          v-for="repo in repos"
+          :key="repo.repo_id"
+          v-model="selectedRepoIds"
+          :value="repo.repo_id"
+          density="compact"
+          hide-details
+          :disabled="startingReview"
+        >
+          <template #label>
+            <span class="text-body-2">{{ repo.repo_name }}</span>
+            <v-chip size="x-small" :color="stateColor(repo)" variant="tonal" class="ml-2">
+              {{ stateLabel(repo) }}
+            </v-chip>
+          </template>
+        </v-checkbox>
+        <v-alert
+          v-if="startReviewError"
+          type="error"
+          variant="tonal"
+          density="compact"
+          class="mt-2"
+        >
+          {{ startReviewError }}
+        </v-alert>
+        <div class="d-flex align-center ga-3 mt-3">
+          <v-btn
+            color="primary"
+            variant="flat"
+            size="small"
+            prepend-icon="mdi-play"
+            :loading="startingReview"
+            :disabled="!canStartReview"
+            @click="startReview"
+          >
+            Run code review
+          </v-btn>
+          <span v-if="reviewQueued" class="text-caption text-medium-emphasis">
+            Queued — the review will start shortly.
+          </span>
+        </div>
+      </div>
+    </v-card>
+
     <!-- Per-repo status list -->
-    <v-card v-if="repos.length > 0" variant="outlined" rounded="lg">
+    <v-card v-if="repos.length > 0 && !needsRepoSelection" variant="outlined" rounded="lg">
       <v-list density="compact" class="py-0">
         <v-list-item
           v-for="repo in repos"
