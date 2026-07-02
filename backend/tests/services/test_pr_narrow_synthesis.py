@@ -31,6 +31,7 @@ Two layers of coverage:
 from __future__ import annotations
 
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -599,6 +600,21 @@ async def test_run_claude_narrow_refreshes_token_before_spawning_engine(
             call_sequence.append(f"engine:{request.working_dir}")
             return _FakeOutcome()
 
+    # ``_run_claude_narrow`` loads the org to pick its provider; stub the
+    # session + repo so this unit test never touches a DB (the engine that
+    # would use the org is faked out anyway).
+    @asynccontextmanager
+    async def _fake_session() -> Any:
+        yield object()
+
+    class _FakeOrgRepo:
+        def __init__(self, _db: Any) -> None: ...
+
+        async def get_by_id(self, _entity_id: uuid.UUID) -> None:
+            return None
+
+    monkeypatch.setattr(handler_mod, "AsyncSessionLocal", _fake_session)
+    monkeypatch.setattr(handler_mod, "OrganizationRepository", _FakeOrgRepo)
     monkeypatch.setattr(handler_mod, "refresh_origin_token_for_spawn", fake_refresh)
     monkeypatch.setattr(handler_mod, "AgentCliEngine", _FakeEngine)
     monkeypatch.setattr(handler_mod, "create_internal_mcp_token", lambda _org: "tok")
