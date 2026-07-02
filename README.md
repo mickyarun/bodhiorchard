@@ -2,9 +2,9 @@
 
 # Bodhiorchard&trade;
 
-### From conversation to production, with twelve AI agents.
+### Ship software, not Scrum ceremonies.
 
-**The open-source alternative to sprint, scrum & agile — self-hosted, AI-engine-agnostic, and built so your data never leaves your machine.**
+**The open-source, self-hosted alternative to Jira & Scrum — AI agents run the process end-to-end, developers earn XP for what actually ships, and your data never leaves your machine.**
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Website](https://img.shields.io/badge/website-bodhiorchard.ai-2E7D32.svg)](https://bodhiorchard.ai/)
@@ -22,7 +22,7 @@
 
 ---
 
-**Bodhiorchard** is the open-source reference implementation of **Agent-Driven Development (ADD)** — a software development methodology where twelve specialised AI agents handle the busywork (specs, estimates, test plans, triage, retrospectives) and humans keep the decisions that matter. It works as a **self-hosted Jira alternative** for the full lifecycle: intake → spec → design → development → testing → deploy → retrospective. The data plane stays on your hardware; inference runs through your choice of agent CLI — [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [GitHub Copilot](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli), or [OpenAI Codex](https://developers.openai.com/codex/cli) — picked per organization in setup, with Ollama next.
+**Bodhiorchard** replaces sprint, scrum, and Jira ceremony with **Agent-Driven Development (ADD)** — twelve specialised AI agents handle the busywork (triage, specs, estimates, test plans, retrospectives) while humans keep the decisions that matter, and developers earn XP for the work that actually reaches production. It's a **self-hosted Jira alternative** for the full lifecycle: intake → spec → design → development → testing → deploy → retrospective. The data plane stays on your hardware; inference runs through your choice of agent CLI — [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [GitHub Copilot](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli), or [OpenAI Codex](https://developers.openai.com/codex/cli) — picked per organization in setup, with Ollama next.
 
 > **Less process. More shipped.** The full methodology lives at [bodhiorchard.ai](https://bodhiorchard.ai/).
 
@@ -62,6 +62,7 @@ npm install && npm run setup && npm run dev
 | 🎯 **Predictions, not poker** | AI-PERT + 10,000 Monte Carlo simulations give P50/P70/P85 delivery dates per phase — factoring skill profiles, backlog, and workload. No story points. |
 | 📄 **One BUD per feature** | A single living document (spec + tech spec + test plan + history) replaces tickets scattered across Jira, Confluence, Notion, and Slack. |
 | 🌱 **Knowledge that stays current** | Auto-synced from code, vector-indexed, and fed into every agent prompt. No stale wiki pages. |
+| 🏆 **XP for shipped work** | Developers level up when their PRs reach production — recognition for shipped outcomes, split across contributors, never for hours logged or tickets closed. |
 
 ### Old way vs Agent-Driven Development
 
