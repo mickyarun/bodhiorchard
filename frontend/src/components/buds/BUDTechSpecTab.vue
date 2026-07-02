@@ -18,6 +18,7 @@
 import { computed, ref } from 'vue'
 
 import AppCallout from '@/components/common/AppCallout.vue'
+import BUDImpactedReposDialog from '@/components/buds/BUDImpactedReposDialog.vue'
 import { useMermaidRender } from '@/composables/useMermaidRender'
 import type { BUDDocument } from '@/types'
 import { renderMarkdown } from '@/utils/markdown'
@@ -35,7 +36,15 @@ const emit = defineEmits<{
   save: []
   startEdit: []
   generate: []
+  /** Fired after the user saves an impacted_repos edit so the parent
+   *  reloads the BUD and every repo-derived surface refreshes. */
+  'refresh-bud': []
 }>()
+
+// Impacted-repos edit dialog. Tech Arch is where repo scope is first
+// decided (and where the agent's first guess most often needs correcting),
+// so the same Edit affordance the Development tab offers lives here too.
+const editReposOpen = ref(false)
 
 // True when the PM has explicitly disabled the AI tech-arch agent
 // for this BUD. The empty / unset case ALSO returns true (default is
@@ -86,6 +95,40 @@ async function copyPrompt(): Promise<void> {
 
 <template>
   <div class="bud-tech-spec-tab">
+    <!-- Impacted repos — editable here so the scope can be corrected while
+         the tech spec is being planned (the tech-arch agent's first guess
+         often needs fixing). Hidden while editing the spec markdown to keep
+         that focused. Same dialog + contract as the Development tab. -->
+    <div
+      v-if="!editing"
+      class="d-flex align-center flex-wrap ga-2 mb-4 tech-spec-impacted-row"
+    >
+      <v-icon icon="mdi-source-repository-multiple" size="16" color="medium-emphasis" />
+      <span class="text-caption text-medium-emphasis">Impacted:</span>
+      <template v-if="bud.impacted_repos && bud.impacted_repos.length">
+        <v-chip
+          v-for="r in bud.impacted_repos"
+          :key="r.repo_id || r.repo_name"
+          size="x-small"
+          variant="tonal"
+          prepend-icon="mdi-source-repository"
+        >
+          {{ r.repo_name }}
+        </v-chip>
+      </template>
+      <span v-else class="text-caption text-medium-emphasis">none yet</span>
+      <v-spacer />
+      <v-btn
+        size="x-small"
+        variant="text"
+        density="compact"
+        prepend-icon="mdi-pencil-outline"
+        @click="editReposOpen = true"
+      >
+        Edit
+      </v-btn>
+    </div>
+
     <textarea
       v-if="editing"
       :value="editValue"
@@ -183,6 +226,13 @@ async function copyPrompt(): Promise<void> {
         </v-btn>
       </div>
     </div>
+
+    <BUDImpactedReposDialog
+      v-model="editReposOpen"
+      :bud-id="bud.id"
+      :current="bud.impacted_repos ?? null"
+      @saved="emit('refresh-bud')"
+    />
   </div>
 </template>
 

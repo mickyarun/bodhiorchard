@@ -313,6 +313,7 @@
                   @save="saveTechSpec"
                   @start-edit="toggleTechSpecEdit"
                   @generate="openTechSpecChat"
+                  @refresh-bud="budStore.refreshBUDIfCurrent(bud.id)"
                 />
               </v-tabs-window-item>
 
