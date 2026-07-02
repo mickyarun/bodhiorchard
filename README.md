@@ -14,9 +14,9 @@
 
 [Website](https://bodhiorchard.ai/) · [Quick Start](#quick-start) · [Why Bodhiorchard](#why-bodhiorchard) · [The Twelve Agents](#the-twelve-agents) · [Docs](#documentation) · [FAQ](#faq)
 
-<a href="https://youtu.be/OxoqBI7BNxU"><img src="docs/images/livingtree.png" width="85%" alt="Bodhiorchard — your codebase as a living orchard"></a>
+<a href="https://bodhiorchard.ai/"><img src="docs/images/board-ui.webp" width="85%" alt="The BUD board — every feature tracked from backlog to production in one view"></a>
 
-**[▶ Watch the demo](https://youtu.be/OxoqBI7BNxU)** — your organization as a living, tended orchard.
+**[▶ Watch the demo](https://youtu.be/OxoqBI7BNxU)** · plan, track, and ship every feature in one place — no sprints, no story points, no standups.
 
 </div>
 
@@ -78,18 +78,37 @@ npm install && npm run setup && npm run dev
 
 ## Screenshots
 
-| | |
+| Slack triage — a message in, a BUD out | One BUD per feature — spec to prod |
 |---|---|
-| ![BUD board — plan, track, ship in one garden](docs/images/board.png) | ![One BUD per feature — spec to prod](docs/images/bud-document.png) |
-| ![Feature registry — every feature, every dev at a glance](docs/images/Feature.png) | ![Slack triage — a message in, a BUD out](docs/images/slack-triage.png) |
-| ![AI drafts the tech spec, you decide](docs/images/techarch.png) | ![Cross-repo code graph — every repo, every link, one map](docs/images/crossrepo.png) |
-| ![MCP knowledge — your agents, fed from your code](docs/images/mcp.png) | ![Bring your Jira, then leave it behind](docs/images/jira-import.png) |
+| ![Slack triage — a message in, a BUD out](docs/images/slack-triage-ui.webp) | ![One BUD per feature — spec to prod](docs/images/bud-document-ui.webp) |
+
+| AI drafts the tech spec, you decide | Feature registry — every feature, every dev |
+|---|---|
+| ![AI drafts the tech spec, you decide](docs/images/techarch-ui.webp) | ![Feature registry — every feature, every dev at a glance](docs/images/Feature-ui.webp) |
+
+| Cross-repo code graph — one map | Bring your own AI — MCP knowledge |
+|---|---|
+| ![Cross-repo code graph — every repo, every link, one map](docs/images/crossrepo-ui.webp) | ![MCP knowledge — your agents, fed from your code](docs/images/mcp-ui.webp) |
+
+<div align="center">
+
+<img src="docs/images/jira-import-ui.webp" width="70%" alt="Bring your Jira, then leave it behind — import issues into BUDs in minutes">
+
+</div>
 
 The gamification layer rebuilds developer skill profiles nightly — skills compound, badges unlock, and the leaderboard reflects shipped value, not ticket count:
 
 | | | | |
 |---|---|---|---|
-| ![Developer skill profile — rebuilt nightly](docs/images/skills.png) | ![Ship quality, earn XP, grow your tree](docs/images/gamification.png) | ![Leaderboard ranked by shipped value](docs/images/LeaderBoard.png) | ![Unlocks — do the work, unlock the world](docs/images/unlocks.png) |
+| ![Developer skill profile — rebuilt nightly](docs/images/skills-ui.webp) | ![Ship quality, earn XP, grow your tree](docs/images/gamification-ui.webp) | ![Leaderboard ranked by shipped value](docs/images/LeaderBoard-ui.webp) | ![Unlocks — do the work, unlock the world](docs/images/unlocks-ui.webp) |
+
+And yes — your codebase is a living orchard. Repos as trees, features as fruit, your team walking the garden:
+
+<div align="center">
+
+<a href="https://youtu.be/OxoqBI7BNxU"><img src="docs/images/livingtree.png" width="70%" alt="The Living Tree — your codebase as a living orchard"></a>
+
+</div>
 
 **More walkthroughs:** [Setup](https://youtu.be/ot-BmKxRgRA) · [Slack triage & MCP tools](https://youtu.be/i8kZdcL1bME) · [Requirements & estimation](https://youtu.be/YBwdTes0Fno) · [Design phase](https://youtu.be/lV71qhmfzzw) · [Development & retrospective](https://youtu.be/YjRihN_SKaw)
 
