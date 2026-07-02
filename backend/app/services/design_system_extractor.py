@@ -30,11 +30,19 @@ import asyncio
 import hashlib
 import json
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 import structlog
 
+from app.models.organization import AIProvider, Organization
+from app.services.ai_runner import run_agent
+from app.services.ai_runner.capabilities import capabilities_for
+from app.services.claude_runner import (
+    ClaudeRunnerConfig,
+    is_claude_cli_available,
+)
 from app.services.platforms import DEFAULT_SKIP_DIRS, Platform, PlatformKind
 
 logger = structlog.get_logger(__name__)
@@ -74,12 +82,28 @@ def _discover_read_hash(
     return discovered, file_contents, compute_hash(file_contents)
 
 
-async def extract_design_system(repo_path: Path, platform: Platform) -> ExtractionResult:
+def _cli_available(org: Organization | None) -> bool:
+    """Whether the org's provider CLI is installed (gate for LLM extraction).
+
+    Claude keeps its dedicated check; other providers test their binary
+    name from the capability table. A missing CLI cleanly degrades the
+    caller to regex extraction.
+    """
+    provider = org.ai_provider if org is not None else AIProvider.claude
+    if provider == AIProvider.claude:
+        return is_claude_cli_available()
+    return shutil.which(capabilities_for(provider).cli) is not None
+
+
+async def extract_design_system(
+    repo_path: Path, platform: Platform, org: Organization | None = None
+) -> ExtractionResult:
     """Extract design system from a repository using the LLM.
 
     Discovers design-related files (via the platform's ``design_globs``),
-    sends them to Claude Code CLI for intelligent extraction, and returns
-    structured markdown.
+    sends them to the org's agent CLI (Claude / Copilot / Codex, via
+    ``run_agent``) for intelligent extraction, and returns structured
+    markdown.
 
     Falls back to regex-based extraction if the CLI is unavailable or times out.
 
@@ -87,6 +111,7 @@ async def extract_design_system(repo_path: Path, platform: Platform) -> Extracti
         repo_path: Path to the repository root.
         platform: The detected platform supplying globs, skip dirs, and
             prompt idiom.
+        org: The org whose provider runs the extraction; ``None`` → Claude.
 
     Returns:
         ExtractionResult with content, hash, method used, and any non-fatal error.
@@ -107,13 +132,11 @@ async def extract_design_system(repo_path: Path, platform: Platform) -> Extracti
             method="minimal",
         )
 
-    # 3. Try LLM-powered extraction
-    from app.services.claude_runner import is_claude_cli_available
-
+    # 3. Try LLM-powered extraction via the org's provider CLI.
     llm_error: str | None = None
-    if is_claude_cli_available():
+    if _cli_available(org):
         try:
-            markdown, llm_err = await _llm_extract(repo_path, file_contents, platform)
+            markdown, llm_err = await _llm_extract(repo_path, file_contents, platform, org)
             if markdown:
                 logger.info(
                     "design_system_extracted_via_llm",
@@ -312,8 +335,9 @@ async def _llm_extract(
     repo_path: Path,
     file_contents: dict[str, str],
     platform: Platform,
+    org: Organization | None = None,
 ) -> tuple[str | None, str | None]:
-    """Use Claude Code CLI to intelligently extract the design system.
+    """Use the org's agent CLI to intelligently extract the design system.
 
     Sends discovered file paths (and small file contents inline) to the
     LLM, which can read additional files from the repo via its tools
@@ -324,12 +348,11 @@ async def _llm_extract(
         file_contents: Dict of filename → content for design-related files.
         platform: Detected platform whose ``prompt_hint`` is prepended so
             the LLM parses tokens in the idioms of that platform.
+        org: The org whose provider runs the extraction; ``None`` → Claude.
 
     Returns:
         Tuple of (markdown_content_or_none, error_message_or_none).
     """
-    from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
-
     # Inline design files up to 10KB each. The previous 20KB cap meant a
     # real Flutter app could easily ship 80KB of prompt, which combined
     # with the 15-turn exploration budget timed out at 10 minutes on
@@ -382,10 +405,11 @@ async def _llm_extract(
     # Flutter repos without dedicated theme files (inline colours force
     # several Read calls). 12 is the sweet spot: room for 1-2 code_query
     # calls + 4-6 Read calls + 1-2 refinement passes, still bounded.
-    result = await run_claude_code(
-        prompt=prompt,
-        working_dir=repo_path,
-        config=ClaudeRunnerConfig(max_turns=12, timeout_seconds=600),
+    result = await run_agent(
+        org,
+        prompt,
+        repo_path,
+        ClaudeRunnerConfig(max_turns=12, timeout_seconds=600),
     )
 
     # Even on non-success (e.g. ``error_max_turns``) Claude often has

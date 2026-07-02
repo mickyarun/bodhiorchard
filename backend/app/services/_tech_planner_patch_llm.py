@@ -27,7 +27,8 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument
-from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
+from app.services.ai_runner import run_agent_for_org_id
+from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig
 from app.services.skill_loader import Skill, load_skill
 
 logger = structlog.get_logger(__name__)
@@ -63,7 +64,8 @@ async def request_patched_section(
         effort=skill.effort or None,
     )
 
-    result = await run_claude_code(
+    result = await run_agent_for_org_id(
+        org_id,
         prompt=prompt,
         working_dir=NO_REPO_CONTEXT,
         config=config,

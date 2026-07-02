@@ -36,7 +36,8 @@ from app.repositories.quiz_question import QuizQuestionRepository
 from app.repositories.quiz_topic_history import QuizTopicHistoryRepository
 from app.schemas.jobs import JobState
 from app.schemas.quiz import QuizBatchJobPayload
-from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
+from app.services.ai_runner import run_agent_for_org_id
+from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig
 from app.services.event_bus import publish
 from app.services.job_queue import JOB_QUIZ_BATCH, create_job, update_job
 from app.services.job_utils import build_mcp_config, make_progress_callback
@@ -86,7 +87,8 @@ async def handle_quiz_batch_job(job_id: str, raw_payload: dict[str, Any]) -> Non
                 output_format="json",
             )
             update_job(job_id, status_message="Running quiz agent...", progress_pct=30)
-            result = await run_claude_code(
+            result = await run_agent_for_org_id(
+                org_id,
                 prompt=prompt,
                 working_dir=NO_REPO_CONTEXT,
                 config=config,

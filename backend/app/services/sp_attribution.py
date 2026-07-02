@@ -24,7 +24,7 @@ Two questions only a judge can answer well feed the developer SP rules:
    earn review SP; a substantive review should. The judge returns a
    per-reviewer valid / not-valid verdict.
 
-This reuses the same ``run_claude_code`` runner the post-close retro agent
+This reuses the same agent runner (``run_agent``) the post-close retro agent
 uses, but runs **synchronously** inside ``on_bud_closed`` rather than via
 the async, opt-in learning task — SP is a first-class currency and must
 not depend on the per-BUD retro-narrative opt-in or its eventual-consistency
@@ -42,7 +42,8 @@ from dataclasses import dataclass
 
 import structlog
 
-from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
+from app.services.ai_runner import run_agent_for_org_id
+from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig
 
 logger = structlog.get_logger(__name__)
 
@@ -183,6 +184,7 @@ def parse_sp_attribution(
 async def judge_sp_attribution(
     todos: list[TodoForJudgment],
     reviewers: list[str],
+    org_id: uuid.UUID | None = None,
 ) -> SPAttribution:
     """Score todo substance + review validity for one BUD.
 
@@ -203,7 +205,8 @@ async def judge_sp_attribution(
         # holding the close handler open. (A future move to the async job
         # pattern would lift this off the request path entirely.)
         config = ClaudeRunnerConfig(max_turns=1, timeout_seconds=30)
-        result = await run_claude_code(
+        result = await run_agent_for_org_id(
+            org_id,
             prompt=prompt,
             working_dir=NO_REPO_CONTEXT,
             config=config,

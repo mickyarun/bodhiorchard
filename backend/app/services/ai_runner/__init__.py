@@ -20,11 +20,14 @@ config/result types are reused from ``claude_runner`` so call sites and
 result handlers are provider-agnostic.
 """
 
+import uuid
 from pathlib import Path
 
 import structlog
 
+from app.database import AsyncSessionLocal
 from app.models.organization import AIProvider, Organization
+from app.repositories.organization import OrganizationRepository
 from app.services.ai_runner.base import AgentProvider
 from app.services.ai_runner.claude_provider import ClaudeProvider
 from app.services.ai_runner.registry import provider_for
@@ -41,6 +44,7 @@ __all__ = [
     "ClaudeProvider",
     "provider_for",
     "run_agent",
+    "run_agent_for_org_id",
 ]
 
 
@@ -65,3 +69,23 @@ async def run_agent(
         requested_effort=cfg.effort or "(cli default)",
     )
     return await provider.run(prompt, working_dir, cfg, progress_callback)
+
+
+async def run_agent_for_org_id(
+    org_id: uuid.UUID | None,
+    prompt: str,
+    working_dir: str | Path,
+    config: ClaudeRunnerConfig | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> ClaudeRunResult:
+    """``run_agent`` for callers that hold only an ``org_id``.
+
+    Loads the ``Organization`` (a single PK lookup on its own session) so
+    the run routes through the org's provider. A ``None`` org_id (or an
+    org that can't be found) falls back to Claude via :func:`run_agent`.
+    """
+    org = None
+    if org_id is not None:
+        async with AsyncSessionLocal() as db:
+            org = await OrganizationRepository(db).get_by_id(org_id)
+    return await run_agent(org, prompt, working_dir, config, progress_callback)

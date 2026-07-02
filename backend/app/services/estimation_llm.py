@@ -26,7 +26,8 @@ from typing import Any
 import structlog
 
 from app.models.bud import BUDDocument
-from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
+from app.services.ai_runner import run_agent_for_org_id
+from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig
 from app.services.estimation_engine import PERTEstimate
 from app.services.estimation_prompt_format import (
     build_phase_context,
@@ -172,7 +173,8 @@ async def llm_pert_estimate(
     for attempt in range(2):
         try:
             config = ClaudeRunnerConfig(max_turns=1, timeout_seconds=60)
-            result = await run_claude_code(
+            result = await run_agent_for_org_id(
+                bud.org_id,
                 prompt=prompt,
                 working_dir=NO_REPO_CONTEXT,
                 config=config,

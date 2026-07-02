@@ -64,6 +64,7 @@ from app.mcp.synthesis_accumulator import drain, reset_for_org
 from app.repositories.feature import FeatureRepository
 from app.repositories.feature_match_log import FeatureMatchLogRepository
 from app.repositories.feature_to_repo import list_features_with_backend_link_to
+from app.repositories.organization import OrganizationRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.services.feature_reconciler import reconcile_features_for_repo
 from app.services.github_remote_refresh import refresh_origin_token_for_spawn
@@ -81,7 +82,7 @@ from app.services.scan.synthesis.runner import (
     DEFAULT_MAX_TURNS,
     DEFAULT_MODEL,
     DEFAULT_TIMEOUT_SECONDS,
-    ClaudeCodeEngine,
+    AgentCliEngine,
     SynthesisRequest,
 )
 
@@ -286,6 +287,10 @@ async def _run_claude_narrow(
         logger.warning("pr_narrow_synthesis_no_mcp_backend_url", org_id=str(org_id))
         return {"success": False, "error": "mcp_backend_url not configured"}
     token = create_internal_mcp_token(org_id)
+    # Load the org so the run routes through its selected provider
+    # (Claude / Copilot / Codex); None → Claude fallback in run_agent.
+    async with AsyncSessionLocal() as db:
+        org = await OrganizationRepository(db).get_by_id(org_id)
     request = SynthesisRequest(
         prompt=prompt,
         working_dir=repo_path,
@@ -296,6 +301,7 @@ async def _run_claude_narrow(
         max_turns=DEFAULT_MAX_TURNS,
         timeout_seconds=DEFAULT_TIMEOUT_SECONDS,
         progress_callback=None,
+        org=org,
     )
     # The narrow-synthesis subprocess runs ``git`` over ``repo_path`` to
     # walk the PR diff; refresh the installation token before spawn so a
@@ -303,7 +309,7 @@ async def _run_claude_narrow(
     await refresh_origin_token_for_spawn(working_dir=repo_path, org_id=org_id)
 
     t0 = time.perf_counter()
-    outcome = await ClaudeCodeEngine().run(request)
+    outcome = await AgentCliEngine().run(request)
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
     logger.info(
         "pr_narrow_synthesis_claude_done",

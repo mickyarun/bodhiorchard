@@ -33,7 +33,8 @@ from app.repositories.bug import BugRepository
 from app.repositories.triage_session import TriageSessionRepository
 from app.repositories.user import UserRepository
 from app.services import slack_client
-from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
+from app.services.ai_runner import run_agent
+from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig
 from app.services.json_parser import parse_json_response
 
 logger = structlog.get_logger(__name__)
@@ -222,10 +223,11 @@ async def run_bug_triage_agent(
         triage_context=session.triage_context,
     )
 
-    result = await run_claude_code(
-        prompt=prompt,
-        working_dir=NO_REPO_CONTEXT,
-        config=ClaudeRunnerConfig(max_turns=5, timeout_seconds=60),
+    result = await run_agent(
+        org,
+        prompt,
+        NO_REPO_CONTEXT,
+        ClaudeRunnerConfig(max_turns=5, timeout_seconds=60),
     )
 
     if not result.success:

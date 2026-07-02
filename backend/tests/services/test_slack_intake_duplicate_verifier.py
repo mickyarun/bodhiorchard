@@ -53,11 +53,11 @@ async def test_verifier_prompt_contains_topic_and_entity_scope_rules(
     mismatch slip through silently."""
     captured: dict[str, str] = {}
 
-    async def _capture_run(*, prompt: str, **kwargs: Any) -> Any:
+    async def _capture_run(org: Any, prompt: str, *args: Any, **kwargs: Any) -> Any:
         captured["prompt"] = prompt
         return MagicMock(success=False, error="captured-only", output="")
 
-    monkeypatch.setattr(slack_intake, "run_claude_code", _capture_run)
+    monkeypatch.setattr(slack_intake, "run_agent", _capture_run)
 
     await _verify_duplicate_with_llm(
         query_text="Integrate Bank D in market Y",

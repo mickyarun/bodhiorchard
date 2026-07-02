@@ -36,11 +36,11 @@ from app.repositories.feature_reads import FeatureReadRepository
 from app.repositories.triage_session import TriageSessionRepository
 from app.repositories.user import UserRepository
 from app.services import slack_client
+from app.services.ai_runner import run_agent
 from app.services.claude_runner import (
     NO_REPO_CONTEXT,
     ClaudeRunnerConfig,
     MCPServerConfig,
-    run_claude_code,
 )
 from app.services.embedding_service import embedding_service
 from app.services.feature_lifecycle import create_planned_feature
@@ -435,6 +435,7 @@ def _format_candidate_line(idx: int, kind: str, match: Any, sim: float) -> str:
 async def _verify_duplicate_with_llm(
     query_text: str,
     candidates: list[tuple[str, Any, float]],
+    org: Organization | None = None,
 ) -> tuple[str, Any, float] | None:
     """Ask the LLM to decide whether any candidate is a true duplicate.
 
@@ -484,10 +485,11 @@ async def _verify_duplicate_with_llm(
         " <1-based index or null>}"
     )
 
-    result = await run_claude_code(
-        prompt=prompt,
-        working_dir=NO_REPO_CONTEXT,
-        config=ClaudeRunnerConfig(max_turns=1, timeout_seconds=45, mcp=None),
+    result = await run_agent(
+        org,
+        prompt,
+        NO_REPO_CONTEXT,
+        ClaudeRunnerConfig(max_turns=1, timeout_seconds=45, mcp=None),
     )
 
     if not result.success:
@@ -652,7 +654,9 @@ async def _run_triage_agent(
     # positives that share generic topic words (e.g. "user", "dashboard").
     query_text = _build_duplicate_query(session, thread_messages)
     candidates = await _find_duplicate_candidates(db, org, query_text)
-    duplicate = await _verify_duplicate_with_llm(query_text, candidates) if candidates else None
+    duplicate = (
+        await _verify_duplicate_with_llm(query_text, candidates, org) if candidates else None
+    )
     if duplicate is not None:
         kind, match, similarity = duplicate
         await _post_duplicate_message(bot_token, session, kind, match, similarity)
@@ -692,10 +696,11 @@ async def _run_triage_agent(
         tool_names=["check_feature_exists", "get_bud_context", "search_bugs"],
     )
 
-    result = await run_claude_code(
-        prompt=prompt,
-        working_dir=NO_REPO_CONTEXT,
-        config=ClaudeRunnerConfig(max_turns=skill.max_turns, timeout_seconds=120, mcp=mcp),
+    result = await run_agent(
+        org,
+        prompt,
+        NO_REPO_CONTEXT,
+        ClaudeRunnerConfig(max_turns=skill.max_turns, timeout_seconds=120, mcp=mcp),
     )
 
     if not result.success:
@@ -845,10 +850,11 @@ async def _run_prd_agent(
             backend_url=app_settings.mcp_backend_url,
             mcp_token=token,
         )
-        result = await run_claude_code(
-            prompt=prompt,
-            working_dir=NO_REPO_CONTEXT,
-            config=ClaudeRunnerConfig(max_turns=skill.max_turns, timeout_seconds=300, mcp=mcp),
+        result = await run_agent(
+            org,
+            prompt,
+            NO_REPO_CONTEXT,
+            ClaudeRunnerConfig(max_turns=skill.max_turns, timeout_seconds=300, mcp=mcp),
         )
 
         if result.success:

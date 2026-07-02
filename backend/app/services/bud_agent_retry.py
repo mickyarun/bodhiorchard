@@ -37,11 +37,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.agent_activity_logger import log_agent_activity
 from app.services.agent_result_handlers import is_git_auth_failure
+from app.services.ai_runner import run_agent_for_org_id
 from app.services.claude_runner import (
     ClaudeRunnerConfig,
     ClaudeRunResult,
     ProgressCallback,
-    run_claude_code,
 )
 from app.services.github_app_auth import invalidate_installation_token
 from app.services.github_remote_refresh import refresh_origin_tokens
@@ -138,7 +138,8 @@ async def maybe_retry_on_git_auth_failure(
         repo_id=repo_id,
     )
 
-    return await run_claude_code(
+    return await run_agent_for_org_id(
+        org_id,
         prompt=prompt,
         working_dir=spawn_cwd,
         config=retry_config,

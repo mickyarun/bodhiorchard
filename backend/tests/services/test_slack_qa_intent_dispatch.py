@@ -92,7 +92,9 @@ def captured_runs(monkeypatch: Any) -> list[dict[str, Any]]:
     """Capture every run_claude_code call into a list of records."""
     runs: list[dict[str, Any]] = []
 
-    async def _capture(*, prompt: str, working_dir: str, config: Any) -> Any:
+    async def _capture(
+        org: Any, prompt: str, working_dir: str, config: Any = None, progress_callback: Any = None
+    ) -> Any:
         runs.append(
             {
                 "prompt": prompt,
@@ -104,7 +106,7 @@ def captured_runs(monkeypatch: Any) -> list[dict[str, Any]]:
             success=True, output='{"action": "not_found", "data": {"message": ""}}', error=None
         )
 
-    monkeypatch.setattr(slack_feature_qa, "run_claude_code", _capture)
+    monkeypatch.setattr(slack_feature_qa, "run_agent", _capture)
     return runs
 
 
@@ -279,7 +281,9 @@ async def test_soft_fallback_returns_not_found_message_not_errored(
 
     monkeypatch.setattr(slack_feature_qa, "classify_qa_intent", _timeline_intent)
 
-    async def _soft_fail(*, prompt: str, working_dir: str, config: Any) -> Any:
+    async def _soft_fail(
+        org: Any, prompt: str, working_dir: str, config: Any = None, progress_callback: Any = None
+    ) -> Any:
         return MagicMock(
             success=False,
             output="",
@@ -287,7 +291,7 @@ async def test_soft_fallback_returns_not_found_message_not_errored(
             error_code=soft_code,
         )
 
-    monkeypatch.setattr(slack_feature_qa, "run_claude_code", _soft_fail)
+    monkeypatch.setattr(slack_feature_qa, "run_agent", _soft_fail)
 
     session = _make_session()
     await _run_qa_agent(
@@ -320,7 +324,9 @@ async def test_hard_error_still_marks_session_errored(
 
     monkeypatch.setattr(slack_feature_qa, "classify_qa_intent", _timeline_intent)
 
-    async def _hard_fail(*, prompt: str, working_dir: str, config: Any) -> Any:
+    async def _hard_fail(
+        org: Any, prompt: str, working_dir: str, config: Any = None, progress_callback: Any = None
+    ) -> Any:
         return MagicMock(
             success=False,
             output="",
@@ -328,7 +334,7 @@ async def test_hard_error_still_marks_session_errored(
             error_code=ClaudeErrorCode.BINARY_MISSING,
         )
 
-    monkeypatch.setattr(slack_feature_qa, "run_claude_code", _hard_fail)
+    monkeypatch.setattr(slack_feature_qa, "run_agent", _hard_fail)
 
     session = _make_session()
     await _run_qa_agent(
@@ -354,7 +360,9 @@ def _queue_runs(monkeypatch: Any, results: list[Any]) -> list[dict[str, Any]]:
     runs: list[dict[str, Any]] = []
     pending = list(results)
 
-    async def _capture(*, prompt: str, working_dir: str, config: Any) -> Any:
+    async def _capture(
+        org: Any, prompt: str, working_dir: str, config: Any = None, progress_callback: Any = None
+    ) -> Any:
         runs.append(
             {
                 "prompt": prompt,
@@ -367,7 +375,7 @@ def _queue_runs(monkeypatch: Any, results: list[Any]) -> list[dict[str, Any]]:
             raise nxt  # exercise the resume except-branch
         return nxt
 
-    monkeypatch.setattr(slack_feature_qa, "run_claude_code", _capture)
+    monkeypatch.setattr(slack_feature_qa, "run_agent", _capture)
     return runs
 
 

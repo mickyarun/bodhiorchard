@@ -12,12 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Synthesis runner — Strategy pattern over Claude invocation.
+"""Synthesis runner — Strategy pattern over the agent invocation.
 
 ``SynthesisEngine`` is a thin Protocol so we can swap the underlying
 client without touching the stage. The default implementation is
-``ClaudeCodeEngine``, which reuses the existing ``run_claude_code``
-subprocess wrapper (handles both api_key and hybrid_host auth modes).
+``AgentCliEngine``, which routes through ``run_agent`` so the org's
+selected provider (Claude / Copilot / Codex) runs the synthesis — auth
+and MCP are handled per-provider inside the adapter.
 
 A future ``AnthropicSDKEngine`` could call the Anthropic SDK directly
 for sandbox previews; same interface, different transport.
@@ -30,11 +31,13 @@ from typing import Protocol
 
 import structlog
 
+from app.models.organization import AIProvider, Organization
+from app.services.ai_runner import run_agent
+from app.services.ai_runner.capabilities import resolve_model
 from app.services.claude_runner import (
     ClaudeRunnerConfig,
     MCPServerConfig,
     ProgressCallback,
-    run_claude_code,
 )
 
 logger = structlog.get_logger(__name__)
@@ -58,11 +61,14 @@ class SynthesisRequest:
     model: str = DEFAULT_MODEL
     max_turns: int = DEFAULT_MAX_TURNS
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
-    # Optional per-tool-use observer. When provided, ``run_claude_code``
-    # auto-switches to ``stream-json`` so tool calls surface in real
-    # time instead of being buffered until subprocess exit. Sync
-    # signature — see ``claude_runner._find_tool_uses``.
+    # Optional per-tool-use observer. When provided, the run auto-switches
+    # to ``stream-json`` so tool calls surface in real time instead of
+    # being buffered until subprocess exit. Sync signature — see
+    # ``claude_runner._find_tool_uses``.
     progress_callback: ProgressCallback | None = None
+    # The org whose provider (Claude / Copilot / Codex) runs this
+    # synthesis. ``None`` falls back to Claude — see ``run_agent``.
+    org: Organization | None = None
 
 
 @dataclass(slots=True)
@@ -90,12 +96,13 @@ class SynthesisEngine(Protocol):
         ...
 
 
-class ClaudeCodeEngine:
-    """Default engine — spawns ``claude`` subprocess via ``run_claude_code``.
+class AgentCliEngine:
+    """Default engine — routes through ``run_agent`` so the org's selected
+    provider (Claude / Copilot / Codex) runs the synthesis.
 
-    Honours the org's claude_auth_mode (api_key vs hybrid_host) because
-    ``run_claude_code`` reads from the process env that
-    ``apply_claude_auth_to_env`` populates at startup.
+    Auth and per-provider MCP wiring live inside the adapter; the org's
+    credential is already in the process env via ``apply_claude_auth_to_env``.
+    A ``None`` org falls back to Claude (see ``run_agent``).
     """
 
     async def run(self, request: SynthesisRequest) -> SynthesisOutcome:
@@ -108,17 +115,25 @@ class ClaudeCodeEngine:
                 mcp_token=request.mcp_token,
             ),
         )
+        # Report the model the provider will actually use, not the vestigial
+        # ``request.model`` default (which never reaches the CLI — synthesis
+        # runs on the provider's default model). Codex/Copilot drop a Claude
+        # model id to their own default via ``resolve_model``.
+        provider = request.org.ai_provider if request.org is not None else AIProvider.claude
+        resolved_model, _ = resolve_model(provider, config.model, config.effort)
         logger.info(
             "scan_synthesis_starting",
             repo=request.repo_name,
-            model=request.model,
+            provider=provider.value,
+            model=resolved_model or "(provider default)",
             max_turns=request.max_turns,
         )
-        result = await run_claude_code(
-            prompt=request.prompt,
-            working_dir=request.working_dir,
-            config=config,
-            progress_callback=request.progress_callback,
+        result = await run_agent(
+            request.org,
+            request.prompt,
+            request.working_dir,
+            config,
+            request.progress_callback,
         )
         return SynthesisOutcome(
             success=bool(result.success),

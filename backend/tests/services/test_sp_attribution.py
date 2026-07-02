@@ -83,7 +83,7 @@ def test_parse_malformed_falls_back() -> None:
 async def test_single_assignee_skips_llm() -> None:
     a = uuid.uuid4()
     todos = [_todo(a, "t1"), _todo(a, "t2")]  # same assignee → no judgment needed
-    with patch("app.services.sp_attribution.run_claude_code") as mock_run:
+    with patch("app.services.sp_attribution.run_agent_for_org_id") as mock_run:
         res = await judge_sp_attribution(todos, ["solo_reviewer"])
     mock_run.assert_not_called()
     assert res.todo_weights == {"t1": 1.0, "t2": 1.0}
@@ -98,7 +98,7 @@ async def test_multiple_assignees_invoke_llm() -> None:
         output='{"todo_weights": {"t1": 0.8, "t2": 0.0}, "review_validity": {}}',
     )
     with patch(
-        "app.services.sp_attribution.run_claude_code", new=AsyncMock(return_value=fake)
+        "app.services.sp_attribution.run_agent_for_org_id", new=AsyncMock(return_value=fake)
     ) as mock_run:
         res = await judge_sp_attribution(todos, [])
     mock_run.assert_awaited_once()
@@ -109,6 +109,8 @@ async def test_multiple_assignees_invoke_llm() -> None:
 async def test_llm_failure_falls_back() -> None:
     todos = [_todo(uuid.uuid4(), "t1"), _todo(uuid.uuid4(), "t2")]
     fake = SimpleNamespace(success=False, output="")
-    with patch("app.services.sp_attribution.run_claude_code", new=AsyncMock(return_value=fake)):
+    with patch(
+        "app.services.sp_attribution.run_agent_for_org_id", new=AsyncMock(return_value=fake)
+    ):
         res = await judge_sp_attribution(todos, [])
     assert res.todo_weights == {"t1": 1.0, "t2": 1.0}

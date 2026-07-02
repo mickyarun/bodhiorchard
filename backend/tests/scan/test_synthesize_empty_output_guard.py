@@ -35,6 +35,7 @@ from typing import Any
 
 import pytest
 
+from app.models.organization import AIProvider
 from app.schemas.scan import Community
 from app.services.scan.stages import StageContext
 from app.services.scan.stages import synthesize as stage
@@ -123,6 +124,26 @@ def _patch_origin_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(stage, "refresh_origin_token_for_spawn", _noop)
 
 
+def _patch_org_repo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the org load so it doesn't touch the fake session.
+
+    ``stage.run`` now loads the org to route synthesis through its
+    provider. These tests mock the engine, so the org's value is never
+    read — the stub just returns a Claude-default org without a real DB.
+    """
+
+    class _FakeOrg:
+        ai_provider = AIProvider.claude
+
+    class _FakeOrgRepo:
+        def __init__(self, _db: Any) -> None: ...
+
+        async def get_by_id(self, _entity_id: uuid.UUID) -> _FakeOrg:
+            return _FakeOrg()
+
+    monkeypatch.setattr(stage, "OrganizationRepository", _FakeOrgRepo)
+
+
 async def test_raises_when_reconcile_persists_zero_for_nonempty_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -142,6 +163,7 @@ async def test_raises_when_reconcile_persists_zero_for_nonempty_input(
     _patch_session(monkeypatch, fake_session)
     _patch_no_skip(monkeypatch)
     _patch_origin_refresh(monkeypatch)
+    _patch_org_repo(monkeypatch)
     monkeypatch.setattr(stage, "_resolve_engine", lambda _config: _FakeEngine())
 
     async def _reset_progress(_a: Any, _b: Any) -> None: ...
@@ -197,6 +219,7 @@ async def test_no_raise_when_reconcile_persisted_anything(
     _patch_session(monkeypatch, fake_session)
     _patch_no_skip(monkeypatch)
     _patch_origin_refresh(monkeypatch)
+    _patch_org_repo(monkeypatch)
     monkeypatch.setattr(stage, "_resolve_engine", lambda _config: _FakeEngine())
     monkeypatch.setattr(stage, "reset_tool_progress", lambda _a, _b: None)
     monkeypatch.setattr(stage, "reset_tool_progress_for_org", lambda _a: None)

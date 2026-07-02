@@ -40,12 +40,13 @@ from app.models.user import User, UserRole
 from app.repositories.bud import BUDRepository
 from app.repositories.skill_profile import SkillProfileRepository
 from app.repositories.user import UserRepository
+from app.services.ai_runner import run_agent_for_org_id
 from app.services.assignment_policy import (
     BUD_PRIORITY_WEIGHTS,
     TERMINAL_BUD_STATUSES,
     max_active_buds_for,
 )
-from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
+from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig
 
 # Re-exported for callers that still import the constant from this module.
 __all__ = [
@@ -241,7 +242,8 @@ async def _llm_tiebreak(
         )
 
         config = ClaudeRunnerConfig(max_turns=1, timeout_seconds=60)
-        result = await run_claude_code(
+        result = await run_agent_for_org_id(
+            bud.org_id,
             prompt=prompt,
             working_dir=NO_REPO_CONTEXT,
             config=config,

@@ -38,10 +38,11 @@ from typing import Any
 
 import structlog
 
+from app.models.organization import Organization
+from app.services.ai_runner import run_agent
 from app.services.claude_runner import (
     NO_REPO_CONTEXT,
     ClaudeRunnerConfig,
-    run_claude_code,
 )
 from app.services.skill_loader import load_skill
 
@@ -233,6 +234,7 @@ async def classify_qa_intent(
     question_text: str,
     thread_messages: list[dict[str, Any]] | None,
     session_context: dict[str, Any] | None,
+    org: Organization | None = None,
 ) -> QaIntent:
     """Classify a Slack Q&A turn into a single :class:`QaIntent`.
 
@@ -255,10 +257,11 @@ async def classify_qa_intent(
     prompt = _build_router_prompt(skill.prompt, question_text, thread_messages, session_context)
 
     try:
-        result = await run_claude_code(
-            prompt=prompt,
-            working_dir=NO_REPO_CONTEXT,
-            config=ClaudeRunnerConfig(
+        result = await run_agent(
+            org,
+            prompt,
+            NO_REPO_CONTEXT,
+            ClaudeRunnerConfig(
                 max_turns=skill.max_turns or 1,
                 timeout_seconds=skill.timeout_or_default(10),
                 model=skill.model or "haiku",

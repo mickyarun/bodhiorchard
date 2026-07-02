@@ -28,10 +28,12 @@ import structlog
 from app.database import AsyncSessionLocal
 from app.models.bud import BUDDesignStatus
 from app.repositories.bud import BUDDesignRepository
+from app.repositories.organization import OrganizationRepository
 from app.schemas.jobs import DesignAgentJobPayload, DesignExtractJobPayload, JobState
 from app.services.agent_activity_logger import log_agent_activity
+from app.services.ai_runner import run_agent_for_org_id
 from app.services.chat_prompts import build_design_prompt
-from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
+from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig
 from app.services.github_remote_refresh import refresh_origin_token_for_spawn
 from app.services.job_queue import update_job
 from app.services.job_utils import (
@@ -165,10 +167,11 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
     # Best-effort, skipped when ``repo_path`` is None.
     await refresh_origin_token_for_spawn(working_dir=repo_path, org_id=_org_uuid)
 
-    result = await run_claude_code(
-        prompt=prompt,
-        working_dir=repo_path or NO_REPO_CONTEXT,
-        config=ClaudeRunnerConfig(
+    result = await run_agent_for_org_id(
+        _org_uuid,
+        prompt,
+        repo_path or NO_REPO_CONTEXT,
+        ClaudeRunnerConfig(
             max_turns=designer_skill.max_turns if designer_skill else 0,
             timeout_seconds=900,
             mcp=mcp_config,
@@ -177,7 +180,7 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
             cli_session_id=str(originating_session_id),
             is_resume=False,
         ),
-        progress_callback=make_progress_callback(
+        make_progress_callback(
             job_id,
             generating_message=("Generating wireframe HTML — this may take a minute or two..."),
         ),
@@ -381,15 +384,18 @@ async def handle_design_extract_job(job_id: str, raw_payload: dict[str, Any]) ->
         )
         return
 
-    # The extractor spawns claude in ``repo_path`` and may run ``git`` / ``gh``
-    # against the cloned remote; refresh the installation token before
-    # the spawn so a clone older than the 1-hour token TTL still works.
+    # The extractor spawns the agent CLI in ``repo_path`` and may run
+    # ``git`` / ``gh`` against the cloned remote; refresh the installation
+    # token before the spawn so a clone older than the 1-hour token TTL works.
     await refresh_origin_token_for_spawn(
         working_dir=str(repo_path),
         org_id=uuid_mod.UUID(payload.org_id),
     )
 
-    extraction = await extract_design_system(repo_path, platform)
+    # Load the org so extraction routes through its selected provider.
+    async with AsyncSessionLocal() as db:
+        org = await OrganizationRepository(db).get_by_id(uuid_mod.UUID(payload.org_id))
+    extraction = await extract_design_system(repo_path, platform, org)
 
     if extraction.error:
         update_job(
@@ -400,7 +406,6 @@ async def handle_design_extract_job(job_id: str, raw_payload: dict[str, Any]) ->
 
     update_job(job_id, status_message="Saving to database...", progress_pct=80)
 
-    from app.database import AsyncSessionLocal
     from app.repositories.design_system import DesignSystemRefRepository
 
     async with AsyncSessionLocal() as db:

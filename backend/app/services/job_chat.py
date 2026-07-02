@@ -31,9 +31,10 @@ from app.repositories.bud_section_session import BUDSectionSessionRepository
 from app.schemas.bud_constants import SECTION_LABELS
 from app.schemas.jobs import ChatJobPayload, JobState
 from app.services.agent_activity_logger import log_agent_activity
+from app.services.ai_runner import run_agent_for_org_id
 from app.services.chat_persistence import persist_chat_message, persist_chat_update
 from app.services.chat_prompts import build_chat_prompt, build_design_prompt, fetch_chat_history
-from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
+from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig
 from app.services.github_remote_refresh import refresh_origin_token_for_spawn
 from app.services.job_queue import update_job
 from app.services.job_utils import (
@@ -397,7 +398,8 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
     )
 
     try:
-        result = await run_claude_code(
+        result = await run_agent_for_org_id(
+            uuid_mod.UUID(_chat_org_id),
             prompt=prompt,
             working_dir=repo_path or NO_REPO_CONTEXT,
             config=_build_config(session_id=cli_session_id, resume=is_resume),
@@ -417,7 +419,8 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
                 was_resume=is_resume,
                 error_code=result.error_code,
             )
-            result = await run_claude_code(
+            result = await run_agent_for_org_id(
+                uuid_mod.UUID(_chat_org_id),
                 prompt=prompt,
                 working_dir=repo_path or NO_REPO_CONTEXT,
                 config=_build_config(session_id=None, resume=False),

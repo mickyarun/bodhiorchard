@@ -61,7 +61,7 @@ async def test_ack_short_circuits_without_subprocess(text: str, monkeypatch: Any
     async def _explode(*a: Any, **kw: Any) -> Any:
         raise AssertionError(f"run_claude_code should not run for ack text {text!r}")
 
-    monkeypatch.setattr(slack_qa_router, "run_claude_code", _explode)
+    monkeypatch.setattr(slack_qa_router, "run_agent", _explode)
 
     intent = await classify_qa_intent(
         question_text=text,
@@ -84,11 +84,11 @@ async def test_long_reply_starting_with_thanks_still_calls_classifier(
     """
     called = {"yes": False}
 
-    async def _record(*, prompt: str, **kw: Any) -> Any:
+    async def _record(org: Any, prompt: str, *args: Any, **kw: Any) -> Any:
         called["yes"] = True
         return MagicMock(success=True, output="TIMELINE", error=None)
 
-    monkeypatch.setattr(slack_qa_router, "run_claude_code", _record)
+    monkeypatch.setattr(slack_qa_router, "run_agent", _record)
 
     intent = await classify_qa_intent(
         question_text="thanks that's helpful, what about timeline?",
@@ -124,10 +124,10 @@ async def test_long_reply_starting_with_thanks_still_calls_classifier(
 async def test_parses_haiku_label(raw: str, expected: QaIntent, monkeypatch: Any) -> None:
     """Forgiving label parser maps common Haiku quirks to the right intent."""
 
-    async def _return(*, prompt: str, **kw: Any) -> Any:
+    async def _return(org: Any, prompt: str, *args: Any, **kw: Any) -> Any:
         return MagicMock(success=True, output=raw, error=None)
 
-    monkeypatch.setattr(slack_qa_router, "run_claude_code", _return)
+    monkeypatch.setattr(slack_qa_router, "run_agent", _return)
 
     intent = await classify_qa_intent(
         question_text="when does it ship?",
@@ -142,10 +142,10 @@ async def test_subprocess_failure_returns_unknown(monkeypatch: Any) -> None:
     """A Haiku subprocess failure must not propagate — UNKNOWN routes
     to the safe EXPLAIN specialist downstream."""
 
-    async def _fail(*, prompt: str, **kw: Any) -> Any:
+    async def _fail(org: Any, prompt: str, *args: Any, **kw: Any) -> Any:
         return MagicMock(success=False, output="", error="boom")
 
-    monkeypatch.setattr(slack_qa_router, "run_claude_code", _fail)
+    monkeypatch.setattr(slack_qa_router, "run_agent", _fail)
 
     intent = await classify_qa_intent(
         question_text="when does it ship?",
@@ -166,11 +166,11 @@ async def test_prior_candidates_surface_in_prompt(monkeypatch: Any) -> None:
     correctly."""
     captured: dict[str, str] = {}
 
-    async def _capture(*, prompt: str, **kw: Any) -> Any:
+    async def _capture(org: Any, prompt: str, *args: Any, **kw: Any) -> Any:
         captured["prompt"] = prompt
         return MagicMock(success=True, output="TIMELINE", error=None)
 
-    monkeypatch.setattr(slack_qa_router, "run_claude_code", _capture)
+    monkeypatch.setattr(slack_qa_router, "run_agent", _capture)
 
     await classify_qa_intent(
         question_text="timeline give me",
@@ -196,11 +196,11 @@ async def test_no_candidates_means_no_bud_reference(monkeypatch: Any) -> None:
     """
     captured: dict[str, str] = {}
 
-    async def _capture(*, prompt: str, **kw: Any) -> Any:
+    async def _capture(org: Any, prompt: str, *args: Any, **kw: Any) -> Any:
         captured["prompt"] = prompt
         return MagicMock(success=True, output="EXPLAIN", error=None)
 
-    monkeypatch.setattr(slack_qa_router, "run_claude_code", _capture)
+    monkeypatch.setattr(slack_qa_router, "run_agent", _capture)
 
     await classify_qa_intent(
         question_text="explain how X works",

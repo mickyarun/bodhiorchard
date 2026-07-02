@@ -44,13 +44,13 @@ from app.repositories.feature import FeatureRepository
 from app.repositories.feature_qa_session import FeatureQASessionRepository
 from app.repositories.user import UserRepository
 from app.services import slack_client
+from app.services.ai_runner import run_agent
 from app.services.claude_errors import ClaudeErrorCode
 from app.services.claude_runner import (
     NO_REPO_CONTEXT,
     ClaudeRunnerConfig,
     ClaudeRunResult,
     MCPServerConfig,
-    run_claude_code,
 )
 from app.services.json_parser import parse_json_response
 from app.services.skill_loader import Skill, load_skill
@@ -302,6 +302,7 @@ async def _run_qa_agent(
         question_text=question_text,
         thread_messages=thread_messages,
         session_context=session.context,
+        org=org,
     )
     logger.info(
         "feature_qa_intent_routed",
@@ -352,10 +353,11 @@ async def _run_qa_agent(
         session.cli_model = model
 
     try:
-        result = await run_claude_code(
-            prompt=prompt,
-            working_dir=NO_REPO_CONTEXT,
-            config=ClaudeRunnerConfig(
+        result = await run_agent(
+            org,
+            prompt,
+            NO_REPO_CONTEXT,
+            ClaudeRunnerConfig(
                 max_turns=_clamp_specialist_max_turns(skill),
                 timeout_seconds=skill.timeout_or_default(_SPECIALIST_TIMEOUT_SECONDS),
                 model=model,
@@ -546,10 +548,11 @@ async def _resume_qa_turn(
     logger.info("feature_qa_resume", session_id=str(session.id), model=model)
     result: ClaudeRunResult | None = None
     try:
-        result = await run_claude_code(
-            prompt=prompt,
-            working_dir=NO_REPO_CONTEXT,
-            config=ClaudeRunnerConfig(
+        result = await run_agent(
+            org,
+            prompt,
+            NO_REPO_CONTEXT,
+            ClaudeRunnerConfig(
                 max_turns=_SPECIALIST_MAX_TURNS_CEILING,
                 timeout_seconds=_SPECIALIST_TIMEOUT_SECONDS,
                 model=model,

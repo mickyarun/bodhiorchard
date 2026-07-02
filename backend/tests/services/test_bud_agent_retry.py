@@ -57,7 +57,9 @@ def _patch_dependencies():  # type: ignore[no-untyped-def]
         ) as refresh,
         patch.object(bud_agent_retry, "log_agent_activity", new=AsyncMock()) as logact,
         patch.object(
-            bud_agent_retry, "run_claude_code", new=AsyncMock(return_value=_success_result("{}"))
+            bud_agent_retry,
+            "run_agent_for_org_id",
+            new=AsyncMock(return_value=_success_result("{}")),
         ) as rcc,
         patch.object(bud_agent_retry, "mint_session_id", return_value=uuid.UUID(int=42)) as mint,
     ):
@@ -65,7 +67,7 @@ def _patch_dependencies():  # type: ignore[no-untyped-def]
             "invalidate": inv,
             "refresh": refresh,
             "log_activity": logact,
-            "run_claude_code": rcc,
+            "run_agent_for_org_id": rcc,
             "mint_session_id": mint,
         }
 
@@ -77,7 +79,7 @@ async def test_no_retry_when_no_working_dir(_patch_dependencies) -> None:
     out = await bud_agent_retry.maybe_retry_on_git_auth_failure(result=first, **kwargs)  # type: ignore[arg-type]
     assert out is first
     _patch_dependencies["invalidate"].assert_not_called()
-    _patch_dependencies["run_claude_code"].assert_not_called()
+    _patch_dependencies["run_agent_for_org_id"].assert_not_called()
 
 
 async def test_no_retry_when_first_spawn_crashed(_patch_dependencies) -> None:
@@ -86,7 +88,7 @@ async def test_no_retry_when_first_spawn_crashed(_patch_dependencies) -> None:
     out = await bud_agent_retry.maybe_retry_on_git_auth_failure(result=crashed, **kwargs)  # type: ignore[arg-type]
     assert out is crashed
     _patch_dependencies["invalidate"].assert_not_called()
-    _patch_dependencies["run_claude_code"].assert_not_called()
+    _patch_dependencies["run_agent_for_org_id"].assert_not_called()
 
 
 async def test_no_retry_when_output_clean(_patch_dependencies) -> None:
@@ -112,7 +114,7 @@ async def test_retry_invalidates_refreshes_and_respawns(_patch_dependencies) -> 
     assert _patch_dependencies["log_activity"].await_args.kwargs["event_type"] == "agent_retried"
     # Second spawn fired with a FRESH session id (not None, not the
     # original) so the CLI doesn't replay partial MCP side-effects.
-    rcc = _patch_dependencies["run_claude_code"]
+    rcc = _patch_dependencies["run_agent_for_org_id"]
     rcc.assert_awaited_once()
     retry_config = rcc.await_args.kwargs["config"]
     assert retry_config.cli_session_id == str(uuid.UUID(int=42))
@@ -130,7 +132,7 @@ async def test_retry_preserves_mcp_and_tool_allowlist(_patch_dependencies) -> No
 
     await bud_agent_retry.maybe_retry_on_git_auth_failure(result=first, **kwargs)  # type: ignore[arg-type]
 
-    retry_config = _patch_dependencies["run_claude_code"].await_args.kwargs["config"]
+    retry_config = _patch_dependencies["run_agent_for_org_id"].await_args.kwargs["config"]
     # Tool allowlist + MCP must carry through — the retry is the same
     # skill running in the same scope, only the session id changes.
     assert retry_config.allowed_tools == ["Bash", "Read"]

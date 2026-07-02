@@ -600,7 +600,7 @@ async def test_run_claude_narrow_refreshes_token_before_spawning_engine(
             return _FakeOutcome()
 
     monkeypatch.setattr(handler_mod, "refresh_origin_token_for_spawn", fake_refresh)
-    monkeypatch.setattr(handler_mod, "ClaudeCodeEngine", _FakeEngine)
+    monkeypatch.setattr(handler_mod, "AgentCliEngine", _FakeEngine)
     monkeypatch.setattr(handler_mod, "create_internal_mcp_token", lambda _org: "tok")
     # mcp_backend_url must be truthy or the function short-circuits before
     # reaching the refresh call we want to assert against.

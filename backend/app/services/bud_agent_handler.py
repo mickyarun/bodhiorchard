@@ -46,9 +46,10 @@ from app.services.agent_result_handlers import (
     handle_tech_arch_result,
     handle_testing_result,
 )
+from app.services.ai_runner import run_agent_for_org_id
 from app.services.bud_agent_retry import maybe_retry_on_git_auth_failure
 from app.services.bud_repo_paths import confirmed_repo_paths
-from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, run_claude_code
+from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig
 from app.services.github_remote_refresh import refresh_origin_tokens
 from app.services.job_queue import update_job
 from app.services.job_utils import build_mcp_config, make_progress_callback, record_agent_timeline
@@ -308,7 +309,7 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
                 _repo_id = repo_row.scalar_one_or_none()
 
             # Log skill_invoked in a SEPARATE session so it commits immediately
-            # (the main db session commits only after run_claude_code completes,
+            # (the main db session commits only after the agent run completes,
             #  which can take 30-120 seconds — the row must be visible NOW)
             await log_agent_activity(
                 None,
@@ -362,7 +363,8 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             # explicit no-repo sentinel so ``_validate_working_dir`` never
             # has to fall back to the worker cwd.
             spawn_cwd: str = working_dir if working_dir else NO_REPO_CONTEXT
-            result = await run_claude_code(
+            result = await run_agent_for_org_id(
+                org_id,
                 prompt=prompt,
                 working_dir=spawn_cwd,
                 config=config,

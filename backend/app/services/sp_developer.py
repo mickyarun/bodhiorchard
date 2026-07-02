@@ -92,7 +92,7 @@ async def award_developer_sp_on_close(
     # close handler.
     try:
         todos, reviewers = await _gather_judgment_inputs(db, org_id, bud)
-        attribution = await judge_sp_attribution(todos, reviewers)
+        attribution = await judge_sp_attribution(todos, reviewers, org_id)
         weights = await resolve_shipped_weights(db, org_id, bud, attribution.todo_weights)
     except Exception:
         logger.warning("sp_developer_setup_failed", bud_number=bud.bud_number, exc_info=True)

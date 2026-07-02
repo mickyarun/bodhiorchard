@@ -34,7 +34,7 @@ Config keys (all optional, defaults from ``synthesis/runner.py``):
       not call Claude. Useful for token-cost previewing.
     - ``readme``: free-form repo overview to embed in the prompt; the
       caller can hand in the README contents or any other context.
-    - ``mcp_backend_url`` / ``mcp_token``: forwarded into ``run_claude_code``
+    - ``mcp_backend_url`` / ``mcp_token``: forwarded into the agent run
       so the spawned subprocess can call ``write_synthesis_feature`` back
       to this server. Required when ``dry_run`` is False.
 """
@@ -57,6 +57,7 @@ from app.mcp.synthesis_progress import (
 from app.mcp.synthesis_progress import (
     reset_for_org as reset_tool_progress_for_org,
 )
+from app.models.organization import Organization
 from app.repositories.feature import FeatureRepository
 from app.repositories.feature_match_log import FeatureMatchLogRepository
 from app.repositories.organization import OrganizationRepository
@@ -79,7 +80,7 @@ from app.services.scan.synthesis.runner import (
     DEFAULT_MAX_TURNS,
     DEFAULT_MODEL,
     DEFAULT_TIMEOUT_SECONDS,
-    ClaudeCodeEngine,
+    AgentCliEngine,
     SynthesisEngine,
     SynthesisRequest,
 )
@@ -209,6 +210,12 @@ async def run(
     # two surfaces in lockstep.
     if runtime is not None and repo_id is not None:
         reset_tool_progress(str(runtime.org_id), str(repo_id))
+    # Load the org so the run routes through its selected provider. None
+    # in engine-mocked unit tests (no runtime) → run_agent falls back to Claude.
+    org = None
+    if runtime is not None:
+        async with with_session(runtime.org_id) as db:
+            org = await OrganizationRepository(db).get_by_id(runtime.org_id)
     request = _build_request(
         ctx=ctx,
         prompt=prompt,
@@ -217,6 +224,7 @@ async def run(
         max_turns=max_turns,
         timeout_seconds=timeout_seconds,
         progress_callback=progress_callback,
+        org=org,
     )
 
     # Pre-spawn token refresh. The synthesis subprocess runs ``git`` over
@@ -428,13 +436,15 @@ async def _count_synthesized_features(config: dict[str, Any]) -> int:
 def _resolve_engine(config: dict[str, Any]) -> SynthesisEngine:
     """Pick the synthesis engine (Strategy pattern).
 
-    Today we only ship ``ClaudeCodeEngine``. ``engine`` config knob is
-    accepted but only ``"claude_code"`` is recognised; future
-    ``"anthropic_sdk"`` will plug in here without touching callers.
+    Today we only ship ``AgentCliEngine`` (routes through the org's
+    provider). The ``engine`` config knob is accepted but only
+    ``"claude_code"`` is recognised (kept for back-compat with stored
+    configs); future ``"anthropic_sdk"`` will plug in here without
+    touching callers.
     """
     name = str(config.get("engine", "claude_code"))
     if name == "claude_code":
-        return ClaudeCodeEngine()
+        return AgentCliEngine()
     raise ValueError(f"Unknown synthesis engine: {name!r}")
 
 
@@ -447,6 +457,7 @@ def _build_request(
     max_turns: int,
     timeout_seconds: int,
     progress_callback: ProgressCallback | None,
+    org: Organization | None,
 ) -> SynthesisRequest:
     """Assemble the engine request, raising if MCP details are missing."""
     mcp_backend_url = config.get("mcp_backend_url")
@@ -466,6 +477,7 @@ def _build_request(
         max_turns=max_turns,
         timeout_seconds=timeout_seconds,
         progress_callback=progress_callback,
+        org=org,
     )
 
 
