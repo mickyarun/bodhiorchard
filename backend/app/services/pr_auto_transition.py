@@ -215,16 +215,12 @@ async def check_all_repos_have_prs(
             )
             return
 
-        # Auto-populate confirmed_repos so code review agent has repo paths
-        from app.repositories.tracked_repository import TrackedRepoRepository
+        # Auto-populate confirmed_repos so code review agent has repo paths.
+        # Same resolver the manual repo-selection endpoint uses, so the two
+        # entry points can't drift.
+        from app.services.bud_repo_paths import resolve_confirmed_repos
 
-        tr_repo = TrackedRepoRepository(db, org_id=org_id)
-        repo_triples = await tr_repo.get_active_id_path_name()
-        confirmed = [
-            {"repo_path": path, "repo_name": name}
-            for rid, path, name in repo_triples
-            if str(rid) in impacted_ids
-        ]
+        confirmed = await resolve_confirmed_repos(db, org_id, impacted_ids)
         meta = dict(bud.metadata_ or {})
         meta["confirmed_repos"] = confirmed
         bud.metadata_ = meta

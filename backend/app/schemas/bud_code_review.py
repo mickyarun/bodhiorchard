@@ -19,6 +19,7 @@ to their endpoint surface area instead of inflating the core BUD CRUD
 module.
 """
 
+import uuid
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -106,6 +107,12 @@ class CodeReviewStatusResponse(BaseModel):
     # is ``parse_failed`` or ``failed``. ``None`` for the success / idle
     # states so the frontend can short-circuit rendering.
     last_run_message: str | None = None
+    # True when the BUD is in code_review but no repos are confirmed with a
+    # clone path — the code-review agent can't run and the tab should ask
+    # the user to pick repos instead of hard-failing. This happens when the
+    # BUD was advanced to code_review manually (the automatic PR-merge path
+    # is the only writer of ``confirmed_repos``).
+    needs_repo_selection: bool = False
 
 
 class CodeReviewOverrideRequest(BaseModel):
@@ -130,3 +137,16 @@ class CodeReviewRerunRequest(BaseModel):
     """
 
     start_fresh: bool = False
+
+
+class CodeReviewRepoSelectRequest(BaseModel):
+    """Body for POST /buds/{id}/code-review/repos.
+
+    Lets the user pick which impacted repos the code-review agent should
+    run against when the BUD was advanced to code_review manually and no
+    ``confirmed_repos`` were auto-populated. The selected repo_ids are
+    resolved to their clone paths and written to ``metadata.confirmed_repos``
+    before the agent is (re)spawned.
+    """
+
+    repo_ids: list[uuid.UUID] = Field(..., min_length=1)

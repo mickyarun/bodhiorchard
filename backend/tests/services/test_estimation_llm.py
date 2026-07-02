@@ -135,7 +135,11 @@ def test_prompt_interpolates_heuristic_complexity() -> None:
         historical_ctx="",
         remaining_phases=_PHASES,
     )
-    assert "Heuristic complexity from BUD signals: 4/5" in prompt
+    # The heuristic is offered as a hint (not a directive), and the prompt
+    # tells the LLM its rating is kept within ±1 of that hint.
+    assert "heuristic guessed 4/5 from BUD signals" in prompt
+    assert "rate" in prompt.lower()
+    assert "±1" in prompt
 
 
 def test_prompt_drops_seductive_numeric_example() -> None:

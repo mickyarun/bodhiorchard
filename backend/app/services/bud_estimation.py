@@ -48,8 +48,9 @@ from app.services.estimation_context import (
 )
 from app.services.estimation_engine import monte_carlo_simulate
 from app.services.estimation_gates import gate_pert, gate_turnaround_days
-from app.services.estimation_heuristics import default_pert_spread
+from app.services.estimation_heuristics import default_pert_spread, reconcile_complexity
 from app.services.estimation_llm import llm_pert_estimate
+from app.services.estimation_progress import current_phase_progress, discounted_pert
 from app.services.org_settings import get_phase_order
 from app.services.phase_roles import is_gate_phase
 
@@ -129,7 +130,10 @@ async def estimate_bud_dates(
     )
     if llm_result is not None:
         pert_estimates = llm_result.phases
-        complexity = llm_result.complexity or heuristic_complexity
+        # Trust the LLM's independent rating, bounded to ±1 of the heuristic
+        # so a short spec across many repos (which the heuristic over-scores)
+        # can come back down without letting a hallucinated rating run free.
+        complexity = reconcile_complexity(llm_result.complexity, heuristic_complexity)
     else:
         all_defaults = default_pert_spread(
             heuristic_complexity,
@@ -180,6 +184,31 @@ async def estimate_bud_dates(
             source="llm" if llm_result is not None else "heuristic",
             action="gate left on effort/capacity model; estimate may over-stretch it",
         )
+
+    # Progress-aware current phase: a phase whose todos are done (or whose
+    # BUD already has a merged PR for code work) shouldn't be re-budgeted at
+    # full effort just because the BUD hasn't been transitioned yet. Discount
+    # only the current phase by what remains; downstream phases haven't
+    # started, so they stand. Applied after the gate override so it scales
+    # whatever PERT the current phase ended up with (build or gate).
+    current_phase_done = await current_phase_progress(db, org_id, bud)
+    if current_phase_done > 0.0:
+        if current_status in pert_estimates:
+            pert_estimates[current_status] = discounted_pert(
+                pert_estimates[current_status], current_phase_done
+            )
+        else:
+            # Real completion was measured but the current phase has no PERT to
+            # discount — the snapshot would otherwise record progress next to an
+            # undiscounted estimate. Surface it, mirroring the gate-missing warn.
+            logger.warning(
+                "current_phase_progress_unapplied",
+                bud_id=str(bud.id),
+                current_status=current_status,
+                progress=current_phase_done,
+                pert_phases=list(pert_estimates.keys()),
+                action="phase absent from pert_estimates; discount skipped",
+            )
 
     # Historical reference-class (Magennis-style bootstrap) reuses the
     # same per-phase data fetched for the prompt above; weight ramps with
@@ -234,6 +263,7 @@ async def estimate_bud_dates(
             "capacity_by_phase": cap_by_phase,
             "gate_turnaround_by_phase": gate_turnaround_by_phase,
             "gate_llm_effort_overridden": gate_llm_effort_overridden,
+            "current_phase_progress": current_phase_done,
             "open_bug_count": bug_ctx["open_bug_count"],
             "historical_n_used": historical_n,
             "historical_weight": historical_weight,

@@ -66,6 +66,7 @@ from app.schemas.bud import (
 )
 from app.schemas.bud_code_review import (
     CodeReviewOverrideRequest,
+    CodeReviewRepoSelectRequest,
     CodeReviewRepoStatus,
     CodeReviewRerunRequest,
     CodeReviewStatusResponse,
@@ -97,6 +98,7 @@ from app.services.bud_assignment_actions import assign_bud, unassign_bud
 from app.services.bud_edit_policy import assert_section_editable
 from app.services.bud_estimation import estimate_bud_dates
 from app.services.bud_learning_alias_resolver import resolve_aliased_contributors
+from app.services.bud_metrics import compute_and_persist as compute_bud_metrics
 from app.services.bud_timeline import record_event
 from app.services.job_queue import JOB_BUD_AGENT, create_job
 
@@ -228,17 +230,25 @@ async def _bud_response(
             "metadata": latest_failure.metadata_ or {},
         }
 
-    # ``has_learning`` is a cheap tab-visibility flag. The tab shows once
-    # a feature_learning row carries *either* the metrics envelope or the
-    # retrospective: gating on the recap alone hid the quantitative
-    # metrics (and the regenerate-recap control) whenever the post-close
-    # Learning Agent failed but compute_and_persist succeeded — or vice
-    # versa. The full payload is fetched lazily via GET /buds/{id}/learning
-    # so the BUD list stays small.
+    # ``has_learning`` is a cheap tab-visibility flag. The tab shows when:
+    #  - a row carries *either* the metrics envelope or the retrospective
+    #    (gating on the recap alone hid restored metrics + the regenerate
+    #    control when the Learning Agent failed but metrics succeeded), OR
+    #  - the BUD is closed and opted into close-time AI but has no recap
+    #    yet. That last case is the recovery path for a transient
+    #    close-time failure that left *no* row at all (the prod incident on
+    #    BUD-029/036): without it the tab stays hidden and the failure
+    #    hides its own remedy — the user can never trigger a regenerate.
+    # The full payload is fetched lazily via GET /buds/{id}/learning so the
+    # BUD list stays small.
     learning_row = await FeatureLearningRepository(db, org_id=org_id).get_for_bud(bud.id)
-    bud_data.has_learning = bool(
+    row_has_content = bool(
         learning_row and (learning_row.retrospective_md or learning_row.metrics)
     )
+    awaiting_recap = bud.status == BUDStatus.CLOSED and should_auto_generate_phase(
+        bud.auto_generate_phases, "closed"
+    )
+    bud_data.has_learning = row_has_content or awaiting_recap
 
     return bud_data
 
@@ -574,14 +584,20 @@ async def regenerate_learning(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Re-run the post-close Learning Agent to (re)generate the recap.
+    """Re-run the post-close learnings pipeline to (re)generate them.
 
-    The Learnings tab exposes this when a recap is missing — the usual
+    The Learnings tab exposes this when learnings are missing — the usual
     cause is a transient ``compute_and_persist`` failure at close that
     left the ``feature_learnings`` row partial (metrics but no
-    ``retrospective_md``) or absent. The agent attaches its recap to the
-    existing row, or ``set_retrospective`` creates one if metrics never
-    landed.
+    ``retrospective_md``) or absent entirely.
+
+    Full recovery, mirroring ``on_bud_closed``: first (re)compute the
+    metrics envelope — idempotent, so it is a no-op when metrics already
+    landed and a backfill when they didn't — then spawn the Learning
+    Agent for the recap. A metrics-compute failure is isolated in a
+    savepoint and never blocks the recap (``set_retrospective`` creates
+    the row if metrics still never landed), so the user always gets at
+    least the qualitative half from one click.
 
     Requires the BUD to be closed (learnings are a post-close artifact),
     the BUD to have opted into close-time AI via
@@ -616,6 +632,16 @@ async def regenerate_learning(
             status_code=status.HTTP_409_CONFLICT,
             detail="Cannot regenerate while an agent task is running",
         )
+
+    # (Re)compute the metrics envelope first so a row that lost its
+    # quantitative half — or never got one — is made whole, not just given
+    # a recap. Isolated in a savepoint: if the same transient failure that
+    # caused the gap recurs, the recap still gets generated below.
+    try:
+        async with db.begin_nested():
+            await compute_bud_metrics(db, current_user.org_id, bud)
+    except Exception:
+        logger.warning("regenerate_metrics_compute_failed", bud_id=str(bud_id), exc_info=True)
 
     # force=True so the per-section content-exists guard doesn't short
     # the re-run, and we branch on the returned task: a None means no
@@ -1380,6 +1406,7 @@ async def get_code_review_status(
 ) -> CodeReviewStatusResponse:
     """Return PR status + comment count per impacted repo for the Code Review tab."""
     from app.services.bud_code_review_status import get_last_run_status, get_pr_status_summary
+    from app.services.bud_repo_paths import confirmed_repo_paths
 
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     bud = await bud_repo.get_by_id(bud_id)
@@ -1388,11 +1415,96 @@ async def get_code_review_status(
 
     rows = await get_pr_status_summary(db, current_user.org_id, bud)
     last_run_status, last_run_message = await get_last_run_status(db, current_user.org_id, bud_id)
+    # In code_review with no confirmed repo paths, the agent can't run —
+    # the BUD was advanced manually and never had confirmed_repos populated.
+    # Tell the FE to prompt for repo selection rather than showing a dead
+    # "check the logs" failure.
+    needs_repo_selection = bud.status == BUDStatus.CODE_REVIEW and not confirmed_repo_paths(bud)
     return CodeReviewStatusResponse(
         repos=[CodeReviewRepoStatus(**r) for r in rows],
         last_run_status=last_run_status,
         last_run_message=last_run_message,
+        needs_repo_selection=needs_repo_selection,
     )
+
+
+@router.post(
+    "/{bud_id}/code-review/repos",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def select_code_review_repos(
+    bud_id: uuid.UUID,
+    payload: CodeReviewRepoSelectRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Pick which repos the code-review agent runs against, then spawn it.
+
+    Used by the Code Review tab when the BUD reached code_review manually
+    and ``confirmed_repos`` was never auto-populated (the automatic
+    PR-merge path is the only other writer). The selected repo_ids are
+    resolved to active tracked-repo clone paths, written to
+    ``metadata.confirmed_repos``, and a code-review agent task is spawned.
+
+    Guarded to ``code_review`` status, blocked while another agent task is
+    running, and rejects a selection that resolves to zero reviewable repos
+    (all inactive / no clone path) so the user sees why nothing ran.
+    """
+    from app.services.bud_repo_paths import resolve_confirmed_repos
+
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id_for_update(bud_id)
+    if bud is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+    if bud.status != BUDStatus.CODE_REVIEW:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"BUD is not in code_review status (current: {bud.status.value})",
+        )
+
+    task_repo = BUDAgentTaskRepository(db, org_id=current_user.org_id)
+    if await task_repo.get_active_for_bud(bud_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot start code review while an agent task is running",
+        )
+
+    # Restrict the selection to the BUD's own impacted repos, then resolve
+    # to clone paths. A selection that resolves to nothing (inactive repos
+    # or no local path) is a 400 rather than a silent agent failure.
+    impacted_ids = {str(r.get("repo_id")) for r in (bud.impacted_repos or []) if r.get("repo_id")}
+    selected_ids = {str(rid) for rid in payload.repo_ids} & impacted_ids
+    confirmed = await resolve_confirmed_repos(db, current_user.org_id, selected_ids)
+    if not confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="None of the selected repos are active with a local clone path",
+        )
+
+    meta = dict(bud.metadata_ or {})
+    meta["confirmed_repos"] = confirmed
+    bud.metadata_ = meta
+
+    task = await create_agent_task_for_stage(
+        bud,
+        str(BUDStatus.CODE_REVIEW.value),
+        current_user.org_id,
+        db,
+        triggered_by=current_user.id,
+        force=True,
+    )
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No code-review agent is configured for this org",
+        )
+    return {
+        "status": "accepted",
+        "bud_id": str(bud_id),
+        "task_id": str(task.id),
+        "repo_count": len(confirmed),
+    }
 
 
 @router.post(

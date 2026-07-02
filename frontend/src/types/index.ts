@@ -1037,6 +1037,9 @@ export interface CodeReviewStatusResponse {
   repos: CodeReviewRepoStatus[]
   last_run_status: CodeReviewRunStatus
   last_run_message: string | null
+  // True when the BUD is in code_review but no repos are confirmed with a
+  // clone path — the tab prompts the user to pick repos to review.
+  needs_repo_selection: boolean
 }
 
 // Mirror of backend `CodeReviewOverrideRequest` Pydantic constraints in

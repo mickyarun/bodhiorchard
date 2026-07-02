@@ -27,22 +27,49 @@
 
 <template>
   <div class="learnings-panel">
-    <!-- Cold state. Reachable only if the row is fetched as null while the
-         tab is open (the tab itself is gated on has_learning), so this is
-         purely informational — the regenerate affordance lives on the
-         recap-missing branch below, which is the real entry point. -->
-    <AppCallout
-      v-if="!learning && !loading"
-      variant="info"
-      eyebrow="No recap yet"
-      icon="mdi-book-open-page-variant-outline"
-    >
-      The Learning Agent runs on close when
-      <code>auto_generate_phases.closed</code>
-      is enabled. Once it has produced a recap, this tab will display
-      the retrospective along with phase-drift, contributor, and
-      parallelism summaries.
-    </AppCallout>
+    <!-- Cold state: no learning row at all. Centered empty state matching
+         the other BUD tabs. For a closed, opted-in BUD this is the
+         recovery path after a transient close-time failure — generate from
+         here rather than being locked out. -->
+    <div v-if="!learning && !loading" class="text-center py-12">
+      <v-icon
+        icon="mdi-book-open-page-variant-outline"
+        size="48"
+        color="primary"
+        class="mb-3 opacity-40"
+      />
+      <div class="text-h6 font-weight-medium mb-2">No learnings yet</div>
+      <div class="text-body-2 text-medium-emphasis mx-auto" style="max-width: 460px">
+        <template v-if="canRegenerate">
+          The post-close learnings haven't been generated for this BUD —
+          usually a transient failure at close. Generate them now to
+          capture the metrics and retrospective.
+        </template>
+        <template v-else>
+          The Learning Agent runs on close when
+          <code>auto_generate_phases.closed</code>
+          is enabled. Once it has produced a recap, this tab will display
+          the retrospective along with phase-drift, contributor, and
+          parallelism summaries.
+        </template>
+      </div>
+      <div v-if="canRegenerate" class="mt-5">
+        <v-btn
+          variant="tonal"
+          size="small"
+          color="primary"
+          prepend-icon="mdi-refresh"
+          :loading="regenerating"
+          @click="onRegenerate"
+        >
+          Generate learnings
+        </v-btn>
+        <div v-if="queued" class="learnings-panel__hint mt-2">
+          Queued — they'll appear here once the agent finishes.
+        </div>
+        <div v-else-if="error" class="learnings-panel__hint text-error mt-2">{{ error }}</div>
+      </div>
+    </div>
 
     <v-progress-linear v-if="loading" indeterminate color="primary" />
 
@@ -133,6 +160,7 @@
         <div class="learnings-panel__section-head">
           <h3 class="learnings-panel__section-title">Retrospective</h3>
           <v-btn
+            v-if="canRegenerate"
             variant="text"
             size="x-small"
             prepend-icon="mdi-refresh"
@@ -156,10 +184,18 @@
           eyebrow="No recap"
           icon="mdi-book-open-page-variant-outline"
         >
-          The metrics above were captured, but the Learning Agent didn't
-          leave a written recap. Re-run it to generate one.
+          <template v-if="canRegenerate">
+            The metrics above were captured, but the Learning Agent didn't
+            leave a written recap. Re-run it to generate one.
+          </template>
+          <template v-else>
+            The metrics above were captured, but no written recap was
+            generated. Enable
+            <code>auto_generate_phases.closed</code>
+            to produce one.
+          </template>
         </AppCallout>
-        <div class="learnings-panel__actions">
+        <div v-if="canRegenerate" class="learnings-panel__actions">
           <v-btn
             variant="tonal"
             size="small"
@@ -186,7 +222,7 @@ import AppCallout from '@/components/common/AppCallout.vue'
 import { useBudLearning, type BudLearningPhaseMetric } from '@/composables/useBudLearning'
 import { renderMarkdown } from '@/utils/markdown'
 
-const props = defineProps<{ budId: string; refreshKey?: number }>()
+const props = defineProps<{ budId: string; refreshKey?: number; canRegenerate?: boolean }>()
 
 const { learning, loading, error, regenerating, fetchLearning, regenerateLearning } =
   useBudLearning()
