@@ -21,10 +21,13 @@ subsequent scans):
    branch-aware work without disturbing the user's working tree.
 2. ``main_branch`` / ``develop_branch`` detection if the row was added
    without explicit values (legacy ``Add Repo`` UX).
-3. MCP server config (``.mcp.json``) so Claude Code launched inside
-   the repo can talk back to Bodhiorchard.
-4. Git hooks (``.githooks/`` + ``core.hooksPath``) and Claude Code
-   hooks (``.claude/hooks/`` + ``settings.json``).
+3. MCP server config so the org's agent CLI (Claude → ``.mcp.json``;
+   Codex → ``.codex/config.toml``; Copilot → ``.github/copilot/``)
+   launched inside the repo can talk back to Bodhiorchard.
+4. Git hooks (``.githooks/`` + ``core.hooksPath``) and the org's
+   agent-CLI hooks (Claude → ``.claude/``; Codex → ``.codex/hooks.json``;
+   Copilot → ``.github/hooks/``), all wired to the shared dev-activity
+   scripts — see :mod:`app.services.scan.agent_repo_config`.
 5. ``.gitignore`` carve-out for ``.bodhiorchard/``, package-script
    prep, and the workflow paragraph appended to ``CLAUDE.md``.
 6. If any file actually changed, branch + commit + push + PR.
@@ -43,7 +46,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings as app_settings
-from app.models.organization import Organization
+from app.models.organization import AIProvider, Organization
 from app.models.tracked_repository import TrackedRepository
 from app.services.git_operations import (
     _detect_develop_branch,
@@ -64,6 +67,11 @@ from app.services.repo_setup import (
     install_hooks,
     mark_setup_branch_pushed,
     prepare_setup_worktree,
+)
+from app.services.scan.agent_repo_config import (
+    append_agent_instructions,
+    install_agent_hooks,
+    write_agent_mcp_config,
 )
 from app.services.scan.stages._origin_auth import refresh_origin_auth
 from app.services.scan_progress import update_scan_progress
@@ -160,30 +168,38 @@ async def phase_b1_repo_setup(
             )
             return setup_pr_message
 
+        # Provider chosen by the org drives which agent-CLI config we write:
+        # Claude → .claude/ + .mcp.json + CLAUDE.md; Codex/Copilot → their
+        # native hook config + AGENTS.md + provider MCP (see agent_repo_config).
+        # The MCP bridge, git hooks, .gitignore, and prepare script are
+        # generic and written for every provider.
+        provider = org.ai_provider if org is not None else AIProvider.claude
+
         # Init Bodhiorchard MCP in repo (skips if already configured)
         await update_scan_progress(
             scan_id,
             status="setting_up_mcp",
             progress_pct=base_pct + 22,
         )
-        mcp_changed = await init_bodhiorchard_mcp_in_repo(
-            work_path,
-            app_settings.public_url,
-        )
-
-        # Install git hooks to .githooks/ + set core.hooksPath
+        # Install the provider's agent-CLI hooks + instructions
         await update_scan_progress(
             scan_id,
             status="installing_hooks",
             progress_pct=base_pct + 25,
         )
-        hooks_changed = await install_hooks(work_path, app_settings.public_url, str(org_id))
+        if provider == AIProvider.claude:
+            mcp_changed = await init_bodhiorchard_mcp_in_repo(work_path, app_settings.public_url)
+            agent_hooks_changed = await install_claude_hooks(work_path, app_settings.public_url)
+            instructions_changed = append_bodhiorchard_claude_instructions(work_path)
+        else:
+            mcp_changed = write_agent_mcp_config(work_path, app_settings.public_url, provider)
+            agent_hooks_changed = install_agent_hooks(
+                work_path, app_settings.public_url, provider
+            )
+            instructions_changed = append_agent_instructions(work_path, provider)
 
-        # Install Claude Code hooks (.claude/hooks/ + settings.json)
-        claude_hooks_changed = await install_claude_hooks(
-            work_path,
-            app_settings.public_url,
-        )
+        # Install git hooks to .githooks/ + set core.hooksPath (generic)
+        hooks_changed = await install_hooks(work_path, app_settings.public_url, str(org_id))
 
         # Ensure hooks are active regardless of commit/push status
         await run_git(["config", "core.hooksPath", ".githooks"], cwd=work_path)
@@ -194,17 +210,14 @@ async def phase_b1_repo_setup(
         # Add prepare script to package.json
         prepare_changed = add_prepare_script(work_path)
 
-        # Add Bodhiorchard workflow instructions to CLAUDE.md
-        claude_md_changed = append_bodhiorchard_claude_instructions(work_path)
-
         # Branch, commit, push setup files, and create PR
         any_changed = (
             mcp_changed
             or hooks_changed
-            or claude_hooks_changed
+            or agent_hooks_changed
             or gitignore_changed
             or prepare_changed
-            or claude_md_changed
+            or instructions_changed
         )
         pushed_branch: str | None = None
         if any_changed:

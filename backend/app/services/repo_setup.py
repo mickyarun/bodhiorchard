@@ -182,6 +182,28 @@ _SETUP_FILES = [
     "CLAUDE.md",
     ".claude/skills/",
     ".bodhiorchard/mcp_bridge.py",
+    # Provider-aware setup (Codex / Copilot). ``commit_and_push_setup_worktree``
+    # stages only files that EXIST, so a Claude org skips these and a
+    # Codex/Copilot org skips the ``.claude/*`` + ``.mcp.json`` + ``CLAUDE.md``
+    # set above. The shared hook scripts live under ``.bodhiorchard/hooks/``
+    # (force-added past .gitignore) and are wired per-provider by
+    # ``agent_repo_config``. See that module for the event maps.
+    "AGENTS.md",
+    ".codex/hooks.json",
+    ".codex/config.toml",
+    ".github/hooks/copilot-cli-policy.json",
+    ".github/copilot/mcp-config.json",
+    ".bodhiorchard/hooks/_common.sh",
+    ".bodhiorchard/hooks/session-start.sh",
+    ".bodhiorchard/hooks/session-end.sh",
+    ".bodhiorchard/hooks/post-commit-track.sh",
+    ".bodhiorchard/hooks/file-change-track.sh",
+    ".bodhiorchard/hooks/tool-error-track.sh",
+    ".bodhiorchard/hooks/api-error-track.sh",
+    ".bodhiorchard/hooks/activity-report.sh",
+    ".bodhiorchard/hooks/detect-bud-prompt.sh",
+    ".bodhiorchard/hooks/subagent-start.sh",
+    ".bodhiorchard/hooks/subagent-stop.sh",
 ]
 
 # Paths in ``_SETUP_FILES`` whose parent directory is in ``.gitignore``.
@@ -829,7 +851,11 @@ def _build_common_sh(backend_url: str) -> str:
         }}
 
         get_sid() {{
-          printf '%s' "$1" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4
+          # Accept both Claude/Codex ``session_id`` and Copilot ``sessionId``
+          # so one script set serves every provider's stdin payload.
+          printf '%s' "$1" \\
+            | grep -o '"session_id":"[^"]*"\\|"sessionId":"[^"]*"' \\
+            | head -1 | cut -d'"' -f4
         }}
 
         get_bud_from_branch() {{
