@@ -63,6 +63,7 @@ _MANAGED_CRED_VARS = frozenset(
     {_API_KEY_ENV_VAR, _OAUTH_ENV_VAR, "COPILOT_GITHUB_TOKEN", "OPENAI_API_KEY"}
 )
 
+
 def _provider_of(org: Organization) -> AIProvider:
     """The org's selected provider, defaulting to Claude."""
     return org.ai_provider or AIProvider.claude

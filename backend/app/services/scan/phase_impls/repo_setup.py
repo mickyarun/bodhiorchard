@@ -193,9 +193,7 @@ async def phase_b1_repo_setup(
             instructions_changed = append_bodhiorchard_claude_instructions(work_path)
         else:
             mcp_changed = write_agent_mcp_config(work_path, app_settings.public_url, provider)
-            agent_hooks_changed = install_agent_hooks(
-                work_path, app_settings.public_url, provider
-            )
+            agent_hooks_changed = install_agent_hooks(work_path, app_settings.public_url, provider)
             instructions_changed = append_agent_instructions(work_path, provider)
 
         # Install git hooks to .githooks/ + set core.hooksPath (generic)

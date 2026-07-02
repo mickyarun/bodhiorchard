@@ -118,8 +118,10 @@ async def test_provider_conformance_returns_runresult(provider: AIProvider) -> N
     unsupported fields (cost_usd) left None rather than raising."""
     impl = provider_for(Organization(ai_provider=provider))
     assert isinstance(impl, (CopilotProvider, CodexProvider))
-    module = cx if provider == AIProvider.codex else __import__(
-        "app.services.ai_runner.copilot_provider", fromlist=["run_cli"]
+    module = (
+        cx
+        if provider == AIProvider.codex
+        else __import__("app.services.ai_runner.copilot_provider", fromlist=["run_cli"])
     )
     with patch.object(module, "run_cli", new=AsyncMock(return_value=(0, "", ""))):
         result = await impl.run("ping", NO_REPO_CONTEXT, ClaudeRunnerConfig(timeout_seconds=5))
