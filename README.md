@@ -16,7 +16,7 @@
 
 <a href="https://bodhiorchard.ai/"><img src="docs/images/board-ui.webp" width="85%" alt="The BUD board — every feature tracked from backlog to production in one view"></a>
 
-**[▶ Watch the demo](https://youtu.be/OxoqBI7BNxU)** · plan, track, and ship every feature in one place — no sprints, no story points, no standups.
+**[▶ Watch the demo](https://youtu.be/i8kZdcL1bME)** — a Slack message becomes a scoped, estimated BUD. No sprints, no story points, no standups.
 
 </div>
 
