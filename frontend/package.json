@@ -9,7 +9,7 @@
     "lint": "eslint . --ext .vue,.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepare": "test -d ../.git && npx --yes npm-merge-driver install --driver-name=npm-merge-driver || true"
+    "prepare": "node ./scripts/install-merge-driver.mjs"
   },
   "dependencies": {
     "@colyseus/sdk": "^0.17.42",
