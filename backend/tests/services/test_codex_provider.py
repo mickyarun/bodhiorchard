@@ -44,6 +44,12 @@ def test_parse_output_ignores_non_agent_items() -> None:
     assert cx._parse_output(only_reasoning) == ""
 
 
+def test_parse_output_survives_null_item() -> None:
+    """A version-drifted event with a null ``item`` must not raise."""
+    stream = '{"type":"item.completed","item":null}\n' + _SAMPLE_JSONL
+    assert cx._parse_output(stream) == "CODEX FINAL"
+
+
 def test_registry_dispatches_codex() -> None:
     assert isinstance(provider_for(Organization(ai_provider=AIProvider.codex)), CodexProvider)
 
@@ -63,6 +69,47 @@ async def test_codex_run_reports_failure() -> None:
         result = await CodexProvider().run("hi", NO_REPO_CONTEXT, config)
     assert result.success is False
     assert "kaboom" in (result.error or "")
+
+
+def test_tool_label_maps_action_items_and_skips_thinking() -> None:
+    mcp_item = {"type": "mcp_tool_call", "server": "bodhiorchard", "tool": "get_bud_context"}
+    assert cx._tool_label(mcp_item) == "bodhiorchard-get_bud_context"
+    assert cx._tool_label({"type": "command_execution", "command": "ls"}) == "shell"
+    assert cx._tool_label({"type": "file_change"}) == "edit"
+    # Agent thinking/answering is not tool activity.
+    assert cx._tool_label({"type": "reasoning"}) is None
+    assert cx._tool_label({"type": "agent_message", "text": "hi"}) is None
+
+
+async def test_codex_run_streams_tool_progress_when_callback_given() -> None:
+    """A progress_callback → stdout is streamed and fires per tool item start,
+    skipping reasoning/agent_message, while the final message still parses."""
+    lines = [
+        '{"type":"item.started","item":{"type":"mcp_tool_call",'
+        '"server":"bodhiorchard","tool":"get_design_system"}}',
+        '{"type":"item.started","item":{"type":"reasoning"}}',
+        '{"type":"item.started","item":{"type":"command_execution","command":"ls"}}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"DONE"}}',
+    ]
+    stdout = "\n".join(lines)
+    seen: list[str] = []
+
+    async def _fake_stream(cmd, cwd, env, timeout, on_line):  # type: ignore[no-untyped-def]
+        for ln in stdout.splitlines():
+            on_line(ln)
+        return (0, stdout, "")
+
+    with patch.object(cx, "run_cli_streaming", new=_fake_stream):
+        result = await CodexProvider().run(
+            "hi",
+            NO_REPO_CONTEXT,
+            ClaudeRunnerConfig(timeout_seconds=30),
+            progress_callback=lambda name, _inp: seen.append(name),
+        )
+
+    assert result.success is True
+    assert result.output == "DONE"
+    assert seen == ["bodhiorchard-get_design_system", "shell"]
 
 
 @pytest.mark.parametrize("provider", [AIProvider.copilot, AIProvider.codex])

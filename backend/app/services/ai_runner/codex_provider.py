@@ -23,12 +23,13 @@ mcp_servers.*`` overrides, and normalizes Codex's JSONL stream into a
 
 import json
 from pathlib import Path
+from typing import Any
 
 import structlog
 
 from app.models.organization import AIProvider
 from app.services.ai_runner.capabilities import resolve_model
-from app.services.ai_runner.cli_exec import resolve_working_dir, run_cli
+from app.services.ai_runner.cli_exec import resolve_working_dir, run_cli, run_cli_streaming
 from app.services.ai_runner.mcp_config import build_codex_mcp
 from app.services.ai_runner.subprocess_env import build_provider_env
 from app.services.claude_runner import (
@@ -56,6 +57,58 @@ def _compose_prompt(prompt: str, system_prompt_files: list[str]) -> str:
     return "\n\n".join(parts)
 
 
+# Codex ``item`` types that are the agent thinking/answering, not an action —
+# these don't count as "tool activity" for progress purposes.
+_NON_TOOL_ITEMS = frozenset({"agent_message", "reasoning", "todo_list"})
+
+
+def _tool_label(item: dict[str, Any]) -> str | None:
+    """Derive a progress label from a Codex ``item`` object, or None.
+
+    Codex emits ``item.started`` events as it runs actions. MCP tool calls,
+    shell commands, and file edits are surfaced under friendly names; the
+    agent's own message/reasoning items are skipped.
+    """
+    itype = item.get("type")
+    if not isinstance(itype, str) or itype in _NON_TOOL_ITEMS:
+        return None
+    if itype == "mcp_tool_call":
+        tool = item.get("tool") or item.get("name")
+        server = item.get("server")
+        if server and tool:
+            return f"{server}-{tool}"
+        return str(tool) if tool else "mcp_tool_call"
+    if itype == "command_execution":
+        return "shell"
+    if itype == "file_change":
+        return "edit"
+    # Any other action-ish item type surfaces under its own name.
+    return itype
+
+
+def _emit_progress(line: str, callback: ProgressCallback) -> None:
+    """Fire ``callback`` for a Codex tool/action item as it starts.
+
+    Parses one JSONL line; a non-JSON or non-``item.started`` line is a no-op.
+    Never raises — the streaming reader wraps this, but stay defensive anyway.
+    """
+    line = line.strip()
+    if not line:
+        return
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        return
+    if not isinstance(event, dict) or event.get("type") != "item.started":
+        return
+    item = event.get("item")
+    if not isinstance(item, dict):
+        return
+    label = _tool_label(item)
+    if label:
+        callback(label, {})
+
+
 def _parse_output(stdout: str) -> str:
     """Extract the final agent message from Codex's JSONL stream.
 
@@ -72,8 +125,11 @@ def _parse_output(stdout: str) -> str:
         except json.JSONDecodeError:
             continue
         if isinstance(event, dict) and event.get("type") == "item.completed":
-            item = event.get("item", {})
-            if item.get("type") == "agent_message" and item.get("text"):
+            item = event.get("item")
+            # ``item`` can be null / non-dict on a malformed or version-drifted
+            # event — guard so ``_parse_output`` (called outside run()'s
+            # try/except) can't raise and escape the run's error handling.
+            if isinstance(item, dict) and item.get("type") == "agent_message" and item.get("text"):
                 result_text = item["text"]
     return result_text
 
@@ -90,8 +146,10 @@ class CodexProvider:
     ) -> ClaudeRunResult:
         """Execute ``prompt`` via ``codex exec`` and normalize the result.
 
-        ``progress_callback`` is accepted for protocol compatibility but not
-        yet emitted — Codex runs in batch mode here (v1).
+        When ``progress_callback`` is supplied, stdout is streamed line-by-line
+        and the callback fires on each Codex tool/action item as it starts, so
+        callers (scan timeline, design tab) show live activity instead of a
+        static spinner. Without it, the run is buffered.
         """
         config = config or ClaudeRunnerConfig()
         cwd = resolve_working_dir(working_dir)
@@ -130,7 +188,17 @@ class CodexProvider:
             prompt_preview=prompt[:100],
         )
         try:
-            returncode, stdout, stderr = await run_cli(cmd, cwd, env, config.timeout_seconds)
+            if progress_callback is not None:
+                cb = progress_callback
+
+                def _on_line(line: str) -> None:
+                    _emit_progress(line, cb)
+
+                returncode, stdout, stderr = await run_cli_streaming(
+                    cmd, cwd, env, config.timeout_seconds, _on_line
+                )
+            else:
+                returncode, stdout, stderr = await run_cli(cmd, cwd, env, config.timeout_seconds)
         except (TimeoutError, OSError) as exc:
             logger.error("codex_run_error", error=str(exc))
             return ClaudeRunResult(success=False, output="", error=f"Codex CLI failed: {exc}")

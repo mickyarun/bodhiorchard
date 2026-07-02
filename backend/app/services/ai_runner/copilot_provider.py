@@ -29,7 +29,7 @@ import structlog
 
 from app.models.organization import AIProvider
 from app.services.ai_runner.capabilities import resolve_model
-from app.services.ai_runner.cli_exec import resolve_working_dir, run_cli
+from app.services.ai_runner.cli_exec import resolve_working_dir, run_cli, run_cli_streaming
 from app.services.ai_runner.mcp_config import build_copilot_mcp
 from app.services.ai_runner.subprocess_env import build_provider_env
 from app.services.claude_runner import (
@@ -57,6 +57,35 @@ def _compose_prompt(prompt: str, system_prompt_files: list[str]) -> str:
     return "\n\n".join(parts)
 
 
+def _emit_progress(line: str, callback: ProgressCallback) -> None:
+    """Fire ``callback`` for a Copilot tool-invocation event as it starts.
+
+    Copilot's JSONL marks tool activity with an event ``type`` containing
+    ``tool`` (e.g. ``tool.execution``); the tool name lives in ``data.name`` /
+    ``data.tool``. Result/output events are skipped so a call doesn't tick
+    twice. Best-effort by design — an unrecognised shape is simply ignored.
+    """
+    line = line.strip()
+    if not line:
+        return
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        return
+    if not isinstance(event, dict):
+        return
+    etype = event.get("type")
+    if not isinstance(etype, str):
+        return
+    low = etype.lower()
+    if "tool" not in low or any(k in low for k in ("result", "response", "output", "completed")):
+        return
+    raw_data = event.get("data")
+    data = raw_data if isinstance(raw_data, dict) else {}
+    name = data.get("name") or data.get("tool") or event.get("name") or etype
+    callback(str(name), {})
+
+
 def _parse_output(stdout: str) -> str:
     """Extract the final assistant text from Copilot's JSONL stream.
 
@@ -73,7 +102,11 @@ def _parse_output(stdout: str) -> str:
         except json.JSONDecodeError:
             continue
         if isinstance(event, dict) and event.get("type") == "assistant.message":
-            content = event.get("data", {}).get("content")
+            # ``data`` can be null even when the key exists (so ``.get("data", {})``
+            # wouldn't help) — guard so ``_parse_output`` (called outside run()'s
+            # try/except) can't raise on a version-drifted event shape.
+            data = event.get("data")
+            content = data.get("content") if isinstance(data, dict) else None
             if content:
                 result_text = content
     return result_text
@@ -91,8 +124,10 @@ class CopilotProvider:
     ) -> ClaudeRunResult:
         """Execute ``prompt`` via ``copilot -p`` and normalize the result.
 
-        ``progress_callback`` is accepted for protocol compatibility but not
-        yet emitted — Copilot runs in batch mode here (v1).
+        When ``progress_callback`` is supplied, stdout is streamed and the
+        callback fires on each Copilot tool invocation as it starts, so callers
+        show live activity instead of a static spinner. Without it, the run is
+        buffered.
         """
         config = config or ClaudeRunnerConfig()
         cwd = resolve_working_dir(working_dir)
@@ -130,7 +165,17 @@ class CopilotProvider:
             prompt_preview=prompt[:100],
         )
         try:
-            returncode, stdout, stderr = await run_cli(cmd, cwd, env, config.timeout_seconds)
+            if progress_callback is not None:
+                cb = progress_callback
+
+                def _on_line(line: str) -> None:
+                    _emit_progress(line, cb)
+
+                returncode, stdout, stderr = await run_cli_streaming(
+                    cmd, cwd, env, config.timeout_seconds, _on_line
+                )
+            else:
+                returncode, stdout, stderr = await run_cli(cmd, cwd, env, config.timeout_seconds)
         except (TimeoutError, OSError) as exc:
             logger.error("copilot_run_error", error=str(exc))
             return ClaudeRunResult(success=False, output="", error=f"Copilot CLI failed: {exc}")

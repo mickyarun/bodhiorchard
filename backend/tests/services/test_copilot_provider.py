@@ -48,6 +48,12 @@ def test_parse_output_ignores_non_json_lines() -> None:
     assert cp._parse_output("garbage\n" + _SAMPLE_JSONL) == "FINAL ANSWER"
 
 
+def test_parse_output_survives_null_data() -> None:
+    """A version-drifted ``assistant.message`` with null ``data`` must not raise."""
+    stream = '{"type":"assistant.message","data":null}\n' + _SAMPLE_JSONL
+    assert cp._parse_output(stream) == "FINAL ANSWER"
+
+
 def test_compose_prompt_prepends_files(tmp_path: object) -> None:
     import pathlib
 
@@ -105,3 +111,43 @@ async def test_copilot_run_reports_failure() -> None:
         result = await CopilotProvider().run("hi", NO_REPO_CONTEXT, config)
     assert result.success is False
     assert "boom" in (result.error or "")
+
+
+def test_emit_progress_fires_on_tool_events_only() -> None:
+    seen: list[str] = []
+    cb = lambda name, _inp: seen.append(name)  # noqa: E731
+    # A tool-invocation event fires with its resolved name.
+    cp._emit_progress('{"type":"tool.execution","data":{"name":"bodhi-get_features"}}', cb)
+    # Result/output events for the same call must not double-tick.
+    cp._emit_progress('{"type":"tool.result","data":{"name":"bodhi-get_features"}}', cb)
+    # Non-tool events (the assistant answer) are ignored.
+    cp._emit_progress('{"type":"assistant.message","data":{"content":"hi"}}', cb)
+    # Junk lines are no-ops.
+    cp._emit_progress("not json", cb)
+    assert seen == ["bodhi-get_features"]
+
+
+async def test_copilot_run_streams_progress_when_callback_given() -> None:
+    lines = [
+        '{"type":"tool.execution","data":{"name":"bodhi-code_query"}}',
+        '{"type":"assistant.message","data":{"content":"FINAL ANSWER"}}',
+    ]
+    stdout = "\n".join(lines)
+    seen: list[str] = []
+
+    async def _fake_stream(cmd, cwd, env, timeout, on_line):  # type: ignore[no-untyped-def]
+        for ln in stdout.splitlines():
+            on_line(ln)
+        return (0, stdout, "")
+
+    with patch.object(cp, "run_cli_streaming", new=_fake_stream):
+        result = await CopilotProvider().run(
+            "hi",
+            NO_REPO_CONTEXT,
+            ClaudeRunnerConfig(timeout_seconds=30),
+            progress_callback=lambda name, _inp: seen.append(name),
+        )
+
+    assert result.success is True
+    assert result.output == "FINAL ANSWER"
+    assert seen == ["bodhi-code_query"]

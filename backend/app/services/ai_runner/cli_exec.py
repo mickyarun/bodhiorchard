@@ -24,6 +24,7 @@ import asyncio
 import contextlib
 import os
 import signal
+from collections.abc import Callable
 from pathlib import Path
 
 import structlog
@@ -32,6 +33,11 @@ from app.services.claude_guard import apply_subprocess_rlimits
 from app.services.claude_runner import _validate_working_dir
 
 logger = structlog.get_logger(__name__)
+
+# Provider JSONL lines can be large — the final ``agent_message`` carries the
+# full generated artefact (e.g. a wireframe HTML), which blows past asyncio's
+# 64KB default StreamReader limit. Matches ``claude_runner``'s streaming cap.
+_STREAM_LINE_LIMIT = 10 * 1024 * 1024  # 10MB
 
 
 def resolve_working_dir(working_dir: str | Path | None) -> str:
@@ -89,3 +95,66 @@ async def run_cli(
         stdout.decode("utf-8", errors="replace"),
         stderr.decode("utf-8", errors="replace"),
     )
+
+
+async def run_cli_streaming(
+    cmd: list[str],
+    cwd: str | Path,
+    env: dict[str, str],
+    timeout_seconds: int,
+    on_line: Callable[[str], None],
+) -> tuple[int, str, str]:
+    """Like :func:`run_cli`, but stream stdout line-by-line to ``on_line``.
+
+    Reads stdout incrementally so the caller can surface live progress (tool
+    calls) instead of waiting for the whole run to finish. ``on_line`` is
+    invoked with each decoded stdout line and must be cheap; it's wrapped so a
+    raising callback can never break the reader. Same return shape and
+    timeout/kill-the-process-group contract as :func:`run_cli`. A line beyond
+    the 10MB buffer stops line-parsing (rare — only a multi-MB final message);
+    stdout captured up to that point is still returned.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=str(cwd),
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        limit=_STREAM_LINE_LIMIT,
+        preexec_fn=apply_subprocess_rlimits(),
+    )
+    out_chunks: list[str] = []
+    err_chunks: list[str] = []
+
+    async def _pump_stdout() -> None:
+        assert proc.stdout is not None  # noqa: S101
+        while True:
+            try:
+                raw = await proc.stdout.readline()
+            except ValueError:
+                logger.warning("cli_stream_line_overflow", limit_mb=10)
+                break
+            if not raw:
+                break
+            text = raw.decode("utf-8", errors="replace")
+            out_chunks.append(text)
+            try:
+                on_line(text)
+            except Exception:  # noqa: BLE001 — never break the reader
+                logger.exception("cli_stream_on_line_failed")
+
+    async def _pump_stderr() -> None:
+        assert proc.stderr is not None  # noqa: S101
+        data = await proc.stderr.read()
+        err_chunks.append(data.decode("utf-8", errors="replace"))
+
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(_pump_stdout(), _pump_stderr()), timeout=timeout_seconds
+        )
+        await proc.wait()
+    except TimeoutError:
+        _kill_process_tree(proc)
+        await proc.wait()
+        raise
+    return proc.returncode or 0, "".join(out_chunks), "".join(err_chunks)
