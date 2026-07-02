@@ -22,7 +22,7 @@
 
 ---
 
-**Bodhiorchard** is the open-source reference implementation of **Agent-Driven Development (ADD)** — a software development methodology where twelve specialised AI agents handle the busywork (specs, estimates, test plans, triage, retrospectives) and humans keep the decisions that matter. It works as a **self-hosted Jira alternative** for the full lifecycle: intake → spec → design → development → testing → deploy → retrospective. The data plane stays on your hardware; inference runs on [Claude Code](https://docs.anthropic.com/en/docs/claude-code) today, with Ollama and OpenAI next.
+**Bodhiorchard** is the open-source reference implementation of **Agent-Driven Development (ADD)** — a software development methodology where twelve specialised AI agents handle the busywork (specs, estimates, test plans, triage, retrospectives) and humans keep the decisions that matter. It works as a **self-hosted Jira alternative** for the full lifecycle: intake → spec → design → development → testing → deploy → retrospective. The data plane stays on your hardware; inference runs through your choice of agent CLI — [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [GitHub Copilot](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli), or [OpenAI Codex](https://developers.openai.com/codex/cli) — picked per organization in setup, with Ollama next.
 
 > **Less process. More shipped.** The full methodology lives at [bodhiorchard.ai](https://bodhiorchard.ai/).
 
@@ -160,7 +160,7 @@ shared/      World layout consumed by frontend + multiplayer
 examples/    TaskFlow demo repos (cross-repo feature detection)
 ```
 
-The agent layer is engine-independent: Claude Code runs the codebase-aware agents, the Anthropic direct API handles lightweight ones, and Ollama / OpenAI / Codex are next — adding an engine is API rewiring only. Bodhiorchard also runs its own **MCP server** so Claude Code (or any MCP client) can drive the BUD lifecycle, query the code graph, and read team context.
+The agent layer is engine-independent: a per-org provider selector runs the codebase-aware agents through **Claude Code, GitHub Copilot, or OpenAI Codex** — each org picks one in setup, and all three reach the same tools via one STDIO MCP bridge — with Ollama next. Adding an engine is a thin adapter, not a rewrite. Bodhiorchard also runs its own **MCP server** so any of those CLIs (or any MCP client) can drive the BUD lifecycle, query the code graph, and read team context.
 
 ## Documentation
 
@@ -189,7 +189,7 @@ The data plane — Postgres, embeddings, BUDs, scanned repos, audit log — is a
 
 ### Do I need a Claude subscription?
 
-No. Either paste an Anthropic API key (pay-per-token) or, if you do have Claude Pro/Max, run Hybrid mode and the agents inherit your flat-rate `claude login` session.
+No — and you're not tied to Claude at all. Pick your agent CLI per organization in setup: **Claude Code**, **GitHub Copilot**, or **OpenAI Codex**. For each you can either paste an API key / token (pay-per-token) or, in Hybrid mode, inherit the host's existing login (`claude login`, `gh`/Copilot login, or `codex login`) so the agents run on your flat-rate subscription.
 
 ### How is this different from Cursor, Tabby, or Continue?
 
