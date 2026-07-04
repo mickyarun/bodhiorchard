@@ -70,8 +70,10 @@ from app.mcp.handlers_team import (
 )
 from app.mcp.handlers_todo import (
     handle_complete_todo,
+    handle_create_todo,
     handle_get_bud_plan,
     handle_takeover_todo,
+    handle_update_todo,
 )
 from app.mcp.rate_limit import enforce_rate_limit
 from app.mcp.synthesis_queue import (  # noqa: F401
@@ -257,6 +259,15 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                         "BUD is past the MCP-writable phases (e.g. while "
                         "in testing). Drives smart assignment scoring and "
                         "yield-offer routing."
+                    ),
+                },
+                "title": {
+                    "type": "string",
+                    "description": (
+                        "Optional. Rename the BUD (1–500 chars). Metadata, "
+                        "independent of phase — like priority, it can be set "
+                        "in any non-terminal phase. The change is snapshotted "
+                        "and revertible through the History UI."
                     ),
                 },
                 "linked_feature_ids": {
@@ -830,6 +841,58 @@ MCP_TOOLS: list[MCPToolDefinition] = [
         },
     ),
     MCPToolDefinition(
+        name="create_todo",
+        description=(
+            "Add a new TODO to a BUD's plan. Use when work is discovered that "
+            "the tech-spec-derived plan missed. The item is created PENDING and "
+            "unassigned, and is marked manual so a later 'Regenerate' won't "
+            "delete it. Does NOT claim or assign — call takeover_todo to start it."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bud_number": {"type": "integer"},
+                "title": {
+                    "type": "string",
+                    "description": "Short imperative task title (1–500 chars).",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Optional longer description / acceptance notes.",
+                },
+            },
+            "required": ["bud_number", "title"],
+        },
+    ),
+    MCPToolDefinition(
+        name="update_todo",
+        description=(
+            "Edit an existing TODO's text — its title and/or description. "
+            "Content-only: status and assignment are managed by takeover_todo / "
+            "complete_todo, not here. Identify the TODO by bud_number + sequence "
+            "(from get_bud_plan)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bud_number": {"type": "integer"},
+                "sequence": {
+                    "type": "integer",
+                    "description": "The TODO sequence number from get_bud_plan.",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "New task title (1–500 chars). Omit to leave unchanged.",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "New description. Omit to leave unchanged.",
+                },
+            },
+            "required": ["bud_number", "sequence"],
+        },
+    ),
+    MCPToolDefinition(
         name="code_impact",
         description=(
             "Return upstream callers / downstream callees of a target symbol "
@@ -1098,6 +1161,8 @@ AUTH_TOOL_HANDLERS: dict[str, Any] = {
     "get_bud_plan": handle_get_bud_plan,
     "takeover_todo": handle_takeover_todo,
     "complete_todo": handle_complete_todo,
+    "create_todo": handle_create_todo,
+    "update_todo": handle_update_todo,
     "create_bud": handle_create_bud,
     "update_bud": handle_update_bud,
     "get_bud_by_id": handle_get_bud_by_id,

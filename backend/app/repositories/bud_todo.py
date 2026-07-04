@@ -16,6 +16,7 @@
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -207,3 +208,41 @@ class BUDTodoRepository(BaseRepository[BUDTodo]):
         if row is not None:
             await self._db.flush()
         return row
+
+    async def next_sequence(self, bud_id: uuid.UUID) -> int:
+        """Return the next unused sequence for a BUD (``max(sequence) + 1``, or 1)."""
+        stmt = self._scoped(select(func.max(BUDTodo.sequence)).where(BUDTodo.bud_id == bud_id))
+        result = await self._db.execute(stmt)
+        return (result.scalar_one_or_none() or 0) + 1
+
+    async def create_todo(
+        self,
+        bud_id: uuid.UUID,
+        *,
+        title: str,
+        phase: str,
+        description: str | None = None,
+        detail: dict[str, Any] | None = None,
+    ) -> BUDTodo:
+        """Insert a PENDING, unassigned, non-checkpoint TODO at the next sequence.
+
+        Backs the manual "add todo" REST endpoint and the ``create_todo`` MCP
+        tool. ``detail`` carries the ``{"source": "manual"}`` marker that keeps
+        the row from being deleted by the tech-spec reconciler — see
+        ``todo_sync._is_preserved``. Callers re-fetch via ``get_by_sequence`` to
+        pick up the eager-loaded assignee for serialization.
+        """
+        todo = BUDTodo(
+            org_id=self._org_id,
+            bud_id=bud_id,
+            sequence=await self.next_sequence(bud_id),
+            title=title,
+            phase=phase,
+            status=BUDTodoStatus.PENDING.value,
+            is_checkpoint=False,
+            description=description,
+            detail=detail,
+        )
+        self._db.add(todo)
+        await self._db.flush()
+        return todo

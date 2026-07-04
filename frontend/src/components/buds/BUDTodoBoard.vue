@@ -150,6 +150,33 @@ async function handleStatus(todo: BUDTodo, status: BUDTodoStatus) {
   await todosStore.updateTodo(props.budId, todo.id, { status })
 }
 
+async function handleEdit(todo: BUDTodo, title: string) {
+  await todosStore.updateTodo(props.budId, todo.id, { title })
+}
+
+// Manual add-todo. A lightweight inline form rather than a dialog — adding a
+// task should be as quick as editing one.
+const showAdd = ref(false)
+const newTitle = ref('')
+const adding = ref(false)
+
+function openAdd() {
+  newTitle.value = ''
+  showAdd.value = true
+}
+
+async function submitAdd() {
+  const title = newTitle.value.trim()
+  if (!title || adding.value) return
+  adding.value = true
+  const created = await todosStore.addTodo(props.budId, { title })
+  adding.value = false
+  if (created) {
+    newTitle.value = ''
+    showAdd.value = false
+  }
+}
+
 function openRegenerateConfirm() {
   confirmRegenerate.value = true
 }
@@ -182,12 +209,44 @@ async function doRegenerate() {
         <v-btn
           size="small"
           variant="text"
+          prepend-icon="mdi-plus"
+          :disabled="showAdd"
+          @click="openAdd"
+        >Add todo</v-btn>
+        <v-btn
+          size="small"
+          variant="text"
           :loading="todosStore.regenerating"
           :disabled="todosStore.regenerating || !todosStore.todos.length && todosStore.loading"
           prepend-icon="mdi-refresh"
           @click="openRegenerateConfirm"
         >Regenerate</v-btn>
       </div>
+    </div>
+
+    <div v-if="showAdd" class="todo-board__add">
+      <v-text-field
+        v-model="newTitle"
+        variant="outlined"
+        density="compact"
+        autofocus
+        hide-details
+        placeholder="New task title…"
+        :disabled="adding"
+        @keyup.enter="submitAdd"
+        @keyup.escape="showAdd = false"
+      />
+      <v-btn
+        size="small"
+        color="primary"
+        variant="flat"
+        :loading="adding"
+        :disabled="!newTitle.trim()"
+        @click="submitAdd"
+      >Add</v-btn>
+      <v-btn size="small" variant="text" :disabled="adding" @click="showAdd = false">
+        Cancel
+      </v-btn>
     </div>
 
     <v-alert
@@ -229,7 +288,7 @@ async function doRegenerate() {
     <div
       v-else-if="todosStore.todos.length === 0"
       class="pa-4 text-center text-medium-emphasis"
-    >No TODOs yet — click Regenerate to re-derive them from the current tech spec.</div>
+    >No TODOs yet — click <strong>Add todo</strong>, or <strong>Regenerate</strong> to re-derive them from the current tech spec.</div>
 
     <div v-else class="todo-board__list">
       <BUDTodoRow
@@ -240,6 +299,7 @@ async function doRegenerate() {
         :busy="todosStore.loading || todosStore.regenerating"
         @claim="handleClaim"
         @status="handleStatus"
+        @edit="handleEdit"
       />
     </div>
 
@@ -283,6 +343,13 @@ async function doRegenerate() {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.6);
   font-style: italic;
+}
+.todo-board__add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px 12px;
+  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.06);
 }
 .todo-board__list {
   border-top: 1px solid rgba(var(--v-theme-on-surface), 0.06);

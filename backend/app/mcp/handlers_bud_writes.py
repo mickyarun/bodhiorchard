@@ -447,12 +447,19 @@ async def handle_update_bud(
     if priority_err:
         return priority_err
 
+    title_raw = params.get("title")
+    new_title: str | None = None
+    if title_raw is not None:
+        if not isinstance(title_raw, str) or not title_raw.strip():
+            return _err("bad_title", "title must be a non-empty string (1–500 chars).")
+        new_title = title_raw.strip()[:500]
+
     has_content = isinstance(params.get("content"), str) and bool(params["content"].strip())
-    if not has_content and priority is None:
+    if not has_content and priority is None and new_title is None:
         return _err(
             "nothing_to_update",
-            "Pass either 'content' (phase-owned edit) or 'priority' "
-            "(P0..P3) — update_bud needs something to change.",
+            "Pass 'content' (phase-owned edit), 'priority' (P0..P3), or 'title' "
+            "— update_bud needs something to change.",
         )
 
     try:
@@ -594,6 +601,26 @@ async def handle_update_bud(
         result["priority"] = priority.value
         priority_changed = True
 
+    # ── Title update ──────────────────────────────────────────────────
+    # Metadata, phase-independent (mirrors priority and the REST PATCH,
+    # which allows title edits in any non-terminal phase). Snapshot first
+    # so an MCP title change is revertible through the same History UI.
+    title_changed = False
+    if new_title is not None and bud.title != new_title:
+        await bud_version_repo.insert_snapshot(
+            db,
+            bud=bud,
+            phase=bud.status,
+            source=BUDEditSource.MCP,
+            edited_by=auth.user.id,
+            mcp_token_id=auth.token_id,
+            reason="title_change",
+        )
+        bud.title = new_title
+        await db.flush()
+        result["title"] = new_title
+        title_changed = True
+
     # Same explicit-link path as create_bud. Linking happens AFTER the
     # content write so a failed write doesn't produce orphan link rows.
     # ``link_features`` is idempotent — re-passing existing ids is a
@@ -613,6 +640,7 @@ async def handle_update_bud(
         field=result.get("field"),
         content_len=len(content),
         priority_changed=priority_changed,
+        title_changed=title_changed,
         linked_count=link_summary["linked_count"],
     )
     return result

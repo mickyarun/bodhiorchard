@@ -64,7 +64,7 @@ export const useBUDTodosStore = defineStore('budTodos', () => {
   async function updateTodo(
     budId: string,
     todoId: string,
-    patch: { status?: BUDTodoStatus; assigneeId?: string | null; summary?: string },
+    patch: { title?: string; status?: BUDTodoStatus; assigneeId?: string | null; summary?: string },
   ): Promise<BUDTodo | null> {
     try {
       const { data } = await api.patch(`/v1/buds/${budId}/todos/${todoId}`, patch)
@@ -72,6 +72,25 @@ export const useBUDTodosStore = defineStore('budTodos', () => {
       return data as BUDTodo
     } catch (e: unknown) {
       error.value = extractApiError(e, 'Failed to update TODO')
+      return null
+    }
+  }
+
+  /**
+   * Add a TODO manually (not derived from the tech spec). The new item is
+   * appended to the local list on success; other sessions pick it up via
+   * the `todo:{budId}` "added" event.
+   */
+  async function addTodo(
+    budId: string,
+    payload: { title: string; description?: string },
+  ): Promise<BUDTodo | null> {
+    try {
+      const { data } = await api.post(`/v1/buds/${budId}/todos`, payload)
+      if (currentBudId.value === budId) todos.value.push(data as BUDTodo)
+      return data as BUDTodo
+    } catch (e: unknown) {
+      error.value = extractApiError(e, 'Failed to add TODO')
       return null
     }
   }
@@ -140,6 +159,7 @@ export const useBUDTodosStore = defineStore('budTodos', () => {
     fetchTodos,
     claimTodo,
     updateTodo,
+    addTodo,
     regenerate,
     handleRemoteEvent,
     reset,

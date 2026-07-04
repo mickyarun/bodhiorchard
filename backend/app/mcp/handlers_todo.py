@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.mcp.auth import MCPAuthResult
 from app.mcp.handler_utils import require_non_empty
+from app.models.bud import BUDStatus
 from app.models.bud_todo import BUDTodo, BUDTodoStatus
 from app.repositories.bud import BUDRepository
 from app.repositories.bud_todo import BUDTodoRepository
@@ -309,6 +310,129 @@ async def handle_complete_todo(
 
 async def _count_remaining_todos(db: AsyncSession, org_id: uuid.UUID, bud_id: uuid.UUID) -> int:
     return await BUDTodoRepository(db, org_id=org_id).count_remaining_for_bud(bud_id)
+
+
+# ── Tool: create_todo ──────────────────────────────────────────────
+
+
+async def handle_create_todo(
+    db: AsyncSession,
+    auth: MCPAuthResult,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """Add a new TODO to a BUD's plan.
+
+    The item is PENDING, unassigned, and marked ``detail.source == "manual"``
+    so a later tech-spec regenerate won't delete it. Requires a per-user MCP
+    token; any org member may extend the plan (matching takeover/complete).
+    Content only — status/assignee are managed by ``takeover_todo`` /
+    ``complete_todo`` and the UI.
+    """
+    if auth.user is None:
+        return {"success": False, "error": "create_todo requires a per-user MCP token"}
+
+    error = require_non_empty(params, "bud_number", "title")
+    if error:
+        return error
+    title = str(params["title"]).strip()[:500]
+
+    bud_repo = BUDRepository(db, org_id=auth.org.id)
+    bud = await bud_repo.get_by_number(int(params["bud_number"]))
+    if bud is None:
+        return {"success": False, "error": f"BUD-{int(params['bud_number']):03d} not found"}
+    if bud.status in (BUDStatus.CLOSED, BUDStatus.DISCARDED):
+        return {"success": False, "error": f"Cannot add a TODO to a {bud.status.value} BUD"}
+
+    desc_raw = params.get("description")
+    description = desc_raw.strip()[:1000] or None if isinstance(desc_raw, str) else None
+
+    todo_repo = BUDTodoRepository(db, org_id=auth.org.id)
+    todo = await todo_repo.create_todo(
+        bud.id,
+        title=title,
+        phase=bud.status.value,
+        description=description,
+        detail={"source": "manual"},
+    )
+
+    await record_event(
+        db,
+        auth.org.id,
+        bud.id,
+        "todo_added",
+        actor_id=auth.user.id,
+        actor_name=auth.user.name,
+        detail={"todo_id": str(todo.id), "sequence": todo.sequence, "title": todo.title},
+    )
+    publish(
+        f"todo:{bud.id}",
+        {"event": "added", "todo_id": str(todo.id), "sequence": todo.sequence},
+    )
+
+    return {"success": True, "sequence": todo.sequence, "title": todo.title}
+
+
+# ── Tool: update_todo ──────────────────────────────────────────────
+
+
+async def handle_update_todo(
+    db: AsyncSession,
+    auth: MCPAuthResult,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """Edit a TODO's text — its title and/or description.
+
+    Content-only: the status lifecycle stays with ``takeover_todo`` /
+    ``complete_todo`` so the dev→code_review gate lives in one place. Requires
+    a per-user MCP token.
+    """
+    if auth.user is None:
+        return {"success": False, "error": "update_todo requires a per-user MCP token"}
+
+    error = require_non_empty(params, "bud_number", "sequence")
+    if error:
+        return error
+
+    bud_repo = BUDRepository(db, org_id=auth.org.id)
+    bud = await bud_repo.get_by_number(int(params["bud_number"]))
+    if bud is None:
+        return {"success": False, "error": f"BUD-{int(params['bud_number']):03d} not found"}
+
+    sequence = int(params["sequence"])
+    todo_repo = BUDTodoRepository(db, org_id=auth.org.id)
+    todo = await todo_repo.get_by_sequence(bud.id, sequence)
+    if todo is None:
+        return {"success": False, "error": f"TODO #{sequence} not found"}
+
+    title_raw = params.get("title")
+    desc_raw = params.get("description")
+    new_title: str | None = None
+    if isinstance(title_raw, str) and title_raw.strip():
+        new_title = title_raw.strip()[:500]
+    if new_title is None and not isinstance(desc_raw, str):
+        return {"success": False, "error": "Provide title and/or description to update."}
+
+    if new_title is not None:
+        todo.title = new_title
+    if isinstance(desc_raw, str):
+        todo.description = desc_raw.strip()[:1000] or None
+    await db.flush()
+
+    await record_event(
+        db,
+        auth.org.id,
+        bud.id,
+        "todo_edited",
+        actor_id=auth.user.id,
+        actor_name=auth.user.name,
+        detail={"todo_id": str(todo.id), "sequence": todo.sequence},
+    )
+    publish(
+        f"todo:{bud.id}",
+        {"event": "edited", "todo_id": str(todo.id), "sequence": todo.sequence},
+    )
+
+    return {"success": True, "sequence": todo.sequence, "title": todo.title}
 
 
 # ── Cross-branch context for get_bud_plan ──────────────────────────

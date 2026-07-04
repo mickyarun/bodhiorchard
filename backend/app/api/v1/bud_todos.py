@@ -28,6 +28,7 @@ from app.repositories.bud import BUDRepository
 from app.repositories.bud_todo import BUDTodoRepository
 from app.schemas.bud_todos import (
     BUDTodoClaimResponse,
+    BUDTodoCreate,
     BUDTodoRead,
     BUDTodoUpdate,
 )
@@ -73,6 +74,61 @@ async def list_todos(
     return [_to_read(t) for t in todos]
 
 
+@router.post(
+    "/{bud_id}/todos",
+    response_model=BUDTodoRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def add_todo(
+    bud_id: uuid.UUID,
+    body: BUDTodoCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BUDTodoRead:
+    """Add a TODO manually (i.e. not derived from the tech spec).
+
+    The new item is PENDING, unassigned, and marked ``detail.source == "manual"``
+    so the tech-spec reconciler keeps it across a "Regenerate" (see
+    ``todo_sync._is_preserved``). Defaults the phase to the BUD's current status.
+    """
+    bud = await BUDRepository(db, org_id=current_user.org_id).get_by_id(bud_id)
+    if bud is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "BUD not found")
+    if bud.status in (BUDStatus.CLOSED, BUDStatus.DISCARDED):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Cannot add a TODO to a {bud.status.value} BUD",
+        )
+
+    repo = BUDTodoRepository(db, org_id=current_user.org_id)
+    todo = await repo.create_todo(
+        bud_id,
+        title=body.title,
+        phase=body.phase or bud.status.value,
+        description=body.description,
+        detail={"source": "manual"},
+    )
+
+    await record_event(
+        db,
+        current_user.org_id,
+        bud_id,
+        "todo_added",
+        actor_id=current_user.id,
+        actor_name=current_user.name,
+        detail={"todo_id": str(todo.id), "sequence": todo.sequence, "title": todo.title},
+    )
+    publish(
+        f"todo:{bud_id}",
+        {"event": "added", "todo_id": str(todo.id), "sequence": todo.sequence},
+    )
+
+    refreshed = await repo.get_by_sequence(bud_id, todo.sequence)
+    assert refreshed is not None
+    return _to_read(refreshed)
+
+
 @router.patch(
     "/{bud_id}/todos/{todo_id}",
     response_model=BUDTodoRead,
@@ -85,7 +141,7 @@ async def update_todo(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BUDTodoRead:
-    """Update a TODO's status, assignee, or summary."""
+    """Update a TODO's title, status, assignee, or summary."""
     repo = BUDTodoRepository(db, org_id=current_user.org_id)
     todo = await repo.get_by_id(todo_id)
     if todo is None or todo.bud_id != bud_id:
@@ -101,6 +157,8 @@ async def update_todo(
         and todo.status != BUDTodoStatus.COMPLETED.value
     )
 
+    if body.title is not None:
+        todo.title = body.title
     if new_status is not None:
         todo.status = new_status
     if body.assignee_id is not None or "assignee_id" in body.model_fields_set:

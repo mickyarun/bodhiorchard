@@ -73,6 +73,10 @@ REMOTE_TOOLS: frozenset[str] = frozenset(
         "create_bud",
         "update_bud",
         "get_bud_by_id",
+        # Plan editing. User-token required; any org member may add/edit
+        # todos (matching the takeover/complete family). See ``handlers_todo.py``.
+        "create_todo",
+        "update_todo",
     }
 )
 
@@ -169,10 +173,11 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "(testing, code_review, …) are NOT remotely writable. You "
             "must be the BUD's assignee; the server picks the field "
             "from the phase — you cannot address a different one. "
-            "expected_phase is a REQUIRED sanity check: declare the "
-            "phase you composed content for, and the server rejects "
-            "with phase_mismatch if the BUD has since moved. "
-            "linked_feature_ids is optional and idempotent."
+            "expected_phase is a REQUIRED sanity check WHEN content is "
+            "provided: declare the phase you composed content for, and the "
+            "server rejects with phase_mismatch if the BUD has since moved. "
+            "Pass title (metadata, any non-terminal phase) to rename the BUD "
+            "without content. linked_feature_ids is optional and idempotent."
         ),
         "inputSchema": {
             "type": "object",
@@ -182,6 +187,14 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "expected_phase": {
                     "type": "string",
                     "enum": ["bud", "design", "tech_arch"],
+                    "description": "Required whenever content is provided.",
+                },
+                "title": {
+                    "type": "string",
+                    "description": (
+                        "Optional. Rename the BUD (1–500 chars) — metadata, "
+                        "independent of phase. Requires no expected_phase."
+                    ),
                 },
                 "repo_id": {
                     "type": "string",
@@ -196,7 +209,9 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "items": {"type": "string"},
                 },
             },
-            "required": ["bud_id", "content", "expected_phase"],
+            # Only bud_id is structurally required — content/expected_phase are
+            # enforced together at runtime, so title-only edits are allowed.
+            "required": ["bud_id"],
         },
     },
     {
@@ -242,6 +257,42 @@ _REMOTE_TOOL_SCHEMAS: list[dict[str, Any]] = [
                 },
             },
             "required": ["task_type"],
+        },
+    },
+    {
+        "name": "create_todo",
+        "description": (
+            "Add a new TODO to a BUD's plan (identified by bud_number). Use "
+            "when work is discovered that the tech-spec-derived plan missed. "
+            "Created PENDING and unassigned, and marked manual so a later "
+            "'Regenerate' won't delete it. Requires a per-user token."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "bud_number": {"type": "integer"},
+                "title": {"type": "string"},
+                "description": {"type": "string"},
+            },
+            "required": ["bud_number", "title"],
+        },
+    },
+    {
+        "name": "update_todo",
+        "description": (
+            "Edit an existing TODO's text — its title and/or description — "
+            "identified by bud_number + sequence. Content only; status and "
+            "assignment are managed elsewhere. Requires a per-user token."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "bud_number": {"type": "integer"},
+                "sequence": {"type": "integer"},
+                "title": {"type": "string"},
+                "description": {"type": "string"},
+            },
+            "required": ["bud_number", "sequence"],
         },
     },
 ]

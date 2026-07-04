@@ -51,6 +51,7 @@ def _existing(
     assignee_id: uuid.UUID | None = None,
     summary: str | None = None,
     title: str = "old title",
+    detail: dict[str, object] | None = None,
 ) -> BUDTodo:
     return BUDTodo(
         id=uuid.uuid4(),
@@ -63,6 +64,7 @@ def _existing(
         is_checkpoint=False,
         assignee_id=assignee_id,
         summary=summary,
+        detail=detail,
     )
 
 
@@ -104,6 +106,18 @@ def test_summary_set_is_preserved() -> None:
 
 def test_assigned_with_summary_is_preserved() -> None:
     assert _is_preserved(_existing(1, assignee_id=uuid.uuid4(), summary="notes")) is True
+
+
+def test_manual_pending_is_preserved() -> None:
+    # Manually-added todos (detail.source == "manual") never appear in the
+    # parsed spec, so without this flag a regenerate would delete them.
+    assert _is_preserved(_existing(1, detail={"source": "manual"})) is True
+
+
+def test_non_manual_detail_is_not_preserved() -> None:
+    # A detail blob from the parser (no manual marker) must not accidentally
+    # protect an otherwise-untouched pending row.
+    assert _is_preserved(_existing(1, detail={"foo": "bar"})) is False
 
 
 # ── reconciliation matrix ──────────────────────────────────────────
@@ -200,6 +214,52 @@ async def test_in_progress_kept_when_parser_drops_the_sequence() -> None:
     )
     assert (pres, dlt) == (1, 0)
     assert db.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_manual_todo_kept_when_parser_drops_the_sequence() -> None:
+    """A manually-added pending todo survives a regenerate that doesn't emit it."""
+    manual = _existing(9, title="added by hand", detail={"source": "manual"})
+    db = _RecordingSession()
+    _ins, _upd, pres, dlt = await _reconcile(
+        db,  # type: ignore[arg-type]
+        org_id=uuid.uuid4(),
+        bud_id=uuid.uuid4(),
+        parsed_items=[],
+        existing={9: manual},
+    )
+    assert (pres, dlt) == (1, 0)
+    assert db.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_spec_task_not_lost_when_it_grows_onto_a_manual_sequence() -> None:
+    """The grown spec emits a sequence a manual todo already occupies.
+
+    The manual row must stay put AND the new spec task must be inserted (at a
+    free slot) rather than silently dropped. Regression for the manual-vs-
+    parser sequence collision.
+    """
+    manual = _existing(2, title="added by hand", detail={"source": "manual"})
+    db = _RecordingSession()
+    ins, _upd, pres, dlt = await _reconcile(
+        db,  # type: ignore[arg-type]
+        org_id=uuid.uuid4(),
+        bud_id=uuid.uuid4(),
+        parsed_items=[_parsed(1, title="spec one"), _parsed(2, title="spec two NEW")],
+        existing={2: manual},
+    )
+    # spec one inserted at 1, spec two relocated to a free slot; manual kept.
+    assert (ins, pres, dlt) == (2, 1, 0)
+    assert db.deleted == []
+    inserted_titles = {t.title for t in db.added}
+    assert inserted_titles == {"spec one", "spec two NEW"}
+    # The manual row keeps its own sequence and is untouched.
+    assert manual.sequence == 2
+    assert manual.title == "added by hand"
+    # The relocated spec task got a sequence disjoint from everything in play.
+    relocated = next(t for t in db.added if t.title == "spec two NEW")
+    assert relocated.sequence == 3
 
 
 @pytest.mark.asyncio

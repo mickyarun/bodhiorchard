@@ -29,10 +29,30 @@ const props = defineProps<{
 const emit = defineEmits<{
   claim: [todo: BUDTodo]
   status: [todo: BUDTodo, status: BUDTodoStatus]
+  edit: [todo: BUDTodo, title: string]
 }>()
 
 const expanded = ref(false)
 const MAX_VISIBLE_LOCATIONS = 3
+
+// Inline title edit. Checkpoints are review gates, not editable tasks.
+const canEditTitle = computed(() => !props.todo.isCheckpoint)
+const editingTitle = ref(false)
+const editTitle = ref('')
+
+function startEditTitle(): void {
+  if (!canEditTitle.value || props.busy) return
+  editTitle.value = props.todo.title
+  editingTitle.value = true
+}
+
+function saveTitle(): void {
+  const trimmed = editTitle.value.trim()
+  if (trimmed && trimmed !== props.todo.title) {
+    emit('edit', props.todo, trimmed)
+  }
+  editingTitle.value = false
+}
 
 const isYours = computed(
   () => !!props.currentUserId && props.todo.assigneeId === props.currentUserId,
@@ -98,14 +118,40 @@ function toggleExpanded() {
     <div class="todo-row__main">
       <div class="todo-row__title">
         <span class="todo-row__seq">#{{ todo.sequence }}</span>
-        <span v-html="renderInline(todo.title)" />
-        <v-chip
-          v-if="todo.isCheckpoint"
-          size="x-small"
-          color="primary"
-          variant="tonal"
-          class="todo-row__review-badge"
-        >review</v-chip>
+        <v-text-field
+          v-if="editingTitle"
+          v-model="editTitle"
+          variant="outlined"
+          density="compact"
+          autofocus
+          hide-details
+          class="todo-row__title-input"
+          @click.stop
+          @blur="saveTitle"
+          @keyup.enter="saveTitle"
+          @keyup.escape="editingTitle = false"
+        />
+        <template v-else>
+          <span v-html="renderInline(todo.title)" />
+          <v-chip
+            v-if="todo.isCheckpoint"
+            size="x-small"
+            color="primary"
+            variant="tonal"
+            class="todo-row__review-badge"
+          >review</v-chip>
+          <v-btn
+            v-if="canEditTitle"
+            icon="mdi-pencil-outline"
+            size="x-small"
+            variant="text"
+            density="compact"
+            class="todo-row__edit-btn"
+            :disabled="busy"
+            title="Edit text"
+            @click.stop="startEditTitle"
+          />
+        </template>
       </div>
       <div
         v-if="hasDescription"
@@ -215,6 +261,12 @@ function toggleExpanded() {
   flex-shrink: 0;
 }
 .todo-row__review-badge { margin-left: 2px; }
+.todo-row__title-input { min-width: 260px; max-width: 520px; }
+/* Pencil stays quiet until the row is hovered, so it doesn't compete with
+   the title text — same restraint as the BUD-title edit affordance. */
+.todo-row__edit-btn { opacity: 0; transition: opacity 120ms ease; }
+.todo-row:hover .todo-row__edit-btn { opacity: 0.55; }
+.todo-row__edit-btn:hover { opacity: 1; }
 .todo-row__description {
   margin-top: 4px;
   font-size: 13.5px;

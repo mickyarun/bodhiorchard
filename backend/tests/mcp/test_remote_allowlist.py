@@ -36,6 +36,9 @@ def test_remote_allowlist_is_exactly_the_documented_tools() -> None:
         "create_bud",
         "update_bud",
         "get_bud_by_id",
+        # Plan editing — user-token gated; any org member may add/edit todos.
+        "create_todo",
+        "update_todo",
     }
     assert set(REMOTE_TOOLS) == expected
 

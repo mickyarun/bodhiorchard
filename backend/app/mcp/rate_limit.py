@@ -51,6 +51,10 @@ TOOL_COSTS: dict[str, int] = {
     "create_bud": 15,
     "update_bud": 15,
     "get_bud_by_id": 2,
+    # Single-row plan writes — lighter than a full BUD write (no snapshot /
+    # embedding), heavier than a plain read.
+    "create_todo": 5,
+    "update_todo": 5,
     # Code-graph tools are pgvector-heavy; weight similarly to features.
     "code_impact": 5,
     "code_query": 3,

@@ -48,9 +48,22 @@ class BUDTodoRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
+class BUDTodoCreate(BaseModel):
+    """Body for adding a TODO manually (not derived from the tech spec)."""
+
+    title: str = Field(min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=1000)
+    # Defaults to the BUD's current phase when omitted (resolved in the handler).
+    # Capped to the column width so a hand-crafted request can't 500 on insert.
+    phase: str | None = Field(default=None, max_length=30)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class BUDTodoUpdate(BaseModel):
     """Partial update for a TODO."""
 
+    title: str | None = Field(default=None, min_length=1, max_length=500)
     status: str | None = None
     assignee_id: uuid.UUID | None = Field(default=None, alias="assigneeId")
     summary: str | None = None

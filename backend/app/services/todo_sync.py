@@ -115,15 +115,26 @@ async def _load_existing_by_sequence(
 
 
 def _is_preserved(todo: BUDTodo) -> bool:
-    """True only when a developer has actively worked on the TODO.
+    """True when the TODO must survive a tech-spec-driven regenerate.
 
     Claim (``assignee_id`` set) alone is NOT enough — ``assign_all_todos_to_lead``
     stamps the lead on every PENDING row the moment they're created, so a
     freshly-generated, never-touched TODO would be permanently frozen by that
     auto-assignment. "Started" means the status left PENDING or the developer
     left a manual summary note.
+
+    Manually-added TODOs (``detail.source == "manual"``) are also preserved:
+    they never appear in the parsed spec, so without this they'd be deleted the
+    moment anyone regenerated todos.
     """
-    return todo.status != BUDTodoStatus.PENDING or todo.summary is not None
+    if todo.status != BUDTodoStatus.PENDING or todo.summary is not None:
+        return True
+    return _is_manual(todo)
+
+
+def _is_manual(todo: BUDTodo) -> bool:
+    """True for a manually-added todo (``detail.source == "manual"``)."""
+    return bool((todo.detail or {}).get("source") == "manual")
 
 
 async def _reconcile(
@@ -138,11 +149,27 @@ async def _reconcile(
     inserted = updated = preserved = deleted = 0
     parsed_seqs = {item.sequence for item in parsed_items}
 
+    # High-water mark for relocating a parsed item when its slot is squatted
+    # on by a manual todo (see below). Above every sequence in play, so newly
+    # placed items can't collide with an existing or parsed one.
+    next_free = max([*parsed_seqs, *existing.keys()], default=0) + 1
+
     for item in parsed_items:
         current = existing.get(item.sequence)
         if current is None:
             db.add(_build_new_todo(org_id, bud_id, item))
             inserted += 1
+        elif _is_manual(current):
+            # A manually-added todo occupies a sequence the (now larger) spec
+            # wants for a different task. The manual row is NOT this parsed
+            # item, so overwriting/skipping would lose the spec task. Keep the
+            # manual row where it is and insert the spec task at a free slot.
+            displaced = _build_new_todo(org_id, bud_id, item)
+            displaced.sequence = next_free
+            next_free += 1
+            db.add(displaced)
+            inserted += 1
+            preserved += 1
         elif _is_preserved(current):
             preserved += 1
         else:
