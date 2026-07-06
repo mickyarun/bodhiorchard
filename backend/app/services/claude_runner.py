@@ -33,6 +33,7 @@ from typing import Any
 
 import structlog
 
+from app.config import settings
 from app.services import claude_errors
 from app.services.claude_errors import ClaudeErrorCode
 from app.services.claude_guard import (
@@ -446,13 +447,32 @@ _ALLOWED_CWD_ROOTS: tuple[str, ...] = (
 )
 
 
+def _windows_cwd_roots() -> tuple[str, ...]:
+    """Allowed spawn roots on native Windows (forward-slash normalized).
+
+    The POSIX roots above never match a Windows drive-letter path, so anchor to
+    the directories the app actually spawns in: the configured data dir (repo
+    clones live under ``<data_dir>/repos``), the system temp dir (the
+    ``NO_REPO_CONTEXT`` scratch dir), and the user home. All are derived from
+    trusted config/env — never from the request — so they remain safe constant
+    prefixes for the reconstruct-from-prefix sanitizer. Each is normalized to
+    ``/`` separators and a trailing ``/`` to match the candidate-path
+    normalization applied in ``_validate_working_dir``.
+    """
+    if sys.platform != "win32":
+        return ()
+    bases = (settings.storage.data_dir, tempfile.gettempdir(), str(Path.home()))
+    return tuple(b.replace("\\", "/").rstrip("/") + "/" for b in bases if b)
+
+
 def _allowed_cwd_roots() -> tuple[str, ...]:
-    """Return the in-tree allowlist plus any deploy-time additions."""
+    """Return the in-tree allowlist plus any Windows + deploy-time additions."""
+    roots = _ALLOWED_CWD_ROOTS + _windows_cwd_roots()
     extra = os.environ.get("BODHIORCHARD_EXTRA_CWD_ROOTS", "")
     if not extra:
-        return _ALLOWED_CWD_ROOTS
+        return roots
     extras = tuple(p for p in extra.split(":") if p.endswith("/"))
-    return _ALLOWED_CWD_ROOTS + extras
+    return roots + extras
 
 
 # Suffix characters allowed AFTER the constant root prefix.
@@ -525,6 +545,12 @@ def _validate_working_dir(working_dir: str | Path | None) -> str:
         working_dir = _NO_REPO_SCRATCH_DIR
 
     raw = str(working_dir)
+    # Windows: normalize backslashes to '/' so drive-letter paths match the
+    # forward-slash Windows roots and the suffix regex (which allows '/', not
+    # '\\'). Gated to win32 — on POSIX a backslash is a rare-but-valid filename
+    # character we must not rewrite.
+    if sys.platform == "win32":
+        raw = raw.replace("\\", "/")
 
     matched_root: str | None = None
     for root in _allowed_cwd_roots():
