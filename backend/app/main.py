@@ -28,6 +28,7 @@ from sqlalchemy import select
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from app.api.router import api_router
+from app.core.event_loop import configure_event_loop_policy
 from app.core.logging import setup_logging
 from app.core.middleware import RequestLoggingMiddleware
 from app.services.mcp_audit_cleanup import run_forever as run_audit_cleanup
@@ -38,6 +39,11 @@ from app.services.quiz_monthly_rollup import run_forever as run_quiz_monthly_rol
 from app.services.quiz_scheduler import run_forever as run_quiz_scheduler
 from app.services.scan.pr_merge_update import handle_pr_merge_delivery
 from app.services.velocity_snapshot_roller import run_forever as run_velocity_snapshot_roller
+
+# Windows: force the Proactor event loop so asyncio can spawn subprocesses
+# (git clone, repo scanning, every AI-agent CLI run). Must run at import time —
+# before uvicorn creates the serving loop. No-op off Windows.
+configure_event_loop_policy()
 
 # Configure structured JSON logging before anything else
 setup_logging(
