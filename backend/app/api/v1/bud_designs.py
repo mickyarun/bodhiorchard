@@ -18,13 +18,14 @@ import uuid
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.bud import BUDDesignStatus
 from app.models.user import User
 from app.repositories.bud import BUDDesignRepository, BUDRepository
+from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.bud_design import BUDDesignRead, DesignGenerateRequest, DesignHtmlUpdate
 from app.schemas.jobs import DesignAgentJobPayload
 from app.services.agent_task_cancel import (
@@ -32,11 +33,33 @@ from app.services.agent_task_cancel import (
     cancel_design,
 )
 from app.services.bud_edit_policy import assert_design_editable
+from app.services.bud_timeline import record_event
+from app.services.html_sanitizer import sanitize_design_html
 from app.services.job_queue import JOB_DESIGN_AGENT, create_job
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+# Cap on uploaded wireframe size. Wireframes are self-contained HTML with
+# inlined CSS (and occasionally data-URI assets), so they run larger than a
+# plain page but should never approach a few MB — a bigger payload signals a
+# stray binary, not a design.
+MAX_DESIGN_UPLOAD_BYTES = 5 * 1024 * 1024
+
+
+async def _assert_repo_in_org(db: AsyncSession, org_id: uuid.UUID, repo_id: uuid.UUID) -> None:
+    """Raise 404 unless ``repo_id`` is a tracked repo in ``org_id``.
+
+    ``bud_designs.repo_id`` FKs ``tracked_repositories.id`` with no
+    composite org constraint, so a crafted request could otherwise attach a
+    design row to another tenant's repo — and leak its name back via the
+    ``list_with_repo_names`` join. The org-scoped ``get_by_id`` returns None
+    for a foreign or missing repo, which we translate into a 404.
+    """
+    repo = await TrackedRepoRepository(db, org_id=org_id).get_by_id(repo_id)
+    if repo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found")
 
 
 @router.get(
@@ -74,6 +97,13 @@ async def generate_designs(
 
     design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
     repo_ids: list[uuid.UUID | None] = list(body.repo_ids) if body.repo_ids else [None]
+
+    # Reject any foreign/unknown repo before creating rows or enqueuing jobs,
+    # so a crafted repo_ids list can't seed design rows against another
+    # tenant's repositories.
+    for rid in repo_ids:
+        if rid is not None:
+            await _assert_repo_in_org(db, current_user.org_id, rid)
 
     design_rows: list[tuple[uuid.UUID | None, str]] = []
     for rid in repo_ids:
@@ -201,8 +231,6 @@ async def update_design_html(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Design not found")
 
     if body.design_html is not None:
-        from app.services.html_sanitizer import sanitize_design_html
-
         design.design_html = sanitize_design_html(body.design_html)
         design.status = BUDDesignStatus.READY
     if body.notes is not None:
@@ -212,6 +240,93 @@ async def update_design_html(
 
     designs = await design_repo.list_with_repo_names(bud_id)
     return next((d for d in designs if d["id"] == design_id), designs[0])
+
+
+@router.post(
+    "/upload",
+    response_model=BUDDesignRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def upload_design(
+    bud_id: uuid.UUID,
+    file: UploadFile = File(...),
+    repo_id: uuid.UUID | None = Form(None),
+    notes: str | None = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Create or replace a per-repo design wireframe from an uploaded file.
+
+    Bypasses the inline-content write path: the browser posts the raw HTML
+    bytes in one multipart request, so wireframes large enough to time out
+    when streamed as an LLM tool argument land directly. Upserts by
+    ``(bud_id, repo_id)`` — a repo without a design row becomes a new tab,
+    an existing repo's tab is overwritten. Credits the uploader with a
+    ``design_updated`` timeline event so the designer SP rule attributes
+    the work at BUD close, matching the MCP and agent write paths.
+    """
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if bud is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+    assert_design_editable(bud)
+
+    # Reject a repo_id that isn't in the caller's org before writing, so a
+    # crafted form can't attach a design row to another tenant's repository.
+    if repo_id is not None:
+        await _assert_repo_in_org(db, current_user.org_id, repo_id)
+
+    filename = file.filename or ""
+    is_html = filename.lower().endswith((".html", ".htm")) or (file.content_type or "").startswith(
+        "text/html"
+    )
+    if not is_html:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Upload an .html file (self-contained wireframe HTML).",
+        )
+
+    raw = await file.read()
+    if len(raw) > MAX_DESIGN_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Design file exceeds the {MAX_DESIGN_UPLOAD_BYTES // (1024 * 1024)} MB limit.",
+        )
+    try:
+        html = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Design file must be UTF-8 encoded HTML.",
+        ) from exc
+    if not html.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Design file is empty.",
+        )
+
+    design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
+    design = await design_repo.upsert(
+        bud_id,
+        repo_id,
+        design_html=sanitize_design_html(html),
+        status=BUDDesignStatus.READY,
+        notes=notes,
+    )
+    await record_event(
+        db,
+        current_user.org_id,
+        bud_id,
+        "design_updated",
+        actor_id=current_user.id,
+        actor_name=current_user.name,
+        detail={"source": "upload", "filename": filename},
+    )
+    await db.flush()
+
+    designs = await design_repo.list_with_repo_names(bud_id)
+    return next((d for d in designs if d["id"] == design.id), designs[0])
 
 
 @router.post(

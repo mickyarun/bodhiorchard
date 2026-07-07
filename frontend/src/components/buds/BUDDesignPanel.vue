@@ -83,6 +83,11 @@
           <v-icon size="15" class="mr-1">mdi-plus</v-icon>
           Add
         </v-btn>
+        <BUDDesignUpload
+          :bud-id="props.budId"
+          :editable="props.editable"
+          @uploaded="onDesignUploaded"
+        />
       </div>
     </div>
 
@@ -209,17 +214,24 @@
       </v-btn>
     </div>
 
-    <v-btn
-      variant="tonal"
-      size="small"
-      color="primary"
-      :disabled="!props.editable || (extractingRepos.length > 0 && designSystemStore.items.length === 0)"
-      :title="!props.editable ? 'Move the BUD to Design phase to generate wireframes' : ''"
-      @click="triggerDesignGeneration"
-    >
-      <v-icon start size="15">mdi-creation-outline</v-icon>
-      Generate with AI
-    </v-btn>
+    <div class="d-flex align-center ga-2">
+      <v-btn
+        variant="tonal"
+        size="small"
+        color="primary"
+        :disabled="!props.editable || (extractingRepos.length > 0 && designSystemStore.items.length === 0)"
+        :title="!props.editable ? 'Move the BUD to Design phase to generate wireframes' : ''"
+        @click="triggerDesignGeneration"
+      >
+        <v-icon start size="15">mdi-creation-outline</v-icon>
+        Generate with AI
+      </v-btn>
+      <BUDDesignUpload
+        :bud-id="props.budId"
+        :editable="props.editable"
+        @uploaded="onDesignUploaded"
+      />
+    </div>
   </div>
 
   <!-- Auto-generate ON — simple empty state; agent handles generation -->
@@ -229,17 +241,24 @@
     <div class="text-caption text-medium-emphasis mt-1 mb-3">
       The AI agent will generate wireframes automatically
     </div>
-    <v-btn
-      variant="tonal"
-      size="small"
-      color="primary"
-      :disabled="!props.editable || (extractingRepos.length > 0 && designSystemStore.items.length === 0)"
-      :title="!props.editable ? 'Move the BUD to Design phase to generate wireframes' : ''"
-      @click="triggerDesignGeneration"
-    >
-      <v-icon start size="15">mdi-creation-outline</v-icon>
-      Generate with AI
-    </v-btn>
+    <div class="d-flex align-center ga-2">
+      <v-btn
+        variant="tonal"
+        size="small"
+        color="primary"
+        :disabled="!props.editable || (extractingRepos.length > 0 && designSystemStore.items.length === 0)"
+        :title="!props.editable ? 'Move the BUD to Design phase to generate wireframes' : ''"
+        @click="triggerDesignGeneration"
+      >
+        <v-icon start size="15">mdi-creation-outline</v-icon>
+        Generate with AI
+      </v-btn>
+      <BUDDesignUpload
+        :bud-id="props.budId"
+        :editable="props.editable"
+        @uploaded="onDesignUploaded"
+      />
+    </div>
   </div>
 
   <!-- Repo selection dialog for design generation -->
@@ -294,6 +313,7 @@ import { useJobSocket } from '@/composables/useJobSocket'
 import { friendlyAgentError } from '@/types/agentErrors'
 import AgentErrorMessage from '@/components/common/AgentErrorMessage.vue'
 import AppCallout from '@/components/common/AppCallout.vue'
+import BUDDesignUpload from '@/components/buds/BUDDesignUpload.vue'
 import BUDFigmaSection from '@/components/buds/BUDFigmaSection.vue'
 import { designPrompt } from '@/utils/budPromptTemplates'
 import type { BUDDesign, RepoInfo } from '@/types'
@@ -471,6 +491,16 @@ async function loadDesigns(): Promise<void> {
       trackDesignJob(d.id, d.job_id)
     }
   }
+}
+
+async function onDesignUploaded(design: BUDDesign): Promise<void> {
+  // Reload so a brand-new repo shows up as a fresh tab, then focus the
+  // uploaded design and bump the preview key so its iframe re-renders
+  // with the new HTML (same repo overwrite keeps the tab, new HTML).
+  await loadDesigns()
+  activeDesignTab.value = design.id
+  designPreviewKey.value++
+  emit('switch-to-design')
 }
 
 async function triggerDesignGeneration(): Promise<void> {

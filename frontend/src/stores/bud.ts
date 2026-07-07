@@ -343,6 +343,23 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
+  async function uploadDesign(
+    budId: string,
+    file: File,
+    repoId: string | null,
+  ): Promise<BUDDesign> {
+    // Multipart POST so the raw HTML bytes go straight to the backend
+    // instead of round-tripping through an LLM tool argument (which times
+    // out on large wireframes). Let axios set the multipart boundary — do
+    // NOT hand-set Content-Type. Rethrows the backend ``detail`` so the
+    // caller can show the size/type/phase rejection reason inline.
+    const form = new FormData()
+    form.append('file', file)
+    if (repoId) form.append('repo_id', repoId)
+    const { data } = await api.post(`/v1/buds/${budId}/designs/upload`, form)
+    return data
+  }
+
   async function fetchChatHistory(
     budId: string,
     section: string,
@@ -645,6 +662,7 @@ export const useBUDStore = defineStore('bud', () => {
     fetchDesigns,
     updateDesignHtml,
     updateDesignNotes,
+    uploadDesign,
     regenerateDesign,
     regenerateCodeReview,
     fetchChatHistory,
