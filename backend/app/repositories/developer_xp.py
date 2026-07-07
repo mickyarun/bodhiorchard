@@ -19,12 +19,13 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func as sa_func
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.developer_xp import DeveloperXP, RewardEvent, RewardType
 from app.models.user import OrgToUser, User
+from app.services.xp_rules import compute_level
 
 
 class DeveloperXPRepository:
@@ -87,6 +88,54 @@ class DeveloperXPRepository:
         )
         result = await self.db.execute(stmt)
         return list(result.tuples().all())
+
+    async def merge_into_target(
+        self, source_user_id: uuid.UUID, target_user_id: uuid.UUID
+    ) -> dict[str, float]:
+        """Fold the source user's XP/SP aggregate into the target's row.
+
+        The leaderboard ranks by ``DeveloperXP`` keyed on ``user_id`` and
+        skips inactive users, so a merge that only deactivates the source
+        strands its XP and skill points. This sums both currencies onto the
+        target, reconciles the derived fields (streak bests, house tier and
+        vehicle unlocks are kept, not lost), recomputes the target's level
+        from the combined XP, then deletes the emptied source row so the
+        ``(user_id, org_id)`` uniqueness holds and no points are orphaned.
+
+        Idempotent: once the source row is gone, re-running returns zeros.
+
+        Returns:
+            ``{"xp": <moved_xp>, "sp": <moved_sp>}`` for audit logging.
+        """
+        source = await self.get_by_user(source_user_id)
+        if source is None:
+            return {"xp": 0.0, "sp": 0.0}
+
+        target = await self.get_or_create(target_user_id)
+
+        moved_xp = float(source.total_xp)
+        moved_sp = float(source.skill_points)
+
+        target.total_xp += source.total_xp
+        target.skill_points += source.skill_points
+        target.streak_best = max(target.streak_best, source.streak_best)
+        target.streak_count = max(target.streak_count, source.streak_count)
+        target.house_level = max(target.house_level, source.house_level)
+        # Union of unlocks, target-first, de-duplicated while preserving order.
+        target.vehicle_unlocks = list(
+            dict.fromkeys([*target.vehicle_unlocks, *source.vehicle_unlocks])
+        )
+        if source.last_active_date is not None and (
+            target.last_active_date is None or source.last_active_date > target.last_active_date
+        ):
+            target.last_active_date = source.last_active_date
+
+        target.level, target.level_name = compute_level(target.total_xp)
+
+        await self.db.delete(source)
+        await self.db.flush()
+
+        return {"xp": moved_xp, "sp": moved_sp}
 
 
 class RewardEventRepository:
@@ -154,6 +203,28 @@ class RewardEventRepository:
         self.db.add(event)
         await self.db.flush()
         return event
+
+    async def repoint_user(self, source_user_id: uuid.UUID, target_user_id: uuid.UUID) -> int:
+        """Re-attribute every reward event from the source user to the target.
+
+        Keeps the audit trail and the windowed XP sums
+        (:meth:`sum_xp_by_user_in_window`) pointing at the surviving member
+        after a merge. The ``(source_ref, org_id)`` unique index cannot
+        collide here: it already forbids two users in one org sharing a
+        ``source_ref``, so re-keying ``user_id`` introduces no new duplicate.
+
+        Returns:
+            The number of events re-pointed.
+        """
+        result = await self.db.execute(
+            update(RewardEvent)
+            .where(
+                RewardEvent.user_id == source_user_id,
+                RewardEvent.org_id == self.org_id,
+            )
+            .values(user_id=target_user_id)
+        )
+        return result.rowcount or 0
 
     async def list_for_user(
         self,

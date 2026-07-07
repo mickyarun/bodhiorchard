@@ -27,6 +27,7 @@ from app.core.deps import get_current_user, get_db, require_permissions
 from app.core.security import hash_password
 from app.models.organization import Organization
 from app.models.user import OrgToUser, User, UserRole
+from app.repositories.developer_xp import DeveloperXPRepository, RewardEventRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.role import RoleRepository
 from app.repositories.skill_profile import SkillProfileRepository
@@ -599,6 +600,15 @@ async def merge_members(
     sp_repo = SkillProfileRepository(db, org_id=org.id)
     transferred = await sp_repo.transfer_profiles(source.id, target.id)
 
+    # 1b. Fold the source's XP + skill-point totals and reward-event history
+    # into the target. The leaderboard ranks by DeveloperXP keyed on user_id
+    # and skips inactive members, so without this the deactivated source's
+    # XP/SP vanish instead of combining onto the surviving member.
+    xp_repo = DeveloperXPRepository(db, org_id=org.id)
+    moved = await xp_repo.merge_into_target(source.id, target.id)
+    event_repo = RewardEventRepository(db, org_id=org.id)
+    repointed_events = await event_repo.repoint_user(source.id, target.id)
+
     # 2. Rebind every email source owned (primary + aliases) onto target.
     # Force-overwrite any prior conflicting row so a stale alias from an
     # earlier bad merge cannot strand attribution on a deactivated user.
@@ -619,6 +629,9 @@ async def merge_members(
         source_id=str(body.source_id),
         source_email=source.email,
         profiles_transferred=transferred,
+        xp_merged=moved["xp"],
+        sp_merged=moved["sp"],
+        reward_events_repointed=repointed_events,
         emails_rebound=len(emails_to_rebind),
         mcp_tokens_revoked=revoked_tokens,
         had_tokens_to_revoke=bool(revoked_tokens),
