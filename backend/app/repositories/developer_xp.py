@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.developer_xp import DeveloperXP, RewardEvent, RewardType
 from app.models.user import OrgToUser, User
+from app.repositories.base import rowcount
 from app.services.xp_rules import compute_level
 
 
@@ -224,7 +225,7 @@ class RewardEventRepository:
             )
             .values(user_id=target_user_id)
         )
-        return result.rowcount or 0
+        return rowcount(result) or 0
 
     async def list_for_user(
         self,
