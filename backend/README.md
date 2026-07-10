@@ -34,7 +34,9 @@ npm run dev      # starts backend, frontend, multiplayer with colour-coded logs
 Backend alone:
 
 ```bash
-npm run dev:backend     # equivalent to: cd backend && .venv/bin/uvicorn app.main:app --reload --port 8000
+npm run dev:backend     # runs scripts/dev-backend.sh: picks the venv python and
+                        # launches backend/dev_server.py (auto-reload on macOS/Linux,
+                        # no --reload on Windows — see the Windows note below)
 ```
 
 API docs:
@@ -59,6 +61,36 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 > **Python tooling**: `conda activate python3129` is the project convention for one-off Python work outside the `.venv`. CI and the dev loop both use `.venv` directly.
+
+### Native Windows (running uvicorn directly)
+
+On Windows the venv scripts live in `.venv\Scripts\` (not `.venv/bin`), and
+**you must not use `uvicorn --reload`**. uvicorn's reloader forces a
+`SelectorEventLoop`, which on Windows cannot spawn subprocesses — so every
+`git clone`, repo scan, and AI-agent CLI run fails with `NotImplementedError`
+(surfacing first as a 500 on *Test connection*). Use one of:
+
+```powershell
+cd backend
+# Option A (recommended): the cross-platform launcher — no --reload on Windows,
+# so uvicorn gets the subprocess-capable ProactorEventLoop.
+.venv\Scripts\python.exe dev_server.py
+
+# Option B: run uvicorn directly, WITHOUT --reload (also gets the Proactor loop)
+.venv\Scripts\uvicorn.exe app.main:app --host 0.0.0.0 --port 8000
+```
+
+For auto-reload on Windows, wrap the launcher with `watchfiles` instead of
+`--reload` (it restarts the whole process, avoiding the Selector-loop path):
+
+```powershell
+.venv\Scripts\watchfiles.exe ".venv\Scripts\python.exe dev_server.py" app
+```
+
+From the repo root, `npm run dev` / `npm run dev:backend` already do the right
+thing on Windows (via `scripts/dev-backend.sh`). Redis is optional — if it
+isn't running, scans fall back to a direct run. See the top-level `README.md`
+FAQ *"Does it run on Windows?"*.
 
 ## Project layout
 

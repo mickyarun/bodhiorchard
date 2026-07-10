@@ -329,6 +329,7 @@
           prepend-inner-icon="mdi-folder-outline"
           class="mb-3"
           @keyup.enter="addPathToList"
+          @update:model-value="localPathError = ''"
         >
           <template #append-inner>
             <v-btn
@@ -336,7 +337,8 @@
               size="small"
               variant="text"
               density="compact"
-              :disabled="!inputPath.trim()"
+              :loading="addingPath"
+              :disabled="!inputPath.trim() || addingPath"
               @click="addPathToList"
             />
             <v-btn
@@ -348,6 +350,19 @@
             />
           </template>
         </v-text-field>
+
+        <v-expand-transition>
+          <v-alert
+            v-if="localPathError"
+            type="error"
+            variant="tonal"
+            density="compact"
+            class="mb-3"
+            icon="mdi-alert-circle-outline"
+          >
+            {{ localPathError }}
+          </v-alert>
+        </v-expand-transition>
       </div>
 
       <!-- Selected repos -->
@@ -650,6 +665,8 @@ const copied = ref(false)
 
 // Local path form state (host mode)
 const inputPath = ref('')
+const localPathError = ref('')
+const addingPath = ref(false)
 const showPicker = ref(false)
 const currentDir = ref('')
 const parentDir = ref<string | null>(null)
@@ -818,12 +835,13 @@ function addRepo(
   detectedMain?: string | null,
   branches?: string[],
   source: 'github-clone' | 'local-path' = 'local-path',
+  detectedDevelop?: string | null,
 ): void {
   if (isRepoSelected(path)) return
   const repo: SetupRepoConfig = {
     path,
     mainBranch: detectedMain || null,
-    developBranch: null,
+    developBranch: detectedDevelop ?? null,
     source,
   }
   setupStore.state.sourceCode.repos.push(repo)
@@ -832,9 +850,13 @@ function addRepo(
     branchOptions[idx] = branches
     if (detectedMain) repo.mainBranch = detectedMain
   }
-  // Always (re)fetch branches + detect develop — the clone response only
-  // gives us the GitHub default; develop must be inferred separately.
-  fetchBranches(idx, path)
+  // Fetch branches + infer develop only when the caller hasn't already
+  // resolved develop. The local-path add validates via /setup/repo-branches
+  // up front and passes detectedDevelop here (so re-fetching would hit the
+  // endpoint twice); the clone flow passes no develop and still needs this.
+  if (detectedDevelop === undefined) {
+    fetchBranches(idx, path)
+  }
 }
 
 function removeRepo(idx: number): void {
@@ -849,11 +871,39 @@ function removeRepo(idx: number): void {
   Object.assign(branchOptions, newOpts)
 }
 
-function addPathToList(): void {
+async function addPathToList(): Promise<void> {
   const p = inputPath.value.trim()
-  if (p) {
-    addRepo(p)
+  if (!p) return
+  localPathError.value = ''
+  if (isRepoSelected(p)) {
+    localPathError.value = 'That repository is already added.'
+    return
+  }
+  addingPath.value = true
+  try {
+    // Validate the path IS a git repo (and prime its branches) BEFORE adding
+    // it to the list. A missing or non-git path returns 400 here; we surface
+    // that inline instead of silently adding an unusable, branch-less entry
+    // (the previous behaviour, where fetchBranches swallowed the 400).
+    const { data } = await api.get('/setup/repo-branches', { params: { path: p } })
+    // Pass detectedDevelop (even if null) so addRepo doesn't re-hit
+    // /setup/repo-branches — we already have branches + develop from here.
+    addRepo(p, data.detectedMain, data.branches, 'local-path', data.detectedDevelop ?? null)
     inputPath.value = ''
+  } catch (err: unknown) {
+    let detail = ''
+    if (err && typeof err === 'object' && 'response' in err) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } }
+      detail = axiosErr.response?.data?.detail || ''
+    }
+    // Backend says e.g. "Not a git repository: <path>"; append the actionable
+    // hint since the #1 cause is pointing at a downloaded ZIP (no .git).
+    localPathError.value =
+      (detail || `Couldn't add "${p}".`)
+      + ' Point to an absolute path to a git checkout (a folder containing .git).'
+      + ' A downloaded ZIP has no git history — use "git clone" instead.'
+  } finally {
+    addingPath.value = false
   }
 }
 

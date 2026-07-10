@@ -736,10 +736,14 @@ async def run_claude_code(
         ) as tmp:
             # guard: tighten file mode to owner-read-only BEFORE
             # writing the token, so there is no window where the token is
-            # on disk under a world-readable umask. Best-effort on Windows
-            # (no ``fchmod``); the path-based ``os.chmod`` below covers it.
-            with contextlib.suppress(OSError):
-                os.fchmod(tmp.fileno(), 0o600)
+            # on disk under a world-readable umask. ``os.fchmod`` is
+            # POSIX-only — it does not exist on Windows (calling it raises
+            # ``AttributeError``, which ``suppress(OSError)`` would NOT catch),
+            # so gate on ``hasattr``. The path-based ``os.chmod`` below is the
+            # Windows fallback.
+            if hasattr(os, "fchmod"):
+                with contextlib.suppress(OSError):
+                    os.fchmod(tmp.fileno(), 0o600)
             tmp.write(json.dumps(mcp_json))
             mcp_config_file = Path(tmp.name)
         with contextlib.suppress(OSError):

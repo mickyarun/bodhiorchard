@@ -31,6 +31,7 @@ fails there is nothing valuable to leak.
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Mapping
 
 # Variables the ``claude`` child process actually needs to run.
@@ -51,25 +52,52 @@ from collections.abc import Mapping
 # The MCP bridge receives its token via the per-call MCP JSON config's
 # ``env`` block (see ``claude_runner._build_mcp_config_file``), not via
 # parent-process env inheritance, so dropping them here is safe.
-_CLAUDE_ENV_WHITELIST: frozenset[str] = frozenset(
+# Windows-essential plumbing (the win32 counterparts to the POSIX vars above).
+# These are non-secret and simply absent on macOS / Linux, so listing them
+# unconditionally is a no-op off-Windows. Without ``SYSTEMROOT`` the ``claude``
+# launcher — an npm ``.CMD`` shim that bootstraps ``cmd.exe`` + node — exits
+# immediately (rc=1, no output); ``USERPROFILE`` / ``APPDATA`` / ``LOCALAPPDATA``
+# / ``TEMP`` / ``TMP`` are needed once the CLI spawns node, git, and writes
+# scratch files. Kept in sync with ``ai_runner.subprocess_env._WINDOWS_ENV``.
+_WINDOWS_ENV: frozenset[str] = frozenset(
     {
-        "PATH",
-        "HOME",
-        "USER",
-        "LANG",
-        "LC_ALL",
-        "TERM",
-        "TMPDIR",
-        "SHELL",
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_AUTH_TOKEN",
-        # Subscription auth: long-lived OAuth token from `claude setup-token`,
-        # injected for `subscription` auth mode (see claude_env.py).
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-        "DISABLE_AUTOUPDATER",
-        "DISABLE_TELEMETRY",
+        "SYSTEMROOT",
+        "SYSTEMDRIVE",
+        "WINDIR",
+        "COMSPEC",
+        "PATHEXT",
+        "TEMP",
+        "TMP",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "NUMBER_OF_PROCESSORS",
+        "PROCESSOR_ARCHITECTURE",
     }
+)
+
+_CLAUDE_ENV_WHITELIST: frozenset[str] = (
+    frozenset(
+        {
+            "PATH",
+            "HOME",
+            "USER",
+            "LANG",
+            "LC_ALL",
+            "TERM",
+            "TMPDIR",
+            "SHELL",
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            # Subscription auth: long-lived OAuth token from `claude setup-token`,
+            # injected for `subscription` auth mode (see claude_env.py).
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+            "DISABLE_AUTOUPDATER",
+            "DISABLE_TELEMETRY",
+        }
+    )
+    | _WINDOWS_ENV
 )
 
 
@@ -91,7 +119,18 @@ def build_claude_env(env_extra: Mapping[str, str] | None) -> dict[str, str]:
     ``env={}`` would strip ``PATH`` and break ``claude`` launch immediately
     — the whitelist is the minimum viable env.
     """
-    base: dict[str, str] = {k: v for k, v in os.environ.items() if k in _CLAUDE_ENV_WHITELIST}
+    # On Windows, match case-insensitively: keys are stored in arbitrary case
+    # (``SYSTEMROOT`` vs ``SystemRoot``) and are semantically case-insensitive,
+    # so a case-sensitive test would silently drop the essential win32 vars.
+    # On POSIX, env names ARE case-sensitive and the whitelist is canonical, so
+    # we keep the exact match — this leaves the macOS/Linux security posture
+    # byte-for-byte unchanged (the added ``_WINDOWS_ENV`` names simply don't
+    # exist there).
+    if sys.platform == "win32":
+        _allowed_lower = {name.lower() for name in _CLAUDE_ENV_WHITELIST}
+        base: dict[str, str] = {k: v for k, v in os.environ.items() if k.lower() in _allowed_lower}
+    else:
+        base = {k: v for k, v in os.environ.items() if k in _CLAUDE_ENV_WHITELIST}
     base.setdefault("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
     base.setdefault("DISABLE_AUTOUPDATER", "1")
     if env_extra:

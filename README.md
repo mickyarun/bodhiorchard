@@ -229,7 +229,13 @@ Yes — **Apache 2.0**, including embedding in proprietary products. Contributio
 
 ### Does it run on Windows?
 
-Yes, via WSL2 in either deployment mode.
+Yes — **natively** (no WSL required) in Hybrid mode, as well as via WSL2 or Full
+Docker. `npm run dev` handles the Windows specifics for you. If you run the
+backend directly with uvicorn on native Windows, **don't use `--reload`** (it
+forces an event loop that can't spawn the subprocesses scans/agents need) — run
+`python backend\dev_server.py` instead. See
+[`backend/README.md`](backend/README.md) → *Native Windows*. Redis is optional:
+if it isn't running, re-scans fall back to a direct scan.
 
 ## Roadmap
 

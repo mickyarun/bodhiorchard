@@ -112,6 +112,22 @@ git add tests/smoke/ README.md
 git -c user.name="Dave Chen" -c user.email="dave@taskflow.dev" commit -m "Add smoke tests and README" --date="2025-12-16T10:00:00"
 echo "  Done ($(git rev-list --count HEAD) commits)"
 
-cd ..
+echo "Setting up taskflow-spring (Java / Spring Boot sample)..."
+cd ..  # back to examples/
+# Unlike the repos above (rebuilt in place), taskflow-spring is hosted as its
+# own public repo — github.com/${GITHUB_OWNER}/taskflow-java-bodhiorchard-demo —
+# with its multi-author history already committed. Just clone it (into a
+# ``taskflow-spring`` folder, to match the docs) if it isn't present; no
+# history rebuild needed.
+if [ ! -d taskflow-spring ]; then
+  echo "Cloning taskflow-spring from github.com/${GITHUB_OWNER}/taskflow-java-bodhiorchard-demo..."
+  if command -v gh >/dev/null 2>&1; then
+    gh repo clone "${GITHUB_OWNER}/taskflow-java-bodhiorchard-demo" taskflow-spring
+  else
+    git clone "https://github.com/${GITHUB_OWNER}/taskflow-java-bodhiorchard-demo.git" taskflow-spring
+  fi
+fi
+echo "  Done ($(git -C taskflow-spring rev-list --count HEAD) commits)"
+
 echo ""
-echo "All 4 repos ready. Add them as tracked repositories in Bodhiorchard settings."
+echo "All repos ready. Add them as tracked repositories in Bodhiorchard settings."

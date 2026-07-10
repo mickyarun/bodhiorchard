@@ -101,6 +101,9 @@ examples/taskflow-api/
 examples/taskflow-web/
 examples/taskflow-worker/
 examples/taskflow-qa/
+# Java/Spring sample — hosted at github.com/mickyarun/taskflow-java-bodhiorchard-demo,
+# cloned into examples/taskflow-spring/ by setup-git-history.sh.
+examples/taskflow-spring/
 # The example BUD spec ships with the example repos, not bodhiorchard core.
 examples/BUD-001-tech-spec.md
 

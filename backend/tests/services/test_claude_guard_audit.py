@@ -19,6 +19,7 @@ from __future__ import annotations
 import io
 import json
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -61,6 +62,12 @@ class TestAuditLog:
         rules = [json.loads(line).get("rule") for line in lines]
         assert rules[1] == "env_exfil"
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="POSIX mode bits don't apply on Windows — audit_log opens with "
+        "mode 0o600, but Windows honours only the read-only bit and governs "
+        "access via ACLs, so st_mode always reports 0o666 here.",
+    )
     def test_log_file_is_owner_only(self) -> None:
         append_event("pre_tool", "Bash", "allow", tool_input={"command": "x"})
         mode = stat.S_IMODE(self.log.stat().st_mode)

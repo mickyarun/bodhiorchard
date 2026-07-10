@@ -385,7 +385,9 @@ class TestValidateWorkingDir:
         scoped = _Path(tmp_path) / "@scope" / "pkg"  # type: ignore[operator]
         scoped.mkdir(parents=True)
         result = _validate_working_dir(str(scoped))
-        assert result.endswith("@scope/pkg")
+        # Compare on path components, not a hardcoded separator — the resolved
+        # path uses '\' on Windows and '/' on POSIX.
+        assert _Path(result).parts[-2:] == ("@scope", "pkg")
 
         accented = _Path(tmp_path) / "José" / "repo"  # type: ignore[operator]
         accented.mkdir(parents=True)

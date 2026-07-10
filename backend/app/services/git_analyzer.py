@@ -32,6 +32,12 @@ logger = structlog.get_logger(__name__)
 # How far back to scan by default
 DEFAULT_SINCE = "6.months.ago"
 
+# When the ``since`` window is empty, ``analyze_repo_skills`` retries over full
+# history. Cap that walk to the most-recent N commits so the per-commit numstat
+# subprocess fan-out can't blow up on a repo with tens of thousands of commits;
+# the newest commits are also the most relevant for a skill profile.
+_FULL_HISTORY_FALLBACK_MAX_COMMITS = 2000
+
 # Weighted lines that saturate a skill_score to 1.0. Tuned so a developer
 # who wrote ~1k lines of feature code recently lands at score 1.0, and a
 # developer with a few hundred old lines stays well above the downstream
@@ -182,8 +188,30 @@ async def analyze_repo_skills(
         logger.error("git_analyzer_not_a_repo", path=repo_path)
         return []
 
-    # Step 1: Get commit hashes with author info
+    # Step 1: Get commit hashes with author info.
     commits = await _get_commits(repo_path, since, branch=branch)
+    if not commits:
+        # Fallback: nothing in the recent window. Common on a first-time scan
+        # of a repo whose history predates ``since`` (or a low-activity /
+        # sample repo). Retry over history (most-recent N, capped) so skill
+        # profiles still populate — the per-commit recency weighting below
+        # already down-weights old work, so including old commits is safe and
+        # strictly better than emitting zero profiles. The cap keeps the
+        # numstat fan-out bounded on deep histories.
+        commits = await _get_commits(
+            repo_path,
+            since=None,
+            branch=branch,
+            max_count=_FULL_HISTORY_FALLBACK_MAX_COMMITS,
+        )
+        if commits:
+            logger.info(
+                "git_analyzer_full_history_fallback",
+                repo=repo_path,
+                since=since,
+                branch=branch,
+                count=len(commits),
+            )
     if not commits:
         logger.info("git_analyzer_no_commits", repo=repo_path, since=since, branch=branch)
         return []
@@ -406,8 +434,9 @@ async def get_changed_files_since(repo_path: str, since_sha: str) -> list[str]:
 
 async def _get_commits(
     repo_path: str,
-    since: str,
+    since: str | None,
     branch: str | None = None,
+    max_count: int | None = None,
 ) -> list[tuple[str, str, str, datetime | None]]:
     """Get commit metadata from git log.
 
@@ -422,13 +451,18 @@ async def _get_commits(
         List of (hash, email, author_name, commit_date) tuples.
     """
     walk_ref = await _resolve_walk_ref(repo_path, branch)
+    # ``since=None`` walks the entire history (no time window) — used by the
+    # full-history fallback in ``analyze_repo_skills`` when the recent window
+    # is empty.
+    git_args = ["git", "log", walk_ref, "--format=%H|%ae|%an|%aI", "--no-merges"]
+    if since is not None:
+        git_args.append(f"--since={since}")
+    if max_count is not None:
+        # Cap the walk (most-recent N) so the per-commit numstat fan-out in
+        # ``analyze_repo_skills`` stays bounded on deep histories.
+        git_args.append(f"--max-count={max_count}")
     proc = await asyncio.create_subprocess_exec(
-        "git",
-        "log",
-        walk_ref,
-        "--format=%H|%ae|%an|%aI",
-        "--no-merges",
-        f"--since={since}",
+        *git_args,
         cwd=repo_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,

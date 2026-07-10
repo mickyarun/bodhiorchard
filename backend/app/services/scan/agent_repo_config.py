@@ -94,9 +94,10 @@ def _write_shared_scripts(repo: Path, backend_url: str) -> bool:
     changed = False
     for filename, content in _shared_scripts(backend_url):
         path = hooks_dir / filename
-        if path.exists() and path.read_text().strip() == content.strip():
+        existing = path.read_text(encoding="utf-8", errors="replace") if path.exists() else None
+        if existing is not None and existing.strip() == content.strip():
             continue
-        path.write_text(content)
+        path.write_text(content, encoding="utf-8")
         path.chmod(0o755)
         changed = True
     return changed
@@ -176,10 +177,10 @@ def _write_json_if_changed(path: Path, data: dict[str, object]) -> bool:
     expected = json.dumps(data, indent=2)
     if path.exists():
         with contextlib.suppress(OSError):
-            if path.read_text().strip() == expected.strip():
+            if path.read_text(encoding="utf-8", errors="replace").strip() == expected.strip():
                 return False
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(expected)
+    path.write_text(expected, encoding="utf-8")
     return True
 
 
@@ -205,10 +206,11 @@ def _write_codex_config_toml(repo: Path, backend_url: str) -> bool:
     """Write/replace the bodhiorchard block in ``.codex/config.toml``. Idempotent."""
     block = _codex_config_toml(backend_url)
     path = repo / ".codex" / "config.toml"
-    if path.exists() and path.read_text().strip() == block.strip():
+    existing = path.read_text(encoding="utf-8", errors="replace") if path.exists() else None
+    if existing is not None and existing.strip() == block.strip():
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(block)
+    path.write_text(block, encoding="utf-8")
     return True
 
 
@@ -286,7 +288,7 @@ def append_agent_instructions(repo_path: str, provider: AIProvider) -> bool:
     """
     section = _agents_md_section()
     path = Path(repo_path) / "AGENTS.md"
-    existing = path.read_text() if path.exists() else ""
+    existing = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
     if _BG_START in existing and _BG_END in existing:
         before = existing.split(_BG_START)[0]
         after = existing.split(_BG_END, 1)[1]
@@ -297,6 +299,6 @@ def append_agent_instructions(repo_path: str, provider: AIProvider) -> bool:
         updated = f"# AGENTS.md\n\n{section}"
     if updated.strip() == existing.strip():
         return False
-    path.write_text(updated)
+    path.write_text(updated, encoding="utf-8")
     logger.info("agent_instructions_written", repo=repo_path, provider=provider.value)
     return True

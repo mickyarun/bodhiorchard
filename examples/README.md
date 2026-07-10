@@ -1,6 +1,6 @@
 # TaskFlow — Sample Repositories for Scan Testing
 
-Four sample repos that exercise the scan pipeline's cross-repo feature detection, skill profiling, code location tracking — plus an end-to-end test suite that drives the UI of the running app.
+Sample repos that exercise the scan pipeline's cross-repo feature detection, skill profiling, code location tracking — plus an end-to-end test suite that drives the UI of the running app, and a standalone Java/Spring Boot sample.
 
 ## Repos
 
@@ -10,17 +10,42 @@ Four sample repos that exercise the scan pipeline's cross-repo feature detection
 | `taskflow-worker` | Python background jobs | — | auth, notifications, reminders, billing |
 | `taskflow-web` | Vue 3 frontend | 9002 | auth, tasks, notifications, billing |
 | `taskflow-qa` | Playwright + Cucumber BDD e2e suite | — | drives `taskflow-web` at 9002 via `taskflow-api` at 9001 |
+| `taskflow-spring` | **Java / Spring Boot 3 backend** | 9003 | auth, tasks, notifications, billing |
+
+The repos are **hosted on GitHub, not committed into bodhiorchard** — they're
+gitignored here so FT-testing PR merges don't show up as bodhiorchard-side
+changes. `taskflow-spring` lives in its own public repo:
+**https://github.com/mickyarun/taskflow-java-bodhiorchard-demo**
 
 ## Setup Git History
 
-The sample repos need git commit history with different authors for skill profile testing. Run the setup script first:
+The sample repos need git commit history with different authors for skill
+profile testing. The setup script clones each repo (into `examples/`) and, for
+the Python/Vue ones, rebuilds a 4-author history:
 
 ```bash
 cd examples
 bash setup-git-history.sh
 ```
 
-This creates proper git repos with 4 authors and ~6 commits each.
+This produces git repos with 4 authors (Alice, Bob, Carol, Dave) and ~6 commits
+each. `taskflow-spring` is cloned from its GitHub repo with its history already
+baked in.
+
+### Clone just the Java sample
+
+To test the Java scan on its own, clone it directly (use `git clone`, **not**
+"Download ZIP" — a ZIP has no `.git`, so branch detection and skill profiles
+won't work):
+
+```bash
+git clone https://github.com/mickyarun/taskflow-java-bodhiorchard-demo.git
+```
+
+Then add the cloned folder's absolute path in Bodhiorchard **Settings →
+Repositories** (or the setup wizard's **Local path** tab), branch `main`, and
+run a scan. Expect ~4 features (Authentication, Task Management, Notifications,
+Billing), `NotificationService` as a cross-feature hub, and 4 skill profiles.
 
 ## Quick Start
 
@@ -47,7 +72,15 @@ npm run dev -- --port 9002
 cd examples/taskflow-qa
 npm install
 npm test                # Playwright + Cucumber against the running web app
+
+# 5. Java / Spring Boot sample (optional — JDK 17 + Maven; runs standalone)
+cd examples/taskflow-spring
+mvn -DskipTests package
+java -jar target/taskflow-spring-1.0.0.jar   # → http://localhost:9003
 ```
+
+> Running the apps is optional — a scan only reads source. Build/run is only
+> needed to hit the live endpoints. See each repo's own README for details.
 
 ## Testing the Scan Pipeline
 

@@ -238,10 +238,10 @@ def append_bodhiorchard_claude_instructions(repo_path: str) -> bool:
     claude_md = Path(repo_path) / "CLAUDE.md"
     if not claude_md.exists():
         # Create CLAUDE.md with just the Bodhiorchard section
-        claude_md.write_text(_BODHIORCHARD_CLAUDE_SECTION.strip() + "\n")
+        claude_md.write_text(_BODHIORCHARD_CLAUDE_SECTION.strip() + "\n", encoding="utf-8")
         return True
 
-    content = claude_md.read_text()
+    content = claude_md.read_text(encoding="utf-8", errors="replace")
 
     # Already has Bodhiorchard section — check if content changed
     if _BG_START in content:
@@ -263,7 +263,7 @@ def append_bodhiorchard_claude_instructions(repo_path: str) -> bool:
     else:
         content = content.rstrip() + "\n\n" + _BODHIORCHARD_CLAUDE_SECTION.strip() + "\n"
 
-    claude_md.write_text(content)
+    claude_md.write_text(content, encoding="utf-8")
     return True
 
 
@@ -654,7 +654,8 @@ async def init_bodhiorchard_mcp_in_repo(repo_path: str, backend_url: str) -> boo
     expected_json = json.dumps(mcp_config, indent=2)
     if mcp_json_path.exists() and dest_bridge.exists():
         with contextlib.suppress(json.JSONDecodeError, OSError):
-            if mcp_json_path.read_text().strip() == expected_json.strip():
+            existing_mcp = mcp_json_path.read_text(encoding="utf-8", errors="replace")
+            if existing_mcp.strip() == expected_json.strip():
                 logger.debug("bodhiorchard_mcp_already_configured", repo=repo_path)
                 return False
 
@@ -662,7 +663,7 @@ async def init_bodhiorchard_mcp_in_repo(repo_path: str, backend_url: str) -> boo
     dest_dir.mkdir(exist_ok=True)
     shutil.copy2(source_bridge, dest_bridge)
 
-    mcp_json_path.write_text(json.dumps(mcp_config, indent=2))
+    mcp_json_path.write_text(json.dumps(mcp_config, indent=2), encoding="utf-8")
 
     # Also keep .claude/settings.json for backward compatibility
     claude_dir = repo / ".claude"
@@ -672,12 +673,12 @@ async def init_bodhiorchard_mcp_in_repo(repo_path: str, backend_url: str) -> boo
     settings: dict[str, Any] = {}
     if settings_path.exists():
         with contextlib.suppress(json.JSONDecodeError, OSError):
-            settings = json.loads(settings_path.read_text())
+            settings = json.loads(settings_path.read_text(encoding="utf-8", errors="replace"))
 
     settings.setdefault("mcpServers", {})
     # Overwrite with token-free config (replaces any stale token from old setups)
     settings["mcpServers"]["bodhiorchard"] = mcp_config["mcpServers"]["bodhiorchard"]
-    settings_path.write_text(json.dumps(settings, indent=2))
+    settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
     logger.info("bodhiorchard_mcp_written", repo=repo_path)
     return True
@@ -802,18 +803,18 @@ async def install_hooks(repo_path: str, backend_url: str, org_id: str) -> bool:
 
         full_content = f"#!/bin/sh\n{hook_content}"
         if hook_path.exists():
-            existing = hook_path.read_text()
+            existing = hook_path.read_text(encoding="utf-8", errors="replace")
             if _HOOK_MARKER in existing:
                 if existing.strip() == full_content.strip():
                     continue  # Already up to date
                 # Overwrite with updated hook content
-                hook_path.write_text(full_content)
+                hook_path.write_text(full_content, encoding="utf-8")
             else:
                 # Append to existing non-Bodhiorchard hook
                 with hook_path.open("a") as f:
                     f.write(f"\n{hook_content}")
         else:
-            hook_path.write_text(full_content)
+            hook_path.write_text(full_content, encoding="utf-8")
 
         hook_path.chmod(0o755)
         changed = True
@@ -1347,10 +1348,10 @@ async def install_claude_hooks(repo_path: str, backend_url: str) -> bool:
     for filename, content in scripts:
         hook_path = hooks_dir / filename
         if hook_path.exists():
-            existing = hook_path.read_text()
+            existing = hook_path.read_text(encoding="utf-8", errors="replace")
             if _CLAUDE_HOOK_MARKER in existing and existing.strip() == content.strip():
                 continue
-        hook_path.write_text(content)
+        hook_path.write_text(content, encoding="utf-8")
         hook_path.chmod(0o755)
         changed = True
 
@@ -1361,7 +1362,7 @@ async def install_claude_hooks(repo_path: str, backend_url: str) -> bool:
     settings: dict[str, Any] = {}
     if settings_path.exists():
         with contextlib.suppress(json.JSONDecodeError, OSError):
-            settings = json.loads(settings_path.read_text())
+            settings = json.loads(settings_path.read_text(encoding="utf-8", errors="replace"))
 
     hooks_config = {
         "SessionStart": [
@@ -1486,7 +1487,7 @@ async def install_claude_hooks(repo_path: str, backend_url: str) -> bool:
 
     if settings.get("hooks") != hooks_config:
         settings["hooks"] = hooks_config
-        settings_path.write_text(json.dumps(settings, indent=2))
+        settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
         changed = True
 
     logger.info("claude_hooks_installed", repo=repo_path, changed=changed)
@@ -1511,15 +1512,15 @@ def add_bodhiorchard_gitignore(repo_path: str) -> bool:
     entry = ".bodhiorchard/"
 
     if gitignore.exists():
-        content = gitignore.read_text()
+        content = gitignore.read_text(encoding="utf-8", errors="replace")
         if entry in content:
             return False
         if not content.endswith("\n"):
             content += "\n"
         content += f"{entry}\n"
-        gitignore.write_text(content)
+        gitignore.write_text(content, encoding="utf-8")
     else:
-        gitignore.write_text(f"{entry}\n")
+        gitignore.write_text(f"{entry}\n", encoding="utf-8")
 
     logger.info("gitignore_updated", repo=repo_path)
     return True
@@ -1551,7 +1552,7 @@ def add_prepare_script(repo_path: str) -> bool:
     pkg: dict[str, Any] = {}
     if pkg_path.exists():
         with contextlib.suppress(json.JSONDecodeError, OSError):
-            pkg = json.loads(pkg_path.read_text())
+            pkg = json.loads(pkg_path.read_text(encoding="utf-8", errors="replace"))
 
     scripts = pkg.get("scripts", {})
     existing_prepare = scripts.get("prepare", "")
@@ -1572,7 +1573,7 @@ def add_prepare_script(repo_path: str) -> bool:
     if not pkg_path.exists():
         pkg.setdefault("private", True)
 
-    pkg_path.write_text(json.dumps(pkg, indent=2) + "\n")
+    pkg_path.write_text(json.dumps(pkg, indent=2) + "\n", encoding="utf-8")
     logger.info("prepare_script_added", repo=repo_path)
     return True
 

@@ -117,6 +117,11 @@ def _patched(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         yield _FakeDb()
 
     async def _fake_run_git(args: list[str], cwd: str, **kwargs: Any) -> tuple[str, str, int]:
+        # Origin-presence probe runs first: report a configured remote so
+        # these tests exercise the hosted ls-remote path (below), not the
+        # local-head fallback.
+        if args == ["remote"]:
+            return ("origin\n", "", 0)
         # ``ls-remote`` may be invoked with a leading ``-c
         # remote.origin.url=...`` override on the App-HTTPS fallback path
         # — find the first non-``-c`` token so this fake works for both
@@ -232,6 +237,37 @@ async def test_raises_when_repo_path_is_null(_patched: dict[str, Any]) -> None:
 
     with pytest.raises(mod.RescanRepoNotFoundError):
         await mod.enqueue_rescan_delivery(org_id=uuid.uuid4(), repo_id=uuid.uuid4())
+
+
+async def test_local_repo_without_origin_uses_local_head(
+    _patched: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A repo with no ``origin`` remote resolves head from the local branch.
+
+    Local-first: ``git init`` working copies have nothing to ``ls-remote``,
+    so the enqueue path falls back to ``git rev-parse`` of the branch tip.
+    ``ls-remote`` must never be attempted.
+    """
+    local_sha = "abcdef0123456789abcdef0123456789abcdef01"
+    calls: list[list[str]] = []
+
+    async def _fake_run_git(args: list[str], cwd: str, **_kw: Any) -> tuple[str, str, int]:
+        calls.append(list(args))
+        if args == ["remote"]:
+            return ("", "", 0)  # no remotes configured
+        if args[:2] == ["rev-parse", "--verify"]:
+            return (f"{local_sha}\n", "", 0)
+        raise AssertionError(f"unexpected git call for local repo: {args}")
+
+    monkeypatch.setattr(mod, "run_git", _fake_run_git)
+
+    delivery_id = await mod.enqueue_rescan_delivery(org_id=uuid.uuid4(), repo_id=uuid.uuid4())
+
+    assert delivery_id.startswith("rescan-")
+    assert not any("ls-remote" in c for c in calls), "must not ls-remote a local-only repo"
+    assert _FakeWebhookLogRepo.last_call["payload"]["head_sha"] == local_sha
+    assert len(_patched["publish_calls"]) == 1
 
 
 async def test_raises_when_ls_remote_fails(_patched: dict[str, Any]) -> None:
@@ -366,6 +402,9 @@ async def test_falls_back_to_app_https_override_on_ls_remote_failure(
     )
 
     async def _fake_run_git(args: list[str], cwd: str, **_kw: Any) -> tuple[str, str, int]:
+        # Origin exists → drop straight into the hosted ls-remote path.
+        if args == ["remote"]:
+            return ("origin\n", "", 0)
         calls.append(list(args))
         return ssh_failure if len(calls) == 1 else https_success
 
@@ -409,6 +448,9 @@ async def test_error_message_scrubs_app_token_from_stderr(
     seq = iter([primary_failure, fallback_failure])
 
     async def _fake_run_git(args: list[str], cwd: str, **_kw: Any) -> tuple[str, str, int]:
+        # Origin exists → proceed to the ls-remote attempts the test drives.
+        if args == ["remote"]:
+            return ("origin\n", "", 0)
         return next(seq)
 
     async def _fake_build_app_https_url(_repo_path: str, _org: Any) -> str | None:

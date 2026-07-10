@@ -406,6 +406,12 @@ class TestPreToolGuardMain:
     def test_main_no_output_on_allow(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        """A safe command produces no stdout: the hook only ever DENIES.
+
+        Staying silent (rather than emitting an explicit ``allow``) keeps the
+        settings-level ``permissions.deny`` list authoritative — an explicit
+        hook allow could bypass deny rules this hook's narrower regexes miss.
+        """
         event_json = json.dumps({"tool_name": "Bash", "tool_input": {"command": "git status"}})
         monkeypatch.setattr("sys.stdin", io.StringIO(event_json))
 

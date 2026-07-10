@@ -154,6 +154,13 @@ def main() -> int:
             json.dump(decision, sys.stdout)
             sys.stdout.write("\n")
         else:
+            # No deny rule matched: stay silent (emit no decision) so the
+            # normal permission system — including the settings-level
+            # ``permissions.deny`` (INLINE_DENY_LIST, broader than this hook's
+            # regexes) — remains authoritative. Emitting an explicit ``allow``
+            # here would risk bypassing those settings-level deny rules for
+            # commands this hook's narrower regexes don't catch (e.g. ``mysql``,
+            # ``chown``).
             append_event(
                 event="pre_tool",
                 tool_name=tool_name,

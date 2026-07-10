@@ -63,14 +63,31 @@ def build_inline_settings_json() -> str:
         "outputStyle": "default",
         "permissions": {
             "deny": INLINE_DENY_LIST,
+            # Explicitly grant our own first-party MCP server. In
+            # ``bypassPermissions`` mode (the normal ``--dangerously-skip-
+            # permissions`` path) this is redundant but harmless. It becomes
+            # LOAD-BEARING whenever the subprocess ends up in ``default``
+            # permission mode instead — which happens when the CLI silently
+            # downgrades ``--dangerously-skip-permissions`` (observed when the
+            # backend runs elevated on Windows: the session reports
+            # ``permissionMode: "default"``). Without this allow rule, every
+            # ``mcp__bodhiorchard__*`` call is denied ("requires permission …
+            # you haven't granted it yet"), so synthesis emits 0
+            # ``write_synthesis_feature`` calls and the scan fails with
+            # "0 features from N communities". A server-scoped entry grants
+            # all bodhiorchard tools; the per-run ``BODHIORCHARD_MCP_TOOLS``
+            # filter still bounds which are actually exposed. The deny list
+            # below and the PreToolUse hook still apply regardless.
+            "allow": ["mcp__bodhiorchard"],
             # NOTE: ``disableBypassPermissionsMode`` is intentionally NOT
             # set. When combined with ``--dangerously-skip-permissions``
             # it forces the subprocess into normal permission mode where
-            # every MCP tool needs an explicit allow rule — and we have
-            # none, so every ``mcp__bodhiorchard__write_bud`` call gets
-            # denied. The PM agent reported this as "write_bud /
-            # get_bud_context MCP tools are not available in this
-            # session" and emitted markdown without persisting.
+            # every MCP tool needs an explicit allow rule — now shipped
+            # above, so this is no longer the failure it once was, but we
+            # still avoid the toggle to keep bypass mode available where the
+            # platform honours it. Historically its absence let
+            # ``mcp__bodhiorchard__write_bud`` be denied and the PM agent
+            # emitted markdown without persisting.
             #
             # Defense against planted ``.claude/settings.json`` files
             # re-enabling YOLO still holds because:

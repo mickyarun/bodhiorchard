@@ -220,7 +220,18 @@ async def _resolve_remote_head_sha(
     refs); refuses non-SHA tokens (HTML banners, proxy errors, etc.)
     that would otherwise flow into ``payload["head_sha"]`` and surface
     much later as a confusing indexer/git-checkout failure.
+
+    Local-first fallback: a repo added by local path may have no ``origin``
+    remote at all (e.g. a ``git init`` working copy). There is nothing to
+    ``ls-remote``, so resolve the head from the local branch instead. This
+    branch is taken ONLY when ``origin`` is genuinely absent — when a remote
+    exists, the remote path below stays authoritative and its network/auth
+    failures still surface, so a hosted repo is never masked by a stale
+    local head.
     """
+    if not await _has_origin_remote(repo_path):
+        return await _resolve_local_head_sha(repo_path, branch)
+
     env = await refresh_origin_auth(repo_path, org)
     stdout, primary_stderr, rc = await run_git(
         ["ls-remote", "origin", branch], cwd=repo_path, env=env
@@ -273,3 +284,45 @@ async def _resolve_remote_head_sha(
             f"git ls-remote origin {branch} returned non-SHA token: {sha[:80]!r}"
         )
     return sha
+
+
+async def _has_origin_remote(repo_path: str) -> bool:
+    """Whether an ``origin`` remote is configured for the repo.
+
+    Local-only working copies (``git init`` with no remote added) return
+    ``False``, which routes head resolution to the local branch instead of
+    ``git ls-remote``. A configured remote returns ``True`` so the existing
+    remote-resolution path — and its failure handling — is unaffected.
+
+    We list remotes with ``git remote`` and test membership rather than
+    ``git remote get-url origin``: only a *clean* listing that omits ``origin``
+    means "no origin". If ``git`` itself fails (corrupt/locked ``.git``, git
+    error), we return ``True`` so the caller takes the remote path and surfaces
+    the real error, instead of silently resolving a possibly-stale local head
+    for a genuinely-hosted repo.
+    """
+    stdout, _, rc = await run_git(["remote"], cwd=repo_path)
+    if rc != 0:
+        return True
+    return "origin" in stdout.split()
+
+
+async def _resolve_local_head_sha(repo_path: str, branch: str) -> str:
+    """Resolve ``branch``'s head from the LOCAL repo (no remote to query).
+
+    For local-first repos added by path that have no ``origin`` remote, the
+    "latest to scan" is the named branch's local tip. We resolve ONLY
+    ``refs/heads/<branch>`` — no ``HEAD`` fallback — so a repo checked out on a
+    different branch (or in detached HEAD) fails loud instead of silently
+    scanning the wrong branch. This mirrors the remote path, where
+    ``ls-remote origin <branch>`` returning no matching ref raises rather than
+    resolving some other ref.
+    """
+    stdout, _, rc = await run_git(["rev-parse", "--verify", f"refs/heads/{branch}"], cwd=repo_path)
+    sha = stdout.strip().lower()
+    if rc == 0 and _GIT_SHA_RE.fullmatch(sha):
+        return sha
+    raise RescanHeadResolutionError(
+        f"local branch {branch!r} not found in {repo_path} (no refs/heads/{branch}); "
+        "cannot resolve a head SHA for a repo with no origin remote"
+    )

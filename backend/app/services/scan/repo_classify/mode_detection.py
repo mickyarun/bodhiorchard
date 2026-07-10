@@ -92,7 +92,7 @@ def classify_from_worktree(path: Path) -> Classification | None:
 
     if pkg_json.exists():
         try:
-            data = json.loads(pkg_json.read_text())
+            data = json.loads(pkg_json.read_text(encoding="utf-8", errors="replace"))
         except (OSError, json.JSONDecodeError):
             return None
         deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
