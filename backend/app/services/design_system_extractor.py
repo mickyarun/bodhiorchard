@@ -83,16 +83,22 @@ def _discover_read_hash(
 
 
 def _cli_available(org: Organization | None) -> bool:
-    """Whether the org's provider CLI is installed (gate for LLM extraction).
+    """Whether the org's provider can do LLM extraction (else regex fallback).
 
-    Claude keeps its dedicated check; other providers test their binary
-    name from the capability table. A missing CLI cleanly degrades the
-    caller to regex extraction.
+    Claude keeps its dedicated check; other CLI providers test their binary
+    name from the capability table. A provider that cannot read files at all
+    is treated the same as a missing CLI — this extraction reads a repository,
+    so there is nothing for it to run — and the caller cleanly degrades to
+    regex extraction rather than shipping a confident guess about files that
+    were never opened.
     """
     provider = org.ai_provider if org is not None else AIProvider.claude
+    caps = capabilities_for(provider)
+    if not caps.supports_files:
+        return False
     if provider == AIProvider.claude:
         return is_claude_cli_available()
-    return shutil.which(capabilities_for(provider).cli) is not None
+    return caps.cli is not None and shutil.which(caps.cli) is not None
 
 
 async def extract_design_system(

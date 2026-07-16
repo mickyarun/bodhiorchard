@@ -91,6 +91,23 @@ def _build_org_config(req: InitOrgRequest) -> dict[str, object]:
     }
 
 
+def _clean_base_url(value: str | None) -> str | None:
+    """Validate the wizard's server address, or None to use the default.
+
+    Only http/https — this string reaches an HTTP client, and the wizard is
+    unauthenticated, so it validates rather than trusts.
+    """
+    cleaned = (value or "").strip().rstrip("/")
+    if not cleaned:
+        return None
+    if not cleaned.startswith(("http://", "https://")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="claude.base_url must start with http:// or https://",
+        )
+    return cleaned
+
+
 def _resolve_claude_auth(req: InitOrgRequest) -> tuple[AIProvider, str, str | None]:
     """Validate the wizard's AI-provider choice → ``(provider, mode, key)``."""
     try:
@@ -146,6 +163,10 @@ async def setup_init_org(req: InitOrgRequest, db: AsyncSession) -> InitOrgResult
 
     mcp_token = secrets.token_urlsafe(_MCP_TOKEN_NUM_BYTES)
 
+    # Host-scoped settings only apply to a provider that runs against the org's
+    # own machine; storing them for one that ignores them would leave state
+    # nobody can see and nothing reads.
+    caps = capabilities_for(provider)
     org = Organization(
         name=req.organization.name,
         slug=req.organization.slug,
@@ -154,6 +175,9 @@ async def setup_init_org(req: InitOrgRequest, db: AsyncSession) -> InitOrgResult
         ai_provider=provider,
         claude_auth_mode=claude_auth_mode,
         claude_api_key_encrypted=encrypted_key,
+        ai_base_url=_clean_base_url(req.claude.base_url) if caps.requires_base_url else None,
+        ai_model=((req.claude.model or "").strip() or None) if caps.dynamic_models else None,
+        ai_thinking=bool(req.claude.thinking) if caps.supports_thinking else False,
     )
     db.add(org)
     await db.flush()

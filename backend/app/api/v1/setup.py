@@ -23,7 +23,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.ai_settings import serialize_provider
+from app.api.v1.ai_settings import serialize_provider, with_dynamic_models
 from app.core.deps import get_current_user, get_db
 from app.models.organization import AIProvider
 from app.models.user import User
@@ -224,10 +224,15 @@ async def get_ai_capabilities() -> dict[str, Any]:
     org context (there's no JWT yet during first-run setup). Exposes only
     non-sensitive metadata — models, effort levels, auth-mode shapes, install
     hints — so the wizard can build provider-aware, deployment-gated controls.
+
+    Host-provided model lists are probed at each provider's default address:
+    there is no org yet to have configured one, and the common case is a local
+    server on this machine. A wizard pointed elsewhere re-probes on save.
     """
+    providers = await with_dynamic_models([serialize_provider(p) for p in AIProvider], None)
     return {
         "deployment_mode": deployment_info()["mode"],
-        "providers": [serialize_provider(p) for p in AIProvider],
+        "providers": providers,
     }
 
 

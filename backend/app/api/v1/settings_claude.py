@@ -48,27 +48,70 @@ router = APIRouter(tags=["settings-claude"])
 
 
 class ClaudeSettingsRead(BaseModel):
-    """Current AI-provider auth state for the org — key itself never returned."""
+    """Current AI-provider state for the org — the credential is never returned."""
 
     provider: str
     auth_mode: str
     has_api_key: bool
+    # Only meaningful for providers that run against the org's own host.
+    base_url: str | None = None
+    model: str | None = None
+    thinking: bool = False
 
 
 class ClaudeSettingsUpdate(BaseModel):
     """Update the org's AI provider, auth mode, and (optionally) its credential.
 
-    ``provider`` selects the agent CLI (claude / copilot / codex). ``api_key``
-    is consumed in ``api_key`` mode (an Anthropic key, GitHub token, or OpenAI
-    key depending on provider), ``oauth_token`` in Claude ``subscription`` mode.
-    Omitting the credential while staying in the same mode keeps the stored one;
-    switching modes requires the new credential. ``host`` mode clears it.
+    ``provider`` selects the agent (claude / copilot / codex / ollama).
+    ``api_key`` is consumed in ``api_key`` mode (an Anthropic key, GitHub
+    token, or OpenAI key depending on provider), ``oauth_token`` in Claude
+    ``subscription`` mode. Omitting the credential while staying in the same
+    mode keeps the stored one; switching modes requires the new credential.
+    ``host`` mode clears it.
+
+    ``base_url``/``model``/``thinking`` apply to providers that run against the
+    org's own host; they are cleared when switching to one that doesn't, so a
+    stale host can't linger on a provider that ignores it.
     """
 
-    provider: str | None = Field(None, description="One of 'claude', 'copilot', 'codex'.")
+    provider: str | None = Field(
+        None, description="One of 'claude', 'copilot', 'codex', 'ollama'."
+    )
     auth_mode: str = Field(..., description="An auth mode valid for the chosen provider.")
     api_key: str | None = None
     oauth_token: str | None = None
+    base_url: str | None = Field(None, description="Server address, for HTTP-based providers.")
+    model: str | None = Field(None, description="Model id, for host-provided model lists.")
+    thinking: bool | None = Field(None, description="Let the model reason before answering.")
+
+
+def _clean_base_url(value: str | None) -> str | None:
+    """Validate a user-supplied server address, or None to use the default.
+
+    Only http/https: this string is handed to an HTTP client, and anything else
+    (file://, a shell fragment) has no business reaching it.
+    """
+    cleaned = (value or "").strip().rstrip("/")
+    if not cleaned:
+        return None
+    if not cleaned.startswith(("http://", "https://")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="base_url must start with http:// or https://",
+        )
+    return cleaned
+
+
+def _read_model(org: Organization) -> ClaudeSettingsRead:
+    """The org's provider state as the UI sees it. One shape, two endpoints."""
+    return ClaudeSettingsRead(
+        provider=(org.ai_provider or AIProvider.claude).value,
+        auth_mode=org.claude_auth_mode,
+        has_api_key=bool(org.claude_api_key_encrypted),
+        base_url=org.ai_base_url,
+        model=org.ai_model,
+        thinking=org.ai_thinking,
+    )
 
 
 def _resolve_provider(value: str | None, current: AIProvider) -> AIProvider:
@@ -117,11 +160,7 @@ async def get_claude_settings(
 ) -> ClaudeSettingsRead:
     """Return the org's current AI-provider auth configuration."""
     org = await OrganizationRepository(db).get_for_user(current_user)
-    return ClaudeSettingsRead(
-        provider=(org.ai_provider or AIProvider.claude).value,
-        auth_mode=org.claude_auth_mode,
-        has_api_key=bool(org.claude_api_key_encrypted),
-    )
+    return _read_model(org)
 
 
 @router.patch(
@@ -174,6 +213,21 @@ async def update_claude_settings(
     elif body.auth_mode == AUTH_MODE_HOST:
         org.claude_api_key_encrypted = None
 
+    # Host-scoped settings only mean anything to a provider that runs against
+    # the org's own machine. Clear them otherwise, so switching to Ollama later
+    # can't silently inherit a host someone typed months ago for a different
+    # provider — and so a stale model id can't outlive the provider that knew it.
+    target_caps = capabilities_for(target_provider)
+    if target_caps.requires_base_url:
+        org.ai_base_url = _clean_base_url(body.base_url)
+    else:
+        org.ai_base_url = None
+    if target_caps.dynamic_models:
+        org.ai_model = (body.model or "").strip() or None
+    else:
+        org.ai_model = None
+    org.ai_thinking = bool(body.thinking) if target_caps.supports_thinking else False
+
     await db.flush()
     apply_claude_auth_to_env(org)
 
@@ -186,11 +240,7 @@ async def update_claude_settings(
         by=current_user.email,
     )
 
-    return ClaudeSettingsRead(
-        provider=org.ai_provider.value,
-        auth_mode=org.claude_auth_mode,
-        has_api_key=bool(org.claude_api_key_encrypted),
-    )
+    return _read_model(org)
 
 
 @router.post("/claude/test")

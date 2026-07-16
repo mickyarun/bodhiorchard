@@ -26,6 +26,7 @@ from typing import Any
 
 from app.models.organization import AIProvider, Organization
 from app.services.ai_runner.capabilities import capabilities_for
+from app.services.ai_runner.capability_gate import adapt_config
 from app.services.ai_runner.registry import provider_instance
 from app.services.ai_runner.subprocess_env import build_provider_env
 from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig
@@ -111,5 +112,14 @@ async def check_connection(
 
 
 async def check_provider_connection(org: Organization) -> dict[str, Any]:
-    """Verify the org's provider CLI (auth already applied to process env)."""
-    return await check_connection(org.ai_provider or AIProvider.claude)
+    """Verify the org's provider is reachable and can authenticate.
+
+    The org's own host/model/thinking settings are resolved through the same
+    seam a real run uses, so "Test connection" checks the configuration the org
+    will actually run with. Without that, a provider pointed at a remote host
+    would silently be probed on localhost — reporting a confident green for a
+    host nobody tested, or an install hint for a config that was fine.
+    """
+    provider = org.ai_provider or AIProvider.claude
+    probe = adapt_config(capabilities_for(provider), org, ClaudeRunnerConfig())
+    return await check_connection(provider, probe.env_extra)

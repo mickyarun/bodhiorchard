@@ -30,6 +30,7 @@ from app.models.organization import AIProvider
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
 from app.services.ai_runner.capabilities import CAPABILITIES
+from app.services.ai_runner.ollama_models import OLLAMA_DEFAULT_BASE_URL, list_tool_models
 from app.services.deployment_info import deployment_info
 
 router = APIRouter(tags=["settings-ai"])
@@ -70,6 +71,28 @@ def serialize_provider(provider: AIProvider) -> dict[str, Any]:
     }
 
 
+async def with_dynamic_models(
+    payloads: list[dict[str, Any]], base_url: str | None
+) -> list[dict[str, Any]]:
+    """Fill in ``models`` for providers whose models live on the org's host.
+
+    Only tool-capable models are offered: one without that capability answers
+    in prose instead of calling a tool, so listing it would let a user pick a
+    model that fails at the first agent run.
+
+    Never raises. This runs while rendering the settings page, and an
+    unreachable host means "nothing to offer" — not a 500 that hides every
+    other provider's settings too.
+    """
+    for payload in payloads:
+        if not payload.get("dynamic_models"):
+            continue
+        target = base_url or payload.get("default_base_url") or OLLAMA_DEFAULT_BASE_URL
+        names = await list_tool_models(target)
+        payload["models"] = [{"id": n, "label": n} for n in names]
+    return payloads
+
+
 @router.get("/ai/capabilities")
 async def get_ai_capabilities(
     current_user: User = Depends(get_current_user),
@@ -77,8 +100,11 @@ async def get_ai_capabilities(
 ) -> dict[str, Any]:
     """Return all providers' capabilities + the org's current provider + mode."""
     org = await OrganizationRepository(db).get_for_user(current_user)
+    providers = await with_dynamic_models(
+        [serialize_provider(p) for p in AIProvider], org.ai_base_url
+    )
     return {
         "current_provider": (org.ai_provider or AIProvider.claude).value,
         "deployment_mode": deployment_info()["mode"],
-        "providers": [serialize_provider(p) for p in AIProvider],
+        "providers": providers,
     }
