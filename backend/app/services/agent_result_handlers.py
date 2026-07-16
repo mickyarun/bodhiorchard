@@ -115,14 +115,30 @@ async def handle_prd_result(
     # estimation failure would roll the links back too.
     await db.flush()
 
-    # Generate initial delivery estimates now that PRD content exists.
-    # Wrap in a SAVEPOINT so a query failure inside the estimator only
-    # rolls back the estimator's own writes — the outer transaction stays
-    # alive, its prior writes survive, and the next log_agent_activity
-    # call doesn't trip InFailedSQLTransactionError.
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if bud is not None:
+        # The requirements body normally reaches the DB through the agent's
+        # own write_bud tool call, leaving just the JSON fence in its final
+        # message. A model that instead answers with the whole document as
+        # prose and never calls the tool (common on smaller local models)
+        # would otherwise have that output dropped — a "completed" run with
+        # empty requirements. Persist the authored body ourselves in that
+        # case, mirroring how handle_tech_arch_result / handle_testing_result
+        # store their sections. Guarded on an empty body so a successful
+        # write_bud is never clobbered.
+        if not (bud.requirements_md or "").strip():
+            body = _strip_trailing_json_fence(output)
+            if body:
+                await _snapshot_agent_write(db, bud)
+                bud.requirements_md = body
+                await db.flush()
+
+        # Generate initial delivery estimates now that PRD content exists.
+        # Wrap in a SAVEPOINT so a query failure inside the estimator only
+        # rolls back the estimator's own writes — the outer transaction stays
+        # alive, its prior writes survive, and the next log_agent_activity
+        # call doesn't trip InFailedSQLTransactionError.
         try:
             async with db.begin_nested():
                 await estimate_bud_dates(db, org_id, bud, trigger="prd_completed")
@@ -259,6 +275,34 @@ def _extract_last_json_dict(output: str) -> dict[str, Any] | None:
     if not isinstance(parsed, dict):
         return None
     return parsed
+
+
+def _strip_trailing_json_fence(output: str) -> str:
+    """Return ``output`` with the PM agent's linked-features fence removed.
+
+    The agent appends a ``{"linked_feature_ids": [...]}`` fence after the
+    document body. When we fall back to storing the agent's prose as the BUD
+    requirements (the agent answered instead of calling ``write_bud``), that
+    sentinel must not leak into the saved markdown.
+
+    Only that sentinel is stripped — recognised by the same ``linked_feature_ids``
+    key :func:`_extract_last_json_dict` parses. A model that skips the tool call
+    may also skip the sentinel, and a requirements doc can legitimately contain
+    an in-body ```json example; stripping the last fence unconditionally would
+    delete that example and everything after it. Gating on the sentinel keeps
+    the stripper and the link parser looking at the same fence.
+    """
+    fences = list(re.finditer(r"```json\s*\n(.*?)\n\s*```", output, re.DOTALL))
+    if not fences:
+        return output.strip()
+    last = fences[-1]
+    try:
+        parsed = json.loads(last.group(1))
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict) and "linked_feature_ids" in parsed:
+        return output[: last.start()].rstrip()
+    return output.strip()
 
 
 async def handle_tech_arch_result(
