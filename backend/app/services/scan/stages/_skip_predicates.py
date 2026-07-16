@@ -54,6 +54,7 @@ from app.repositories.design_system import DesignSystemRefRepository
 from app.repositories.feature import FeatureRepository
 from app.repositories.scan_step_status import (
     find_latest_step_status_for_repo_phase,
+    has_completed_step_for_repo_phase,
     has_done_step_for_scan,
 )
 from app.repositories.tracked_repository import TrackedRepoRepository
@@ -173,12 +174,19 @@ async def should_skip_skill_extraction(
     repo_path: str,
     full_rescan: bool,
 ) -> SkipDecision:
-    """Skip when tracked.head_sha == HEAD AND not full_rescan.
+    """Skip when this repo's skills were already extracted at HEAD.
 
     skill_profiles are org-scoped per (user, module) — they don't carry a
-    repo_id, so the existence proxy is "this repo was successfully scanned
-    before". ``tracked.head_sha`` is stamped only by the global persist
-    phase after a complete scan, which makes it the right marker.
+    repo_id, so unlike ``should_skip_feature_synthesis`` there are no output
+    rows to count per repo. The step history is the per-repo evidence instead:
+    a prior ``DONE`` SKILL_EXTRACTION step proves the walk actually ran.
+
+    ``tracked.head_sha`` alone is NOT that proof. The global persist phase
+    stamps it even for a repo whose run failed earlier in the pipeline, so a
+    scan that died before reaching this stage still leaves HEAD looking
+    "already scanned" — after which every later scan skips on an unchanged
+    SHA and the repo never gets skill profiles at all. Requiring a completed
+    step closes that; the SHA match still guards the cache once it has run.
     """
     if full_rescan:
         return SkipDecision(skip=False, reason="full_rescan set")
@@ -193,6 +201,12 @@ async def should_skip_skill_extraction(
         )
         if bypass is not None:
             return bypass
+        if not await has_completed_step_for_repo_phase(
+            db, org_id=org_id, repo_id=repo_id, phase=ScanPhase.SKILL_EXTRACTION
+        ):
+            return SkipDecision(
+                skip=False, reason="skill extraction never completed for this repo"
+            )
         return SkipDecision(
             skip=True,
             reason=f"head_sha unchanged: {head[:8]}",

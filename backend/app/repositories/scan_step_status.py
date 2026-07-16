@@ -166,6 +166,36 @@ async def find_latest_step_status_for_repo_phase(
     return result.scalar_one_or_none()
 
 
+async def has_completed_step_for_repo_phase(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    repo_id: uuid.UUID,
+    phase: ScanPhase,
+) -> bool:
+    """``True`` iff ``(repo, phase)`` ever reached ``DONE`` in any prior scan.
+
+    Evidence that the stage actually ran to completion for this repo, as
+    opposed to ``find_latest_step_status_for_repo_phase`` which reports only
+    the newest attempt. A skip predicate needs the ``EXISTS`` form: once a
+    stage is cached, every later run records ``SKIPPED_CACHE``, so "latest is
+    DONE" stops being true while the work genuinely remains done.
+    """
+    stmt = (
+        select(ScanRepoStep.id)
+        .join(ScanRepoRun, ScanRepoRun.id == ScanRepoStep.scan_repo_run_id)
+        .where(
+            ScanRepoRun.org_id == org_id,
+            ScanRepoRun.repo_id == repo_id,
+            ScanRepoStep.phase == phase,
+            ScanRepoStep.status == StepStatus.DONE,
+        )
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none() is not None
+
+
 async def has_done_step_for_scan(
     db: AsyncSession,
     *,
