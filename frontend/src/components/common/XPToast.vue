@@ -121,9 +121,11 @@ const LEVEL_ICONS: Record<string, string> = {
   pointer-events: none;
 }
 
-.xp-toast {
-  pointer-events: auto;
-}
+/* No `pointer-events: auto` here: this class lands on the v-snackbar root,
+   which is a VOverlay inset to the whole viewport. Vuetify keeps that root
+   `pointer-events: none` and grants `auto` to `.v-overlay__content` alone;
+   overriding the root blocks every click on the page until the toast clears.
+   See ChatCompletionToast.vue for the same note. */
 
 .xp-toast--levelup {
   animation: levelup-pulse 0.5s ease-out;

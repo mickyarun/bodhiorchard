@@ -175,9 +175,12 @@ function review(notif: AppNotification): void {
   pointer-events: none;
 }
 
-.chat-completion-toast {
-  pointer-events: auto;
-}
+/* This class lands on the v-snackbar root, which is a VOverlay: fixed and
+   inset to the whole viewport. Vuetify keeps that root `pointer-events: none`
+   and grants `auto` to `.v-overlay__content` alone — so making the root `auto`
+   turns an invisible full-screen layer into a click trap that trades every
+   click on the page for one toast, until it times out. The content is already
+   interactive; there is nothing to re-enable here. */
 
 .toast-slide-enter-active,
 .toast-slide-leave-active {
