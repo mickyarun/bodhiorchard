@@ -33,6 +33,12 @@ from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig
 
 _PING_PROMPT = "Reply with exactly: BODHIORCHARD_CONNECTION_OK"
 
+# Fine for a hosted API. A provider with a timeout_multiplier gets it scaled:
+# this is by definition the *cold* request, and on a CPU-only host the model
+# load alone can outlast a hosted API's whole round trip. Timing out here would
+# report a healthy server as unreachable.
+_DEFAULT_PING_TIMEOUT_S = 90
+
 
 async def _cli_version(provider: AIProvider, env: dict[str, str]) -> str | None:
     """Run the provider's version command; return its output or None.
@@ -66,7 +72,9 @@ async def _cli_version(provider: AIProvider, env: dict[str, str]) -> str | None:
 
 
 async def check_connection(
-    provider: AIProvider, env_extra: dict[str, str] | None = None
+    provider: AIProvider,
+    env_extra: dict[str, str] | None = None,
+    timeout_seconds: int = _DEFAULT_PING_TIMEOUT_S,
 ) -> dict[str, Any]:
     """Verify ``provider`` is installed/reachable and can authenticate.
 
@@ -103,7 +111,7 @@ async def check_connection(
     run = await provider_instance(provider).run(
         _PING_PROMPT,
         NO_REPO_CONTEXT,
-        ClaudeRunnerConfig(max_turns=1, timeout_seconds=90, env_extra=env_extra),
+        ClaudeRunnerConfig(max_turns=1, timeout_seconds=timeout_seconds, env_extra=env_extra),
     )
     result["test_passed"] = run.success
     result["output"] = (run.output or "")[:200]
@@ -121,5 +129,6 @@ async def check_provider_connection(org: Organization) -> dict[str, Any]:
     host nobody tested, or an install hint for a config that was fine.
     """
     provider = org.ai_provider or AIProvider.claude
-    probe = adapt_config(capabilities_for(provider), org, ClaudeRunnerConfig())
-    return await check_connection(provider, probe.env_extra)
+    caps = capabilities_for(provider)
+    probe = adapt_config(caps, org, ClaudeRunnerConfig(timeout_seconds=_DEFAULT_PING_TIMEOUT_S))
+    return await check_connection(provider, probe.env_extra, probe.timeout_seconds)

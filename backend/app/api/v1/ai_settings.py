@@ -22,7 +22,7 @@ controls from a single source of truth.
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -95,14 +95,20 @@ async def with_dynamic_models(
 
 @router.get("/ai/capabilities")
 async def get_ai_capabilities(
+    base_url: str | None = Query(
+        None,
+        description="Probe this address instead of the org's saved one, to list "
+        "the models of a host being configured but not yet saved.",
+    ),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Return all providers' capabilities + the org's current provider + mode."""
     org = await OrganizationRepository(db).get_for_user(current_user)
-    providers = await with_dynamic_models(
-        [serialize_provider(p) for p in AIProvider], org.ai_base_url
-    )
+    # An unsaved address wins: the Settings page has to show the models of the
+    # host being typed, or the user saves a model the new host doesn't have.
+    probe_at = (base_url or "").strip() or org.ai_base_url
+    providers = await with_dynamic_models([serialize_provider(p) for p in AIProvider], probe_at)
     return {
         "current_provider": (org.ai_provider or AIProvider.claude).value,
         "deployment_mode": deployment_info()["mode"],

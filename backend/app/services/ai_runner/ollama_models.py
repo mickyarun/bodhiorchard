@@ -70,6 +70,12 @@ def base_url_from_env(env: Mapping[str, str] | None) -> str:
     return OLLAMA_DEFAULT_BASE_URL
 
 
+def _remember(base_url: str, at: float, models: list[str]) -> list[str]:
+    """Cache and return a probe result, successful or not."""
+    _model_cache[base_url] = (at, models)
+    return list(models)
+
+
 async def _get_json(client: httpx.AsyncClient, url: str) -> dict[str, object] | None:
     """GET one JSON object, or None on any failure."""
     try:
@@ -115,7 +121,11 @@ async def list_tool_models(base_url: str) -> list[str]:
     async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_S) as client:
         tags = await _get_json(client, f"{base_url}/api/tags")
         if tags is None:
-            return []
+            # Cache the failure too. This is probed on every settings load, for
+            # every org — including ones on another provider entirely. A host
+            # that drops packets rather than refusing costs the full timeout,
+            # and without this that is paid on every page view forever.
+            return _remember(base_url, now, [])
         raw = tags.get("models")
         names = [
             m["name"]
@@ -123,7 +133,7 @@ async def list_tool_models(base_url: str) -> list[str]:
             if isinstance(m, dict) and isinstance(m.get("name"), str) and m["name"]
         ]
         if not names:
-            return []
+            return _remember(base_url, now, [])
         try:
             checked = await asyncio.wait_for(
                 asyncio.gather(
@@ -134,10 +144,16 @@ async def list_tool_models(base_url: str) -> list[str]:
             )
         except (TimeoutError, asyncio.CancelledError):
             logger.info("ollama_list_models_timeout", base_url=base_url, count=len(names))
-            return []
+            return _remember(base_url, now, [])
 
+    for outcome in checked:
+        if isinstance(outcome, BaseException):
+            # _model_has_tools catches its own HTTP/OS/parse errors, so anything
+            # here is unexpected — a model would vanish from the dropdown with
+            # no trace of why.
+            logger.warning("ollama_show_unexpected_error", error=str(outcome))
     capable = [r for r in checked if isinstance(r, str)]
-    _model_cache[base_url] = (now, capable)
+    _remember(base_url, now, capable)
     logger.info(
         "ollama_models_listed", base_url=base_url, installed=len(names), tool_capable=len(capable)
     )

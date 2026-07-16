@@ -669,8 +669,16 @@ async function testConnection(): Promise<void> {
         authMode: authMode.value,
         apiKey: authMode.value === 'api_key' ? apiKey.value : null,
         oauthToken: authMode.value === 'subscription' ? oauthToken.value : null,
+        // Test what the user has typed, not a default. Without these, a
+        // provider running on their own machine gets probed at the default
+        // address with no model, and a healthy server reports as broken.
+        baseUrl: baseUrl.value || null,
+        model: model.value || null,
+        thinking: setupStore.state.claude.thinking,
       },
-      { timeout: 120_000 },
+      // Generous: this is the cold request, and local inference on CPU can
+      // spend most of it just loading the model into memory.
+      { timeout: 400_000 },
     )
 
     if (!data.cli_available) {

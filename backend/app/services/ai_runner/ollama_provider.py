@@ -31,7 +31,7 @@ import structlog
 
 from app.database import AsyncSessionLocal
 from app.mcp.auth import MCPAuthResult
-from app.models.organization import Organization
+from app.repositories.organization import OrganizationRepository
 from app.services.ai_runner.ollama_chat import OllamaChatError, chat
 from app.services.ai_runner.ollama_models import (
     OLLAMA_MODEL_ENV,
@@ -174,7 +174,7 @@ class OllamaProvider:
         turns = max(config.max_turns, _MIN_TURNS)
 
         async with AsyncSessionLocal() as db:
-            org = await db.get(Organization, uuid.UUID(config.mcp.org_id))
+            org = await OrganizationRepository(db).get_by_id(uuid.UUID(config.mcp.org_id))
             if org is None:
                 return ClaudeRunResult(
                     success=False, output="", error="Organisation not found for this run"

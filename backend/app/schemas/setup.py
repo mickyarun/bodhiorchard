@@ -88,12 +88,15 @@ class SetupClaude(BaseModel):
 
 
 class ClaudeCheckRequest(BaseModel):
-    """Body for ``POST /api/setup/check-claude`` — optional provisional creds.
+    """Body for ``POST /api/setup/check-claude`` — optional provisional config.
 
-    Used by the setup wizard to validate a pasted API key or subscription OAuth
-    token *before* creating the org. The provisional credential is passed to the
-    subprocess via ``env_extra`` only — the backend's process env is never
-    mutated.
+    Used by the setup wizard to validate what the user has typed *before* the
+    org exists. Everything here is provisional: it reaches the run via
+    ``env_extra`` only, and the backend's process env is never mutated.
+
+    Carries the same host/model/thinking fields as ``SetupClaude`` so the test
+    exercises the configuration the user is about to save. Testing anything
+    else would report on a setup they never asked for.
     """
 
     model_config = {"populate_by_name": True}
@@ -102,6 +105,9 @@ class ClaudeCheckRequest(BaseModel):
     auth_mode: str = Field(default="host", alias="authMode")
     api_key: str | None = Field(default=None, alias="apiKey")
     oauth_token: str | None = Field(default=None, alias="oauthToken")
+    base_url: str | None = Field(default=None, alias="baseUrl")
+    model: str | None = Field(default=None, alias="model")
+    thinking: bool = Field(default=False, alias="thinking")
 
 
 class SetupRequest(BaseModel):

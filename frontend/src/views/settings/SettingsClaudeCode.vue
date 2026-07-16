@@ -288,6 +288,7 @@ const authMode = ref<string>('host')
 const credential = ref('')
 const hasStoredCredential = ref(false)
 const saving = ref(false)
+const modelsLoading = ref(false)
 // Settings for a provider that runs against this org's own machine.
 const baseUrl = ref('')
 const model = ref('')
@@ -405,6 +406,37 @@ watch([provider, authMode, credential], () => {
     claudeVersion.value = ''
   }
 })
+
+// The model list is a property of whichever server the address points at, so
+// it has to be re-read when that changes. Without this, pointing at a remote
+// host still lists the models of the last one — or nothing — and the user
+// saves an empty model, which fails every later run.
+let refreshTimer: ReturnType<typeof setTimeout> | undefined
+watch(baseUrl, () => {
+  if (!currentCaps.value?.dynamic_models) return
+  clearTimeout(refreshTimer)
+  // Debounced: this fires per keystroke, and each probe is a real network call.
+  refreshTimer = setTimeout(() => void refreshModels(), 600)
+})
+
+async function refreshModels(): Promise<void> {
+  modelsLoading.value = true
+  try {
+    const { data } = await api.get('/v1/settings/ai/capabilities', {
+      params: { base_url: baseUrl.value.trim() || undefined },
+    })
+    providersCaps.value = data.providers ?? providersCaps.value
+    // A model that the new host doesn't have is not a valid choice.
+    if (model.value && !modelOptions.value.some((m) => m.id === model.value)) {
+      model.value = ''
+    }
+  } catch {
+    // An unreachable host is a normal state while typing an address — the
+    // empty list and its hint already say so.
+  } finally {
+    modelsLoading.value = false
+  }
+}
 
 onMounted(async () => {
   try {

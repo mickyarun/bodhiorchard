@@ -16,8 +16,11 @@
 
 import json
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -37,6 +40,7 @@ from app.services.claude_runner import (
 )
 
 ORG_ID = str(uuid.uuid4())
+_SENTINEL: Any = object()
 
 
 def _cfg(**kw: Any) -> ClaudeRunnerConfig:
@@ -68,6 +72,23 @@ def _msg(content: str = "", tool_calls: list[dict[str, Any]] | None = None) -> d
 
 def _call(name: str, **args: Any) -> dict[str, Any]:
     return {"function": {"name": name, "arguments": args}}
+
+
+@contextmanager
+def _fake_org_lookup(org: object | None = _SENTINEL) -> Iterator[None]:
+    """Stand in for the loop's own session and org lookup.
+
+    The loop opens its own session — it cannot borrow a request's — so both
+    are patched. Pass ``None`` to simulate an org that no longer exists.
+    """
+    resolved = SimpleNamespace(id=uuid.UUID(ORG_ID)) if org is _SENTINEL else org
+    repo = MagicMock()
+    repo.return_value.get_by_id = AsyncMock(return_value=resolved)
+    with (
+        patch("app.services.ai_runner.ollama_provider.AsyncSessionLocal"),
+        patch("app.services.ai_runner.ollama_provider.OrganizationRepository", repo),
+    ):
+        yield
 
 
 # --- the registry must not route Ollama anywhere else -------------------------
@@ -173,8 +194,7 @@ async def test_tool_call_runs_in_process_and_feeds_the_result_back() -> None:
     with (
         patch("app.services.ai_runner.ollama_provider.chat", chat),
         patch("app.services.ai_runner.ollama_tools.dispatch_tool", dispatch),
-        patch("app.services.ai_runner.ollama_provider.AsyncSessionLocal"),
-        patch("app.services.ai_runner.ollama_provider.Organization"),
+        _fake_org_lookup(),
     ):
         result = await OllamaProvider().run(
             "how many features?",
@@ -199,8 +219,7 @@ async def test_only_requested_tools_are_offered() -> None:
     chat = AsyncMock(return_value=_msg("done"))
     with (
         patch("app.services.ai_runner.ollama_provider.chat", chat),
-        patch("app.services.ai_runner.ollama_provider.AsyncSessionLocal"),
-        patch("app.services.ai_runner.ollama_provider.Organization"),
+        _fake_org_lookup(),
     ):
         await OllamaProvider().run("q", NO_REPO_CONTEXT, _cfg(mcp=_mcp(["get_features"])))
     offered = {t["function"]["name"] for t in chat.await_args.kwargs["tools"]}
@@ -214,8 +233,7 @@ async def test_loop_that_never_answers_fails_loudly() -> None:
     with (
         patch("app.services.ai_runner.ollama_provider.chat", chat),
         patch("app.services.ai_runner.ollama_tools.dispatch_tool", AsyncMock(return_value="{}")),
-        patch("app.services.ai_runner.ollama_provider.AsyncSessionLocal"),
-        patch("app.services.ai_runner.ollama_provider.Organization"),
+        _fake_org_lookup(),
     ):
         result = await OllamaProvider().run("q", NO_REPO_CONTEXT, _cfg(mcp=_mcp(), max_turns=3))
     assert result.success is False
@@ -234,8 +252,7 @@ async def test_a_tool_run_naming_no_tools_refuses() -> None:
     chat = AsyncMock(return_value=_msg("here is some prose"))
     with (
         patch("app.services.ai_runner.ollama_provider.chat", chat),
-        patch("app.services.ai_runner.ollama_provider.AsyncSessionLocal"),
-        patch("app.services.ai_runner.ollama_provider.Organization"),
+        _fake_org_lookup(),
     ):
         result = await OllamaProvider().run("q", NO_REPO_CONTEXT, _cfg(mcp=_mcp([])))
     assert result.success is False
@@ -258,8 +275,7 @@ async def test_malformed_tool_calls_do_not_crash_the_run(bad: Any) -> None:
     chat = AsyncMock(side_effect=[_msg(tool_calls=[bad]), _msg("recovered")])
     with (
         patch("app.services.ai_runner.ollama_provider.chat", chat),
-        patch("app.services.ai_runner.ollama_provider.AsyncSessionLocal"),
-        patch("app.services.ai_runner.ollama_provider.Organization"),
+        _fake_org_lookup(),
     ):
         result = await OllamaProvider().run("q", NO_REPO_CONTEXT, _cfg(mcp=_mcp()))
     assert result.success and result.output == "recovered"

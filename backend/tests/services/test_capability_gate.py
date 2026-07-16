@@ -28,8 +28,12 @@ import pytest
 from app.models.organization import AIProvider, Organization
 from app.services.ai_runner import run_agent
 from app.services.ai_runner.capabilities import capabilities_for
-from app.services.ai_runner.capability_gate import adapt_config, unsupported_reason
-from app.services.ai_runner.ollama_models import OLLAMA_HOST_ENV, OLLAMA_THINK_ENV
+from app.services.ai_runner.capability_gate import adapt_config, provider_env, unsupported_reason
+from app.services.ai_runner.ollama_models import (
+    OLLAMA_HOST_ENV,
+    OLLAMA_MODEL_ENV,
+    OLLAMA_THINK_ENV,
+)
 from app.services.claude_runner import (
     NO_REPO_CONTEXT,
     ClaudeRunnerConfig,
@@ -190,3 +194,41 @@ def test_claude_config_is_passed_through_untouched() -> None:
     caps = capabilities_for(AIProvider.claude)
     original = ClaudeRunnerConfig(max_turns=40, timeout_seconds=900)
     assert adapt_config(caps, _org(AIProvider.claude), original) is original
+
+
+# --- provider_env: the seam both a real run and the wizard go through --------
+
+
+def test_wizard_and_run_resolve_settings_the_same_way() -> None:
+    """The setup wizard has no org — only what the user has typed.
+
+    Its "Test connection" must exercise those values, not a default. When these
+    two diverged, the wizard probed the default address with no model and told
+    a user with a healthy server to go configure the field they had just filled.
+    """
+    caps = capabilities_for(AIProvider.ollama)
+    org = _org(
+        AIProvider.ollama, ai_base_url="http://box:11434", ai_model="qwen3", ai_thinking=True
+    )
+
+    from_run = adapt_config(caps, org, ClaudeRunnerConfig()).env_extra
+    from_wizard = provider_env(caps, base_url="http://box:11434", model="qwen3", thinking=True)
+
+    assert from_run == from_wizard
+
+
+def test_provider_env_is_empty_for_a_provider_with_no_host_settings() -> None:
+    """Nothing to carry for the CLI providers, so callers can skip the merge."""
+    for provider in (AIProvider.claude, AIProvider.copilot, AIProvider.codex):
+        caps = capabilities_for(provider)
+        assert provider_env(caps, base_url="http://x", model="m", thinking=True) == {}
+
+
+def test_a_blank_model_is_not_sent() -> None:
+    """An unset model must be absent, not an empty string the provider would
+    treat as a real (and unusable) choice."""
+    caps = capabilities_for(AIProvider.ollama)
+    env = provider_env(caps, base_url=None, model="   ", thinking=False)
+    assert OLLAMA_MODEL_ENV not in env
+    # ...while the host still falls back to the table's default.
+    assert env[OLLAMA_HOST_ENV] == caps.default_base_url

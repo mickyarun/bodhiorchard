@@ -78,6 +78,37 @@ def unsupported_reason(
     return None
 
 
+def provider_env(
+    caps: ProviderCapabilities,
+    *,
+    base_url: str | None,
+    model: str | None,
+    thinking: bool,
+) -> dict[str, str]:
+    """The per-run settings ``caps``' provider needs, as an env mapping.
+
+    Takes loose values rather than an org, because both callers need this and
+    only one of them has an org: a real run reads the org's saved settings, and
+    the setup wizard has values the user has typed but not yet saved. Feeding
+    both through here is what keeps "Test connection" honest — it checks the
+    configuration the run will actually use, rather than a default that happens
+    to work on the developer's machine.
+
+    Returns ``{}`` for a provider with none of these, so callers can skip.
+    """
+    env: dict[str, str] = {}
+    if caps.requires_base_url:
+        env[OLLAMA_HOST_ENV] = (base_url or "").strip() or (caps.default_base_url or "")
+    if caps.supports_thinking:
+        env[OLLAMA_THINK_ENV] = "1" if thinking else "0"
+    if caps.dynamic_models and (model or "").strip():
+        # The org's choice, from what its host actually has installed. A
+        # skill's own `model` is a different provider's vocabulary ("sonnet",
+        # "haiku") and would 404 against a local server.
+        env[OLLAMA_MODEL_ENV] = (model or "").strip()
+    return env
+
+
 def adapt_config(
     caps: ProviderCapabilities, org: Organization | None, config: ClaudeRunnerConfig
 ) -> ClaudeRunnerConfig:
@@ -110,20 +141,18 @@ def adapt_config(
         if capped != config.max_turns:
             changes["max_turns"] = capped
 
+    # Only read the host settings for a provider that actually uses them — the
+    # CLI providers don't, and touching an org's columns to build a mapping
+    # that would come back empty is just a way to fail on something unrelated.
     if caps.requires_base_url or caps.supports_thinking or caps.dynamic_models:
-        env: dict[str, str] = dict(config.env_extra or {})
-        if caps.requires_base_url:
-            env[OLLAMA_HOST_ENV] = (org.ai_base_url if org else None) or (
-                caps.default_base_url or ""
-            )
-        if caps.supports_thinking:
-            env[OLLAMA_THINK_ENV] = "1" if (org and org.ai_thinking) else "0"
-        if caps.dynamic_models and org and org.ai_model:
-            # The org's choice, from what its host actually has installed. The
-            # skill's own `model` is a different provider's vocabulary
-            # ("sonnet", "haiku") and would 404 against a local server.
-            env[OLLAMA_MODEL_ENV] = org.ai_model
-        changes["env_extra"] = env
+        provider_settings = provider_env(
+            caps,
+            base_url=org.ai_base_url if org else None,
+            model=org.ai_model if org else None,
+            thinking=bool(org.ai_thinking) if org else False,
+        )
+        if provider_settings:
+            changes["env_extra"] = {**(config.env_extra or {}), **provider_settings}
 
     if not changes:
         return config

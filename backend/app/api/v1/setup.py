@@ -44,7 +44,8 @@ from app.schemas.setup import (
     SetupStatusResponse,
 )
 from app.services.ai_runner.capabilities import capabilities_for
-from app.services.ai_runner.connection_check import check_connection
+from app.services.ai_runner.capability_gate import provider_env
+from app.services.ai_runner.connection_check import _DEFAULT_PING_TIMEOUT_S, check_connection
 from app.services.claude_env import (
     AUTH_MODE_HOST,
     AUTH_MODE_SUBSCRIPTION,
@@ -227,7 +228,8 @@ async def get_ai_capabilities() -> dict[str, Any]:
 
     Host-provided model lists are probed at each provider's default address:
     there is no org yet to have configured one, and the common case is a local
-    server on this machine. A wizard pointed elsewhere re-probes on save.
+    server on this machine. A wizard pointed elsewhere gets its models once the
+    org exists and the authenticated endpoint probes the saved address.
     """
     providers = await with_dynamic_models([serialize_provider(p) for p in AIProvider], None)
     return {
@@ -343,9 +345,19 @@ async def check_ai_with_credentials(
             f"choose one of {valid}",
         )
 
-    # Host mode: no stored secret — rely on the host CLI login / process env.
+    # Everything the user has typed but not yet saved, resolved through the same
+    # helper a real run uses — so the test exercises their configuration rather
+    # than a default. Without this a provider with no CLI is probed at its
+    # default address with no model, and reports a healthy server as broken.
+    provisional = provider_env(
+        caps, base_url=body.base_url, model=body.model, thinking=body.thinking
+    )
+    timeout_s = int(_DEFAULT_PING_TIMEOUT_S * caps.timeout_multiplier)
+
+    # Host mode: no stored secret — rely on the host CLI login / process env,
+    # or on a provider that needs no credential at all.
     if not spec.requires_secret:
-        return await check_connection(provider)
+        return await check_connection(provider, provisional or None, timeout_s)
 
     # Credentialed mode: subscription uses the OAuth token field, others the
     # api_key field. The secret is injected only into this subprocess's env.
@@ -356,12 +368,12 @@ async def check_ai_with_credentials(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"A credential is required for {provider.value} '{body.auth_mode}' mode",
         )
-    env_extra = {var: secret for var in spec.env_vars}
+    env_extra = {**provisional, **{var: secret for var in spec.env_vars}}
     # Subscription: drop any inherited ANTHROPIC_API_KEY so it can't shadow the
     # OAuth token and pass the test against the wrong credential.
     if body.auth_mode == AUTH_MODE_SUBSCRIPTION:
         env_extra["ANTHROPIC_API_KEY"] = ""
-    return await check_connection(provider, env_extra)
+    return await check_connection(provider, env_extra, timeout_s)
 
 
 @router.post("/init-org", response_model=InitOrgResponse, status_code=status.HTTP_201_CREATED)
