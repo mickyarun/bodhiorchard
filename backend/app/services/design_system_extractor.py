@@ -40,6 +40,7 @@ from app.models.organization import AIProvider, Organization
 from app.services.ai_runner import run_agent
 from app.services.ai_runner.capabilities import capabilities_for
 from app.services.claude_runner import (
+    NO_REPO_CONTEXT,
     ClaudeRunnerConfig,
     is_claude_cli_available,
 )
@@ -86,19 +87,25 @@ def _cli_available(org: Organization | None) -> bool:
     """Whether the org's provider can do LLM extraction (else regex fallback).
 
     Claude keeps its dedicated check; other CLI providers test their binary
-    name from the capability table. A provider that cannot read files at all
-    is treated the same as a missing CLI — this extraction reads a repository,
-    so there is nothing for it to run — and the caller cleanly degrades to
-    regex extraction rather than shipping a confident guess about files that
-    were never opened.
+    name from the capability table.
+
+    File access is deliberately NOT required. The extraction's payload is the
+    design files this module already read and inlines into the prompt — the
+    agent is handed the source, it does not go looking for it. Only the >10KB
+    stragglers are left on disk, and those are an optimisation, not the job. So
+    a provider with no filesystem still does real work here; refusing it would
+    force the regex fallback (web/Vuetify idioms only) on orgs whose provider
+    is perfectly capable.
     """
     provider = org.ai_provider if org is not None else AIProvider.claude
     caps = capabilities_for(provider)
-    if not caps.supports_files:
-        return False
+    if caps.cli is None:
+        # An HTTP provider has no binary to probe. Liveness is the runner's
+        # problem, and a failure there degrades to the fallback like any other.
+        return True
     if provider == AIProvider.claude:
         return is_claude_cli_available()
-    return caps.cli is not None and shutil.which(caps.cli) is not None
+    return shutil.which(caps.cli) is not None
 
 
 async def extract_design_system(
@@ -375,6 +382,14 @@ async def _llm_extract(
     file_context = "\n\n".join(inline_parts) if inline_parts else "(none inlined)"
     paths_section = "\n".join(path_only_files) if path_only_files else ""
 
+    # A provider with no filesystem works from the inlined files alone, so it
+    # must not be handed a repo path (run_agent refuses that outright) nor told
+    # to go read things it cannot reach — an instruction it can't follow reads
+    # to the model as a broken environment, and it gives up instead of using
+    # the source already in front of it.
+    caps = capabilities_for(org.ai_provider if org is not None else AIProvider.claude)
+    can_read_files = caps.supports_files
+
     prompt_parts = [
         "You are a design system analyzer. Extract the design system "
         "from this repository into structured markdown.\n",
@@ -387,20 +402,27 @@ async def _llm_extract(
     # ``code_context`` against the per-repo cached call graph. When
     # available these are 5-10× faster than reading individual files
     # by name; when not registered the CLI just ignores the suggestion.
-    prompt_parts.append(
-        "## Navigation\n\n"
-        "If the bodhi `code_*` MCP tools are connected, **prefer them "
-        "over filesystem scans**:\n"
-        '- `code_query` with query="theme color typography" to '
-        "locate design-related symbols by name.\n"
-        "- `code_context` with a symbol name to get its definition "
-        "+ callers without reading the whole file.\n"
-        "Fall back to `Read` only for files the indexer doesn't surface.\n"
-    )
+    if can_read_files:
+        prompt_parts.append(
+            "## Navigation\n\n"
+            "If the bodhi `code_*` MCP tools are connected, **prefer them "
+            "over filesystem scans**:\n"
+            '- `code_query` with query="theme color typography" to '
+            "locate design-related symbols by name.\n"
+            "- `code_context` with a symbol name to get its definition "
+            "+ callers without reading the whole file.\n"
+            "Fall back to `Read` only for files the indexer doesn't surface.\n"
+        )
+    else:
+        prompt_parts.append(
+            "## Navigation\n\n"
+            "You have no filesystem access. Everything you need is inlined "
+            "below — work from it directly and do not ask to open files.\n"
+        )
 
     prompt_parts.append(f"## Key Files (inlined)\n\n{file_context}\n")
 
-    if paths_section:
+    if paths_section and can_read_files:
         prompt_parts.append(f"## Additional Files (read from disk if needed)\n\n{paths_section}\n")
 
     prompt_parts.append(_extraction_instructions(platform))
@@ -414,7 +436,7 @@ async def _llm_extract(
     result = await run_agent(
         org,
         prompt,
-        repo_path,
+        repo_path if can_read_files else NO_REPO_CONTEXT,
         ClaudeRunnerConfig(max_turns=12, timeout_seconds=600),
     )
 
