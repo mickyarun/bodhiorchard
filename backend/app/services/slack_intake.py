@@ -694,6 +694,7 @@ async def _run_triage_agent(
         backend_url=app_settings.mcp_backend_url,
         mcp_token=token,
         tool_names=["check_feature_exists", "get_bud_context", "search_bugs"],
+        org_id=str(org.id),
     )
 
     result = await run_agent(
@@ -849,6 +850,12 @@ async def _run_prd_agent(
         mcp = MCPServerConfig(
             backend_url=app_settings.mcp_backend_url,
             mcp_token=token,
+            # Name the skill's own tools rather than leaving this empty. The
+            # CLI path reads empty as "expose everything", which works but
+            # hands the model 29 tools; a provider that runs tools in-process
+            # has no such default to fall back on.
+            tool_names=skill.mcp_tools or [],
+            org_id=str(org.id),
         )
         result = await run_agent(
             org,

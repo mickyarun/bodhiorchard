@@ -24,18 +24,31 @@ from app.services.ai_runner.base import AgentProvider
 from app.services.ai_runner.claude_provider import ClaudeProvider
 from app.services.ai_runner.codex_provider import CodexProvider
 from app.services.ai_runner.copilot_provider import CopilotProvider
+from app.services.ai_runner.ollama_provider import OllamaProvider
+
+# Every provider must be named explicitly. A default arm here would turn "this
+# provider has no adapter yet" into "silently run on someone else's" — an org
+# that picked a local-only provider would have its prompts sent to a hosted
+# API, succeeding quietly wherever that API happens to work.
+_ADAPTERS: dict[AIProvider, type[AgentProvider]] = {
+    AIProvider.claude: ClaudeProvider,
+    AIProvider.copilot: CopilotProvider,
+    AIProvider.codex: CodexProvider,
+    AIProvider.ollama: OllamaProvider,
+}
 
 
 def provider_instance(provider: AIProvider) -> AgentProvider:
     """Map an :class:`AIProvider` to its adapter (no org needed).
 
     Used by the pre-init setup connection test, which has no organization yet.
+
+    Raises ``KeyError`` for a provider with no adapter — loudly, and at the
+    dispatch point. Adding an enum member without an adapter is a programming
+    error, and every alternative to raising here routes the run somewhere the
+    user did not choose.
     """
-    if provider == AIProvider.copilot:
-        return CopilotProvider()
-    if provider == AIProvider.codex:
-        return CodexProvider()
-    return ClaudeProvider()
+    return _ADAPTERS[provider]()
 
 
 def provider_for(org: Organization | None = None) -> AgentProvider:

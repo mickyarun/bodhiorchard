@@ -92,6 +92,12 @@ class Organization(BaseModel):
     # — resolved in code via ProviderCapabilities.default_base_url, so that
     # default can change without a migration.
     ai_base_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Which model to run, for providers whose models live on the org's own host
+    # rather than in our capability table. Skills name a model in their
+    # frontmatter, but those are another provider's vocabulary ("sonnet",
+    # "haiku") and mean nothing to a local server — so for those providers the
+    # org chooses once, here, from what it actually has installed.
+    ai_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # Whether to let the model emit a reasoning trace before answering
     # (Ollama's `think`). Off by default: it roughly doubles latency for no
     # measurable gain on the short, structured tasks this provider handles,

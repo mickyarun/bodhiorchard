@@ -166,6 +166,7 @@ def build_mcp_config(
             backend_url=app_settings.mcp_backend_url,
             mcp_token=token,
             tool_names=tool_names or [],
+            org_id=org_id,
         )
     except Exception:
         logger.warning("mcp_config_build_failed", org_id=org_id)

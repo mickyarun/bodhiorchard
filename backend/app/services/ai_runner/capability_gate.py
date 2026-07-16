@@ -1,0 +1,137 @@
+# Copyright 2025-2026 Arun Rajkumar
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Refuses runs a provider cannot actually perform, and adapts the rest.
+
+Not every provider can do everything. Ollama has tools but no filesystem and
+no session affinity, so a caller that hands it a repo path and a prompt saying
+"read these files" gets a fluent answer about files it never opened — a
+*plausible* result, which is worse than an error because nothing looks wrong.
+Scan synthesis is the sharpest case: its output arrives entirely via MCP side
+effects, so an incapable provider yields a clean, silent zero-feature scan.
+
+So the capability table decides up front, and an unsupported combination fails
+loudly here rather than being discovered downstream. This is a correctness
+guard, not a security boundary — ``connection_check`` deliberately calls
+providers directly and bypasses it.
+"""
+
+from dataclasses import replace
+from pathlib import Path
+
+import structlog
+
+from app.models.organization import Organization
+from app.services.ai_runner.capability_types import ProviderCapabilities
+from app.services.ai_runner.ollama_models import (
+    OLLAMA_HOST_ENV,
+    OLLAMA_MODEL_ENV,
+    OLLAMA_THINK_ENV,
+)
+from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig
+
+logger = structlog.get_logger(__name__)
+
+
+def unsupported_reason(
+    caps: ProviderCapabilities, working_dir: str | Path, config: ClaudeRunnerConfig
+) -> str | None:
+    """Why ``caps``' provider cannot run this, or None if it can.
+
+    The message is user-facing: it says what is missing and what to do about
+    it, because it surfaces in a job error where the reader is an operator,
+    not the person who wrote this code.
+    """
+    name = caps.provider.value
+
+    # A real working_dir means the caller expects the agent to read files.
+    # Checked via the sentinel, NOT via max_turns: max_turns == 0 means
+    # *unlimited* (claude_runner omits the flag when <= 0), so a "> 1" test
+    # would read the most agentic callers as single-turn.
+    if not caps.supports_files and str(working_dir) != NO_REPO_CONTEXT:
+        return (
+            f"This feature needs to read the repository, which the {name} provider "
+            f"cannot do — it has no filesystem access. Switch the organisation to a "
+            f"CLI-based provider (Settings → AI Config) to use it."
+        )
+    if not caps.supports_mcp and config.mcp is not None:
+        return (
+            f"This feature needs MCP tools, which the {name} provider cannot use. "
+            f"Switch the organisation to a provider that supports them."
+        )
+    if not caps.supports_resume and config.is_resume:
+        return (
+            f"This feature resumes an earlier agent session, which the {name} "
+            f"provider cannot do — its calls are stateless."
+        )
+    return None
+
+
+def adapt_config(
+    caps: ProviderCapabilities, org: Organization | None, config: ClaudeRunnerConfig
+) -> ClaudeRunnerConfig:
+    """Reshape ``config`` for ``caps``' provider without touching call sites.
+
+    Two jobs:
+
+    1. Scale limits the caller chose for a hosted API. Local inference is far
+       slower, and an unbounded tool loop on a small model is a real hazard,
+       so the table's multiplier and turn cap are applied at this seam rather
+       than at all ~19 call sites.
+    2. Carry org-scoped settings down to the provider. Providers never receive
+       the org — only ``config`` — and ``os.environ`` is process-global, so
+       two orgs on different hosts would clobber each other there. ``env_extra``
+       is per-run, which keeps it multi-tenant safe; it is also how
+       ``connection_check`` already passes provisional wizard values, so the
+       setup "test before save" path works through the same code.
+    """
+    changes: dict[str, object] = {}
+
+    if caps.timeout_multiplier != 1.0:
+        changes["timeout_seconds"] = int(config.timeout_seconds * caps.timeout_multiplier)
+    if caps.max_turns_cap is not None:
+        # max_turns <= 0 means unlimited, which a capped provider must not honour.
+        capped = (
+            caps.max_turns_cap
+            if config.max_turns <= 0
+            else min(config.max_turns, caps.max_turns_cap)
+        )
+        if capped != config.max_turns:
+            changes["max_turns"] = capped
+
+    if caps.requires_base_url or caps.supports_thinking or caps.dynamic_models:
+        env: dict[str, str] = dict(config.env_extra or {})
+        if caps.requires_base_url:
+            env[OLLAMA_HOST_ENV] = (org.ai_base_url if org else None) or (
+                caps.default_base_url or ""
+            )
+        if caps.supports_thinking:
+            env[OLLAMA_THINK_ENV] = "1" if (org and org.ai_thinking) else "0"
+        if caps.dynamic_models and org and org.ai_model:
+            # The org's choice, from what its host actually has installed. The
+            # skill's own `model` is a different provider's vocabulary
+            # ("sonnet", "haiku") and would 404 against a local server.
+            env[OLLAMA_MODEL_ENV] = org.ai_model
+        changes["env_extra"] = env
+
+    if not changes:
+        return config
+    adapted = replace(config, **changes)  # type: ignore[arg-type]
+    logger.debug(
+        "ai_config_adapted",
+        provider=caps.provider.value,
+        timeout_seconds=adapted.timeout_seconds,
+        max_turns=adapted.max_turns,
+    )
+    return adapted

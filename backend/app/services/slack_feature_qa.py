@@ -343,6 +343,7 @@ async def _run_qa_agent(
         backend_url=app_settings.mcp_backend_url,
         mcp_token=token,
         tool_names=_TOOLS_BY_INTENT[intent],
+        org_id=str(org.id),
     )
 
     model = skill.model or None
@@ -536,6 +537,7 @@ async def _resume_qa_turn(
         backend_url=app_settings.mcp_backend_url,
         mcp_token=token,
         tool_names=_ALL_QA_TOOLS,
+        org_id=str(org.id),
     )
 
     # Continue on the exact model the session was minted with; only fall

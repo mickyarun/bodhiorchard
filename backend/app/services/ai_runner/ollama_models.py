@@ -35,7 +35,13 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434"
+# Ollama's own variable for the server address.
 OLLAMA_HOST_ENV = "OLLAMA_HOST"
+# Ours, not Ollama's: the per-run channel carrying org-scoped settings down to
+# the provider. Providers are handed a config, never the org, and os.environ
+# would leak one org's choice into another's run.
+OLLAMA_THINK_ENV = "OLLAMA_THINK"  # "1"/"0"
+OLLAMA_MODEL_ENV = "OLLAMA_MODEL"
 
 # Short: this runs inside a settings-page request. A slow or absent host must
 # degrade quickly, not hold the page open.

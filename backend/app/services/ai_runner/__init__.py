@@ -29,6 +29,8 @@ from app.database import AsyncSessionLocal
 from app.models.organization import AIProvider, Organization
 from app.repositories.organization import OrganizationRepository
 from app.services.ai_runner.base import AgentProvider
+from app.services.ai_runner.capabilities import capabilities_for
+from app.services.ai_runner.capability_gate import adapt_config, unsupported_reason
 from app.services.ai_runner.claude_provider import ClaudeProvider
 from app.services.ai_runner.registry import provider_for
 from app.services.claude_runner import (
@@ -59,16 +61,33 @@ async def run_agent(
 
     Drop-in for direct ``run_claude_code`` calls, with the provider chosen
     per-org via :func:`provider_for`.
+
+    Refuses combinations the org's provider cannot perform (see
+    :mod:`capability_gate`) rather than letting them return a plausible-looking
+    empty result, and adapts limits and org settings for it.
     """
-    provider = provider_for(org)
+    provider_enum = org.ai_provider if org is not None else AIProvider.claude
+    caps = capabilities_for(provider_enum)
     cfg = config or ClaudeRunnerConfig()
+
+    blocked = unsupported_reason(caps, working_dir, cfg)
+    if blocked is not None:
+        logger.warning(
+            "agent_run_unsupported",
+            provider=provider_enum.value,
+            org_id=str(org.id) if org else None,
+            reason=blocked,
+        )
+        return ClaudeRunResult(success=False, output="", error=blocked)
+
+    cfg = adapt_config(caps, org, cfg)
     logger.info(
         "agent_run",
-        provider=(org.ai_provider if org is not None else AIProvider.claude).value,
-        requested_model=cfg.model or "(cli default)",
-        requested_effort=cfg.effort or "(cli default)",
+        provider=provider_enum.value,
+        requested_model=cfg.model or "(provider default)",
+        requested_effort=cfg.effort or "(provider default)",
     )
-    return await provider.run(prompt, working_dir, cfg, progress_callback)
+    return await provider_for(org).run(prompt, working_dir, cfg, progress_callback)
 
 
 async def run_agent_for_org_id(
