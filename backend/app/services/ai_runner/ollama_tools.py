@@ -103,6 +103,26 @@ def parse_tool_call(call: object) -> tuple[str, dict[str, Any]] | None:
     return name, args if isinstance(args, dict) else {}
 
 
+async def _reload_org_after_rollback(db: AsyncSession, auth: MCPAuthResult) -> None:
+    """Re-load ``auth.org`` after a rollback so the next tool call can use it.
+
+    ``rollback()`` expires every instance in the session — that's unconditional,
+    unlike ``expire_on_commit``. The handlers read the org (``org.id`` at
+    minimum) through plain attribute access, which on an expired instance means
+    a lazy re-SELECT from sync code and therefore ``MissingGreenlet``. Without
+    this, one failing tool call poisons every call after it: each subsequent
+    tool dies on the org rather than on its own merits, the model is handed a
+    wall of "backend error", and it gives up on an otherwise healthy run.
+
+    Best-effort by design — a failure here must not escape and kill the run,
+    since we are already on the path of reporting another failure to the model.
+    """
+    try:
+        await db.refresh(auth.org)
+    except Exception:
+        logger.exception("ollama_org_reload_failed", org_id=str(auth.org.id))
+
+
 async def dispatch_tool(
     db: AsyncSession, auth: MCPAuthResult, name: str, arguments: dict[str, Any]
 ) -> str:
@@ -139,6 +159,7 @@ async def dispatch_tool(
         # a crash that escapes run() and breaks its contract of always
         # returning a ClaudeRunResult.
         await db.rollback()
+        await _reload_org_after_rollback(db, auth)
         logger.exception("ollama_tool_failed", tool=name, error=str(exc))
         return json.dumps({"error": f"{name} failed: {exc}"})
 
