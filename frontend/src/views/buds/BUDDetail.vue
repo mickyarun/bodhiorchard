@@ -29,14 +29,33 @@
         <v-skeleton-loader type="paragraph@4" />
       </div>
 
-      <!-- Error -->
-      <v-alert v-else-if="budStore.error" type="error" variant="tonal" class="ma-6">
+      <!-- Error — only when there is no BUD to show, i.e. the load itself
+           failed. Every store action funnels into the same ``error`` ref, so
+           branching on it alone replaced the whole page whenever an action
+           failed: a rejected status change or a refused design generation
+           would blank out the BUD the user was working in, losing their place
+           to report something they could have acted on in situ. An action
+           error belongs beside the content, below. -->
+      <v-alert v-else-if="budStore.error && !bud" type="error" variant="tonal" class="ma-6">
         {{ budStore.error }}
       </v-alert>
 
       <!-- Content -->
       <template v-else-if="bud">
         <div class="bud-page-content">
+          <!-- An action failed while the BUD is open — report it in place and
+               let the user dismiss it; the page stays usable underneath. -->
+          <v-alert
+            v-if="budStore.error"
+            type="error"
+            variant="tonal"
+            closable
+            class="mx-12 mb-3"
+            @click:close="budStore.error = ''"
+          >
+            {{ budStore.error }}
+          </v-alert>
+
           <!-- Header -->
           <BUDHeader
             :bud="bud"

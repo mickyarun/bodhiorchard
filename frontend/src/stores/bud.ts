@@ -298,8 +298,12 @@ export const useBUDStore = defineStore('bud', () => {
     try {
       const { data } = await api.post(`/v1/buds/${budId}/designs/generate`, { repo_ids: repoIds })
       return data
-    } catch {
-      error.value = 'Failed to start design generation'
+    } catch (err) {
+      // Surface the backend's detail verbatim — the 409 here says *why* and
+      // names the fix ("no design system ... extract one from a repository
+      // that has a UI"). A generic fallback turns an answerable message into
+      // a dead end, which is the whole failure this guard exists to avoid.
+      error.value = extractApiError(err, 'Failed to start design generation')
       return []
     }
   }

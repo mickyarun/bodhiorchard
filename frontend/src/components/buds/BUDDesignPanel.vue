@@ -191,16 +191,17 @@
     <AppCallout
       v-else-if="noDesignSystem"
       variant="warning"
-      eyebrow="No design system"
+      eyebrow="Design generation unavailable"
       icon="mdi-palette-swatch-outline"
       class="mb-4"
     >
-      AI generation needs a design system to take its tokens and app skeleton
-      from, and none has been extracted for this organisation. Design systems
-      come from repositories that have a UI, so a backend-only repository won't
-      produce one. Extract one in
-      <router-link to="/settings/design-systems">Settings → Design systems</router-link>,
-      or upload a wireframe instead.
+      A wireframe is built from a design system's tokens and app skeleton, and
+      none has been extracted here. Design systems come from repositories that
+      have a UI, so backend-only repositories never produce one. Add a frontend
+      repository in <router-link to="/settings/code">Settings → Code</router-link>
+      and extract its design system in
+      <router-link to="/settings/design-systems">Settings → Design systems</router-link>.
+      You can still upload a wireframe.
     </AppCallout>
 
     <AppCallout
@@ -254,10 +255,10 @@
     <v-icon icon="mdi-palette-outline" size="40" class="mb-3" />
     <div>No design yet</div>
     <div v-if="noDesignSystem" class="text-caption text-medium-emphasis mt-1 mb-3">
-      AI generation needs a design system, and none has been extracted — a
-      backend-only repository won't produce one. Extract one in
-      <router-link to="/settings/design-systems">Settings → Design systems</router-link>,
-      or upload a wireframe instead.
+      Design generation is unavailable — it needs a design system, and
+      backend-only repositories never produce one. Add a frontend repository in
+      <router-link to="/settings/code">Settings → Code</router-link>, or upload
+      a wireframe.
     </div>
     <div v-else class="text-caption text-medium-emphasis mt-1 mb-3">
       The AI agent will generate wireframes automatically
@@ -400,7 +401,7 @@ const generateBlockedReason = computed(() => {
     return 'Design system extraction is still running'
   }
   if (noDesignSystem.value) {
-    return 'No design system to build from — extract one in Settings → Design systems'
+    return 'Unavailable for backend-only repositories — add a frontend repository first'
   }
   return ''
 })
@@ -504,6 +505,10 @@ function debouncedSaveNotes(designId: string, value: string): void {
 onMounted(() => {
   loadDesigns()
   settingsStore.fetchRepos()
+  // Needed before first paint: the generate controls key off whether any
+  // design system exists, so without this an org that has one still renders
+  // the disabled state until some other view happens to populate the store.
+  designSystemStore.fetchAll()
 })
 
 // Self-trigger the repo-picker flow when the backend signals a fresh
@@ -561,7 +566,15 @@ async function triggerDesignGeneration(): Promise<void> {
   availableRepos.value = frontendRepos
   availableReposLoading.value = false
 
+  // No design system anywhere: the run cannot succeed, and the panel already
+  // states why and what to do. Stop here rather than trade that standing
+  // explanation for a red banner — this path is also reached unattended, via
+  // the design-phase watcher below, where nobody chose to generate at all.
+  if (noDesignSystem.value) return
+
   if (frontendRepos.length === 0) {
+    // No repo-specific design system, but one exists — the org default. The
+    // backend resolves it from a null repo id.
     await startDesignJobs([])
   } else if (frontendRepos.length === 1) {
     await startDesignJobs([frontendRepos[0].id])
