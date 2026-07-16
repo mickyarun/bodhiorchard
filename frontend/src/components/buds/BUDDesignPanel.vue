@@ -76,8 +76,8 @@
         <v-btn
           variant="text"
           size="small"
-          :disabled="!props.editable"
-          :title="!props.editable ? 'Move the BUD to Design to add wireframes' : ''"
+          :disabled="!canGenerate"
+          :title="generateBlockedReason"
           @click="triggerDesignGeneration"
         >
           <v-icon size="15" class="mr-1">mdi-plus</v-icon>
@@ -189,6 +189,21 @@
     </AppCallout>
 
     <AppCallout
+      v-else-if="noDesignSystem"
+      variant="warning"
+      eyebrow="No design system"
+      icon="mdi-palette-swatch-outline"
+      class="mb-4"
+    >
+      AI generation needs a design system to take its tokens and app skeleton
+      from, and none has been extracted for this organisation. Design systems
+      come from repositories that have a UI, so a backend-only repository won't
+      produce one. Extract one in
+      <router-link to="/settings/design-systems">Settings → Design systems</router-link>,
+      or upload a wireframe instead.
+    </AppCallout>
+
+    <AppCallout
       v-else
       variant="info"
       eyebrow="Create a wireframe"
@@ -219,8 +234,8 @@
         variant="tonal"
         size="small"
         color="primary"
-        :disabled="!props.editable || (extractingRepos.length > 0 && designSystemStore.items.length === 0)"
-        :title="!props.editable ? 'Move the BUD to Design phase to generate wireframes' : ''"
+        :disabled="!canGenerate"
+        :title="generateBlockedReason"
         @click="triggerDesignGeneration"
       >
         <v-icon start size="15">mdi-creation-outline</v-icon>
@@ -238,7 +253,13 @@
   <div v-else class="section-empty">
     <v-icon icon="mdi-palette-outline" size="40" class="mb-3" />
     <div>No design yet</div>
-    <div class="text-caption text-medium-emphasis mt-1 mb-3">
+    <div v-if="noDesignSystem" class="text-caption text-medium-emphasis mt-1 mb-3">
+      AI generation needs a design system, and none has been extracted — a
+      backend-only repository won't produce one. Extract one in
+      <router-link to="/settings/design-systems">Settings → Design systems</router-link>,
+      or upload a wireframe instead.
+    </div>
+    <div v-else class="text-caption text-medium-emphasis mt-1 mb-3">
       The AI agent will generate wireframes automatically
     </div>
     <div class="d-flex align-center ga-2">
@@ -246,8 +267,8 @@
         variant="tonal"
         size="small"
         color="primary"
-        :disabled="!props.editable || (extractingRepos.length > 0 && designSystemStore.items.length === 0)"
-        :title="!props.editable ? 'Move the BUD to Design phase to generate wireframes' : ''"
+        :disabled="!canGenerate"
+        :title="generateBlockedReason"
         @click="triggerDesignGeneration"
       >
         <v-icon start size="15">mdi-creation-outline</v-icon>
@@ -360,6 +381,31 @@ const extractingRepos = computed(() =>
 const designAutoOff = computed(
   () => currentBUD.value?.auto_generate_phases?.design !== true,
 )
+
+// No design system anywhere in the org — nothing for the designer to build
+// from. Design systems are extracted from repos that have a UI, so an org
+// tracking only backend repos legitimately has none, permanently.
+const noDesignSystem = computed(() => designSystemStore.items.length === 0)
+
+// Why AI generation is unavailable, or '' when it is available. The designer
+// builds strictly from the design system's tokens and app skeleton and is told
+// to stop rather than invent one, so without a design system the run can only
+// burn a model call and leave a failed row behind. Blocking beats offering a
+// button whose only outcome is a failure the user can't act on.
+// Single source for the button's disabled state, its tooltip, and the callout —
+// they drifted apart while each site repeated the condition inline.
+const generateBlockedReason = computed(() => {
+  if (!props.editable) return 'Move the BUD to Design phase to generate wireframes'
+  if (extractingRepos.value.length > 0 && noDesignSystem.value) {
+    return 'Design system extraction is still running'
+  }
+  if (noDesignSystem.value) {
+    return 'No design system to build from — extract one in Settings → Design systems'
+  }
+  return ''
+})
+
+const canGenerate = computed(() => generateBlockedReason.value === '')
 
 // Multi-design state
 const designs = ref<BUDDesign[]>([])

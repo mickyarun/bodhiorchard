@@ -25,6 +25,7 @@ from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.bud import BUDDesignStatus
 from app.models.user import User
 from app.repositories.bud import BUDDesignRepository, BUDRepository
+from app.repositories.design_system import DesignSystemRefRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.bud_design import BUDDesignRead, DesignGenerateRequest, DesignHtmlUpdate
 from app.schemas.jobs import DesignAgentJobPayload
@@ -60,6 +61,35 @@ async def _assert_repo_in_org(db: AsyncSession, org_id: uuid.UUID, repo_id: uuid
     repo = await TrackedRepoRepository(db, org_id=org_id).get_by_id(repo_id)
     if repo is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found")
+
+
+async def _assert_design_system_available(
+    db: AsyncSession, org_id: uuid.UUID, repo_ids: list[uuid.UUID | None]
+) -> None:
+    """Raise 409 unless a design system applies to every target repo.
+
+    The designer builds strictly from the design system's tokens and App
+    Skeleton, and is instructed to stop rather than invent one. With none
+    resolvable the run can only spend a model call, fail, and leave a failed
+    design row behind — so refuse up front, naming the fix.
+
+    A design system is extracted from a repository that has a UI, so an org
+    tracking only backend repos has none and always will. That's a legitimate
+    state, not an error; the UI disables generation on the same condition, and
+    this is the enforcement behind it.
+    """
+    ds_repo = DesignSystemRefRepository(db, org_id=org_id)
+    for repo_id in repo_ids:
+        if await ds_repo.get_effective(repo_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "No design system is available, so there are no tokens or app "
+                    "skeleton to generate a wireframe from. Extract one from a "
+                    "repository that has a UI in Settings → Design systems, or "
+                    "upload a wireframe instead."
+                ),
+            )
 
 
 @router.get(
@@ -104,6 +134,8 @@ async def generate_designs(
     for rid in repo_ids:
         if rid is not None:
             await _assert_repo_in_org(db, current_user.org_id, rid)
+
+    await _assert_design_system_available(db, current_user.org_id, repo_ids)
 
     design_rows: list[tuple[uuid.UUID | None, str]] = []
     for rid in repo_ids:
