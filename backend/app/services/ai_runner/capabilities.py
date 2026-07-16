@@ -156,7 +156,11 @@ CAPABILITIES: dict[AIProvider, ProviderCapabilities] = {
         # Local inference on CPU is roughly an order of magnitude slower than a
         # hosted API; callers' timeouts assume the latter.
         timeout_multiplier=4.0,
-        max_turns_cap=8,
+        # A runaway backstop, not a working limit. Set above what the most
+        # tool-heavy feature (scan synthesis) needs to emit its features across
+        # several rounds of write_synthesis_feature calls, while still bounding
+        # a model that would otherwise loop forever.
+        max_turns_cap=25,
         auth_modes=(_HOST_OLLAMA,),
         install_hint=(
             "Install Ollama (https://ollama.com), then `ollama pull qwen3`. "
