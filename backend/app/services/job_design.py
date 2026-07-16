@@ -34,6 +34,7 @@ from app.services.agent_activity_logger import log_agent_activity
 from app.services.ai_runner import run_agent_for_org_id
 from app.services.chat_prompts import build_design_prompt
 from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig
+from app.services.design_output_fallback import save_wireframe_from_output
 from app.services.github_remote_refresh import refresh_origin_token_for_spawn
 from app.services.job_queue import update_job
 from app.services.job_utils import (
@@ -219,6 +220,18 @@ async def handle_design_agent_job(job_id: str, raw_payload: dict[str, Any]) -> N
     # fall back to a generic message (a contaminated stdout no longer
     # blocks persistence).
     wireframe_saved = await _design_was_saved(design_id, payload.org_id) if design_id else False
+
+    if not wireframe_saved and design_id:
+        # The agent may have authored the wireframe and simply answered with
+        # it rather than calling the tool — routine on smaller local models.
+        # Recover the document instead of discarding a run that did the work.
+        wireframe_saved = await save_wireframe_from_output(
+            result.output,
+            org_id=_org_uuid,
+            bud_id=payload.bud_id,
+            design_id=design_id,
+            repo_id=repo_id,
+        )
 
     reply = "Design wireframe generated."
     response = parse_chat_response(result.output)
