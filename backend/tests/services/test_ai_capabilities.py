@@ -104,6 +104,22 @@ def test_codex_default_is_none_and_effort_can_drop() -> None:
     assert resolve_model(AIProvider.codex, "gpt-5.5", "max") == ("gpt-5.5", None)
 
 
+def test_codex_does_not_offer_chatgpt_account_rejected_models() -> None:
+    """gpt-5-codex and o3 fail on a ChatGPT-login account with a hard 400.
+
+    A listed id passes straight through to the CLI, so offering one of these
+    would guarantee a failed run rather than degrade — the exact drift this
+    table is supposed to prevent. If they are re-added, it must be behind an
+    auth mode that actually accepts them.
+    """
+    codex_ids = {m.id for m in capabilities_for(AIProvider.codex).models}
+    assert "gpt-5-codex" not in codex_ids
+    assert "o3" not in codex_ids
+    # An id not in the table still degrades cleanly to the default, so a run
+    # never dies on one that slipped through from, say, stale skill frontmatter.
+    assert resolve_model(AIProvider.codex, "o3", None) == (None, None)
+
+
 def test_capabilities_table_covers_all_enum_members() -> None:
     """No provider enum member is missing from the table."""
     assert set(CAPABILITIES) == set(AIProvider)

@@ -105,11 +105,20 @@ CAPABILITIES: dict[AIProvider, ProviderCapabilities] = {
     AIProvider.codex: ProviderCapabilities(
         provider=AIProvider.codex,
         cli="codex",
+        # Explicit ids are account-gated: a ChatGPT-login account (host mode)
+        # rejects gpt-5-codex / o3 / gpt-5 with "not supported ... with a
+        # ChatGPT account", while an OpenAI API key may allow them. Since a
+        # listed id passes straight through to the CLI (resolve_model only
+        # degrades ids it does NOT recognise), offering a rejected one is a
+        # guaranteed failure, not a graceful fallback. The empty default sends
+        # no -m flag, so codex uses whatever the account's own config permits —
+        # the one universally-safe choice. The explicit ids are verified
+        # against a ChatGPT account on codex-cli 0.142.4; gpt-5-codex and o3
+        # were removed after failing there.
         models=(
             ModelChoice("", "Default (codex config)"),
             ModelChoice("gpt-5.5", "GPT-5.5"),
-            ModelChoice("gpt-5-codex", "GPT-5 Codex"),
-            ModelChoice("o3", "o3 (reasoning)"),
+            ModelChoice("gpt-5.4", "GPT-5.4"),
         ),
         default_model="",
         supports_effort=True,
