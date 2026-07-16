@@ -21,6 +21,8 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.repo_layer import RepoLayer
+from app.models.scan_repo_run import ScanRepoRun
+from app.models.scan_run_enums import RepoRunStatus
 from app.models.tracked_repository import RepoStatus, TrackedRepository
 from app.repositories.base import BaseRepository, rowcount
 
@@ -433,6 +435,37 @@ class TrackedRepoRepository(BaseRepository[TrackedRepository]):
         )
         result = await self._db.execute(stmt)
         return {row.id: row.last_scanned_at is not None for row in result.all()}
+
+    async def get_repos_whose_last_run_failed(self, repo_ids: list[uuid.UUID]) -> set[uuid.UUID]:
+        """Return the ids whose most-recent scan run ended in ``failed``.
+
+        ``update_after_scan`` stamps ``last_scanned_at`` from the indexing
+        phase even when a later phase (synthesis) fails, so a failed scan
+        still looks "scanned" to ``get_scanned_status_by_ids`` — which then
+        routes its rescan down the incremental diff path. That path finds no
+        code changes and no-ops, leaving the repo permanently stuck with the
+        failure it never recovered from. The scan API uses this to re-route
+        those repos to a full scan instead. Only the *latest* run counts: a
+        repo that later succeeded must not be dragged back by an old failure.
+        """
+        if not repo_ids:
+            return set()
+        # One row per repo — its newest run — then keep the failed ones.
+        # Scoped explicitly on ScanRepoRun.org_id: _scoped() only knows how to
+        # scope this repository's own model (TrackedRepository).
+        latest_q = (
+            select(ScanRepoRun.repo_id, ScanRepoRun.status)
+            .where(ScanRepoRun.repo_id.in_(repo_ids))
+            .distinct(ScanRepoRun.repo_id)
+            .order_by(ScanRepoRun.repo_id, ScanRepoRun.created_at.desc())
+        )
+        if self._org_id is not None:
+            latest_q = latest_q.where(ScanRepoRun.org_id == self._org_id)
+        latest = latest_q.subquery()
+        result = await self._db.execute(
+            select(latest.c.repo_id).where(latest.c.status == RepoRunStatus.FAILED.value)
+        )
+        return {row.repo_id for row in result.all()}
 
     async def get_full_names_by_org(self) -> set[str]:
         """Return the set of non-null ``github_repo_full_name`` values for the org.

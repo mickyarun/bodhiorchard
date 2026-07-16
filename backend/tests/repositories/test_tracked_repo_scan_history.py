@@ -54,6 +54,34 @@ async def test_returns_empty_dict_for_empty_input() -> None:
 
 
 @pytest.mark.asyncio
+async def test_failed_last_run_lookup_short_circuits_on_empty() -> None:
+    """No ids → empty set, no DB round-trip."""
+    db = MagicMock()
+    db.execute = AsyncMock()
+    repo = TrackedRepoRepository(db, org_id=uuid.uuid4())
+
+    assert await repo.get_repos_whose_last_run_failed([]) == set()
+    db.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_failed_last_run_lookup_returns_the_failed_ids() -> None:
+    """The rows the query returns ARE the repos to re-route to a full scan."""
+    db = MagicMock()
+    failed_id = uuid.uuid4()
+    execute_result = MagicMock()
+    row = MagicMock()
+    row.repo_id = failed_id
+    execute_result.all = MagicMock(return_value=[row])
+    db.execute = AsyncMock(return_value=execute_result)
+    repo = TrackedRepoRepository(db, org_id=uuid.uuid4())
+
+    result = await repo.get_repos_whose_last_run_failed([failed_id, uuid.uuid4()])
+
+    assert result == {failed_id}
+
+
+@pytest.mark.asyncio
 async def test_maps_last_scanned_at_to_bool() -> None:
     """Non-null timestamp → True; NULL → False."""
     db = MagicMock()

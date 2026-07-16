@@ -445,13 +445,20 @@ async def _split_by_scan_history(
     enqueue loop. The caller surfaces the empty-result case as a 404
     only if BOTH buckets end up empty.
     """
-    scanned = await TrackedRepoRepository(db, org_id=org_id).get_scanned_status_by_ids(repo_ids)
+    repo = TrackedRepoRepository(db, org_id=org_id)
+    scanned = await repo.get_scanned_status_by_ids(repo_ids)
+    # A scan that failed still stamps last_scanned_at (from its indexing phase),
+    # so it looks "scanned" and its rescan would take the incremental diff path
+    # — which no-ops when the code hasn't changed, stranding the repo with the
+    # failure forever. Re-route those to a full scan so the next click actually
+    # retries synthesis.
+    failed_last_run = await repo.get_repos_whose_last_run_failed(repo_ids)
     first_scan: list[uuid.UUID] = []
     rescan: list[uuid.UUID] = []
     for repo_id in repo_ids:
         if repo_id not in scanned:
             continue
-        if scanned[repo_id]:
+        if scanned[repo_id] and repo_id not in failed_last_run:
             rescan.append(repo_id)
         else:
             first_scan.append(repo_id)
