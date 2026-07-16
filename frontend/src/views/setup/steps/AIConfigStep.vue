@@ -93,11 +93,62 @@
                 <span class="text-body-2 font-weight-medium">{{ prov.title }}</span>
               </div>
               <div class="text-caption text-medium-emphasis auth-tile__desc">
-                Runs via the <code>{{ prov.cli }}</code> CLI.
+                {{ prov.description }}
               </div>
             </div>
           </button>
         </div>
+
+        <!-- Settings for a provider that runs on this machine rather than via
+             a CLI. Collected here so the org is usable straight out of setup
+             instead of needing a second trip to Settings. -->
+        <template v-if="currentCaps?.requires_base_url">
+          <v-text-field
+            v-model="baseUrl"
+            label="Server address"
+            :placeholder="currentCaps.default_base_url ?? ''"
+            variant="outlined"
+            density="comfortable"
+            autocomplete="off"
+            prepend-inner-icon="mdi-server-network-outline"
+            :hint="`Leave blank for ${currentCaps.default_base_url}`"
+            persistent-hint
+            class="mb-4"
+          />
+        </template>
+        <template v-if="currentCaps?.dynamic_models">
+          <v-select
+            v-model="model"
+            :items="currentCaps.models"
+            item-title="label"
+            item-value="id"
+            label="Model"
+            variant="outlined"
+            density="comfortable"
+            prepend-inner-icon="mdi-brain"
+            no-data-text="No tool-capable models found"
+            :hint="
+              currentCaps.models.length
+                ? 'Read from your server — only models that support tool calling are listed.'
+                : 'None found. Check the address above, then run: ollama pull qwen3'
+            "
+            persistent-hint
+            class="mb-4"
+          />
+        </template>
+        <template v-if="currentCaps?.supports_thinking">
+          <div class="text-body-2 font-weight-medium mb-2">Reasoning</div>
+          <AppPillToggle
+            v-model="thinkingChoice"
+            :options="[
+              { value: 'off', label: 'Off (faster)' },
+              { value: 'on', label: 'On (slower)' },
+            ]"
+          />
+          <div class="text-caption text-medium-emphasis mt-1 mb-4">
+            Reasoning before answering roughly doubles response time. Off is recommended.
+          </div>
+        </template>
 
         <!-- Step 2: how the backend authenticates with the selected provider. -->
         <v-divider class="mb-4" />
@@ -275,7 +326,7 @@
             icon="mdi-check-decagram"
           >
             <div class="text-body-2">
-              Connected to <strong>{{ providerTitle }}</strong>
+              Connected to <strong>{{ currentProviderTitle }}</strong>
               <span v-if="claudeVersion"> ({{ claudeVersion }})</span>.
             </div>
           </v-alert>
@@ -316,7 +367,14 @@
 import { computed, onMounted, watch, ref } from 'vue'
 import api from '@/services/api'
 import { useSetupStore } from '@/stores/setup'
+import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import type { ClaudeAuthMode } from '@/types/setup'
+import {
+  type AuthModeSpec,
+  type ProviderCaps,
+  providerIcon,
+  providerTitle,
+} from '@/constants/aiProviders'
 
 const setupStore = useSetupStore()
 
@@ -343,27 +401,29 @@ const provider = computed<string>({
   set: (v) => { setupStore.state.claude.provider = v },
 })
 
-interface CapAuthMode { value: string; label: string; requires_secret: boolean }
-interface CapProvider {
-  provider: string
-  cli: string
-  auth_modes: CapAuthMode[]
-  install_hint: string
-}
-const providersCaps = ref<CapProvider[]>([])
+const baseUrl = computed<string>({
+  get: () => setupStore.state.claude.baseUrl,
+  set: (v) => { setupStore.state.claude.baseUrl = v },
+})
+const model = computed<string>({
+  get: () => setupStore.state.claude.model,
+  set: (v) => { setupStore.state.claude.model = v },
+})
+// AppPillToggle carries string values, so the boolean is mapped at the edge.
+const thinkingChoice = computed<'on' | 'off'>({
+  get: () => (setupStore.state.claude.thinking ? 'on' : 'off'),
+  set: (v) => { setupStore.state.claude.thinking = v === 'on' },
+})
 
-const PROVIDER_META: Record<string, { title: string; icon: string }> = {
-  claude: { title: 'Claude', icon: 'mdi-robot-happy-outline' },
-  copilot: { title: 'GitHub Copilot', icon: 'mdi-github' },
-  codex: { title: 'OpenAI Codex', icon: 'mdi-alpha-c-box-outline' },
-}
+const providersCaps = ref<ProviderCaps[]>([])
+
 const MODE_ICONS: Record<string, string> = {
   host: 'mdi-laptop',
   api_key: 'mdi-cloud-outline',
   subscription: 'mdi-account-key-outline',
 }
 
-const currentCaps = computed<CapProvider | undefined>(() =>
+const currentCaps = computed<ProviderCaps | undefined>(() =>
   providersCaps.value.find((p) => p.provider === provider.value),
 )
 const isClaude = computed(() => provider.value === 'claude')
@@ -371,9 +431,11 @@ const isClaude = computed(() => provider.value === 'claude')
 const providerOptions = computed(() =>
   providersCaps.value.map((p) => ({
     value: p.provider,
-    title: PROVIDER_META[p.provider]?.title ?? p.provider,
-    icon: PROVIDER_META[p.provider]?.icon ?? 'mdi-robot',
-    cli: p.cli,
+    title: providerTitle(p.provider),
+    icon: providerIcon(p.provider),
+    description: p.cli
+      ? `Runs via the ${p.cli} CLI.`
+      : 'Runs against a server on your own machine. No CLI needed.',
   })),
 )
 
@@ -382,7 +444,7 @@ const credentialLabel = computed(() => {
   return apiMode?.label ?? 'API key'
 })
 
-const providerTitle = computed(() => PROVIDER_META[provider.value]?.title ?? provider.value)
+const currentProviderTitle = computed(() => providerTitle(provider.value))
 
 // Provider + auth-mode specific "how to connect" steps shown above the test
 // button. Plain strings (no markup) — kept short and copy-pasteable.
@@ -435,7 +497,7 @@ const connectSteps = computed<string[]>(() => {
   ]
 })
 
-function recommendedMode(caps: CapProvider): ClaudeAuthMode {
+function recommendedMode(caps: ProviderCaps): ClaudeAuthMode {
   if (deploymentMode.value === 'docker') {
     const cred = caps.auth_modes.find((m) => m.requires_secret)
     return (cred?.value ?? 'api_key') as ClaudeAuthMode
@@ -491,7 +553,7 @@ interface AuthOption {
   badge?: string
 }
 
-function modeDescription(mode: CapAuthMode): string {
+function modeDescription(mode: AuthModeSpec): string {
   if (!mode.requires_secret) {
     return "Uses the host machine's CLI login / process env. Nothing is stored."
   }
@@ -547,8 +609,8 @@ const failureMessage = computed<string>(() => {
     // Backend returns the provider-specific install hint as the error.
     if (testError.value) return testError.value
     return deploymentMode.value === 'docker'
-      ? `The ${providerTitle.value} CLI is missing from the backend container. Rebuild the backend image (docker compose build backend) and try again.`
-      : `${providerTitle.value} CLI not found on the host. Install it and retry.`
+      ? `The ${currentProviderTitle.value} CLI is missing from the backend container. Rebuild the backend image (docker compose build backend) and try again.`
+      : `${currentProviderTitle.value} CLI not found on the host. Install it and retry.`
   }
   if (authMode.value === 'api_key') {
     if (testError.value.toLowerCase().includes('not logged in')) {
@@ -614,7 +676,7 @@ async function testConnection(): Promise<void> {
     if (!data.cli_available) {
       testStatus.value = 'failed'
       cliUnavailable.value = true
-      testError.value = data.error || `${providerTitle.value} CLI not available.`
+      testError.value = data.error || `${currentProviderTitle.value} CLI not available.`
       return
     }
     if (data.test_passed) {

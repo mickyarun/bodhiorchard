@@ -78,10 +78,90 @@
             <span class="text-body-2 font-weight-medium">{{ prov.title }}</span>
           </div>
           <div class="text-caption text-medium-emphasis auth-tile__desc">
-            Runs via the <code>{{ prov.cli }}</code> CLI.
+            {{ prov.description }}
           </div>
         </div>
       </button>
+    </div>
+
+    <!-- What this provider can't do. Shown before the config, not after a
+         failed run: a provider without file access answers confidently about
+         files it never read, so silence here would be discovered too late. -->
+    <AppCallout
+      v-if="limitations.length"
+      variant="warning"
+      eyebrow="Feature limits"
+      :title="`Not available with ${providerTitle(provider)}`"
+      class="mb-4"
+    >
+      <div class="mb-2">
+        This provider has no access to your repository files, so these stay off:
+      </div>
+      <ul class="ps-4">
+        <li v-for="item in limitations" :key="item">{{ item }}</li>
+      </ul>
+    </AppCallout>
+
+    <!-- Server address: not a secret, so it does not belong in the credential
+         slot below. -->
+    <div v-if="currentCaps?.requires_base_url" class="mb-4">
+      <div class="text-body-2 font-weight-medium mb-2">Server address</div>
+      <v-text-field
+        v-model="baseUrl"
+        :placeholder="currentCaps.default_base_url ?? ''"
+        variant="outlined"
+        density="compact"
+        autocomplete="off"
+        hide-details
+        class="mb-1"
+      />
+      <div class="text-caption text-medium-emphasis">
+        Leave blank for <code>{{ currentCaps.default_base_url }}</code>.
+        <template v-if="deploymentMode === 'docker'">
+          Running in Docker, so <code>localhost</code> is the container — use
+          <code>http://host.docker.internal:11434</code> to reach a server on this machine.
+        </template>
+      </div>
+    </div>
+
+    <div v-if="currentCaps?.dynamic_models" class="mb-4">
+      <div class="text-body-2 font-weight-medium mb-2">Model</div>
+      <v-select
+        v-model="model"
+        :items="modelOptions"
+        item-title="label"
+        item-value="id"
+        variant="outlined"
+        density="compact"
+        hide-details
+        :no-data-text="'No tool-capable models found'"
+        class="mb-1"
+      />
+      <div class="text-caption text-medium-emphasis">
+        <template v-if="modelOptions.length">
+          Read from your server. Only models that support tool calling are listed — agents
+          cannot run without it.
+        </template>
+        <template v-else>
+          None found. Check the server address above, then install one:
+          <code>ollama pull qwen3</code>.
+        </template>
+      </div>
+    </div>
+
+    <div v-if="currentCaps?.supports_thinking" class="mb-4">
+      <div class="text-body-2 font-weight-medium mb-2">Reasoning</div>
+      <AppPillToggle
+        v-model="thinkingChoice"
+        :options="[
+          { value: 'off', label: 'Off (faster)' },
+          { value: 'on', label: 'On (slower)' },
+        ]"
+      />
+      <div class="text-caption text-medium-emphasis mt-1">
+        Letting the model reason before answering roughly doubles response time. Off is
+        recommended — it made no measurable difference on these tasks.
+      </div>
     </div>
 
     <div class="text-body-2 font-weight-medium mb-3">Authentication mode</div>
@@ -182,23 +262,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import api from '@/services/api'
+import AppCallout from '@/components/common/AppCallout.vue'
+import AppPillToggle from '@/components/common/AppPillToggle.vue'
+import {
+  type AuthModeSpec,
+  type ProviderCaps,
+  providerIcon,
+  providerLimitations,
+  providerTitle,
+} from '@/constants/aiProviders'
 
 type Status = 'idle' | 'checking' | 'passed' | 'failed'
 
-interface AuthModeSpec { value: string; label: string; requires_secret: boolean }
-interface ProviderCaps {
-  provider: string
-  cli: string
-  auth_modes: AuthModeSpec[]
-  install_hint: string
-  docs_url: string
-}
-
-const PROVIDER_META: Record<string, { title: string; icon: string }> = {
-  claude: { title: 'Claude', icon: 'mdi-robot-happy-outline' },
-  copilot: { title: 'GitHub Copilot', icon: 'mdi-github' },
-  codex: { title: 'OpenAI Codex', icon: 'mdi-alpha-c-box-outline' },
-}
 const MODE_META: Record<string, { icon: string }> = {
   host: { icon: 'mdi-laptop' },
   api_key: { icon: 'mdi-key-variant' },
@@ -213,6 +288,12 @@ const authMode = ref<string>('host')
 const credential = ref('')
 const hasStoredCredential = ref(false)
 const saving = ref(false)
+// Settings for a provider that runs against this org's own machine.
+const baseUrl = ref('')
+const model = ref('')
+// AppPillToggle carries string values, so the boolean is mapped at the edge.
+const thinkingChoice = ref<'on' | 'off'>('off')
+const thinking = computed(() => thinkingChoice.value === 'on')
 
 const claudeStatus = ref<Status>('idle')
 const claudeError = ref('')
@@ -226,11 +307,20 @@ const currentCaps = computed<ProviderCaps | undefined>(() =>
 const providerOptions = computed(() =>
   providersCaps.value.map((p) => ({
     value: p.provider,
-    title: PROVIDER_META[p.provider]?.title ?? p.provider,
-    icon: PROVIDER_META[p.provider]?.icon ?? 'mdi-robot',
-    cli: p.cli,
+    title: providerTitle(p.provider),
+    icon: providerIcon(p.provider),
+    // Not every provider is a CLI — one that talks HTTP has no binary to name.
+    description: p.cli
+      ? `Runs via the ${p.cli} CLI.`
+      : 'Runs against a server on your own machine. No CLI needed.',
   })),
 )
+
+/** Models the org's own host actually has, for a dynamic-model provider. */
+const modelOptions = computed(() => currentCaps.value?.models ?? [])
+
+/** What the selected provider cannot do — empty for the CLI providers. */
+const limitations = computed(() => providerLimitations(currentCaps.value))
 
 function modeDescription(mode: AuthModeSpec): string {
   if (!mode.requires_secret) {
@@ -245,9 +335,17 @@ function modeDescription(mode: AuthModeSpec): string {
 const authOptions = computed(() => {
   const caps = currentCaps.value
   if (!caps) return []
-  // Full Docker can't reach a host login session — hide the host tile there.
+  // Full Docker can't reach a host login session — hide the host tile there,
+  // but only when the provider offers something else. For a provider with no
+  // credential at all, "host" means "no auth" rather than "the host's login",
+  // and hiding it would leave no tiles to pick and nothing to save.
   const modes = caps.auth_modes.filter(
-    (m) => !(deploymentMode.value === 'docker' && m.value === 'host'),
+    (m) =>
+      !(
+        deploymentMode.value === 'docker' &&
+        m.value === 'host' &&
+        caps.auth_modes.length > 1
+      ),
   )
   const recommended = recommendedMode(caps)
   return modes.map((m) => ({
@@ -327,6 +425,9 @@ onMounted(async () => {
     loadedProvider.value = provider.value
     authMode.value = data.auth_mode
     hasStoredCredential.value = data.has_api_key
+    baseUrl.value = data.base_url ?? ''
+    model.value = data.model ?? ''
+    thinkingChoice.value = data.thinking ? 'on' : 'off'
   } catch (err: unknown) {
     const axiosErr = err as { response?: { status?: number } }
     if (axiosErr?.response?.status !== 401) {
@@ -352,7 +453,18 @@ async function save(): Promise<void> {
       auth_mode: string
       api_key?: string
       oauth_token?: string
-    } = { provider: provider.value, auth_mode: authMode.value }
+      base_url?: string
+      model?: string
+      thinking?: boolean
+    } = {
+      provider: provider.value,
+      auth_mode: authMode.value,
+      // Always sent: the backend clears whichever of these the chosen
+      // provider ignores, so a value typed for one cannot linger on another.
+      base_url: baseUrl.value.trim(),
+      model: model.value,
+      thinking: thinking.value,
+    }
     const secret = credential.value.trim()
     if (requiresSecret.value && secret.length > 0) {
       if (authMode.value === 'subscription') payload.oauth_token = secret
@@ -362,6 +474,9 @@ async function save(): Promise<void> {
     provider.value = data.provider
     loadedProvider.value = data.provider
     hasStoredCredential.value = data.has_api_key
+    baseUrl.value = data.base_url ?? ''
+    model.value = data.model ?? ''
+    thinkingChoice.value = data.thinking ? 'on' : 'off'
     credential.value = ''
     await checkConnection()
   } catch (err: unknown) {

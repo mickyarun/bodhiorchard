@@ -89,6 +89,11 @@ export async function submitOrgInit(ctx: SubmitContext): Promise<OrgInitResult |
           s.claude.authMode === 'subscription' && s.claude.oauthToken
             ? s.claude.oauthToken
             : null,
+        // Always sent: the backend keeps only what the chosen provider uses,
+        // so a value entered before switching provider cannot leak across.
+        baseUrl: s.claude.baseUrl || null,
+        model: s.claude.model || null,
+        thinking: s.claude.thinking,
       },
     }
     const { data } = await api.post(ENDPOINT_INIT_ORG, payload)
