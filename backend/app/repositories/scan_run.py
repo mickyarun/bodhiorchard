@@ -173,6 +173,31 @@ class ScanRunRepository:
         )
         return list((await self.db.execute(stmt)).scalars().all())
 
+    async def list_failed_repo_paths_for_scan(self, *, scan_id: uuid.UUID) -> set[str]:
+        """Tracked-repo paths whose run failed in this scan.
+
+        Mirrors :meth:`list_repo_paths_for_scan` but narrowed to failed runs,
+        so the global persist phase can leave those repos unstamped in a single
+        round-trip. Keyed by path because that is what persist stamps against.
+
+        Reads the run's own status rather than its step rows on purpose. Every
+        per-repo workflow is terminal before the global phases start (see
+        ``runner_fanout``), so the status is settled and authoritative — while
+        a failed *global* phase fans a FAILED step across every repo's lane,
+        which would otherwise read as "every repo failed" and strand the whole
+        org's stamps.
+        """
+        stmt = (
+            select(TrackedRepository.path)
+            .join(ScanRepoRun, ScanRepoRun.repo_id == TrackedRepository.id)
+            .where(
+                ScanRepoRun.scan_id == scan_id,
+                ScanRepoRun.org_id == self.org_id,
+                ScanRepoRun.status == RepoRunStatus.FAILED,
+            )
+        )
+        return set((await self.db.execute(stmt)).scalars().all())
+
     async def find_latest_per_repo(
         self,
         *,

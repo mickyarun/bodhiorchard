@@ -15,9 +15,23 @@
 """Stage G — Persist results (global, runs once per scan).
 
 Wraps ``app.services.scan.phase_impls.persist_results.phase_g_persist``. Updates
-``tracked_repositories.head_sha`` + ``last_scanned_at`` for every
-scanned repo and writes the ``organizations.config.knowledge``
+``tracked_repositories.head_sha`` + ``last_scanned_at`` for every repo whose
+scan came out whole, and writes the ``organizations.config.knowledge``
 snapshot. Returns the authoritative active-feature count from the DB.
+
+This phase is global: it runs even when an individual repo's run failed
+mid-pipeline. A repo whose run failed is therefore excluded from the stamp —
+those two columns mean "this repo was fully scanned at this SHA", and the skip
+predicates, the scan-history router and the PR-merge webhook all read them that
+way. Stamping a repo whose synthesis (or any other stage) failed makes it look
+complete, so later scans skip the work that never ran and the repo can never
+recover on its own.
+
+Not the only writer of those columns: ``db_timeline_observer`` stamps a repo on
+``on_run_done`` as its run finishes, which is the normal path for a healthy
+repo. This phase is the fallback that also covers repos carried through a
+Resume, plus the org-config snapshot. A *failed* run never reaches the
+observer's stamp, which is exactly why the exclusion here matters.
 
 Called from :mod:`scan_runner._run_global_phases` after the merge
 phase. Failures here are loud — without persist, the next scan won't
@@ -26,10 +40,13 @@ know which SHAs were already scanned.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.repositories.scan_run import ScanRunRepository
 from app.scan.session import with_session
 from app.schemas.scan import Community
 from app.services.scan.stages import StageContext, StageOutput
@@ -40,6 +57,25 @@ from app.services.scan.stages._runtime_context import (
 from app.services.scan.stages.persist_helpers import collect_head_shas, load_org_config
 
 logger = structlog.get_logger(__name__)
+
+
+async def _drop_failed_repos(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    scan_id: uuid.UUID,
+    new_shas: dict[str, str],
+) -> dict[str, str]:
+    """Return ``new_shas`` without the repos whose run failed this scan."""
+    failed_paths = await ScanRunRepository(db, org_id=org_id).list_failed_repo_paths_for_scan(
+        scan_id=scan_id
+    )
+    if not failed_paths:
+        return new_shas
+    dropped = sorted(failed_paths & set(new_shas))
+    if dropped:
+        logger.info("scan_persist_skipping_failed_repos", scan_id=str(scan_id), skipped=dropped)
+    return {path: sha for path, sha in new_shas.items() if path not in failed_paths}
 
 
 async def run(
@@ -60,19 +96,23 @@ async def run(
     all_unmatched = list(unmatched_raw) if isinstance(unmatched_raw, list) else []
 
     new_shas = await collect_head_shas(repo_paths)
+    missing_shas = max(0, len(repo_paths) - len(new_shas))
 
     from app.repositories.feature import FeatureRepository
     from app.services.scan.phase_impls.persist_results import phase_g_persist
 
     try:
         async with with_session(runtime.org_id) as db:
+            stamped_shas = await _drop_failed_repos(
+                db, org_id=runtime.org_id, scan_id=runtime.scan_id, new_shas=new_shas
+            )
             org_config = await load_org_config(db, org_id=runtime.org_id)
             feature_repo = FeatureRepository(db, org_id=runtime.org_id)
             feature_count = await phase_g_persist(
                 db=db,
                 org_id=runtime.org_id,
                 repo_paths=repo_paths,
-                new_shas=new_shas,
+                new_shas=stamped_shas,
                 config=org_config,
                 total_profiles=total_profiles,
                 all_unmatched=all_unmatched,
@@ -99,23 +139,25 @@ async def run(
             },
         )
 
-    missing_shas = max(0, len(repo_paths) - len(new_shas))
+    skipped_failed = len(new_shas) - len(stamped_shas)
     extras = {
         "persisted": True,
         "feature_count": feature_count,
-        "repos_persisted": len(new_shas),
+        "repos_persisted": len(stamped_shas),
         "missing_shas": missing_shas,
+        "skipped_failed_repos": skipped_failed,
         "scan_mode": overall_mode,
         "input_count": len(repo_paths),
-        "kept_count": len(new_shas),
-        "dropped_count": missing_shas,
+        "kept_count": len(stamped_shas),
+        "dropped_count": missing_shas + skipped_failed,
         "io_label": "repos → persisted",
     }
     logger.info(
         "scan_persist_results_done",
         scan_id=str(runtime.scan_id),
         feature_count=feature_count,
-        repos_persisted=len(new_shas),
+        repos_persisted=len(stamped_shas),
+        skipped_failed_repos=skipped_failed,
         missing_shas=extras["missing_shas"],
     )
     return StageOutput(communities=communities, dropped=[], extras=extras)
