@@ -38,8 +38,13 @@ async def _cli_version(provider: AIProvider, env: dict[str, str]) -> str | None:
 
     Uses ``create_subprocess_exec`` (argument vector, no shell) so there is no
     shell-injection surface — the same safe pattern ``claude_runner`` uses.
+
+    Returns None for a provider with no ``version_cmd``; such providers are
+    HTTP-based and are checked with ``preflight`` instead.
     """
     cmd = capabilities_for(provider).version_cmd
+    if cmd is None:
+        return None
     binary = shutil.which(cmd[0])
     if binary is None:
         return None
@@ -62,18 +67,26 @@ async def _cli_version(provider: AIProvider, env: dict[str, str]) -> str | None:
 async def check_connection(
     provider: AIProvider, env_extra: dict[str, str] | None = None
 ) -> dict[str, Any]:
-    """Verify ``provider``'s CLI is installed and can authenticate.
+    """Verify ``provider`` is installed/reachable and can authenticate.
 
     Org-independent core. ``env_extra`` carries provisional credentials for
     the pre-init setup wizard (where no org/process-env exists yet); for the
     authenticated settings path it's ``None`` and the caller has already put
     the org's auth into ``os.environ``. Returns ``cli_available``,
     ``cli_version``, ``test_passed``, ``output``, ``error``, ``provider``.
+
+    A provider is "available" if its CLI version command works, or — for
+    HTTP-based providers with no CLI — if its ``preflight`` probe answers.
+    Which applies is decided by the capability table, not by naming a
+    provider here.
     """
     caps = capabilities_for(provider)
     env = build_provider_env(provider, env_extra)
 
-    version = await _cli_version(provider, env)
+    if caps.preflight is not None:
+        version = await caps.preflight(env_extra)
+    else:
+        version = await _cli_version(provider, env)
     result: dict[str, Any] = {
         "provider": provider.value,
         "cli_available": version is not None,

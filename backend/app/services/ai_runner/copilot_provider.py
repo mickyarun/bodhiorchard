@@ -28,9 +28,9 @@ from pathlib import Path
 import structlog
 
 from app.models.organization import AIProvider
-from app.services.ai_runner.capabilities import resolve_model
 from app.services.ai_runner.cli_exec import resolve_working_dir, run_cli, run_cli_streaming
 from app.services.ai_runner.mcp_config import build_copilot_mcp
+from app.services.ai_runner.model_resolution import resolve_model
 from app.services.ai_runner.subprocess_env import build_provider_env
 from app.services.claude_runner import (
     ClaudeRunnerConfig,

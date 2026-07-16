@@ -36,7 +36,13 @@ router = APIRouter(tags=["settings-ai"])
 
 
 def serialize_provider(provider: AIProvider) -> dict[str, Any]:
-    """JSON-able view of one provider's capabilities for the frontend."""
+    """JSON-able view of one provider's capabilities for the frontend.
+
+    Stays synchronous and static-only: this reads the table and nothing else,
+    so the setup wizard can call it before an org exists. ``models`` is empty
+    for ``dynamic_models`` providers — those are filled in separately from the
+    org's live host, which needs I/O this function deliberately avoids.
+    """
     caps = CAPABILITIES[provider]
     return {
         "provider": provider.value,
@@ -52,6 +58,15 @@ def serialize_provider(provider: AIProvider) -> dict[str, Any]:
         ],
         "install_hint": caps.install_hint,
         "docs_url": caps.docs_url,
+        # Drives which controls the UI renders, and the callout naming what a
+        # provider cannot do — so the UI never offers a setting an adapter
+        # would reject, nor a feature the provider cannot run.
+        "supports_thinking": caps.supports_thinking,
+        "supports_mcp": caps.supports_mcp,
+        "supports_files": caps.supports_files,
+        "dynamic_models": caps.dynamic_models,
+        "requires_base_url": caps.requires_base_url,
+        "default_base_url": caps.default_base_url,
     }
 
 

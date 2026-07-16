@@ -33,7 +33,7 @@ import structlog
 
 from app.models.organization import AIProvider, Organization
 from app.services.ai_runner import run_agent
-from app.services.ai_runner.capabilities import resolve_model
+from app.services.ai_runner.model_resolution import resolve_model
 from app.services.claude_runner import (
     ClaudeRunnerConfig,
     MCPServerConfig,

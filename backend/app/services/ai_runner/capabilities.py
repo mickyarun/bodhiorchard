@@ -19,58 +19,34 @@ frontend (provider selector + Agent Prompts dropdowns, via an API endpoint)
 read this table, so the UI can never offer a setting an adapter would reject.
 Adding a provider is one entry here, not edits across five files.
 
-Model ids / effort levels are best-effort as of 2026-06 and verified against
-the installed CLIs where possible; ``resolve_model`` degrades unknown values
-to the provider default, so a stale id is safe (logged), never fatal.
+The descriptor types live in ``capability_types`` and are re-exported here, so
+callers have a single import site. ``resolve_model`` lives in
+``model_resolution`` (it reads this table, so importing it back would cycle).
+
+Model ids / effort levels are best-effort and verified against the installed
+CLIs where possible; ``resolve_model`` degrades unknown values to the provider
+default, so a stale id is safe (logged), never fatal.
 """
 
-from dataclasses import dataclass
-
-import structlog
-
 from app.models.organization import AIProvider
+from app.services.ai_runner.capability_types import (
+    AuthModeSpec,
+    ModelChoice,
+    ProviderCapabilities,
+)
+from app.services.ai_runner.ollama_models import (
+    OLLAMA_DEFAULT_BASE_URL,
+    OLLAMA_HOST_ENV,
+    ollama_probe,
+)
 
-logger = structlog.get_logger(__name__)
-
-
-@dataclass(frozen=True)
-class ModelChoice:
-    """A selectable model for a provider (UI label + CLI id)."""
-
-    id: str
-    label: str
-
-
-@dataclass(frozen=True)
-class AuthModeSpec:
-    """An auth mode a provider supports and the env var(s) it sets.
-
-    ``requires_secret`` modes store an encrypted credential on the org;
-    ``host`` modes inherit credentials from the process / CLI login.
-    """
-
-    value: str
-    label: str
-    requires_secret: bool
-    env_vars: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class ProviderCapabilities:
-    """Everything the UI and backend need to drive one provider."""
-
-    provider: AIProvider
-    cli: str
-    models: tuple[ModelChoice, ...]
-    default_model: str
-    supports_effort: bool
-    effort_values: tuple[str, ...]
-    supports_iteration_model: bool
-    auth_modes: tuple[AuthModeSpec, ...]
-    version_cmd: tuple[str, ...]
-    install_hint: str
-    docs_url: str
-
+__all__ = [
+    "CAPABILITIES",
+    "AuthModeSpec",
+    "ModelChoice",
+    "ProviderCapabilities",
+    "capabilities_for",
+]
 
 # Host mode sets nothing, but its env_vars name the host/compose-owned
 # credentials the auth dispatcher must PRESERVE (not clear) in host mode.
@@ -86,6 +62,9 @@ _HOST_COPILOT = AuthModeSpec("host", "Host gh / Copilot login", False, ("GH_TOKE
 _TOKEN_COPILOT = AuthModeSpec("api_key", "GitHub token", True, ("COPILOT_GITHUB_TOKEN",))
 _HOST_CODEX = AuthModeSpec("host", "Host Codex login", False, ())
 _API_KEY_CODEX = AuthModeSpec("api_key", "OpenAI API key", True, ("OPENAI_API_KEY",))
+# Ollama has no credential at all — "host" here means "no auth", not "inherit a
+# login". The env var names the base URL so the auth dispatcher preserves it.
+_HOST_OLLAMA = AuthModeSpec("host", "Local Ollama (no auth)", False, (OLLAMA_HOST_ENV,))
 
 
 CAPABILITIES: dict[AIProvider, ProviderCapabilities] = {
@@ -141,62 +120,45 @@ CAPABILITIES: dict[AIProvider, ProviderCapabilities] = {
         install_hint="Install: npm install -g @openai/codex",
         docs_url="https://developers.openai.com/codex/cli",
     ),
+    AIProvider.ollama: ProviderCapabilities(
+        provider=AIProvider.ollama,
+        # No CLI: this provider speaks HTTP to a local server, so there is no
+        # binary to version-check. ``preflight`` is the liveness signal.
+        cli=None,
+        version_cmd=None,
+        # Populated at runtime from the org's own host — see dynamic_models.
+        models=(),
+        default_model="",
+        # Ollama's reasoning switch is a boolean, not a level, so it rides
+        # supports_thinking rather than effort.
+        supports_effort=False,
+        effort_values=(),
+        supports_iteration_model=True,
+        supports_thinking=True,
+        # Tools work in-process; files and session resume have no analogue in a
+        # stateless HTTP call, so run_agent blocks the features needing them
+        # rather than letting them return plausible emptiness.
+        supports_mcp=True,
+        supports_files=False,
+        supports_resume=False,
+        dynamic_models=True,
+        requires_base_url=True,
+        default_base_url=OLLAMA_DEFAULT_BASE_URL,
+        # Local inference on CPU is roughly an order of magnitude slower than a
+        # hosted API; callers' timeouts assume the latter.
+        timeout_multiplier=4.0,
+        max_turns_cap=8,
+        auth_modes=(_HOST_OLLAMA,),
+        install_hint=(
+            "Install Ollama (https://ollama.com), then `ollama pull qwen3`. "
+            "Only models with the `tools` capability can run agents."
+        ),
+        docs_url="https://docs.ollama.com",
+        preflight=ollama_probe,
+    ),
 }
 
 
 def capabilities_for(provider: AIProvider) -> ProviderCapabilities:
     """Return the capability descriptor for ``provider``."""
     return CAPABILITIES[provider]
-
-
-def resolve_model(
-    provider: AIProvider, model: str | None, effort: str | None
-) -> tuple[str | None, str | None]:
-    """Map a skill's ``model``/``effort`` onto the provider's native values.
-
-    Claude is exact pass-through (today's behaviour). For other providers,
-    a model id not in the provider's list falls back to its default, and an
-    unsupported effort is dropped — both logged. Empty strings mean "use the
-    CLI default" and resolve to ``None`` so the adapter omits the flag.
-    """
-    caps = CAPABILITIES[provider]
-
-    if provider == AIProvider.claude:
-        resolved = (model or None, effort or None)
-        logger.debug(
-            "ai_model_resolved",
-            provider="claude",
-            requested_model=model or "",
-            resolved_model=resolved[0],
-            resolved_effort=resolved[1],
-        )
-        return resolved
-
-    valid_ids = {m.id for m in caps.models if m.id}
-    if model and model in valid_ids:
-        resolved_model: str | None = model
-    else:
-        resolved_model = caps.default_model or None
-        if model:
-            logger.info(
-                "ai_model_fallback",
-                provider=provider.value,
-                requested=model,
-                used=resolved_model,
-            )
-
-    if effort and caps.supports_effort and effort in caps.effort_values:
-        resolved_effort: str | None = effort
-    else:
-        resolved_effort = None
-        if effort:
-            logger.info("ai_effort_dropped", provider=provider.value, requested=effort)
-
-    logger.debug(
-        "ai_model_resolved",
-        provider=provider.value,
-        requested_model=model or "",
-        resolved_model=resolved_model,
-        resolved_effort=resolved_effort,
-    )
-    return (resolved_model, resolved_effort)

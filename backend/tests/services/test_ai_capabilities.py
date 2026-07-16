@@ -15,20 +15,68 @@
 """Unit tests for the provider capability table + model/effort resolution."""
 
 from app.models.organization import AIProvider
-from app.services.ai_runner.capabilities import (
-    CAPABILITIES,
-    capabilities_for,
-    resolve_model,
-)
+from app.services.ai_runner.capabilities import CAPABILITIES, capabilities_for
+from app.services.ai_runner.model_resolution import resolve_model
 
 
 def test_every_provider_has_capabilities() -> None:
-    """Each enum member has a descriptor with at least one auth mode + model."""
+    """Each enum member has a usable descriptor.
+
+    Guards the invariant that broke when ``ollama`` was added to the enum: a
+    member without a table entry KeyErrors every ``for p in AIProvider``
+    fan-out, which 500s the settings page and the first-run wizard.
+    """
     for provider in AIProvider:
         caps = capabilities_for(provider)
         assert caps.auth_modes, provider
-        assert caps.models, provider
-        assert caps.version_cmd[0] == caps.cli
+        # Providers that read their model list off the user's own host ship an
+        # empty tuple here and fill it at runtime.
+        assert caps.models or caps.dynamic_models, provider
+        if caps.version_cmd is not None:
+            assert caps.version_cmd[0] == caps.cli
+        else:
+            # No CLI to version-check, so reachability must be probeable.
+            assert caps.cli is None, provider
+            assert caps.preflight is not None, provider
+
+
+def test_ollama_declares_no_files_and_needs_a_base_url() -> None:
+    """Ollama's limits are declared, so run_agent can block what it can't do."""
+    caps = capabilities_for(AIProvider.ollama)
+    assert caps.supports_mcp is True
+    # No filesystem and no session affinity over stateless HTTP.
+    assert caps.supports_files is False
+    assert caps.supports_resume is False
+    # Reasoning is a boolean here, not a graded effort level.
+    assert caps.supports_thinking is True
+    assert caps.supports_effort is False
+    assert caps.requires_base_url is True
+    assert caps.default_base_url
+    assert caps.max_turns_cap and caps.max_turns_cap > 0
+
+
+def test_cli_providers_keep_file_access() -> None:
+    """Adding Ollama must not narrow what the CLI providers may do."""
+    for provider in (AIProvider.claude, AIProvider.copilot, AIProvider.codex):
+        caps = capabilities_for(provider)
+        assert caps.supports_files is True, provider
+        assert caps.supports_mcp is True, provider
+        assert caps.supports_resume is True, provider
+        assert caps.requires_base_url is False, provider
+
+
+def test_ollama_model_passes_through_untouched() -> None:
+    """A dynamic provider's model id must not be validated against the table.
+
+    Ollama's valid ids live on the user's host, so the static tuple is empty.
+    Running it through the normal path would fall back to the default and
+    silently drop every model the user actually has installed.
+    """
+    assert resolve_model(AIProvider.ollama, "qwen3:latest", None)[0] == "qwen3:latest"
+    # Effort is not a concept here (thinking is a boolean), so it is dropped.
+    assert resolve_model(AIProvider.ollama, "qwen3:latest", "high") == ("qwen3:latest", None)
+    # No model requested -> let the caller decide.
+    assert resolve_model(AIProvider.ollama, "", None) == (None, None)
 
 
 def test_claude_is_exact_passthrough() -> None:

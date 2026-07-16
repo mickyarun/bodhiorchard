@@ -17,8 +17,8 @@
 from enum import StrEnum
 from typing import Any
 
+from sqlalchemy import Boolean, Index, Integer, String, Text, text
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy import Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,16 +26,18 @@ from app.models.base import BaseModel
 
 
 class AIProvider(StrEnum):
-    """Which agent CLI an organization runs its AI tasks through.
+    """Which agent an organization runs its AI tasks through.
 
-    Selected in setup / Settings → AI Config. ``claude`` is the default and
-    today's only fully-wired provider; ``copilot`` and ``codex`` are added by
-    the provider-adapter work. Stored as a Postgres enum.
+    Selected in setup / Settings → AI Config. ``claude`` is the default.
+    ``claude``, ``copilot`` and ``codex`` each drive a CLI subprocess;
+    ``ollama`` talks to a local HTTP server instead, for deployments where
+    those CLIs cannot be installed. Stored as a Postgres enum.
     """
 
     claude = "claude"
     copilot = "copilot"
     codex = "codex"
+    ollama = "ollama"
 
 
 class Organization(BaseModel):
@@ -76,14 +78,27 @@ class Organization(BaseModel):
         String(20), nullable=False, server_default="host"
     )
     claude_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Which agent CLI provider this org runs (claude / copilot / codex). The
-    # auth mode above and the encrypted credential are reused per provider:
-    # the secret holds an Anthropic key, a GitHub token, or an OpenAI key
-    # depending on ``ai_provider``. Defaults to claude for backward-compat.
+    # Which agent provider this org runs. The auth mode above and the
+    # encrypted credential are reused per provider: the secret holds an
+    # Anthropic key, a GitHub token, or an OpenAI key depending on
+    # ``ai_provider``. Defaults to claude for backward-compat.
     ai_provider: Mapped[AIProvider] = mapped_column(
         SAEnum(AIProvider, name="ai_provider", values_callable=lambda e: [m.value for m in e]),
         nullable=False,
         server_default=AIProvider.claude.value,
+    )
+    # Base URL of the provider's HTTP server (Ollama only; the CLI providers
+    # reach their backend themselves). NULL means "use the provider's default"
+    # — resolved in code via ProviderCapabilities.default_base_url, so that
+    # default can change without a migration.
+    ai_base_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Whether to let the model emit a reasoning trace before answering
+    # (Ollama's `think`). Off by default: it roughly doubles latency for no
+    # measurable gain on the short, structured tasks this provider handles,
+    # and local inference is already the slowest link. Providers that express
+    # reasoning as a level rather than a boolean use `effort` instead.
+    ai_thinking: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
     )
 
     def __repr__(self) -> str:

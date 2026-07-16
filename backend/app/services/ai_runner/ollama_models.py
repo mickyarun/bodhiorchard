@@ -1,0 +1,158 @@
+# Copyright 2025-2026 Arun Rajkumar
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Discovery against a live Ollama host: which models exist, and can it run?
+
+Unlike the CLI providers, Ollama's usable models are a property of the user's
+own machine, not of a table we ship — so they are read at runtime.
+
+Everything here degrades to empty/None rather than raising: this is called
+while rendering the settings page, and an unreachable Ollama must not 500 it.
+
+Imports nothing from ``capabilities`` on purpose — that module imports
+``ollama_probe`` from here, so the dependency has to stay one-directional.
+Callers own presentation types; this returns plain strings.
+"""
+
+import asyncio
+import time
+from collections.abc import Mapping
+
+import httpx
+import structlog
+
+logger = structlog.get_logger(__name__)
+
+OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434"
+OLLAMA_HOST_ENV = "OLLAMA_HOST"
+
+# Short: this runs inside a settings-page request. A slow or absent host must
+# degrade quickly, not hold the page open.
+_PROBE_TIMEOUT_S = 2.0
+_LIST_BUDGET_S = 5.0
+_CACHE_TTL_S = 60.0
+
+# Ollama reports per-model capabilities; only models advertising this can drive
+# agents. Without it a model answers in prose instead of calling a tool.
+_TOOLS_CAPABILITY = "tools"
+
+# Keyed by base_url. Every settings load would otherwise re-probe every model.
+_model_cache: dict[str, tuple[float, list[str]]] = {}
+
+
+def base_url_from_env(env: Mapping[str, str] | None) -> str:
+    """Resolve the Ollama host from a per-run env mapping.
+
+    Read from the run's own mapping rather than ``os.environ`` so two orgs on
+    different hosts cannot clobber each other in a shared process.
+    """
+    if env:
+        value = (env.get(OLLAMA_HOST_ENV) or "").strip()
+        if value:
+            return value.rstrip("/")
+    return OLLAMA_DEFAULT_BASE_URL
+
+
+async def _get_json(client: httpx.AsyncClient, url: str) -> dict[str, object] | None:
+    """GET one JSON object, or None on any failure."""
+    try:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        body = resp.json()
+    except (httpx.HTTPError, OSError, ValueError) as exc:
+        logger.info("ollama_request_failed", url=url, error=str(exc))
+        return None
+    return body if isinstance(body, dict) else None
+
+
+async def _model_has_tools(client: httpx.AsyncClient, base_url: str, name: str) -> str | None:
+    """Return ``name`` if the model advertises tool support, else None."""
+    try:
+        resp = await client.post(f"{base_url}/api/show", json={"model": name})
+        resp.raise_for_status()
+        body = resp.json()
+    except (httpx.HTTPError, OSError, ValueError) as exc:
+        logger.info("ollama_show_failed", model=name, error=str(exc))
+        return None
+    if not isinstance(body, dict):
+        return None
+    capabilities = body.get("capabilities")
+    if isinstance(capabilities, list) and _TOOLS_CAPABILITY in capabilities:
+        return name
+    return None
+
+
+async def list_tool_models(base_url: str) -> list[str]:
+    """Installed models that can actually run agents, newest-listed first.
+
+    Filters to tool-capable models: offering one without that capability would
+    let a user pick a model that fails at the first tool call. Returns ``[]``
+    on any failure — an unreachable host means "nothing to offer", not an error.
+    """
+    base_url = base_url.rstrip("/")
+    cached = _model_cache.get(base_url)
+    now = time.monotonic()
+    if cached and now - cached[0] < _CACHE_TTL_S:
+        return list(cached[1])
+
+    async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_S) as client:
+        tags = await _get_json(client, f"{base_url}/api/tags")
+        if tags is None:
+            return []
+        raw = tags.get("models")
+        names = [
+            m["name"]
+            for m in (raw if isinstance(raw, list) else [])
+            if isinstance(m, dict) and isinstance(m.get("name"), str) and m["name"]
+        ]
+        if not names:
+            return []
+        try:
+            checked = await asyncio.wait_for(
+                asyncio.gather(
+                    *(_model_has_tools(client, base_url, n) for n in names),
+                    return_exceptions=True,
+                ),
+                timeout=_LIST_BUDGET_S,
+            )
+        except (TimeoutError, asyncio.CancelledError):
+            logger.info("ollama_list_models_timeout", base_url=base_url, count=len(names))
+            return []
+
+    capable = [r for r in checked if isinstance(r, str)]
+    _model_cache[base_url] = (now, capable)
+    logger.info(
+        "ollama_models_listed", base_url=base_url, installed=len(names), tool_capable=len(capable)
+    )
+    return list(capable)
+
+
+async def ollama_probe(env: Mapping[str, str] | None) -> str | None:
+    """Liveness probe: a version string if the host answers, else None.
+
+    Stands in for the CLI providers' ``version_cmd`` — there is no binary to
+    invoke, so reachability is the equivalent signal.
+    """
+    base_url = base_url_from_env(env)
+    async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_S) as client:
+        body = await _get_json(client, f"{base_url}/api/version")
+    if body is None:
+        return None
+    version = body.get("version")
+    return f"Ollama {version}" if isinstance(version, str) else "Ollama"
+
+
+def clear_model_cache() -> None:
+    """Drop the TTL cache. For tests, and for a base_url change."""
+    _model_cache.clear()

@@ -26,12 +26,21 @@ from app.models.organization import AIProvider
 def testserialize_provider_shape(provider: AIProvider) -> None:
     payload = serialize_provider(provider)
     assert payload["provider"] == provider.value
-    assert payload["models"], "every provider exposes at least one model"
+    # A dynamic provider reads its models off the org's own host, so it ships
+    # none here and they are filled in later from the live server.
+    assert payload["models"] or payload["dynamic_models"], "models, or a way to find them"
     assert {m["value"] for m in payload["auth_modes"]}, "auth modes present"
     assert payload["install_hint"]
     assert payload["docs_url"].startswith("http")
     # auth_modes carry the secret requirement flag the wizard needs.
     assert all("requires_secret" in m for m in payload["auth_modes"])
+    # The UI gates its controls on these, so every provider must answer them.
+    for flag in ("supports_thinking", "supports_mcp", "supports_files", "requires_base_url"):
+        assert isinstance(payload[flag], bool), flag
+    # A provider needing a base URL must say what it defaults to, or the
+    # wizard has nothing to prefill and no way to probe before setup.
+    if payload["requires_base_url"]:
+        assert payload["default_base_url"], provider
 
 
 def test_resolve_provider_defaults_and_validates() -> None:
