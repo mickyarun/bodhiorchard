@@ -30,6 +30,12 @@ services:
   backend:
     build:
       context: ./backend
+    # Lets the container reach a server running on the host — an Ollama org in
+    # Full Docker points its base URL at http://host.docker.internal:11434,
+    # since "localhost" here is the container, not your machine. A no-op on
+    # Docker Desktop, which already resolves this name; required on Linux.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

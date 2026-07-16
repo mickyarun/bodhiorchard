@@ -1,6 +1,8 @@
 # AI Engines & MCP Server
 
-Bodhiorchard is **AI-engine-agnostic**. The agent layer is engine-independent — adding a new engine is API rewiring only, no deployment changes. Today: Claude Code + the Anthropic direct API. Next: Ollama (air-gapped), OpenAI, OpenAI Codex.
+Bodhiorchard is **AI-engine-agnostic**. An organisation picks its provider in **Settings → AI Config** (or during setup), and every agent run routes through it. Today: Claude Code, GitHub Copilot, OpenAI Codex, and Ollama.
+
+The first three drive a CLI. Ollama does not — it talks HTTP to a server on your own machine, for deployments where those CLIs cannot be installed. That difference is not cosmetic: **a provider without a CLI has no file access**, so it cannot run every feature. See [Ollama](#today--ollama-fully-local-no-cli) below before choosing it.
 
 ## Today — Claude Code (codebase-aware agents)
 
@@ -14,26 +16,60 @@ Codebase-aware agent runs (BUD spec, Tech Plan, Implementation, Code Review) are
 
 ### Authentication modes
 
+Each provider declares the modes it supports, so the Settings page can only offer one the chosen provider accepts.
+
 | Mode | When the org uses this | Where the credential lives |
 |---|---|---|
-| `api_key` | Full Docker deployments, or any host that doesn't have a Claude subscription | `sk-ant-…` key encrypted in Postgres (Fernet AES-128) and pushed into the backend's process env on save |
-| `hybrid_host` | Hybrid deployments where the developer already runs `claude` interactively | Host's existing `claude login` session — nothing stored in the database |
+| `api_key` | Full Docker deployments, or any host without a Claude subscription. Also used by Copilot (a GitHub token) and Codex (an OpenAI key) | Encrypted in Postgres (Fernet AES-128) and pushed into the backend's process env on save |
+| `subscription` | A Claude Pro / Max plan, via an OAuth token from `claude setup-token` | Encrypted in Postgres, same as `api_key` |
+| `host` | Hybrid deployments where the developer already runs `claude` interactively. For Ollama it means *no auth at all* — there is no credential to store | The host's existing login session — nothing stored in the database |
 
-The backend auto-detects which mode is available (via `/.dockerenv`) and the Settings page only surfaces the option that actually works for that deployment.
+The backend auto-detects the deployment (via `/.dockerenv`) and the Settings page only surfaces options that work there — except where a provider has nothing else to offer, since a provider needing no credential still has to be selectable in Docker.
 
 ## Today — Anthropic direct API (lightweight non-codebase agents)
 
 Triage, Bug-Linker, and Standup don't need to read files — they reason over chat messages, bug reports, and aggregated activity. For those, Bodhiorchard skips Claude Code and calls the Anthropic API directly. Lower latency, lower per-call cost, same `sk-ant-…` key (configured at **Settings → AI Configuration → Anthropic API**).
 
+## Today — Ollama (fully local, no CLI)
+
+For machines where an agent CLI cannot be installed, or where code must not leave the network. Ollama runs locally over HTTP; Bodhiorchard calls it directly and executes MCP tools in-process, so there is no CLI, no subprocess, and no credential.
+
+**Setup:** install [Ollama](https://ollama.com), then `ollama pull qwen3`. Choose *Ollama (local)* in **Settings → AI Config**, set the server address if it isn't on this machine, and pick a model.
+
+Before deploying to a restricted machine, run the readiness check on it — it verifies the two things this integration depends on, and reports the latency you should expect:
+
+```bash
+python3 backend/scripts/check_ollama_ready.py
+```
+
+**Only models advertising the `tools` capability can run agents.** One without it answers in prose instead of calling a tool, so the model list only offers models that qualify — `ollama pull qwen3` if none appear.
+
+### What Ollama cannot do
+
+Ollama has MCP tools but **no access to your repository files**, so these features stay unavailable and fail with a clear error rather than a plausible-looking empty result:
+
+- BUD stage agents (spec, tech plan, test plan)
+- Design generation
+- Repository scanning and feature synthesis
+- Design-system extraction
+
+Everything that reasons over text rather than files works: Slack triage and PRD drafting, feature Q&A, estimation, SP attribution, smart assignment, and quiz generation.
+
+### Speed
+
+Local inference is far slower than a hosted API, and slower still without a GPU. Latency tracks how much the model *writes*: a tool call emits a handful of tokens and stays fast, while a long prose answer dominates. **Reasoning** ("thinking") roughly doubles response time — it is off by default and switchable in Settings.
+
+### Docker
+
+In Full Docker, `localhost` is the container, not your machine. Point the server address at `http://host.docker.internal:11434` to reach an Ollama running on the host; the backend service already declares the `extra_hosts` entry that makes this resolve on Linux.
+
 ## Coming soon
 
 | Engine | Status |
 |---|---|
-| **Ollama** (fully local, free, air-gapped) | Planned |
 | **OpenAI** API (GPT-4o / 4 / 3.5) | Planned |
-| **OpenAI Codex** | In development |
 
-These will appear as additional presets in the AI Configuration page — API rewiring only, no deployment changes.
+New providers are one entry in the backend capability table (`app/services/ai_runner/capabilities.py`) plus an adapter — the table declares what a provider can do, and the UI and the run seam both read it, so a provider is never offered a setting or a feature it cannot handle.
 
 ## MCP server — the tools Bodhiorchard exposes to Claude Code
 
@@ -95,6 +131,8 @@ Impact / blast-radius queries powered by the in-tree code-graph indexer (`backen
 ### Hooks & activity
 
 `dev_activity` ingests Claude Code hook events for the Standup Agent's daily aggregation, and `agent_activity` records when an agent run starts/ends for the audit trail.
+
+> **Note for teams whose developers don't run Claude Code.** `dev_activity` is fed by hooks installed in each developer's *own* editor — it is independent of the provider the org runs its agents on. Where those hooks aren't installed, the endpoint simply receives nothing: XP, streaks, standups, and contributor resolution have no input and render empty. Nothing breaks, but those features stay blank until activity arrives from somewhere.
 
 > The full MCP server is in `backend/app/mcp/`. Each handler lives in `handlers_*.py`; the JSON-schema for every tool is defined alongside it. Auth, rate-limiting, and the audit pipeline are in `backend/app/mcp/{auth,audit,streamable}.py`.
 

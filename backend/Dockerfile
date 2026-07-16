@@ -23,6 +23,9 @@ WORKDIR /app
 #                      by the backend. All three are baked in so an org can
 #                      select any provider (Settings → AI Config) without a
 #                      custom image; the active one is chosen at runtime.
+#                      The ollama provider needs nothing here: it speaks HTTP
+#                      to a server outside this container (see extra_hosts in
+#                      docker-compose.yml), so there is no CLI to install.
 # Code-graph indexing now runs in-process via the Python ``code_indexer``
 # module (graphify-based, MIT) — no npm dependency for that step.
 # curl/gnupg fetch the NodeSource repo key; removed after use.
