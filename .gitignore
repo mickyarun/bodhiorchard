@@ -118,3 +118,9 @@ docs/*
 !docs/api.md
 !docs/deployment.md
 backend/experiments/
+
+# Local scratch output (PDF exports, generated artefacts) — never source.
+output/
+
+# Resolved skill pins for local plugin installs; machine-specific.
+skills-lock.json
