@@ -35,6 +35,7 @@ from app.models.user import User
 from app.repositories.organization import OrganizationRepository
 from app.services.ai_runner.capabilities import capabilities_for
 from app.services.ai_runner.connection_check import check_provider_connection
+from app.services.ai_runner.ollama_models import clean_base_url
 from app.services.claude_env import (
     AUTH_MODE_API_KEY,
     AUTH_MODE_HOST,
@@ -88,18 +89,15 @@ class ClaudeSettingsUpdate(BaseModel):
 def _clean_base_url(value: str | None) -> str | None:
     """Validate a user-supplied server address, or None to use the default.
 
-    Only http/https: this string is handed to an HTTP client, and anything else
-    (file://, a shell fragment) has no business reaching it.
+    Thin HTTP wrapper over the shared validator, which is the one place that
+    decides what the backend may be pointed at. Kept in one place because the
+    saved address and the probed address must be bounded identically — a check
+    that only guards the persisted path just moves the request to the probe.
     """
-    cleaned = (value or "").strip().rstrip("/")
-    if not cleaned:
-        return None
-    if not cleaned.startswith(("http://", "https://")):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="base_url must start with http:// or https://",
-        )
-    return cleaned
+    try:
+        return clean_base_url(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 def _read_model(org: Organization) -> ClaudeSettingsRead:

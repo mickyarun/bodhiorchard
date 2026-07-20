@@ -41,6 +41,7 @@ from app.repositories.organization import OrganizationRepository
 from app.repositories.role import RoleRepository
 from app.schemas.setup import InitOrgRequest
 from app.services.ai_runner.capabilities import capabilities_for
+from app.services.ai_runner.ollama_models import clean_base_url
 from app.services.bud_stage_seeder import seed_stage_mappings_for_org
 from app.services.claude_env import (
     AUTH_MODE_API_KEY,
@@ -94,18 +95,15 @@ def _build_org_config(req: InitOrgRequest) -> dict[str, object]:
 def _clean_base_url(value: str | None) -> str | None:
     """Validate the wizard's server address, or None to use the default.
 
-    Only http/https — this string reaches an HTTP client, and the wizard is
-    unauthenticated, so it validates rather than trusts.
+    Defers to the shared validator. The wizard is unauthenticated, so it is the
+    least appropriate place to hold a looser copy of this rule.
     """
-    cleaned = (value or "").strip().rstrip("/")
-    if not cleaned:
-        return None
-    if not cleaned.startswith(("http://", "https://")):
+    try:
+        return clean_base_url(value)
+    except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="claude.base_url must start with http:// or https://",
-        )
-    return cleaned
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"claude.{exc}"
+        ) from exc
 
 
 def _resolve_claude_auth(req: InitOrgRequest) -> tuple[AIProvider, str, str | None]:

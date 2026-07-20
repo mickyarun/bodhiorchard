@@ -26,8 +26,10 @@ Callers own presentation types; this returns plain strings.
 """
 
 import asyncio
+import ipaddress
 import time
 from collections.abc import Mapping
+from urllib.parse import urlparse
 
 import httpx
 import structlog
@@ -57,20 +59,70 @@ _TOOLS_CAPABILITY = "tools"
 _model_cache: dict[str, tuple[float, list[str]]] = {}
 
 
+# Hostnames that name the local machine across our documented deployments:
+# the default, and the bridge Docker Desktop / Linux exposes for host-gateway.
+_LOCAL_HOSTNAMES = frozenset({"localhost", "host.docker.internal"})
+
+
+def _assert_reachable_host(host: str) -> None:
+    """Reject an address the backend has no business being pointed at.
+
+    The value reaches an HTTP client server-side, so whoever supplies it is
+    choosing a destination on the backend's network — one the browser cannot
+    reach itself. Left open, an authenticated member can sweep internal admin
+    ports, or read a cloud instance's credentials off its metadata endpoint,
+    using the model list as an oracle for what answered.
+
+    Ollama is a local provider by definition ("runs against a server on your own
+    machine"), so the honest bound is the machine and its private network. An IP
+    literal must be loopback or private; a name must be one we know is local.
+    Link-local is refused explicitly rather than by omission — 169.254.169.254
+    is the metadata address, and it is the reason this check exists.
+
+    Names are not resolved here: a DNS lookup would block the event loop, and
+    resolving at validation time proves nothing about the address used at
+    request time anyway. Anyone with a hostname for a LAN server can give its
+    address instead, which is what the error says.
+    """
+    if host in _LOCAL_HOSTNAMES:
+        return
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        raise ValueError(
+            f"'{host}' is not a recognised local address. Use localhost, "
+            "host.docker.internal, or the server's IP address on your network."
+        ) from None
+    if ip.is_link_local:
+        raise ValueError(
+            "Link-local addresses are not allowed — that range holds cloud "
+            "instance metadata, not an Ollama server."
+        )
+    if not (ip.is_loopback or ip.is_private):
+        raise ValueError(
+            f"{host} is a public address. Ollama runs on your own machine or "
+            "private network, so only loopback and private addresses are allowed."
+        )
+
+
 def clean_base_url(value: str | None) -> str | None:
     """Normalise a user-supplied server address; ``None`` means "use the default".
 
-    Raises ``ValueError`` for anything that isn't http/https. The string is
-    handed to an HTTP client, so every caller that accepts one from a request
-    has to run it through here — including the ones that only probe and never
-    persist. A probe is still the backend issuing a request to an address the
-    caller chose, which is reachable from inside the network the browser is not.
+    Raises ``ValueError`` for anything that isn't an http/https URL pointing at
+    a local or private host. Every caller that accepts this from a request has
+    to run it through here — including the ones that only probe and never
+    persist, since a probe is still a server-side request to a caller-chosen
+    address. See :func:`_assert_reachable_host` for why the host is bounded.
     """
     cleaned = (value or "").strip().rstrip("/")
     if not cleaned:
         return None
-    if not cleaned.startswith(("http://", "https://")):
+    parsed = urlparse(cleaned)
+    if parsed.scheme not in ("http", "https"):
         raise ValueError("base_url must start with http:// or https://")
+    if not parsed.hostname:
+        raise ValueError("base_url must include a host, e.g. http://localhost:11434")
+    _assert_reachable_host(parsed.hostname)
     return cleaned
 
 
