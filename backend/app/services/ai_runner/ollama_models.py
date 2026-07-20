@@ -204,17 +204,19 @@ async def _get_json(client: httpx.AsyncClient, url: str) -> dict[str, object] | 
     the address from its parsed numeric form so the string sent is the one that
     was checked.
 
-    CodeQL still reports ``py/partial-ssrf`` here, and it is right that the URL
-    derives from a user-supplied value — that is what the feature is. What it
-    cannot see is the validation, which lives in another module. Suppressed with
-    that reasoning rather than dismissed in the UI, so it sits next to the code
-    and shows up in review.
+    CodeQL reports ``py/partial-ssrf`` here and will keep reporting it: the URL
+    does derive from a user-supplied value, which is what the feature is. The
+    analysis cannot see the validation because it happens in another module.
+    Inline suppression comments are not honoured by GitHub code scanning, so
+    clearing it needs a dismissal recorded against the alert itself; this
+    docstring is the justification for that decision.
 
-    Re-examine this if the bound ever widens: allowing arbitrary hostnames, or
-    resolving names, would make the suppression wrong rather than merely noisy.
+    Re-examine if the bound ever widens: allowing arbitrary hostnames, or
+    resolving names before the request, would make the finding real again
+    rather than merely unprovable to the analysis.
     """
     try:
-        resp = await client.get(url)  # lgtm[py/partial-ssrf] — see docstring
+        resp = await client.get(url)
         resp.raise_for_status()
         body = resp.json()
     except (httpx.HTTPError, OSError, ValueError) as exc:
