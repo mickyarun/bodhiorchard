@@ -153,9 +153,7 @@ async def test_dangling_worktree_is_rebuilt(
     assert result == str(wt)
 
 
-async def test_healthy_worktree_is_reused(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
-) -> None:
+async def test_healthy_worktree_is_reused(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
     """A healthy existing worktree is reused — never rmtree'd or re-added."""
     parent = tmp_path
     wt = parent / "main"

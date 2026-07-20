@@ -57,6 +57,23 @@ _TOOLS_CAPABILITY = "tools"
 _model_cache: dict[str, tuple[float, list[str]]] = {}
 
 
+def clean_base_url(value: str | None) -> str | None:
+    """Normalise a user-supplied server address; ``None`` means "use the default".
+
+    Raises ``ValueError`` for anything that isn't http/https. The string is
+    handed to an HTTP client, so every caller that accepts one from a request
+    has to run it through here — including the ones that only probe and never
+    persist. A probe is still the backend issuing a request to an address the
+    caller chose, which is reachable from inside the network the browser is not.
+    """
+    cleaned = (value or "").strip().rstrip("/")
+    if not cleaned:
+        return None
+    if not cleaned.startswith(("http://", "https://")):
+        raise ValueError("base_url must start with http:// or https://")
+    return cleaned
+
+
 def base_url_from_env(env: Mapping[str, str] | None) -> str:
     """Resolve the Ollama host from a per-run env mapping.
 

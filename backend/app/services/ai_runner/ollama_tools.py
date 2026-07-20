@@ -100,6 +100,16 @@ def parse_tool_call(call: object) -> tuple[str, dict[str, Any]] | None:
     if not isinstance(name, str) or not name:
         return None
     args = fn.get("arguments")
+    if isinstance(args, str):
+        # Several Ollama-served models emit `arguments` as a JSON string rather
+        # than an object. Coercing that to {} would run the tool with no
+        # arguments — search_bugs with no query, update_bud with no fields —
+        # which succeeds and returns something plausible instead of failing.
+        try:
+            args = json.loads(args)
+        except json.JSONDecodeError:
+            logger.warning("ollama_tool_args_unparseable", tool=name, raw=args[:200])
+            return None
     return name, args if isinstance(args, dict) else {}
 
 

@@ -173,12 +173,21 @@ class ScanRunRepository:
         )
         return list((await self.db.execute(stmt)).scalars().all())
 
-    async def list_failed_repo_paths_for_scan(self, *, scan_id: uuid.UUID) -> set[str]:
-        """Tracked-repo paths whose run failed in this scan.
+    async def list_completed_repo_paths_for_scan(self, *, scan_id: uuid.UUID) -> set[str]:
+        """Tracked-repo paths whose run finished this scan in a complete state.
 
-        Mirrors :meth:`list_repo_paths_for_scan` but narrowed to failed runs,
-        so the global persist phase can leave those repos unstamped in a single
-        round-trip. Keyed by path because that is what persist stamps against.
+        Mirrors :meth:`list_repo_paths_for_scan`, narrowed to the states that
+        actually mean "fully scanned at this SHA". Keyed by path because that is
+        what the persist phase stamps against.
+
+        An allowlist, not "everything except FAILED". "This repo was fully
+        scanned" is a positive claim and has to be proven: a run that was
+        CANCELLED, or left at RUNNING/QUEUED by a dead worker, is not a failure
+        and would pass a FAILED-only filter — stamping head_sha on a repo whose
+        stages never ran, which is the permanent strand this guard exists to
+        prevent. Phrased this way a status added later (TIMED_OUT, ABORTED)
+        stays out of the stamp set until someone decides otherwise, instead of
+        silently joining it.
 
         Reads the run's own status rather than its step rows on purpose. Every
         per-repo workflow is terminal before the global phases start (see
@@ -193,7 +202,7 @@ class ScanRunRepository:
             .where(
                 ScanRepoRun.scan_id == scan_id,
                 ScanRepoRun.org_id == self.org_id,
-                ScanRepoRun.status == RepoRunStatus.FAILED,
+                ScanRepoRun.status.in_((RepoRunStatus.DONE, RepoRunStatus.SKIPPED_UNCHANGED)),
             )
         )
         return set((await self.db.execute(stmt)).scalars().all())

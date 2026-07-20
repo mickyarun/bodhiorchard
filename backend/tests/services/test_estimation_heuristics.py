@@ -41,8 +41,7 @@ def test_trivial_change_is_complexity_one() -> None:
 def test_repo_count_is_monotonic_at_fixed_scope() -> None:
     """Holding content/QA fixed, more repos never lowers complexity."""
     scores = [
-        compute_complexity(20000, 0, impacted_repo_count=n, qa_case_count=12)
-        for n in (1, 2, 3, 4)
+        compute_complexity(20000, 0, impacted_repo_count=n, qa_case_count=12) for n in (1, 2, 3, 4)
     ]
     assert scores == sorted(scores)
 

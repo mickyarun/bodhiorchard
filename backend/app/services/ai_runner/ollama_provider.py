@@ -23,6 +23,7 @@ filesystem, no session resume. ``run_agent`` refuses those before dispatch, so
 this module can assume what it receives is runnable.
 """
 
+import json
 import uuid
 from pathlib import Path
 from typing import Any
@@ -200,15 +201,39 @@ class OllamaProvider:
                 for call in calls:
                     parsed = parse_tool_call(call)
                     if parsed is None:
+                        # Answer it anyway. A call left unanswered desyncs the
+                        # positional pairing of the results that follow, and the
+                        # model — having asked for something and heard nothing —
+                        # reliably narrates the result it assumed it got.
+                        logger.warning("ollama_tool_call_malformed", call_preview=str(call)[:200])
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "content": json.dumps(
+                                    {
+                                        "error": "That tool call was malformed and did not run. "
+                                        "Re-issue it with a string `name` and an object "
+                                        "`arguments`."
+                                    }
+                                ),
+                            }
+                        )
                         continue
                     name, args = parsed
                     if progress_callback is not None:
                         progress_callback(name, {})
                     result = await dispatch_tool(db, auth, name, args)
-                    messages.append({"role": "tool", "content": result})
-                # Write tools flush through the handlers but never commit —
-                # the caller owns the transaction, and here that is us.
-                await db.commit()
+                    # ``tool_name`` is what lets the model attribute results when
+                    # a turn emits several calls; without it they arrive as
+                    # indistinguishable blobs matched only by position.
+                    messages.append({"role": "tool", "tool_name": name, "content": result})
+                    # Commit per call, not per turn. Write tools flush through
+                    # the handlers but never commit — the caller owns the
+                    # transaction, and here that is us. Batching a turn behind
+                    # one commit means a later call's failure rolls back the
+                    # earlier calls in that turn, silently discarding writes
+                    # whose success was already reported to the model.
+                    await db.commit()
 
         # Ran out of turns still calling tools. Say so rather than returning
         # the last tool result as if it were an answer.

@@ -383,10 +383,21 @@ const designAutoOff = computed(
   () => currentBUD.value?.auto_generate_phases?.design !== true,
 )
 
+// An empty list is only meaningful once we know the fetch actually ran: the
+// store swallows failures and leaves `items` empty, so a transient 500 would
+// otherwise be indistinguishable from a genuine absence — and would disable
+// generation while blaming a backend-only repository, sending the user to add
+// a frontend repo they may already have.
+const designSystemsUnknown = computed(
+  () => designSystemStore.loading || !!designSystemStore.error,
+)
+
 // No design system anywhere in the org — nothing for the designer to build
 // from. Design systems are extracted from repos that have a UI, so an org
 // tracking only backend repos legitimately has none, permanently.
-const noDesignSystem = computed(() => designSystemStore.items.length === 0)
+const noDesignSystem = computed(
+  () => !designSystemsUnknown.value && designSystemStore.items.length === 0,
+)
 
 // Why AI generation is unavailable, or '' when it is available. The designer
 // builds strictly from the design system's tokens and app skeleton and is told
@@ -397,6 +408,12 @@ const noDesignSystem = computed(() => designSystemStore.items.length === 0)
 // they drifted apart while each site repeated the condition inline.
 const generateBlockedReason = computed(() => {
   if (!props.editable) return 'Move the BUD to Design phase to generate wireframes'
+  if (designSystemsUnknown.value) {
+    // Distinct from "none exists": we don't know yet, so don't diagnose.
+    return designSystemStore.error
+      ? "Couldn't check design systems — reload to try again"
+      : 'Checking design systems…'
+  }
   if (extractingRepos.value.length > 0 && noDesignSystem.value) {
     return 'Design system extraction is still running'
   }

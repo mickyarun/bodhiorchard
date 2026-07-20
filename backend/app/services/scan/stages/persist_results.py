@@ -19,13 +19,14 @@ Wraps ``app.services.scan.phase_impls.persist_results.phase_g_persist``. Updates
 scan came out whole, and writes the ``organizations.config.knowledge``
 snapshot. Returns the authoritative active-feature count from the DB.
 
-This phase is global: it runs even when an individual repo's run failed
-mid-pipeline. A repo whose run failed is therefore excluded from the stamp —
-those two columns mean "this repo was fully scanned at this SHA", and the skip
-predicates, the scan-history router and the PR-merge webhook all read them that
-way. Stamping a repo whose synthesis (or any other stage) failed makes it look
-complete, so later scans skip the work that never ran and the repo can never
-recover on its own.
+This phase is global: it runs even when an individual repo's run failed, was
+cancelled, or was left mid-flight. Only repos that reached a complete state are
+stamped — those two columns mean "this repo was fully scanned at this SHA", and
+the skip predicates, the scan-history router and the PR-merge webhook all read
+them that way. Stamping a repo whose synthesis (or any other stage) never
+finished makes it look complete, so later scans skip the work that never ran and
+the repo cannot recover on its own; on a repo whose HEAD never moves again, that
+is permanent.
 
 Not the only writer of those columns: ``db_timeline_observer`` stamps a repo on
 ``on_run_done`` as its run finishes, which is the normal path for a healthy
@@ -59,23 +60,31 @@ from app.services.scan.stages.persist_helpers import collect_head_shas, load_org
 logger = structlog.get_logger(__name__)
 
 
-async def _drop_failed_repos(
+async def _keep_completed_repos(
     db: AsyncSession,
     *,
     org_id: uuid.UUID,
     scan_id: uuid.UUID,
     new_shas: dict[str, str],
 ) -> dict[str, str]:
-    """Return ``new_shas`` without the repos whose run failed this scan."""
-    failed_paths = await ScanRunRepository(db, org_id=org_id).list_failed_repo_paths_for_scan(
+    """Return only the entries of ``new_shas`` whose run completed this scan.
+
+    Keeps proven-complete repos rather than dropping known-failed ones: a
+    cancelled scan, or a repo left mid-flight by a dead worker, is not FAILED
+    and would otherwise be stamped as fully scanned.
+    """
+    completed = await ScanRunRepository(db, org_id=org_id).list_completed_repo_paths_for_scan(
         scan_id=scan_id
     )
-    if not failed_paths:
-        return new_shas
-    dropped = sorted(failed_paths & set(new_shas))
+    kept = {path: sha for path, sha in new_shas.items() if path in completed}
+    dropped = sorted(set(new_shas) - completed)
     if dropped:
-        logger.info("scan_persist_skipping_failed_repos", scan_id=str(scan_id), skipped=dropped)
-    return {path: sha for path, sha in new_shas.items() if path not in failed_paths}
+        # Named individually: a stuck RUNNING looks identical to a clean skip
+        # from the outside, and this is the only place it becomes visible.
+        logger.info(
+            "scan_persist_skipping_incomplete_repos", scan_id=str(scan_id), skipped=dropped
+        )
+    return kept
 
 
 async def run(
@@ -103,7 +112,7 @@ async def run(
 
     try:
         async with with_session(runtime.org_id) as db:
-            stamped_shas = await _drop_failed_repos(
+            stamped_shas = await _keep_completed_repos(
                 db, org_id=runtime.org_id, scan_id=runtime.scan_id, new_shas=new_shas
             )
             org_config = await load_org_config(db, org_id=runtime.org_id)
@@ -139,17 +148,17 @@ async def run(
             },
         )
 
-    skipped_failed = len(new_shas) - len(stamped_shas)
+    skipped_incomplete = len(new_shas) - len(stamped_shas)
     extras = {
         "persisted": True,
         "feature_count": feature_count,
         "repos_persisted": len(stamped_shas),
         "missing_shas": missing_shas,
-        "skipped_failed_repos": skipped_failed,
+        "skipped_incomplete_repos": skipped_incomplete,
         "scan_mode": overall_mode,
         "input_count": len(repo_paths),
         "kept_count": len(stamped_shas),
-        "dropped_count": missing_shas + skipped_failed,
+        "dropped_count": missing_shas + skipped_incomplete,
         "io_label": "repos → persisted",
     }
     logger.info(
@@ -157,7 +166,7 @@ async def run(
         scan_id=str(runtime.scan_id),
         feature_count=feature_count,
         repos_persisted=len(stamped_shas),
-        skipped_failed_repos=skipped_failed,
+        skipped_incomplete_repos=skipped_incomplete,
         missing_shas=extras["missing_shas"],
     )
     return StageOutput(communities=communities, dropped=[], extras=extras)

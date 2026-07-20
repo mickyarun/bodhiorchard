@@ -89,6 +89,9 @@ export function providerIcon(provider: string): string {
  * owns the sentence about them too.
  */
 export function providerLimitations(caps: ProviderCaps | undefined): string[] {
-  if (!caps || caps.supports_files) return []
-  return caps.limitations ?? []
+  // No `supports_files` gate: that would re-decide here what the backend just
+  // decided, and drop any limitation with a different cause. `supports_mcp` is
+  // the live example — a provider that can read files but cannot run MCP tools
+  // has real limits, and second-guessing the list would render none of them.
+  return caps?.limitations ?? []
 }

@@ -217,16 +217,28 @@ async def update_claude_settings(
     # the org's own machine. Clear them otherwise, so switching to Ollama later
     # can't silently inherit a host someone typed months ago for a different
     # provider — and so a stale model id can't outlive the provider that knew it.
+    # Clear when the provider has no use for the setting; otherwise keep what is
+    # stored unless this request actually supplied a replacement. Omission is not
+    # erasure — these share the credential field's contract above ("omitting it
+    # while staying in the same mode keeps the stored one"). Treating None as
+    # "clear" meant a PATCH that only switched auth mode blanked the host and the
+    # model, after which every run failed with "No Ollama model chosen for this
+    # organisation" and nothing pointed at the settings save that caused it.
     target_caps = capabilities_for(target_provider)
-    if target_caps.requires_base_url:
-        org.ai_base_url = _clean_base_url(body.base_url)
-    else:
+    if not target_caps.requires_base_url:
         org.ai_base_url = None
-    if target_caps.dynamic_models:
-        org.ai_model = (body.model or "").strip() or None
-    else:
+    elif body.base_url is not None:
+        org.ai_base_url = _clean_base_url(body.base_url)
+
+    if not target_caps.dynamic_models:
         org.ai_model = None
-    org.ai_thinking = bool(body.thinking) if target_caps.supports_thinking else False
+    elif body.model is not None:
+        org.ai_model = body.model.strip() or None
+
+    if not target_caps.supports_thinking:
+        org.ai_thinking = False
+    elif body.thinking is not None:
+        org.ai_thinking = bool(body.thinking)
 
     await db.flush()
     apply_claude_auth_to_env(org)

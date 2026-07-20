@@ -52,9 +52,7 @@ async def test_resolves_only_active_repos_in_the_selection(
         await db.flush()
 
         # Select both, but only the active one resolves.
-        result = await resolve_confirmed_repos(
-            db, org_id, {str(active.id), str(ignored.id)}
-        )
+        result = await resolve_confirmed_repos(db, org_id, {str(active.id), str(ignored.id)})
         assert result == [{"repo_path": "/data/repos/api", "repo_name": "api"}]
 
 

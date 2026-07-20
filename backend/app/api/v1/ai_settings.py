@@ -22,7 +22,7 @@ controls from a single source of truth.
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -31,7 +31,11 @@ from app.models.user import User
 from app.repositories.organization import OrganizationRepository
 from app.services.agent_phase_support import provider_limitations
 from app.services.ai_runner.capabilities import CAPABILITIES
-from app.services.ai_runner.ollama_models import OLLAMA_DEFAULT_BASE_URL, list_tool_models
+from app.services.ai_runner.ollama_models import (
+    OLLAMA_DEFAULT_BASE_URL,
+    clean_base_url,
+    list_tool_models,
+)
 from app.services.deployment_info import deployment_info
 
 router = APIRouter(tags=["settings-ai"])
@@ -110,7 +114,12 @@ async def get_ai_capabilities(
     org = await OrganizationRepository(db).get_for_user(current_user)
     # An unsaved address wins: the Settings page has to show the models of the
     # host being typed, or the user saves a model the new host doesn't have.
-    probe_at = (base_url or "").strip() or org.ai_base_url
+    # Validated even though nothing is persisted — the backend still issues the
+    # request, from inside a network the caller's browser cannot reach.
+    try:
+        probe_at = clean_base_url(base_url) or org.ai_base_url
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     providers = await with_dynamic_models([serialize_provider(p) for p in AIProvider], probe_at)
     return {
         "current_provider": (org.ai_provider or AIProvider.claude).value,

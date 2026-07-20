@@ -12,14 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The global persist phase must not stamp a repo whose scan failed.
+"""Only a repo that finished may be stamped as fully scanned.
 
 ``head_sha`` + ``last_scanned_at`` mean "this repo was fully scanned at this
-SHA". Persist is global, so it also runs for a repo whose run died mid-pipeline;
-stamping there makes the repo look complete, and the skip predicates, the
-scan-history router and the PR-merge webhook all then trust a scan that never
-finished. A healthy repo in the same scan must still be stamped — the failure of
-one repo cannot strand the others.
+SHA". Persist is global, so it also runs for repos whose run failed, was
+cancelled, or was abandoned mid-flight by a dead worker. Stamping any of those
+makes the repo look complete, and every SHA-gated stage then skips the work that
+never ran — permanently, on a repo whose HEAD never moves again.
+
+An allowlist is the point: "was fully scanned" is a positive claim. An earlier
+version excluded only FAILED, which let CANCELLED and a stuck RUNNING through.
 """
 
 import uuid
@@ -27,49 +29,51 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.scan.stages.persist_results import _drop_failed_repos
+from app.services.scan.stages.persist_results import _keep_completed_repos
 
 _MOD = "app.services.scan.stages.persist_results"
 
 GOOD_PATH = "/repos/healthy"
-BAD_PATH = "/repos/failed"
+BAD_PATH = "/repos/incomplete"
 
 
-async def _drop(failed_paths: set[str]) -> dict[str, str]:
+async def _keep(completed: set[str]) -> dict[str, str]:
     new_shas = {GOOD_PATH: "aaaa1111", BAD_PATH: "bbbb2222"}
     with patch(
         f"{_MOD}.ScanRunRepository",
         return_value=MagicMock(
-            list_failed_repo_paths_for_scan=AsyncMock(return_value=failed_paths)
+            list_completed_repo_paths_for_scan=AsyncMock(return_value=completed)
         ),
     ):
-        return await _drop_failed_repos(
+        return await _keep_completed_repos(
             MagicMock(), org_id=uuid.uuid4(), scan_id=uuid.uuid4(), new_shas=new_shas
         )
 
 
 @pytest.mark.asyncio
-async def test_failed_repo_is_not_stamped_but_healthy_one_is() -> None:
-    """The bug: a failed run stamped head_sha, so later scans skipped the work
-    that never ran. Only the healthy repo may carry a SHA forward — one repo's
-    failure must not strand the others."""
-    result = await _drop({BAD_PATH})
-
-    assert result == {GOOD_PATH: "aaaa1111"}
+async def test_only_the_completed_repo_is_stamped() -> None:
+    """One repo's failure must not strand the others, nor stamp itself."""
+    assert await _keep({GOOD_PATH}) == {GOOD_PATH: "aaaa1111"}
 
 
 @pytest.mark.asyncio
-async def test_all_repos_stamped_when_nothing_failed() -> None:
+async def test_all_repos_stamped_when_all_completed() -> None:
     """Regression guard: the happy path must be untouched."""
-    result = await _drop(set())
-
-    assert result == {GOOD_PATH: "aaaa1111", BAD_PATH: "bbbb2222"}
+    assert await _keep({GOOD_PATH, BAD_PATH}) == {
+        GOOD_PATH: "aaaa1111",
+        BAD_PATH: "bbbb2222",
+    }
 
 
 @pytest.mark.asyncio
-async def test_a_failed_repo_outside_this_stamp_set_changes_nothing() -> None:
-    """A failed repo that isn't being stamped anyway (no SHA collected) must not
-    disturb the repos that are."""
-    result = await _drop({"/repos/unrelated"})
+async def test_a_scan_where_nothing_completed_stamps_nothing() -> None:
+    """A cancelled scan: no run reached a complete state, so no repo may carry a
+    SHA forward claiming it was scanned."""
+    assert await _keep(set()) == {}
 
-    assert result == {GOOD_PATH: "aaaa1111", BAD_PATH: "bbbb2222"}
+
+@pytest.mark.asyncio
+async def test_a_completed_path_outside_this_stamp_set_adds_nothing() -> None:
+    """Completion of an unrelated repo cannot conjure a stamp for one whose SHA
+    was never collected."""
+    assert await _keep({GOOD_PATH, "/repos/unrelated"}) == {GOOD_PATH: "aaaa1111"}
