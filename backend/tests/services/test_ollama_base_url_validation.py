@@ -86,3 +86,23 @@ def test_empty_means_use_the_default() -> None:
 def test_a_trailing_slash_is_normalised_away() -> None:
     """Callers join paths onto this, so a trailing slash would double up."""
     assert clean_base_url("http://localhost:11434/") == "http://localhost:11434"
+
+
+def test_embedded_credentials_are_stripped() -> None:
+    """Anything beyond scheme/host/port is dropped, so a URL cannot smuggle
+    credentials or a path that shifts what /api/tags resolves to."""
+    assert clean_base_url("http://user:pass@localhost:11434") == "http://localhost:11434"
+
+
+def test_a_path_or_query_is_dropped() -> None:
+    assert clean_base_url("http://localhost:11434/v1/proxy?x=1") == "http://localhost:11434"
+
+
+def test_ipv6_keeps_its_brackets_after_rebuild() -> None:
+    """urlparse strips the brackets an IPv6 authority needs to be re-parsed."""
+    assert clean_base_url("http://[::1]:11434") == "http://[::1]:11434"
+
+
+def test_an_invalid_port_is_refused() -> None:
+    with pytest.raises(ValueError, match="port"):
+        clean_base_url("http://localhost:notaport")

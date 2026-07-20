@@ -123,7 +123,21 @@ def clean_base_url(value: str | None) -> str | None:
     if not parsed.hostname:
         raise ValueError("base_url must include a host, e.g. http://localhost:11434")
     _assert_reachable_host(parsed.hostname)
-    return cleaned
+    try:
+        port = parsed.port
+    except ValueError:
+        raise ValueError("base_url has an invalid port") from None
+
+    # Rebuild from the parts that were checked instead of returning the caller's
+    # string. Callers join paths onto this, so anything beyond scheme/host/port
+    # is at best noise and at worst misdirection: embedded credentials
+    # (http://user:pass@host), a path that shifts what /api/tags resolves to, or
+    # a query that rides along on every request. Only the three components
+    # validated above survive.
+    host = parsed.hostname
+    if ":" in host:  # IPv6 literal — urlparse strips the brackets it needs back
+        host = f"[{host}]"
+    return f"{parsed.scheme}://{host}:{port}" if port else f"{parsed.scheme}://{host}"
 
 
 def base_url_from_env(env: Mapping[str, str] | None) -> str:
