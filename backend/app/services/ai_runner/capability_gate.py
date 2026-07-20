@@ -38,6 +38,7 @@ from app.services.ai_runner.ollama_models import (
     OLLAMA_HOST_ENV,
     OLLAMA_MODEL_ENV,
     OLLAMA_THINK_ENV,
+    clean_base_url,
 )
 from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig
 
@@ -95,10 +96,25 @@ def provider_env(
     to work on the developer's machine.
 
     Returns ``{}`` for a provider with none of these, so callers can skip.
+
+    The address is re-validated here rather than trusted from the caller. This
+    is the one point every address passes through — the org's saved value and
+    the wizard's unsaved one — and the wizard reaches it from an unauthenticated
+    endpoint. A check that lives only in the settings handler leaves that path
+    open, which is exactly what it did. An invalid address falls back to the
+    provider default instead of raising: this function builds a run's
+    environment and has no way to report a bad request, and a run against the
+    default fails visibly rather than silently reaching somewhere it shouldn't.
     """
     env: dict[str, str] = {}
     if caps.requires_base_url:
-        env[OLLAMA_HOST_ENV] = (base_url or "").strip() or (caps.default_base_url or "")
+        default = caps.default_base_url or ""
+        try:
+            safe = clean_base_url(base_url)
+        except ValueError:
+            logger.warning("provider_env_rejected_base_url", provider=caps.provider.value)
+            safe = None
+        env[OLLAMA_HOST_ENV] = safe or default
     if caps.supports_thinking:
         env[OLLAMA_THINK_ENV] = "1" if thinking else "0"
     if caps.dynamic_models and (model or "").strip():

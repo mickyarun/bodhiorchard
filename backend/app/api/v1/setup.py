@@ -46,6 +46,7 @@ from app.schemas.setup import (
 from app.services.ai_runner.capabilities import capabilities_for
 from app.services.ai_runner.capability_gate import provider_env
 from app.services.ai_runner.connection_check import _DEFAULT_PING_TIMEOUT_S, check_connection
+from app.services.ai_runner.ollama_models import clean_base_url
 from app.services.claude_env import (
     AUTH_MODE_HOST,
     AUTH_MODE_SUBSCRIPTION,
@@ -344,6 +345,15 @@ async def check_ai_with_credentials(
             detail=f"auth_mode {body.auth_mode!r} is not supported by {provider.value}; "
             f"choose one of {valid}",
         )
+
+    # Reject a bad address here rather than let provider_env quietly fall back
+    # to the default: this endpoint is unauthenticated, and silently testing a
+    # different address than the one typed would report a success that says
+    # nothing about what the user actually entered.
+    try:
+        clean_base_url(body.base_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     # Everything the user has typed but not yet saved, resolved through the same
     # helper a real run uses — so the test exercises their configuration rather

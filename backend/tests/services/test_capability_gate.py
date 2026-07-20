@@ -149,17 +149,17 @@ def test_org_settings_travel_per_run_not_via_process_env() -> None:
     caps = capabilities_for(AIProvider.ollama)
     a = adapt_config(
         caps,
-        _org(AIProvider.ollama, ai_base_url="http://a:11434", ai_thinking=True),
+        _org(AIProvider.ollama, ai_base_url="http://10.0.0.1:11434", ai_thinking=True),
         ClaudeRunnerConfig(),
     )
     b = adapt_config(
         caps,
-        _org(AIProvider.ollama, ai_base_url="http://b:11434", ai_thinking=False),
+        _org(AIProvider.ollama, ai_base_url="http://10.0.0.2:11434", ai_thinking=False),
         ClaudeRunnerConfig(),
     )
-    assert a.env_extra and a.env_extra[OLLAMA_HOST_ENV] == "http://a:11434"
+    assert a.env_extra and a.env_extra[OLLAMA_HOST_ENV] == "http://10.0.0.1:11434"
     assert a.env_extra[OLLAMA_THINK_ENV] == "1"
-    assert b.env_extra and b.env_extra[OLLAMA_HOST_ENV] == "http://b:11434"
+    assert b.env_extra and b.env_extra[OLLAMA_HOST_ENV] == "http://10.0.0.2:11434"
     assert b.env_extra[OLLAMA_THINK_ENV] == "0"
 
 

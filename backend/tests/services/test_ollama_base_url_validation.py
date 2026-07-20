@@ -27,7 +27,10 @@ guard on only the persisted path just moves the request to the probe.
 
 import pytest
 
-from app.services.ai_runner.ollama_models import clean_base_url
+from app.models.organization import AIProvider
+from app.services.ai_runner.capabilities import capabilities_for
+from app.services.ai_runner.capability_gate import provider_env
+from app.services.ai_runner.ollama_models import OLLAMA_HOST_ENV, clean_base_url
 
 
 @pytest.mark.parametrize(
@@ -133,3 +136,24 @@ def test_an_ipv6_address_is_rendered_in_canonical_form() -> None:
 def test_an_uppercase_scheme_is_normalised() -> None:
     """urlparse lowercases the scheme; the output takes one of two literals."""
     assert clean_base_url("HTTP://localhost:11434") == "http://localhost:11434"
+
+
+def test_provider_env_refuses_a_hostile_address_from_any_caller() -> None:
+    """provider_env is the one point every address passes through — the org's
+    saved value and the setup wizard's unsaved one, the latter from an
+    unauthenticated endpoint that did not validate it. A check living only in
+    the settings handler left that path open, which is how it was open.
+
+    Falls back to the default rather than raising: this builds a run's
+    environment and cannot report a bad request, and a run against the default
+    fails visibly instead of quietly reaching somewhere it should not.
+    """
+    caps = capabilities_for(AIProvider.ollama)
+
+    hostile = provider_env(caps, base_url="http://169.254.169.254", model="qwen3", thinking=False)
+    assert hostile[OLLAMA_HOST_ENV] == caps.default_base_url
+
+    allowed = provider_env(
+        caps, base_url="http://192.168.1.9:11434", model="qwen3", thinking=False
+    )
+    assert allowed[OLLAMA_HOST_ENV] == "http://192.168.1.9:11434"
