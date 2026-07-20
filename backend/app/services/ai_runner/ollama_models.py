@@ -193,9 +193,28 @@ def _remember(base_url: str, at: float, models: list[str]) -> list[str]:
 
 
 async def _get_json(client: httpx.AsyncClient, url: str) -> dict[str, object] | None:
-    """GET one JSON object, or None on any failure."""
+    """GET one JSON object, or None on any failure.
+
+    ``url`` is built from an address that has been through
+    :func:`clean_base_url`, either when it was saved or in
+    ``capability_gate.provider_env`` — the point every caller converges on, so
+    the guarantee does not rest on each one remembering. That validation bounds
+    the destination to loopback, private ranges, or a hostname from a fixed
+    table, refuses link-local (the cloud metadata range) by name, and re-renders
+    the address from its parsed numeric form so the string sent is the one that
+    was checked.
+
+    CodeQL still reports ``py/partial-ssrf`` here, and it is right that the URL
+    derives from a user-supplied value — that is what the feature is. What it
+    cannot see is the validation, which lives in another module. Suppressed with
+    that reasoning rather than dismissed in the UI, so it sits next to the code
+    and shows up in review.
+
+    Re-examine this if the bound ever widens: allowing arbitrary hostnames, or
+    resolving names, would make the suppression wrong rather than merely noisy.
+    """
     try:
-        resp = await client.get(url)
+        resp = await client.get(url)  # lgtm[py/partial-ssrf] — see docstring
         resp.raise_for_status()
         body = resp.json()
     except (httpx.HTTPError, OSError, ValueError) as exc:
