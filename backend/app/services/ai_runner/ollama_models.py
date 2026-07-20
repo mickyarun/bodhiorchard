@@ -59,9 +59,42 @@ _TOOLS_CAPABILITY = "tools"
 _model_cache: dict[str, tuple[float, list[str]]] = {}
 
 
-# Hostnames that name the local machine across our documented deployments:
-# the default, and the bridge Docker Desktop / Linux exposes for host-gateway.
-_LOCAL_HOSTNAMES = frozenset({"localhost", "host.docker.internal"})
+# Hostnames that name the local machine across our documented deployments: the
+# default, and the bridge Docker Desktop / Linux exposes for host-gateway. A
+# mapping, not a set, because the value returned is the one we send — looked up
+# here rather than copied from the request.
+_LOCAL_HOSTNAMES = {
+    "localhost": "localhost",
+    "host.docker.internal": "host.docker.internal",
+}
+
+
+def _safe_host(host: str) -> str:
+    """Return our own rendering of ``host``, or raise ``ValueError``.
+
+    Nothing the caller wrote reaches the result. A known hostname is answered
+    with the literal from :data:`_LOCAL_HOSTNAMES`; an address is parsed to a
+    number, checked, and rendered back from that number. So the string handed to
+    the HTTP client is always one this module produced.
+
+    That is a guarantee, not a formality. Validating one spelling of an address
+    and then sending the caller's spelling is the shape of every parser-mismatch
+    bypass: the checker and the HTTP client disagree about what ``0177.0.0.1``
+    or a zero-padded octet means, and the request goes somewhere the check never
+    saw. Re-rendering from the integer removes the disagreement by construction.
+    """
+    canonical = _LOCAL_HOSTNAMES.get(host)
+    if canonical is not None:
+        return canonical
+    _assert_reachable_host(host)
+    ip = ipaddress.ip_address(host)
+    # Round-trip through the numeric form: the output is derived from the
+    # validated number, never from the text that was parsed.
+    rebuilt: ipaddress.IPv4Address | ipaddress.IPv6Address = (
+        ipaddress.IPv6Address(int(ip)) if ip.version == 6 else ipaddress.IPv4Address(int(ip))
+    )
+    # An IPv6 authority needs the brackets urlparse stripped.
+    return f"[{rebuilt}]" if rebuilt.version == 6 else str(rebuilt)
 
 
 def _assert_reachable_host(host: str) -> None:
@@ -83,9 +116,10 @@ def _assert_reachable_host(host: str) -> None:
     resolving at validation time proves nothing about the address used at
     request time anyway. Anyone with a hostname for a LAN server can give its
     address instead, which is what the error says.
+
+    Called by :func:`_safe_host` once the known-hostname case is already handled,
+    so anything arriving here has to parse as an address.
     """
-    if host in _LOCAL_HOSTNAMES:
-        return
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
@@ -122,22 +156,21 @@ def clean_base_url(value: str | None) -> str | None:
         raise ValueError("base_url must start with http:// or https://")
     if not parsed.hostname:
         raise ValueError("base_url must include a host, e.g. http://localhost:11434")
-    _assert_reachable_host(parsed.hostname)
     try:
         port = parsed.port
     except ValueError:
         raise ValueError("base_url has an invalid port") from None
 
-    # Rebuild from the parts that were checked instead of returning the caller's
-    # string. Callers join paths onto this, so anything beyond scheme/host/port
-    # is at best noise and at worst misdirection: embedded credentials
-    # (http://user:pass@host), a path that shifts what /api/tags resolves to, or
-    # a query that rides along on every request. Only the three components
-    # validated above survive.
-    host = parsed.hostname
-    if ":" in host:  # IPv6 literal — urlparse strips the brackets it needs back
-        host = f"[{host}]"
-    return f"{parsed.scheme}://{host}:{port}" if port else f"{parsed.scheme}://{host}"
+    # Assemble the result from values this module owns, so nothing the caller
+    # wrote is passed through to the HTTP client. The scheme is one of two
+    # literals chosen by comparison; the host comes back from ``_safe_host`` as
+    # either a table entry or an address re-rendered from its numeric form; the
+    # port is an int. Everything else the caller may have written — credentials,
+    # a path that shifts what /api/tags resolves to, a query riding on every
+    # request — has no route into the output at all.
+    scheme = "https" if parsed.scheme == "https" else "http"
+    host = _safe_host(parsed.hostname)
+    return f"{scheme}://{host}:{port}" if port else f"{scheme}://{host}"
 
 
 def base_url_from_env(env: Mapping[str, str] | None) -> str:

@@ -106,3 +106,30 @@ def test_ipv6_keeps_its_brackets_after_rebuild() -> None:
 def test_an_invalid_port_is_refused() -> None:
     with pytest.raises(ValueError, match="port"):
         clean_base_url("http://localhost:notaport")
+
+
+@pytest.mark.parametrize(
+    "ambiguous",
+    [
+        "http://127.000.000.001:11434",  # zero-padded octets
+        "http://0x7f000001:11434",  # hex
+        "http://2130706433:11434",  # bare integer
+    ],
+)
+def test_ambiguous_address_spellings_are_refused(ambiguous: str) -> None:
+    """Validating one spelling and sending another is the shape of every
+    parser-mismatch bypass: the checker reads 127.0.0.1 where the HTTP client
+    reads something else. These forms are refused rather than normalised, which
+    is the stronger outcome — there is no spelling left for the two to disagree
+    about."""
+    with pytest.raises(ValueError, match="not a recognised local address"):
+        clean_base_url(ambiguous)
+
+
+def test_an_ipv6_address_is_rendered_in_canonical_form() -> None:
+    assert clean_base_url("http://[0:0:0:0:0:0:0:1]:11434") == "http://[::1]:11434"
+
+
+def test_an_uppercase_scheme_is_normalised() -> None:
+    """urlparse lowercases the scheme; the output takes one of two literals."""
+    assert clean_base_url("HTTP://localhost:11434") == "http://localhost:11434"
