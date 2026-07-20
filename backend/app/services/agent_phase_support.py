@@ -47,6 +47,7 @@ __all__ = [
     "PHASES_NAVIGABLE_BY_GRAPH",
     "PHASES_REQUIRING_FILES",
     "phase_unsupported_reason",
+    "provider_limitations",
 ]
 
 # Prompts issue git commands; nothing else can stand in for the diff.
@@ -59,6 +60,29 @@ _PHASE_LABELS = {
     "code_review": "Code review",
     "testing": "Test generation",
 }
+
+
+# What a file-less provider genuinely cannot do, in the user's words. Served to
+# the settings screen rather than restated there: the frontend previously kept
+# its own copy, which went stale the moment a feature was reworked to run off
+# the prompt payload instead of the filesystem, and told users four things were
+# off when three of them worked.
+#
+# Keep each entry to a feature a user recognises, and add one only after
+# checking the agent truly needs files — most "reads the repository" work turns
+# out to read a payload the backend already assembled.
+_FILE_LESS_LIMITATIONS = (
+    "Code review",
+    "Test plan generation",
+    "Design generation for a BUD linked to a repository",
+)
+
+
+def provider_limitations(provider: AIProvider) -> list[str]:
+    """User-facing features ``provider`` cannot run. Empty when it can run all."""
+    if capabilities_for(provider).supports_files:
+        return []
+    return list(_FILE_LESS_LIMITATIONS)
 
 
 def phase_unsupported_reason(provider: AIProvider, phase: str) -> str | None:

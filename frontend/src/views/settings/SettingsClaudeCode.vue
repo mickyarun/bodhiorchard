@@ -95,11 +95,17 @@
       class="mb-4"
     >
       <div class="mb-2">
-        This provider has no access to your repository files, so these stay off:
+        This provider reaches your code through the indexed call graph rather than the
+        filesystem, so the features that need a working tree — reading a branch diff —
+        stay off:
       </div>
       <ul class="ps-4">
         <li v-for="item in limitations" :key="item">{{ item }}</li>
       </ul>
+      <div class="mt-2">
+        Everything else runs, including requirements, tech plans, repository scanning,
+        feature synthesis and design-system extraction.
+      </div>
     </AppCallout>
 
     <!-- Server address: not a secret, so it does not belong in the credential

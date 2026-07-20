@@ -29,6 +29,7 @@ from app.core.deps import get_current_user, get_db
 from app.models.organization import AIProvider
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
+from app.services.agent_phase_support import provider_limitations
 from app.services.ai_runner.capabilities import CAPABILITIES
 from app.services.ai_runner.ollama_models import OLLAMA_DEFAULT_BASE_URL, list_tool_models
 from app.services.deployment_info import deployment_info
@@ -68,6 +69,8 @@ def serialize_provider(provider: AIProvider) -> dict[str, Any]:
         "dynamic_models": caps.dynamic_models,
         "requires_base_url": caps.requires_base_url,
         "default_base_url": caps.default_base_url,
+        # Named here rather than in the UI's own copy, which drifted stale.
+        "limitations": provider_limitations(provider),
     }
 
 

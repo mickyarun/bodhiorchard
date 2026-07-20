@@ -26,6 +26,7 @@ from app.services.agent_phase_support import (
     PHASES_NAVIGABLE_BY_GRAPH,
     PHASES_REQUIRING_FILES,
     phase_unsupported_reason,
+    provider_limitations,
 )
 
 _FILE_CAPABLE = [AIProvider.claude, AIProvider.copilot, AIProvider.codex]
@@ -65,3 +66,33 @@ def test_unknown_phase_is_not_refused() -> None:
     """An unlisted phase falls through to allowed — run_agent still guards it,
     so a new phase fails loudly there rather than being silently blocked here."""
     assert phase_unsupported_reason(AIProvider.ollama, "some_new_phase") is None
+
+
+def test_file_capable_providers_have_no_limitations() -> None:
+    for provider in _FILE_CAPABLE:
+        assert provider_limitations(provider) == []
+
+
+def test_limitations_are_listed_for_a_file_less_provider() -> None:
+    assert provider_limitations(AIProvider.ollama)
+
+
+def test_limitations_do_not_name_features_that_actually_work() -> None:
+    """The regression this guards: the UI kept its own copy of this list and
+    went on naming scanning, synthesis and design-system extraction as
+    unavailable long after each was reworked to run off the prompt payload.
+    All three read context the backend assembles, not the filesystem.
+    """
+    listed = " ".join(provider_limitations(AIProvider.ollama)).lower()
+
+    for works in ("scanning", "synthesis", "design-system extraction", "tech plan"):
+        assert works not in listed, f"{works!r} works on a file-less provider"
+
+
+def test_every_file_requiring_phase_is_represented_in_the_listing() -> None:
+    """A phase refused at runtime must be one the settings screen warned about,
+    or the user meets it as a failure instead of a limit."""
+    listed = " ".join(provider_limitations(AIProvider.ollama)).lower()
+
+    assert "code review" in listed  # PHASES_REQUIRING_FILES: code_review
+    assert "test plan" in listed  # PHASES_REQUIRING_FILES: testing

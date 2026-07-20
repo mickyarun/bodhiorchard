@@ -60,6 +60,10 @@ export interface ProviderCaps {
   dynamic_models: boolean
   requires_base_url: boolean
   default_base_url: string | null
+  // Features this provider can't run, phrased for the user and supplied by the
+  // backend that decides them. Optional so an older payload renders no list
+  // rather than a stale one.
+  limitations?: string[]
 }
 
 export function providerTitle(provider: string): string {
@@ -76,13 +80,15 @@ export function providerIcon(provider: string): string {
  * A provider without file access silently produces confident answers about
  * files it never read, so the UI has to say so up front rather than let it be
  * discovered when a scan quietly returns nothing.
+ *
+ * The list is served by the capabilities endpoint, not written here. This file
+ * used to keep its own copy, and it went stale the moment a feature was
+ * reworked to run off the prompt payload instead of the filesystem — it went on
+ * naming scanning, synthesis and design-system extraction as unavailable long
+ * after all three worked. The backend owns which phases truly need files, so it
+ * owns the sentence about them too.
  */
 export function providerLimitations(caps: ProviderCaps | undefined): string[] {
   if (!caps || caps.supports_files) return []
-  return [
-    'BUD stage agents (spec, tech plan, test plan)',
-    'Design generation',
-    'Repository scanning and feature synthesis',
-    'Design-system extraction',
-  ]
+  return caps.limitations ?? []
 }
