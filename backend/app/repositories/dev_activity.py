@@ -288,6 +288,19 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none() is not None
 
+    async def any_event_exists(self) -> bool:
+        """Return True if this org has ever recorded a dev-activity event.
+
+        Rows arrive only from developers' own Claude Code hooks posting to
+        ``/mcp/dev-activity``. None ever, across the whole org, means the hook
+        isn't deployed anywhere — a setup gap, as opposed to one person simply
+        not having coded today. Streak awards have no other trigger, so this is
+        what separates "nobody has wired it up" from "quiet day".
+        """
+        stmt = self._scoped(select(DevActivityLog.id).limit(1))
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
     async def backfill_session_bud(self, session_id: str, bud_id: uuid.UUID) -> None:
         """Set ``bud_id`` on prior session events that lacked one."""
         stmt = (

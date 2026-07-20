@@ -29,15 +29,29 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="rule in XP_RULES" :key="rule.source">
+        <tr
+          v-for="rule in XP_RULES"
+          :key="rule.source"
+          :class="{ 'rule-unavailable': isUnavailable(rule.source) }"
+        >
           <td>
             <v-icon :icon="rule.icon" size="16" class="mr-1" />
             {{ rule.label }}
+            <span v-if="isUnavailable(rule.source)" class="text-caption ml-1">
+              — unavailable
+            </span>
           </td>
           <td class="text-right font-weight-bold">+{{ rule.xp }}</td>
         </tr>
       </tbody>
     </v-table>
+
+    <div v-if="streakUnavailable" class="text-caption text-medium-emphasis mt-2">
+      <v-icon icon="mdi-fire-off" size="14" class="mr-1" />
+      Daily streaks are counted from the Claude Code activity hook, which no one in this
+      organisation has reported from yet — so the streak stays at zero regardless of work
+      shipped. Every other row above is unaffected: they come from merges and BUD progress.
+    </div>
 
     <div class="text-caption text-medium-emphasis mt-2">
       XP for shipping is split equally among everyone who contributed commits or PRs to a BUD —
@@ -140,6 +154,25 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useXPStore } from '@/stores/xp'
+
+const xpStore = useXPStore()
+
+// The daily streak is awarded from one place only: the /mcp/dev-activity
+// endpoint that each developer's own Claude Code hook posts to. Where that
+// hook isn't deployed — a team whose environment can't run Claude Code, or one
+// that simply never set it up — the streak stays at zero no matter how much
+// work ships. Listing it as earnable XP alongside the rules that do fire reads
+// as a broken counter rather than a missing integration, so mark it instead.
+const streakUnavailable = computed(
+  () => xpStore.profile?.streak_source_connected === false,
+)
+
+function isUnavailable(source: string): boolean {
+  return source === 'streak' && streakUnavailable.value
+}
+
 const XP_RULES = [
   { source: 'xp_stage_develop', label: 'Merge to develop', xp: '5 ÷ contributors', icon: 'mdi-source-branch' },
   { source: 'xp_stage_uat', label: 'Merge to UAT', xp: '15 ÷ contributors', icon: 'mdi-shield-check-outline' },
@@ -196,3 +229,22 @@ const SP_ALL = [
   { label: '30-day streak', sp: 2.0 },
 ]
 </script>
+
+<style scoped>
+/* Dimmed rather than hidden: the rule still exists and starts working the
+   moment a hook reports, so removing the row would misrepresent it as gone. */
+.rule-unavailable {
+  opacity: 0.45;
+}
+
+.rule-unavailable td:first-child {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* The strikethrough belongs on the activity, not on the "— unavailable" note
+   that explains it. */
+.rule-unavailable td:first-child span {
+  text-decoration: none;
+}
+</style>

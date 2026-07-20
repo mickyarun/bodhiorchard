@@ -1068,6 +1068,11 @@ export interface XPProfile {
   skill_points: number
   house_level: number
   vehicle_unlocks: string[]
+  // False when nobody in the org has ever reported dev activity, so the Claude
+  // Code hook that is the only trigger for streak awards isn't deployed. The
+  // streak cannot move however much work happens, so the XP guide marks it
+  // unavailable rather than advertising XP nobody here can earn.
+  streak_source_connected: boolean
 }
 
 export interface LeaderboardEntry {

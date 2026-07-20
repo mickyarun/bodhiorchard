@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
 from app.models.user import User
+from app.repositories.dev_activity import DevActivityLogRepository
 from app.repositories.developer_xp import DeveloperXPRepository, RewardEventRepository
 from app.schemas.xp import (
     HouseUpgradeRequest,
@@ -59,6 +60,10 @@ async def get_my_xp(
         org_id=current_user.org_id,
     )
 
+    streak_source_connected = await DevActivityLogRepository(
+        db, org_id=current_user.org_id
+    ).any_event_exists()
+
     return XPProfileRead(
         total_xp=total_xp,
         level=level,
@@ -67,6 +72,7 @@ async def get_my_xp(
         next_level_threshold=next_threshold,
         streak_count=streak_count,
         streak_best=streak_best,
+        streak_source_connected=streak_source_connected,
         unlocked_characters=unlocks.characters,
         unlocked_accessories=unlocks.accessories,
         skill_points=row.skill_points if row else 0,

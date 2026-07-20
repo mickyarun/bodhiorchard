@@ -35,6 +35,12 @@ class XPProfileRead(BaseModel):
     skill_points: float = 0.0
     house_level: int = 1
     vehicle_unlocks: list[str] = []
+    # False when nobody in the org has ever reported dev activity, so the
+    # Claude Code hook that is the sole trigger for streak awards isn't
+    # deployed. The streak then cannot move no matter how much work happens,
+    # and the UI says so rather than showing a 0 that looks like idleness.
+    # Flips true the moment any hook reports — no setting to keep in sync.
+    streak_source_connected: bool = True
 
     model_config = {"from_attributes": True}
 
