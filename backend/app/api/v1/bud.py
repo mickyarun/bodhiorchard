@@ -45,6 +45,7 @@ from app.models.bud import (
 from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
 from app.models.bud_feature_link import BUDFeatureLinkSource
 from app.models.bud_version import BUDEditSource
+from app.models.organization import AIProvider
 from app.models.user import User
 from app.repositories import bud_version as bud_version_repo
 from app.repositories.agent_activity import AgentActivityLogRepository
@@ -55,6 +56,7 @@ from app.repositories.bud_section_session import BUDSectionSessionRepository
 from app.repositories.bud_timeline import BUDTimelineRepository
 from app.repositories.bug import BugRepository
 from app.repositories.feature_learning import FeatureLearningRepository
+from app.repositories.organization import OrganizationRepository
 from app.schemas.bud import (
     BUDAgentTaskRead,
     BUDCreate,
@@ -84,6 +86,7 @@ from app.schemas.dev_activity import (
 )
 from app.schemas.jobs import BUDAgentTaskPayload
 from app.services.agent_activity_logger import PHASE_WORKER_SLUGS, log_agent_activity
+from app.services.agent_phase_support import phase_unsupported_reason
 from app.services.agent_result_handlers import persist_linked_features_from_markdown
 from app.services.agent_task_cancel import (
     AgentTaskCancelError,
@@ -1394,6 +1397,20 @@ async def _bg_estimate(
         )
 
 
+async def _assert_phase_supported(db: AsyncSession, current_user: User, phase: str) -> None:
+    """Raise 409 when the org's provider cannot run ``phase`` at all.
+
+    The UI disables its controls on the same signal (served by the status
+    endpoint), so reaching here means an auto-spawn or a direct call. Refusing
+    up front beats spawning a task whose only outcome is a failed run the user
+    can do nothing about.
+    """
+    org = await OrganizationRepository(db).get_for_user(current_user)
+    reason = phase_unsupported_reason(org.ai_provider or AIProvider.claude, phase)
+    if reason:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=reason)
+
+
 @router.get(
     "/{bud_id}/code-review/status",
     response_model=CodeReviewStatusResponse,
@@ -1420,11 +1437,15 @@ async def get_code_review_status(
     # Tell the FE to prompt for repo selection rather than showing a dead
     # "check the logs" failure.
     needs_repo_selection = bud.status == BUDStatus.CODE_REVIEW and not confirmed_repo_paths(bud)
+    org = await OrganizationRepository(db).get_for_user(current_user)
     return CodeReviewStatusResponse(
         repos=[CodeReviewRepoStatus(**r) for r in rows],
         last_run_status=last_run_status,
         last_run_message=last_run_message,
         needs_repo_selection=needs_repo_selection,
+        unsupported_reason=phase_unsupported_reason(
+            org.ai_provider or AIProvider.claude, "code_review"
+        ),
     )
 
 
@@ -1453,6 +1474,7 @@ async def select_code_review_repos(
     """
     from app.services.bud_repo_paths import resolve_confirmed_repos
 
+    await _assert_phase_supported(db, current_user, "code_review")
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     bud = await bud_repo.get_by_id_for_update(bud_id)
     if bud is None:
@@ -1653,6 +1675,7 @@ async def regenerate_code_review(
     Guarded to ``code_review`` status only, and blocked while another
     agent task is in flight for the BUD.
     """
+    await _assert_phase_supported(db, current_user, "code_review")
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
     bud = await bud_repo.get_by_id_for_update(bud_id)
     if not bud:

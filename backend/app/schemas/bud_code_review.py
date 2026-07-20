@@ -113,6 +113,12 @@ class CodeReviewStatusResponse(BaseModel):
     # BUD was advanced to code_review manually (the automatic PR-merge path
     # is the only writer of ``confirmed_repos``).
     needs_repo_selection: bool = False
+    # Set when the org's AI provider cannot run this phase at all — the agent
+    # reads the branch diff, which a provider with no filesystem cannot reach.
+    # A user-facing sentence naming the blocker and the way out; the tab
+    # disables its controls and shows this instead of offering a run whose
+    # only outcome is a failure. ``None`` when the phase is available.
+    unsupported_reason: str | None = None
 
 
 class CodeReviewOverrideRequest(BaseModel):

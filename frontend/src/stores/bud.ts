@@ -450,15 +450,20 @@ export const useBUDStore = defineStore('bud', () => {
         last_run_status: data?.last_run_status ?? 'never_run',
         last_run_message: data?.last_run_message ?? null,
         needs_repo_selection: data?.needs_repo_selection ?? false,
+        unsupported_reason: data?.unsupported_reason ?? null,
       }
     } catch {
       // Soft failure: keep the tab usable even if the status endpoint
       // is down. The component should never block on a banner load.
+      // ``unsupported_reason`` stays null so a failed status fetch doesn't
+      // masquerade as a provider limitation — the API guard still refuses
+      // the run if the provider really can't do it.
       return {
         repos: [],
         last_run_status: 'never_run',
         last_run_message: null,
         needs_repo_selection: false,
+        unsupported_reason: null,
       }
     }
   }

@@ -22,6 +22,7 @@ import {
   CODE_REVIEW_OVERRIDE_REASON_MIN,
   CODE_REVIEW_OVERRIDE_REASON_MAX,
 } from '@/types'
+import AppCallout from '@/components/common/AppCallout.vue'
 
 const props = defineProps<{
   budId: string
@@ -48,8 +49,16 @@ const startingReview = ref(false)
 const startReviewError = ref('')
 const reviewQueued = ref(false)
 
+// Set when the org's provider can't run this phase at all (no filesystem, so
+// no branch diff). Server-supplied so the rule lives in one place rather than
+// the UI re-deriving it from raw provider capabilities.
+const unsupportedReason = ref<string | null>(null)
+
 const canStartReview = computed(
-  () => selectedRepoIds.value.length > 0 && !startingReview.value,
+  () =>
+    selectedRepoIds.value.length > 0 &&
+    !startingReview.value &&
+    !unsupportedReason.value,
 )
 
 // Re-review dialog state. `startFresh` controls whether the backend
@@ -99,6 +108,7 @@ async function loadStatus(): Promise<void> {
   lastRunStatus.value = data.last_run_status
   lastRunMessage.value = data.last_run_message
   needsRepoSelection.value = data.needs_repo_selection
+  unsupportedReason.value = data.unsupported_reason
   if (needsRepoSelection.value) {
     // Default the selection to repos that have a PR — the likely-intended
     // review set. No-PR repos remain unchecked but selectable.
@@ -231,7 +241,13 @@ function commentBadgeTooltip(repo: CodeReviewRepoStatus): string {
       <span class="text-subtitle-1 font-weight-medium">Code Review</span>
       <v-spacer />
       <v-btn
-        v-if="!loading && repos.length > 0 && lastRunStatus !== 'running' && !needsRepoSelection"
+        v-if="
+          !loading &&
+            repos.length > 0 &&
+            lastRunStatus !== 'running' &&
+            !needsRepoSelection &&
+            !unsupportedReason
+        "
         variant="outlined"
         size="small"
         prepend-icon="mdi-refresh"
@@ -253,6 +269,20 @@ function commentBadgeTooltip(repo: CodeReviewRepoStatus): string {
         Override to QA
       </v-btn>
     </div>
+
+    <!-- The provider can't run this phase at all. Say so up front rather than
+         letting the user start a run whose only outcome is a failure; the PR
+         list and Override to QA stay available, since neither needs the agent. -->
+    <AppCallout
+      v-if="unsupportedReason && !loading"
+      variant="warning"
+      eyebrow="AI review unavailable"
+      icon="mdi-robot-off-outline"
+      class="mb-3"
+    >
+      {{ unsupportedReason }} You can still review the PRs on GitHub and use
+      <strong>Override to QA</strong> to move this BUD forward.
+    </AppCallout>
 
     <div class="text-body-2 text-medium-emphasis mb-3">
       <template v-if="loading">Loading PR status…</template>

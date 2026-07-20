@@ -35,6 +35,7 @@ from app.repositories.organization import OrganizationRepository
 from app.schemas.bud_constants import BUD_AGENT_SECTIONS
 from app.schemas.jobs import BUDAgentTaskPayload, JobState
 from app.services.agent_activity_logger import log_agent_activity
+from app.services.agent_phase_support import PHASES_NAVIGABLE_BY_GRAPH
 from app.services.agent_prompts import (
     build_code_review_prompt,
     build_prd_prompt,
@@ -120,18 +121,6 @@ PROMPT_BUILDERS: dict[str, PromptBuilder] = {
     "testing": build_testing_prompt,
     "closed": build_learning_prompt,
 }
-
-# Phases that explore the codebase through the code-intel MCP tools — the
-# cached call graph — rather than the filesystem. Their ``working_dir`` is a
-# convenience for a CLI that may also Read; the work itself needs no files, so
-# a provider without them is handed the no-repo sentinel instead of a path
-# ``run_agent`` would refuse outright.
-#
-# ``code_review`` and ``testing`` are deliberately absent: their prompts hand
-# the agent ``git fetch`` / ``git diff`` commands to run, and a diff has no
-# call-graph equivalent. Blocking those is correct — dropping their path would
-# buy a confident review of code the agent never saw.
-_GRAPH_NAVIGABLE_PHASES = frozenset({"tech_arch"})
 
 
 async def _provider_reads_files(db: AsyncSession, org_id: uuid_mod.UUID) -> bool:
@@ -389,7 +378,7 @@ async def handle_bud_agent_job(job_id: str, raw_payload: dict[str, Any]) -> None
             spawn_cwd: str = working_dir if working_dir else NO_REPO_CONTEXT
             if (
                 working_dir
-                and task.task_type in _GRAPH_NAVIGABLE_PHASES
+                and task.task_type in PHASES_NAVIGABLE_BY_GRAPH
                 and not await _provider_reads_files(db, org_id)
             ):
                 spawn_cwd = NO_REPO_CONTEXT
