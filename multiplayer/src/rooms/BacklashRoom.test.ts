@@ -8,6 +8,10 @@ import {
   boardIndex,
   encodeBacklashPiece,
 } from "../../../shared/minigames/backlash"
+import {
+  fireBacklashDispose,
+  registerBacklashSummaryHooks,
+} from "../bridge/BacklashRegistry"
 import { BacklashPlayerState, BacklashRoomState } from "../schema/BacklashRoomState"
 import { BacklashRoom } from "./BacklashRoom"
 
@@ -77,23 +81,55 @@ describe("BacklashRoom spectators", () => {
 
   it("tracks viewers without adding them to the player map", () => {
     const room = createRoom("spectator-join-test")
-    const client = { userData: null } as unknown as Client
+    const client = { sessionId: "viewer-session", userData: null } as unknown as Client
 
     room.onJoin(client, { userId: "viewer", name: "Sam", viewer: true })
 
     expect(room.state.viewerCount).toBe(1)
     expect(room.state.players.has("viewer")).toBe(false)
+    expect(room.state.viewers.get("viewer-session")).toMatchObject({
+      userId: "viewer",
+      name: "Sam",
+    })
     expect(client.userData).toEqual({ userId: "viewer", name: "Sam", viewer: true })
+  })
+
+  it("uses the authenticated identity instead of untrusted join options", async () => {
+    const room = createRoom("spectator-auth-handoff-test")
+    room.state.orgId = "org-1"
+    room.state.hostUserId = "host"
+    room.state.invitedUserId = "invitee"
+    room.state.phase = "playing"
+    const client = { sessionId: "viewer-session", userData: null } as unknown as Client
+    const untrustedOptions = { userId: "host", name: "Spoofed host" }
+    const authenticated = await room.onAuth(client, { userId: "viewer", name: "Sam" })
+
+    room.onJoin(client, untrustedOptions, authenticated)
+
+    expect(room.state.players.has("host")).toBe(false)
+    expect(room.state.viewerCount).toBe(1)
+    expect(room.state.viewers.get("viewer-session")?.name).toBe("Sam")
   })
 
   it("removes a viewer immediately after a consented leave", async () => {
     const room = createRoom("spectator-leave-test")
-    const client = { userData: null } as unknown as Client
+    const client = { sessionId: "viewer-session", userData: null } as unknown as Client
+    const onViewers = vi.fn()
+    registerBacklashSummaryHooks(room.roomId, {
+      onDispose: vi.fn(),
+      onPhase: vi.fn(),
+      onViewers,
+    })
     room.onJoin(client, { userId: "viewer", name: "Sam", viewer: true })
+
+    expect(onViewers).toHaveBeenLastCalledWith(["Sam"])
 
     await room.onLeave(client, 1000)
 
     expect(room.state.viewerCount).toBe(0)
+    expect(room.state.viewers.size).toBe(0)
+    expect(onViewers).toHaveBeenLastCalledWith([])
+    fireBacklashDispose(room.roomId)
   })
 
   it("validates and rate-limits encouragements on the server", () => {

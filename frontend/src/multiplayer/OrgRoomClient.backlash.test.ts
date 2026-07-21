@@ -14,7 +14,8 @@ describe('activeBacklashToSnapshot', () => {
       hostName: ' Alice ',
       invitedName: ' Bob ',
       phase: 'playing',
-      viewerCount: 3,
+      viewerCount: 2,
+      viewerNames: { 0: ' Sam ', 1: ' Jo ', length: 2 },
       participantUserIds,
     })).toEqual({
       roomId: 'room-1',
@@ -22,7 +23,8 @@ describe('activeBacklashToSnapshot', () => {
       hostName: 'Alice',
       invitedName: 'Bob',
       phase: 'playing',
-      viewerCount: 3,
+      viewerCount: 2,
+      viewerNames: ['Sam', 'Jo'],
       participantUserIds: ['host', 'invitee'],
     })
   })
@@ -35,6 +37,7 @@ describe('activeBacklashToSnapshot', () => {
       invitedName: 'Opponent',
       phase: 'lobby',
       viewerCount: 0,
+      viewerNames: [],
       participantUserIds: [],
     })
   })

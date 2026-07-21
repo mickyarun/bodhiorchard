@@ -8,7 +8,7 @@ const declineHandlers = new Map<string, DeclineHandler>()
 interface BacklashSummaryHooks {
   onDispose: () => void
   onPhase: (phase: string) => void
-  onViewerCount: (viewerCount: number) => void
+  onViewers: (viewerNames: readonly string[]) => void
 }
 
 const summaryHooks = new Map<string, BacklashSummaryHooks>()
@@ -41,10 +41,10 @@ export function fireBacklashPhase(roomId: string, phase: string): void {
   runSummaryHook(roomId, "phase", () => hooks.onPhase(phase))
 }
 
-export function fireBacklashViewerCount(roomId: string, viewerCount: number): void {
+export function fireBacklashViewers(roomId: string, viewerNames: readonly string[]): void {
   const hooks = summaryHooks.get(roomId)
   if (!hooks) return
-  runSummaryHook(roomId, "viewer count", () => hooks.onViewerCount(viewerCount))
+  runSummaryHook(roomId, "viewers", () => hooks.onViewers(viewerNames))
 }
 
 export function fireBacklashDispose(roomId: string): void {

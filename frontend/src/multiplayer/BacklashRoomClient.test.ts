@@ -140,6 +140,9 @@ describe('BacklashRoomClient message contracts', () => {
       board,
       legalTargets: [] as number[],
       players: new Map(),
+      viewers: new Map([
+        ['viewer-session', { userId: 'viewer-1', name: 'Sam' }],
+      ]),
     }
     const boardListeners = collectionListeners()
     const legalTargetListeners = collectionListeners()
@@ -148,6 +151,7 @@ describe('BacklashRoomClient message contracts', () => {
       board: boardListeners,
       legalTargets: legalTargetListeners,
       players: collectionListeners(),
+      viewers: collectionListeners(),
     }
     getStateCallbacksMock.mockReturnValue((target: unknown) => (
       target === state ? stateListeners : { onChange: vi.fn() }
@@ -159,6 +163,25 @@ describe('BacklashRoomClient message contracts', () => {
     ;(client as unknown as { room: unknown }).room = room
 
     ;(client as unknown as { wireState: (value: unknown) => void }).wireState(room)
+    const initialSnapshot = snapshots.mock.calls[0]?.[0]
+    expect(initialSnapshot.viewerCount).toBe(1)
+    expect(initialSnapshot.viewers).toEqual([{ userId: 'viewer-1', name: 'Sam' }])
+    snapshots.mockClear()
+
+    const nextViewer = { userId: 'viewer-2', name: 'Jo' }
+    state.viewers.set('viewer-session-2', nextViewer)
+    const onViewerAdd = stateListeners.viewers.onAdd.mock.calls[0]?.[0] as (
+      (viewer: typeof nextViewer) => void
+    ) | undefined
+    onViewerAdd?.(nextViewer)
+    await Promise.resolve()
+
+    expect(snapshots).toHaveBeenCalledOnce()
+    expect(snapshots.mock.calls[0]?.[0].viewerCount).toBe(2)
+    expect(snapshots.mock.calls[0]?.[0].viewers).toEqual([
+      { userId: 'viewer-1', name: 'Sam' },
+      { userId: 'viewer-2', name: 'Jo' },
+    ])
     snapshots.mockClear()
 
     board[origin] = ''

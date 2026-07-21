@@ -121,6 +121,7 @@ export interface ActiveBacklashSummary {
   invitedName: string
   phase: string
   viewerCount: number
+  viewerNames: readonly string[]
   participantUserIds: readonly string[]
 }
 
@@ -131,6 +132,7 @@ interface RawActiveBacklash {
   invitedName?: string
   phase?: string
   viewerCount?: number
+  viewerNames?: ArrayLike<string>
   participantUserIds?: ArrayLike<string>
 }
 
@@ -768,6 +770,9 @@ export function activeBacklashToSnapshot(
     invitedName: match.invitedName?.trim() || "Opponent",
     phase: match.phase ?? "lobby",
     viewerCount: match.viewerCount ?? 0,
+    viewerNames: match.viewerNames
+      ? Array.from(match.viewerNames, (name) => name.trim()).filter(Boolean)
+      : [],
     participantUserIds: match.participantUserIds
       ? Array.from(match.participantUserIds)
       : [],

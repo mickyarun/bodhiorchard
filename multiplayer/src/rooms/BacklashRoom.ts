@@ -22,11 +22,15 @@ import { postBacklashResults, verifyUserToken } from "../bridge/BackendClient"
 import {
   fireBacklashDispose,
   fireBacklashPhase,
-  fireBacklashViewerCount,
+  fireBacklashViewers,
   registerBacklashDeclineHandler,
   unregisterBacklashDeclineHandler,
 } from "../bridge/BacklashRegistry"
-import { BacklashPlayerState, BacklashRoomState } from "../schema/BacklashRoomState"
+import {
+  BacklashPlayerState,
+  BacklashRoomState,
+  BacklashViewerState,
+} from "../schema/BacklashRoomState"
 import { BacklashEngine } from "./backlash/BacklashEngine"
 
 interface BacklashRoomOptions {
@@ -107,13 +111,22 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
     })
   }
 
-  onJoin(client: Client, options: BacklashRoomOptions): void {
-    const userId = options.userId!
-    const name = options.name?.trim() || "Viewer"
-    client.userData = { userId, name, viewer: options.viewer === true }
-    if (options.viewer) {
-      this.state.viewerCount = Math.min(BACKLASH_MAX_VIEWERS, this.state.viewerCount + 1)
-      fireBacklashViewerCount(this.roomId, this.state.viewerCount)
+  onJoin(
+    client: Client,
+    options: BacklashRoomOptions,
+    authenticated?: BacklashRoomOptions,
+  ): void {
+    const identity = authenticated ?? options
+    const userId = identity.userId!
+    const name = (identity.name?.trim() || "Viewer").slice(0, 120)
+    const viewer = identity.viewer === true
+    client.userData = { userId, name, viewer }
+    if (viewer) {
+      const spectator = new BacklashViewerState()
+      spectator.userId = userId
+      spectator.name = name
+      this.state.viewers.set(client.sessionId, spectator)
+      this.syncViewers()
       return
     }
     let player = this.state.players.get(userId)
@@ -135,13 +148,13 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
     if (this.isViewer(client)) {
       if (this.closing) return
       if (code === 1000) {
-        this.removeViewer()
+        this.removeViewer(client)
         return
       }
       try {
         await this.allowReconnection(client, BACKLASH_RECONNECT_SECONDS)
       } catch {
-        this.removeViewer()
+        this.removeViewer(client)
       }
       return
     }
@@ -448,9 +461,15 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
     return (client.userData as { viewer?: boolean } | undefined)?.viewer === true
   }
 
-  private removeViewer(): void {
-    this.state.viewerCount = Math.max(0, this.state.viewerCount - 1)
-    fireBacklashViewerCount(this.roomId, this.state.viewerCount)
+  private removeViewer(client: Client): void {
+    if (!this.state.viewers.delete(client.sessionId)) return
+    this.syncViewers()
+  }
+
+  private syncViewers(): void {
+    const viewerNames = Array.from(this.state.viewers.values(), (viewer) => viewer.name)
+    this.state.viewerCount = viewerNames.length
+    fireBacklashViewers(this.roomId, viewerNames)
   }
 
   private colorForClient(client: Client): BacklashColor | null {

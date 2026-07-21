@@ -38,6 +38,8 @@ describe("addActiveBacklash", () => {
     expect(summary).toBeDefined()
     expect(summary?.hostName).toBe("Alice")
     expect(summary?.invitedName).toBe("Opponent")
+    expect(summary?.viewerCount).toBe(0)
+    expect(Array.from(summary?.viewerNames ?? [])).toEqual([])
     expect(Array.from(summary?.participantUserIds ?? [])).toEqual(["host-1", "invitee-1"])
     expect(summary?.phase).toBe("lobby")
   })

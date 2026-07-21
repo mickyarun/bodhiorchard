@@ -11,5 +11,6 @@ export class ActiveBacklashSummary extends Schema {
   @type("string") invitedName = ""
   @type("string") phase = "lobby"
   @type("uint8") viewerCount = 0
+  @type(["string"]) viewerNames = new ArraySchema<string>()
   @type(["string"]) participantUserIds = new ArraySchema<string>()
 }

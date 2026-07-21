@@ -75,7 +75,7 @@ const matches = computed<LiveMatch[]>(() => {
       icon: 'mdi-circle-double',
       eyebrow: 'Backlash in progress',
       title: `${match.hostName} vs ${match.invitedName}`,
-      detail: `${match.viewerCount} ${match.viewerCount === 1 ? 'viewer' : 'viewers'}`,
+      detail: watcherDetail(match.viewerNames),
       isParticipant: Boolean(userId && match.participantUserIds.includes(userId)),
     }))
   return [...liveBacklashes, ...liveRaces]
@@ -118,6 +118,16 @@ function openMatch(match: LiveMatch): void {
     return
   }
   void router.push({ name: 'backlash-room', params: { roomId: match.roomId } })
+}
+
+function watcherDetail(viewerNames: readonly string[]): string {
+  if (viewerNames.length === 0) return 'No viewers yet'
+  if (viewerNames.length === 1) return `${viewerNames[0]} is watching`
+  const visibleNames = viewerNames.slice(0, 2).join(', ')
+  const remaining = viewerNames.length - 2
+  return remaining > 0
+    ? `${visibleNames} +${remaining} watching`
+    : `${visibleNames} watching`
 }
 </script>
 

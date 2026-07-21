@@ -86,10 +86,13 @@ async function handleBacklashCreate(
         if (!summary) return
         summary.phase = phase
       },
-      onViewerCount: (viewerCount) => {
+      onViewers: (viewerNames) => {
         const summary = room.state.activeBacklashes.get(created.roomId)
         if (summary) {
-          summary.viewerCount = Math.max(0, Math.min(BACKLASH_MAX_VIEWERS, viewerCount))
+          const names = viewerNames.slice(0, BACKLASH_MAX_VIEWERS)
+          summary.viewerNames.clear()
+          summary.viewerNames.push(...names)
+          summary.viewerCount = names.length
         }
       },
     })

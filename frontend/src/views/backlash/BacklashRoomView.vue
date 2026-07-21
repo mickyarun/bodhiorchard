@@ -199,6 +199,7 @@
         <BacklashCrowdPanel
           :viewer="isViewer"
           :viewer-count="state.viewerCount"
+          :viewers="state.viewers"
           :disabled="!encouragementReady || !matchIsLive"
           @encourage="sendEncouragement"
         />

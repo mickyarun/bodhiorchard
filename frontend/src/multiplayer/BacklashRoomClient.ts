@@ -26,6 +26,11 @@ export interface BacklashPlayerSnapshot {
   capturedOverlings: number
 }
 
+export interface BacklashViewerSnapshot {
+  userId: string
+  name: string
+}
+
 export interface BacklashSnapshot {
   orgId: string
   hostUserId: string
@@ -46,6 +51,7 @@ export interface BacklashSnapshot {
   board: BacklashBoard
   legalTargets: number[]
   players: BacklashPlayerSnapshot[]
+  viewers: BacklashViewerSnapshot[]
 }
 
 export interface BacklashEncouragementEvent {
@@ -72,6 +78,11 @@ interface RawPlayer {
   capturedOverlings?: number
 }
 
+interface RawViewer {
+  userId?: string
+  name?: string
+}
+
 interface BacklashStateShape {
   orgId?: string
   hostUserId?: string
@@ -92,6 +103,7 @@ interface BacklashStateShape {
   board: ArraySchema<string>
   legalTargets: ArraySchema<number>
   players: MapSchema<RawPlayer>
+  viewers: MapSchema<RawViewer>
 }
 
 const RECONNECT_DELAYS_MS = [500, 1_500, 3_000, 5_000, 8_000] as const
@@ -246,6 +258,11 @@ export class BacklashRoomClient {
       $(player).onChange(() => publish())
     }, true)
     state.players.onRemove(() => publish())
+    state.viewers.onAdd((viewer: RawViewer) => {
+      publish()
+      $(viewer).onChange(() => publish())
+    }, true)
+    state.viewers.onRemove(() => publish())
     publishNow()
   }
 }
@@ -265,6 +282,11 @@ function snapshotFromState(state: BacklashStateShape): BacklashSnapshot {
     rematchReady: player.rematchReady ?? false,
     capturedOverlings: player.capturedOverlings ?? 0,
   }))
+  const viewers: BacklashViewerSnapshot[] = []
+  state.viewers.forEach((viewer) => viewers.push({
+    userId: viewer.userId ?? '',
+    name: viewer.name?.trim() || 'Viewer',
+  }))
   return {
     orgId: state.orgId ?? '',
     hostUserId: state.hostUserId ?? '',
@@ -281,10 +303,11 @@ function snapshotFromState(state: BacklashStateShape): BacklashSnapshot {
     revision: state.revision ?? 0,
     moveCount: state.moveCount ?? 0,
     turnDeadlineMs: state.turnDeadlineMs ?? 0,
-    viewerCount: state.viewerCount ?? 0,
+    viewerCount: viewers.length,
     board,
     legalTargets,
     players,
+    viewers,
   }
 }
 

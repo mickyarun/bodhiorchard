@@ -12,6 +12,11 @@ export class BacklashPlayerState extends Schema {
   @type("uint8") capturedOverlings = 0
 }
 
+export class BacklashViewerState extends Schema {
+  @type("string") userId = ""
+  @type("string") name = ""
+}
+
 export class BacklashRoomState extends Schema {
   @type("string") orgId = ""
   @type("string") hostUserId = ""
@@ -32,4 +37,5 @@ export class BacklashRoomState extends Schema {
   @type(["string"]) board = new ArraySchema<string>()
   @type(["uint8"]) legalTargets = new ArraySchema<number>()
   @type({ map: BacklashPlayerState }) players = new MapSchema<BacklashPlayerState>()
+  @type({ map: BacklashViewerState }) viewers = new MapSchema<BacklashViewerState>()
 }
