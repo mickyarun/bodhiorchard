@@ -3,7 +3,11 @@
 
 type DeclineHandler = (userId: string) => void
 
-const declineHandlers = new Map<string, DeclineHandler>()
+interface BacklashRoomRegistration {
+  readonly decline: DeclineHandler
+}
+
+const declineHandlers = new Map<string, BacklashRoomRegistration>()
 
 interface BacklashSummaryHooks {
   onDispose: () => void
@@ -14,7 +18,7 @@ interface BacklashSummaryHooks {
 const summaryHooks = new Map<string, BacklashSummaryHooks>()
 
 export function registerBacklashDeclineHandler(roomId: string, handler: DeclineHandler): void {
-  declineHandlers.set(roomId, handler)
+  declineHandlers.set(roomId, { decline: handler })
 }
 
 export function unregisterBacklashDeclineHandler(roomId: string): void {
@@ -22,9 +26,9 @@ export function unregisterBacklashDeclineHandler(roomId: string): void {
 }
 
 export function fireBacklashInviteDeclined(roomId: string, userId: string): boolean {
-  const handler = declineHandlers.get(roomId)
-  if (!handler) return false
-  handler(userId)
+  const registration = declineHandlers.get(roomId)
+  if (!registration) return false
+  registration.decline(userId)
   return true
 }
 
