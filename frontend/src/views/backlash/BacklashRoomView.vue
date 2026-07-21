@@ -79,8 +79,19 @@
               {{ turnPlayer?.name || 'Opponent' }} is thinking
             </template>
           </span>
-          <span v-if="turnSeconds !== null" class="turn-clock" :class="{ urgent: turnSeconds <= 10 }">
-            {{ turnSeconds }}s
+          <span class="turn-strip__tools">
+            <button
+              v-if="state.phase === 'jump' && isMyTurn"
+              class="turn-strip__end-turn"
+              type="button"
+              aria-label="End chain jump and finish turn"
+              @click="client?.sendEndJump()"
+            >
+              End turn
+            </button>
+            <span v-if="turnSeconds !== null" class="turn-clock" :class="{ urgent: turnSeconds <= 10 }">
+              {{ turnSeconds }}s
+            </span>
           </span>
         </div>
 
@@ -182,11 +193,6 @@
             </span>
           </TransitionGroup>
           <span v-if="removedBottomPieces.length === 0" class="capture-rack__empty">None</span>
-        </div>
-
-        <div v-if="state.phase === 'jump' && isMyTurn" class="chain-panel">
-          <div><strong>Chain jump available</strong><span>Continue capturing, or end your turn.</span></div>
-          <button type="button" @click="client?.sendEndJump()">End jump</button>
         </div>
       </section>
 
@@ -676,7 +682,11 @@ async function leaveGame(): Promise<void> {
 .turn-pulse { width: 7px; height: 7px; border-radius: 50%; background: #ef9b54; box-shadow: 0 0 0 0 rgba(239,155,84,.6); animation: pulse 1.6s infinite; }
 @keyframes pulse { 70% { box-shadow: 0 0 0 7px transparent; } }
 .turn-strip__hint { opacity: .56; }
-.turn-clock { grid-column: 3; justify-self: end; min-width: 34px; text-align: right; font-weight: 900; font-variant-numeric: tabular-nums; }
+.turn-strip__tools { grid-column: 3; display: inline-flex; align-items: center; justify-self: end; gap: 8px; }
+.turn-strip__end-turn { border: 1px solid rgba(255,209,143,.45); border-radius: 7px; padding: 5px 9px; background: rgba(163,70,35,.72); color: #fff2da; font-size: 10px; font-weight: 800; white-space: nowrap; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,.24); transition: transform .16s, background .16s; }
+.turn-strip__end-turn:hover { transform: translateY(-1px); background: rgba(190,81,40,.88); }
+.turn-strip__end-turn:focus-visible { outline: 2px solid #ffd18f; outline-offset: 2px; }
+.turn-clock { min-width: 34px; text-align: right; font-weight: 900; font-variant-numeric: tabular-nums; }
 .turn-clock.urgent { color: #ff735b; animation: clock-pulse .65s infinite alternate; }
 @keyframes clock-pulse { to { transform: scale(1.1); } }
 .board-frame { position: relative; padding: clamp(20px, 3.2vw, 38px); border: 2px solid #8c5432; border-radius: 9px; background: linear-gradient(100deg, #62351e, #a5683e 48%, #5a2f1d); box-shadow: 0 28px 55px rgba(0,0,0,.55), inset 0 0 0 5px rgba(42,20,11,.35); }
@@ -725,9 +735,6 @@ async function leaveGame(): Promise<void> {
 .board-mark { position: absolute; left: 50%; transform: translateX(-50%); color: rgba(255,235,205,.62); font-size: 8px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; }
 .board-mark--top { top: 8px; }.board-mark--bottom { bottom: 8px; }
 .board-frame--locked .board { filter: saturate(.76); }
-.chain-panel { display: flex; align-items: center; gap: 14px; margin-top: 9px; padding: 10px 12px; border: 1px solid rgba(225,142,65,.38); border-radius: 10px; background: rgba(85,40,20,.62); }
-.chain-panel div { display: flex; flex-direction: column; flex: 1; font-size: 12px; }.chain-panel div span { opacity: .58; font-size: 10px; }
-.chain-panel button { border: 1px solid rgba(255,255,255,.2); border-radius: 7px; padding: 7px 11px; background: rgba(0,0,0,.2); color: white; cursor: pointer; }
 .side-panel { grid-area: side; display: flex; flex-direction: column; gap: 14px; }
 .side-panel__close { display: none; }
 .side-panel section { padding: 15px; border: 1px solid rgba(255,255,255,.09); border-radius: 12px; background: rgba(11,7,5,.55); }
@@ -760,10 +767,14 @@ async function leaveGame(): Promise<void> {
   .side-panel { position: fixed; z-index: 20; inset: 0 0 0 auto; width: min(320px, 88vw); padding: 54px 18px 18px; overflow-y: auto; background: #1b100c; transform: translateX(105%); transition: transform .25s; box-shadow: -20px 0 45px rgba(0,0,0,.5); }
   .side-panel--open { transform: translateX(0); }.side-panel__close { display: block; position: absolute; top: 12px; right: 18px; border: 0; background: transparent; color: white; font-size: 28px; }
   .board-frame { padding: 25px; }.turn-strip__hint { display: none; }
+  .turn-strip { grid-template-columns: minmax(0, 1fr) auto; }
+  .turn-strip__content { grid-column: 1; justify-self: start; }
+  .turn-strip__tools { grid-column: 2; }
 }
 @media (max-width: 430px) {
   .brand span { font-size: 19px; }.back-button, .rules-button { font-size: 0; }.back-button .v-icon, .rules-button .v-icon { font-size: 20px; }
   .board-frame { padding: 18px; }.board-mark { display: none; }.player-card { padding: 9px; }.piece::before { border-width: 2px; }
+  .turn-strip__end-turn { padding-inline: 7px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }

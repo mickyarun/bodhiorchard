@@ -62,13 +62,13 @@ describe('BacklashRoomClient message contracts', () => {
       id: 'room:1',
       userId: 'viewer-1',
       name: 'Viewer',
-      reaction: '👏',
+      reaction: '😭',
       createdAtMs: 123,
     })).toEqual({
       id: 'room:1',
       userId: 'viewer-1',
       name: 'Viewer',
-      reaction: '👏',
+      reaction: '😭',
       createdAtMs: 123,
     })
     expect(parseBacklashEncouragementEvent(null)).toBeNull()

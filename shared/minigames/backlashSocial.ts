@@ -1,7 +1,7 @@
 // Copyright 2025-2026 Arun Rajkumar
 // Licensed under the Apache License, Version 2.0
 
-export const BACKLASH_ENCOURAGEMENTS = ["👏", "🔥", "🎉", "💪"] as const
+export const BACKLASH_ENCOURAGEMENTS = ["👏", "🔥", "🎉", "💪", "😭"] as const
 
 export type BacklashEncouragement = typeof BACKLASH_ENCOURAGEMENTS[number]
 

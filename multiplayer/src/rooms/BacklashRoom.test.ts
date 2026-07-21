@@ -176,10 +176,10 @@ describe("BacklashRoom spectators", () => {
     encourage({ reaction: "not-allowed" })
     expect(send).toHaveBeenCalledWith("backlash_error", { reason: "invalid_encouragement" })
 
-    encourage({ reaction: "🔥" })
+    encourage({ reaction: "😭" })
     expect(broadcast).toHaveBeenCalledWith(
       "backlash_encouragement",
-      expect.objectContaining({ userId: "viewer", name: "Sam", reaction: "🔥" }),
+      expect.objectContaining({ userId: "viewer", name: "Sam", reaction: "😭" }),
     )
 
     encourage({ reaction: "👏" })

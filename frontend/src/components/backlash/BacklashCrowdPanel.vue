@@ -74,7 +74,7 @@ function initials(name: string): string {
 .crowd-panel__watchers span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; border: 1px solid rgba(231,174,113,.16); border-radius: 999px; padding: 3px 7px 3px 3px; background: rgba(231,174,113,.07); color: rgba(255,241,219,.7); font-size: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crowd-panel__watchers i { display: grid; place-items: center; flex: 0 0 20px; width: 20px; height: 20px; border-radius: 50%; background: rgba(220,160,100,.2); color: #efbd89; font-style: normal; font-size: 7px; font-weight: 900; }
 .crowd-panel__empty { margin-bottom: 10px; color: rgba(245,234,211,.3); font-size: 8px; }
-.crowd-panel__actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.crowd-panel__actions { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
 .crowd-panel__actions button { border: 1px solid rgba(255,255,255,.1); border-radius: 8px; padding: 7px 3px; background: rgba(255,255,255,.04); font-size: 19px; cursor: pointer; transition: transform .16s, background .16s; }
 .crowd-panel__actions button:hover:not(:disabled) { transform: translateY(-2px) scale(1.08); background: rgba(215,131,59,.18); }
 .crowd-panel__actions button:disabled { cursor: default; filter: grayscale(.8); opacity: .35; }
