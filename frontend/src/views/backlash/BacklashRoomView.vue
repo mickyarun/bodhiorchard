@@ -52,20 +52,38 @@
 
       <section class="table-area">
         <div class="turn-strip" :class="{ 'turn-strip--mine': isMyTurn }">
-          <template v-if="state.phase === 'lobby'">
-            <v-progress-circular indeterminate size="16" width="2" /> Waiting for your opponent to accept
-          </template>
-          <template v-else-if="state.phase === 'finished'">Match complete</template>
-          <template v-else-if="isMyTurn">
-            <span class="turn-pulse" /> Your turn
-            <span class="turn-strip__hint">{{ turnHint }}</span>
-          </template>
-          <template v-else>
-            {{ opponent?.name || 'Opponent' }} is thinking
-          </template>
+          <span class="turn-strip__content">
+            <template v-if="state.phase === 'lobby'">
+              <v-progress-circular indeterminate size="16" width="2" /> Waiting for your opponent to accept
+            </template>
+            <template v-else-if="state.phase === 'finished'">Match complete</template>
+            <template v-else-if="isMyTurn">
+              <span class="turn-pulse" /> Your turn
+              <span class="turn-strip__hint">{{ turnHint }}</span>
+            </template>
+            <template v-else>
+              {{ opponent?.name || 'Opponent' }} is thinking
+            </template>
+          </span>
           <span v-if="turnSeconds !== null" class="turn-clock" :class="{ urgent: turnSeconds <= 10 }">
             {{ turnSeconds }}s
           </span>
+        </div>
+
+        <div class="capture-rack capture-rack--opponent">
+          <span class="capture-rack__label">Removed from {{ opponent?.name || 'opponent' }}</span>
+          <TransitionGroup name="captured-token" tag="div" class="capture-rack__pieces">
+            <span
+              v-for="piece in removedOpponentPieces"
+              :key="piece.id"
+              class="capture-token"
+              :class="[`capture-token--${piece.color}`, `capture-token--${piece.kind}`]"
+              :title="`${capitalize(piece.color)} ${piece.kind}`"
+            >
+              <b v-if="piece.kind === 'overling'">B</b>
+            </span>
+          </TransitionGroup>
+          <span v-if="removedOpponentPieces.length === 0" class="capture-rack__empty">None</span>
         </div>
 
         <div class="board-frame" :class="{ 'board-frame--locked': !canInteract }">
@@ -100,9 +118,44 @@
               <span class="piece__rim" />
               <span v-if="item.piece.kind === 'overling'" class="piece__crown">B</span>
             </div>
+
+            <div
+              v-for="effect in positionedCaptureEffects"
+              :key="effect.key"
+              class="capture-effect"
+              :style="effect.style"
+              aria-hidden="true"
+            >
+              <span class="capture-effect__burst" />
+              <span
+                class="capture-effect__coin"
+                :class="[
+                  `capture-effect__coin--${effect.piece.color}`,
+                  `capture-effect__coin--${effect.piece.kind}`,
+                ]"
+              >
+                <b v-if="effect.piece.kind === 'overling'">B</b>
+              </span>
+            </div>
           </div>
           <div class="board-mark board-mark--top">{{ topColorLabel }}</div>
           <div class="board-mark board-mark--bottom">{{ myColorLabel }}</div>
+        </div>
+
+        <div class="capture-rack capture-rack--mine">
+          <span class="capture-rack__label">Your removed pieces</span>
+          <TransitionGroup name="captured-token" tag="div" class="capture-rack__pieces">
+            <span
+              v-for="piece in removedMyPieces"
+              :key="piece.id"
+              class="capture-token"
+              :class="[`capture-token--${piece.color}`, `capture-token--${piece.kind}`]"
+              :title="`${capitalize(piece.color)} ${piece.kind}`"
+            >
+              <b v-if="piece.kind === 'overling'">B</b>
+            </span>
+          </TransitionGroup>
+          <span v-if="removedMyPieces.length === 0" class="capture-rack__empty">None</span>
         </div>
 
         <div v-if="state.phase === 'jump' && isMyTurn" class="chain-panel">
@@ -193,7 +246,9 @@ import {
   BACKLASH_BOARD_SIZE,
   countPieces,
   legalMovesForPiece,
+  type BacklashBoard,
   type BacklashColor,
+  type BacklashPiece,
 } from '@shared/minigames/backlash'
 import { useAuthStore } from '@/stores/auth'
 import { useMinigamesStore } from '@/stores/minigames'
@@ -202,6 +257,10 @@ import {
   type BacklashPlayerSnapshot,
   type BacklashSnapshot,
 } from '@/multiplayer/BacklashRoomClient'
+import {
+  findCapturedBacklashPieces,
+  findRemovedBacklashPieces,
+} from './backlashPresentation'
 
 const props = defineProps<{ roomId: string }>()
 const router = useRouter()
@@ -216,7 +275,15 @@ const roomClosed = ref(false)
 const selectedIndex = ref<number | null>(null)
 const rulesOpen = ref(false)
 const nowMs = ref(Date.now())
+const captureEffects = ref<CaptureEffect[]>([])
+const captureEffectTimers = new Set<number>()
 let clockTimer: number | null = null
+
+interface CaptureEffect {
+  key: string
+  index: number
+  piece: BacklashPiece
+}
 
 const myPlayer = computed(() => state.value?.players.find((player) => player.userId === auth.user?.id))
 const opponent = computed(() => state.value?.players.find((player) => player.userId !== auth.user?.id))
@@ -230,8 +297,8 @@ const canInteract = computed(() => Boolean(
   && connectionStatus.value === 'connected'
   && (state.value.phase === 'playing' || state.value.phase === 'jump'),
 ))
-const displayIndices = computed(() => Array.from({ length: 64 }, (_, index) =>
-  myColor.value === 'white' ? 63 - index : index,
+const displayIndices = computed(() => Array.from({ length: BACKLASH_BOARD_SIZE ** 2 }, (_, index) =>
+  myColor.value === 'white' ? BACKLASH_BOARD_SIZE ** 2 - 1 - index : index,
 ))
 const shortRoomId = computed(() => props.roomId.length > 10 ? `${props.roomId.slice(0, 8)}…` : props.roomId)
 const showPromotion = computed(() => state.value?.phase === 'promotion' && isMyTurn.value)
@@ -264,18 +331,22 @@ const positionedPieces = computed(() => {
   if (!snapshot) return []
   return snapshot.board.flatMap((piece, index) => {
     if (!piece) return []
-    const physicalIndex = myColor.value === 'white' ? 63 - index : index
-    const row = Math.floor(physicalIndex / BACKLASH_BOARD_SIZE)
-    const column = physicalIndex % BACKLASH_BOARD_SIZE
     return [{
       index,
       piece,
-      style: {
-        transform: `translate(${column * 100}%, ${row * 100}%)`,
-      },
+      style: positionStyle(index),
     }]
   })
 })
+
+const removedOpponentPieces = computed(() => (
+  findRemovedBacklashPieces(state.value?.board, opponent.value?.color)
+))
+const removedMyPieces = computed(() => findRemovedBacklashPieces(state.value?.board, myColor.value))
+const positionedCaptureEffects = computed(() => captureEffects.value.map((effect) => ({
+  ...effect,
+  style: positionStyle(effect.index),
+})))
 
 const resultTone = computed(() => {
   if (!state.value || state.value.outcome === 'draw') return 'draw'
@@ -310,6 +381,7 @@ onMounted(async () => {
     const roomClient = new BacklashRoomClient()
     client.value = roomClient
     roomClient.onStateChange = (snapshot) => {
+      animateCapturedPieces(state.value?.board, snapshot.board, snapshot.revision)
       state.value = snapshot
       loading.value = false
       if (snapshot.phase === 'finished') void minigames.fetchStatus()
@@ -335,8 +407,35 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (clockTimer !== null) window.clearInterval(clockTimer)
+  for (const timer of captureEffectTimers) window.clearTimeout(timer)
+  captureEffectTimers.clear()
   client.value?.destroy()
 })
+
+function animateCapturedPieces(
+  previousBoard: BacklashBoard | undefined,
+  nextBoard: BacklashBoard,
+  revision: number,
+): void {
+  for (const { piece, index } of findCapturedBacklashPieces(previousBoard, nextBoard)) {
+    const key = `${revision}-${piece.id}`
+    captureEffects.value.push({ key, index, piece })
+    const timer = window.setTimeout(() => {
+      captureEffects.value = captureEffects.value.filter((effect) => effect.key !== key)
+      captureEffectTimers.delete(timer)
+    }, 720)
+    captureEffectTimers.add(timer)
+  }
+}
+
+function positionStyle(index: number): { transform: string } {
+  const physicalIndex = myColor.value === 'white'
+    ? BACKLASH_BOARD_SIZE ** 2 - 1 - index
+    : index
+  const row = Math.floor(physicalIndex / BACKLASH_BOARD_SIZE)
+  const column = physicalIndex % BACKLASH_BOARD_SIZE
+  return { transform: `translate(${column * 100}%, ${row * 100}%)` }
+}
 
 function selectSquare(index: number): void {
   const snapshot = state.value
@@ -466,12 +565,13 @@ async function leaveGame(): Promise<void> {
 .player-card__score strong { font-size: 20px; }
 .player-card__score span { opacity: .45; font-size: 9px; }
 .table-area { grid-area: table; min-width: 0; }
-.turn-strip { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 39px; margin-bottom: 9px; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; background: rgba(0,0,0,.25); color: rgba(245,234,211,.68); font-size: 12px; }
+.turn-strip { display: grid; grid-template-columns: minmax(48px, 1fr) auto minmax(48px, 1fr); align-items: center; min-height: 39px; padding: 0 12px; margin-bottom: 9px; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; background: rgba(0,0,0,.25); color: rgba(245,234,211,.68); font-size: 12px; }
 .turn-strip--mine { border-color: rgba(215,131,59,.48); color: #ffe1b8; }
+.turn-strip__content { grid-column: 2; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; text-align: center; }
 .turn-pulse { width: 7px; height: 7px; border-radius: 50%; background: #ef9b54; box-shadow: 0 0 0 0 rgba(239,155,84,.6); animation: pulse 1.6s infinite; }
 @keyframes pulse { 70% { box-shadow: 0 0 0 7px transparent; } }
 .turn-strip__hint { opacity: .56; }
-.turn-clock { margin-left: auto; margin-right: 12px; min-width: 34px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.turn-clock { grid-column: 3; justify-self: end; min-width: 34px; text-align: right; font-weight: 900; font-variant-numeric: tabular-nums; }
 .turn-clock.urgent { color: #ff735b; animation: clock-pulse .65s infinite alternate; }
 @keyframes clock-pulse { to { transform: scale(1.1); } }
 .board-frame { position: relative; padding: clamp(20px, 3.2vw, 38px); border: 2px solid #8c5432; border-radius: 9px; background: linear-gradient(100deg, #62351e, #a5683e 48%, #5a2f1d); box-shadow: 0 28px 55px rgba(0,0,0,.55), inset 0 0 0 5px rgba(42,20,11,.35); }
@@ -494,6 +594,24 @@ async function leaveGame(): Promise<void> {
 .piece--black .piece__crown { color: #c0ad94; }
 .piece--selected { filter: drop-shadow(0 0 8px #ffc762); animation: selected-float .65s infinite alternate; }
 @keyframes selected-float { to { margin-top: -3px; } }
+.capture-effect { position: absolute; z-index: 8; top: 0; left: 0; width: 12.5%; height: 12.5%; pointer-events: none; }
+.capture-effect__coin { position: absolute; z-index: 2; inset: 14%; display: grid; place-items: center; border: 3px solid; border-radius: 50%; font-family: Georgia, serif; font-weight: 900; box-shadow: 0 7px 13px rgba(32,12,6,.58); animation: captured-away .72s cubic-bezier(.22,.78,.22,1) forwards; }
+.capture-effect__coin--white { border-color: #fffaf0; background: linear-gradient(145deg, #fff7e7, #c9bca6); color: #75482f; }
+.capture-effect__coin--black { border-color: #3c3734; background: linear-gradient(145deg, #302c2a, #080706); color: #c0ad94; }
+.capture-effect__burst { position: absolute; z-index: 1; inset: 8%; border: 2px solid #ffd078; border-radius: 50%; animation: capture-burst .55s ease-out forwards; }
+@keyframes captured-away { 0% { opacity: 1; transform: scale(1); } 42% { opacity: 1; transform: translateY(-16%) scale(1.18) rotate(-8deg); } 100% { opacity: 0; transform: translateY(-92%) scale(.35) rotate(42deg); } }
+@keyframes capture-burst { from { opacity: .9; transform: scale(.45); } to { opacity: 0; transform: scale(1.8); } }
+.capture-rack { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 9px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: rgba(0,0,0,.18); }
+.capture-rack--opponent { margin-bottom: 8px; }.capture-rack--mine { margin-top: 8px; }
+.capture-rack__label { flex: 0 0 auto; color: rgba(245,234,211,.48); font-size: 8px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.capture-rack__pieces { display: flex; flex: 1; flex-wrap: wrap; gap: 3px; min-width: 0; }
+.capture-rack__empty { margin-left: auto; color: rgba(245,234,211,.28); font-size: 9px; }
+.capture-token { display: grid; place-items: center; width: 20px; height: 20px; border: 2px solid; border-radius: 50%; font-family: Georgia, serif; font-size: 9px; box-shadow: 0 3px 6px rgba(0,0,0,.4); }
+.capture-token--white { border-color: #fffaf0; background: linear-gradient(145deg, #fff7e7, #c9bca6); color: #75482f; }
+.capture-token--black { border-color: #4d4742; background: linear-gradient(145deg, #302c2a, #080706); color: #c0ad94; }
+.capture-token--underling { transform: scale(.82); }
+.captured-token-enter-active { animation: captured-token-in .42s cubic-bezier(.18,.86,.24,1.3); }
+@keyframes captured-token-in { from { opacity: 0; transform: translateY(-12px) scale(.35) rotate(-24deg); } }
 .board-mark { position: absolute; left: 50%; transform: translateX(-50%); color: rgba(255,235,205,.62); font-size: 8px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; }
 .board-mark--top { top: 8px; }.board-mark--bottom { bottom: 8px; }
 .board-frame--locked .board { filter: saturate(.76); }
