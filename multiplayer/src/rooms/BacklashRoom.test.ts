@@ -87,7 +87,7 @@ describe("BacklashRoom spectators", () => {
 
     expect(room.state.viewerCount).toBe(1)
     expect(room.state.players.has("viewer")).toBe(false)
-    expect(room.state.viewers.get("viewer-session")).toMatchObject({
+    expect(room.state.viewers.get("viewer")).toMatchObject({
       userId: "viewer",
       name: "Sam",
     })
@@ -108,7 +108,33 @@ describe("BacklashRoom spectators", () => {
 
     expect(room.state.players.has("host")).toBe(false)
     expect(room.state.viewerCount).toBe(1)
-    expect(room.state.viewers.get("viewer-session")?.name).toBe("Sam")
+    expect(room.state.viewers.get("viewer")?.name).toBe("Sam")
+  })
+
+  it("counts one watcher per user across multiple sessions", async () => {
+    const room = createRoom("spectator-deduplication-test")
+    const firstClient = {
+      sessionId: "viewer-session-1",
+      userData: null,
+    } as unknown as Client
+    const secondClient = {
+      sessionId: "viewer-session-2",
+      userData: null,
+    } as unknown as Client
+
+    room.onJoin(firstClient, { userId: "viewer", name: "Sam", viewer: true })
+    room.onJoin(secondClient, { userId: "viewer", name: "Sam", viewer: true })
+
+    expect(room.state.viewerCount).toBe(1)
+    expect(room.state.viewers.size).toBe(1)
+
+    await room.onLeave(firstClient, 1000)
+    expect(room.state.viewerCount).toBe(1)
+    expect(room.state.viewers.has("viewer")).toBe(true)
+
+    await room.onLeave(secondClient, 1000)
+    expect(room.state.viewerCount).toBe(0)
+    expect(room.state.viewers.size).toBe(0)
   })
 
   it("removes a viewer immediately after a consented leave", async () => {

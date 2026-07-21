@@ -294,11 +294,16 @@ function snapshotFromState(state: BacklashStateShape): BacklashSnapshot {
     rematchReady: player.rematchReady ?? false,
     capturedOverlings: player.capturedOverlings ?? 0,
   }))
-  const viewers: BacklashViewerSnapshot[] = []
-  state.viewers?.forEach((viewer) => viewers.push({
-    userId: viewer.userId ?? '',
-    name: viewer.name?.trim() || 'Viewer',
-  }))
+  const viewersByUserId = new Map<string, BacklashViewerSnapshot>()
+  state.viewers?.forEach((viewer, viewerKey) => {
+    const userId = viewer.userId?.trim() || viewerKey
+    const name = viewer.name?.trim() || 'Viewer'
+    const existing = viewersByUserId.get(userId)
+    if (!existing || (existing.name === 'Viewer' && name !== 'Viewer')) {
+      viewersByUserId.set(userId, { userId, name })
+    }
+  })
+  const viewers = Array.from(viewersByUserId.values())
   return {
     orgId: state.orgId ?? '',
     hostUserId: state.hostUserId ?? '',

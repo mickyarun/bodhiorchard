@@ -71,6 +71,7 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
   private closing = false
   private encouragementSequence = 0
   private readonly lastEncouragementAt = new Map<string, number>()
+  private readonly viewerSessions = new Map<string, Set<string>>()
 
   onCreate(rawOptions: unknown): void {
     const options = (rawOptions ?? {}) as BacklashRoomOptions
@@ -104,10 +105,12 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
       throw new Error(verified.reason ?? "invalid auth token")
     }
     if (verified.org_id !== this.state.orgId) throw new Error("token org mismatch")
+    const verifiedName = verified.name?.trim()
+    const requestedName = options.name?.trim()
     return this.validateJoin({
       ...options,
       userId: verified.user_id,
-      name: verified.name ?? options.name ?? "Player",
+      name: verifiedName || requestedName || "Player",
     })
   }
 
@@ -122,10 +125,13 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
     const viewer = identity.viewer === true
     client.userData = { userId, name, viewer }
     if (viewer) {
-      const spectator = new BacklashViewerState()
+      const sessions = this.viewerSessions.get(userId) ?? new Set<string>()
+      sessions.add(client.sessionId)
+      this.viewerSessions.set(userId, sessions)
+      const spectator = this.state.viewers.get(userId) ?? new BacklashViewerState()
       spectator.userId = userId
       spectator.name = name
-      this.state.viewers.set(client.sessionId, spectator)
+      this.state.viewers.set(userId, spectator)
       this.syncViewers()
       return
     }
@@ -133,7 +139,7 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
     if (!player) {
       player = new BacklashPlayerState()
       player.userId = userId
-      player.name = options.name?.trim() || "Player"
+      player.name = name
       this.state.players.set(userId, player)
     }
     player.connected = true
@@ -184,6 +190,7 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
 
   onDispose(): void {
     this.timerGeneration += 1
+    this.viewerSessions.clear()
     unregisterBacklashDeclineHandler(this.roomId)
     fireBacklashDispose(this.roomId)
   }
@@ -462,7 +469,12 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
   }
 
   private removeViewer(client: Client): void {
-    if (!this.state.viewers.delete(client.sessionId)) return
+    const userId = this.userIdFor(client)
+    const sessions = this.viewerSessions.get(userId)
+    if (!sessions?.delete(client.sessionId)) return
+    if (sessions.size > 0) return
+    this.viewerSessions.delete(userId)
+    if (!this.state.viewers.delete(userId)) return
     this.syncViewers()
   }
 

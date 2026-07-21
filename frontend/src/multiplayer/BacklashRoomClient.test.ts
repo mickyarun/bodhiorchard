@@ -155,6 +155,7 @@ describe('BacklashRoomClient message contracts', () => {
     const viewerListeners = collectionListeners()
     const hydratedViewers = new Map([
       ['viewer-session', { userId: 'viewer-1', name: 'Sam' }],
+      ['viewer-session-duplicate', { userId: 'viewer-1', name: 'Sam' }],
     ])
     const stateListeners = {
       onChange: vi.fn(),
