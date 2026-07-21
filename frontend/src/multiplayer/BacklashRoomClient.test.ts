@@ -134,27 +134,40 @@ describe('BacklashRoomClient message contracts', () => {
     const origin = boardIndex(1, 1)
     const destination = boardIndex(2, 1)
     board[origin] = 'white-underling-1|white|underling'
-    const state = {
+    const state: {
+      phase: string
+      turnColor: string
+      viewerCount: number
+      board: string[]
+      legalTargets: number[]
+      players: Map<string, unknown>
+      viewers?: Map<string, { userId: string; name: string }>
+    } = {
       phase: 'playing',
       turnColor: 'white',
+      viewerCount: 1,
       board,
       legalTargets: [] as number[],
-      players: new Map(),
-      viewers: new Map([
-        ['viewer-session', { userId: 'viewer-1', name: 'Sam' }],
-      ]),
+      players: new Map<string, unknown>(),
     }
     const boardListeners = collectionListeners()
     const legalTargetListeners = collectionListeners()
+    const viewerListeners = collectionListeners()
+    const hydratedViewers = new Map([
+      ['viewer-session', { userId: 'viewer-1', name: 'Sam' }],
+    ])
     const stateListeners = {
       onChange: vi.fn(),
       board: boardListeners,
       legalTargets: legalTargetListeners,
       players: collectionListeners(),
-      viewers: collectionListeners(),
     }
     getStateCallbacksMock.mockReturnValue((target: unknown) => (
-      target === state ? stateListeners : { onChange: vi.fn() }
+      target === state
+        ? stateListeners
+        : target === hydratedViewers
+          ? viewerListeners
+          : { onChange: vi.fn() }
     ))
     const room = { state }
     const client = new BacklashRoomClient('ws://test')
@@ -165,12 +178,25 @@ describe('BacklashRoomClient message contracts', () => {
     ;(client as unknown as { wireState: (value: unknown) => void }).wireState(room)
     const initialSnapshot = snapshots.mock.calls[0]?.[0]
     expect(initialSnapshot.viewerCount).toBe(1)
-    expect(initialSnapshot.viewers).toEqual([{ userId: 'viewer-1', name: 'Sam' }])
+    expect(initialSnapshot.viewers).toEqual([])
+    snapshots.mockClear()
+
+    state.viewers = hydratedViewers
+    const onStateChange = stateListeners.onChange.mock.calls[0]?.[0] as (() => void) | undefined
+    onStateChange?.()
+    await Promise.resolve()
+
+    expect(viewerListeners.onAdd).toHaveBeenCalledOnce()
+    expect(snapshots).toHaveBeenCalledOnce()
+    expect(snapshots.mock.calls[0]?.[0].viewerCount).toBe(1)
+    expect(snapshots.mock.calls[0]?.[0].viewers).toEqual([
+      { userId: 'viewer-1', name: 'Sam' },
+    ])
     snapshots.mockClear()
 
     const nextViewer = { userId: 'viewer-2', name: 'Jo' }
-    state.viewers.set('viewer-session-2', nextViewer)
-    const onViewerAdd = stateListeners.viewers.onAdd.mock.calls[0]?.[0] as (
+    hydratedViewers.set('viewer-session-2', nextViewer)
+    const onViewerAdd = viewerListeners.onAdd.mock.calls[0]?.[0] as (
       (viewer: typeof nextViewer) => void
     ) | undefined
     onViewerAdd?.(nextViewer)

@@ -103,7 +103,7 @@ interface BacklashStateShape {
   board: ArraySchema<string>
   legalTargets: ArraySchema<number>
   players: MapSchema<RawPlayer>
-  viewers: MapSchema<RawViewer>
+  viewers?: MapSchema<RawViewer>
 }
 
 const RECONNECT_DELAYS_MS = [500, 1_500, 3_000, 5_000, 8_000] as const
@@ -234,6 +234,7 @@ export class BacklashRoomClient {
     const $ = getStateCallbacks(room)
     const state = $(room.state)
     let publishPending = false
+    let wiredViewers: MapSchema<RawViewer> | null = null
     const publishNow = (): void => {
       if (this.room === room) this.onStateChange?.(snapshotFromState(room.state))
     }
@@ -246,7 +247,22 @@ export class BacklashRoomClient {
       })
     }
 
-    state.onChange(() => publish())
+    const wireViewers = (): void => {
+      const viewerCollection = room.state.viewers
+      if (!viewerCollection || viewerCollection === wiredViewers) return
+      wiredViewers = viewerCollection
+      const viewerCallbacks = $(viewerCollection)
+      viewerCallbacks.onAdd((viewer: RawViewer) => {
+        publish()
+        $(viewer).onChange(() => publish())
+      }, true)
+      viewerCallbacks.onRemove(() => publish())
+    }
+
+    state.onChange(() => {
+      wireViewers()
+      publish()
+    })
     state.board.onAdd(() => publish())
     state.board.onChange(() => publish())
     state.board.onRemove(() => publish())
@@ -258,11 +274,7 @@ export class BacklashRoomClient {
       $(player).onChange(() => publish())
     }, true)
     state.players.onRemove(() => publish())
-    state.viewers.onAdd((viewer: RawViewer) => {
-      publish()
-      $(viewer).onChange(() => publish())
-    }, true)
-    state.viewers.onRemove(() => publish())
+    wireViewers()
     publishNow()
   }
 }
@@ -283,7 +295,7 @@ function snapshotFromState(state: BacklashStateShape): BacklashSnapshot {
     capturedOverlings: player.capturedOverlings ?? 0,
   }))
   const viewers: BacklashViewerSnapshot[] = []
-  state.viewers.forEach((viewer) => viewers.push({
+  state.viewers?.forEach((viewer) => viewers.push({
     userId: viewer.userId ?? '',
     name: viewer.name?.trim() || 'Viewer',
   }))
@@ -303,7 +315,7 @@ function snapshotFromState(state: BacklashStateShape): BacklashSnapshot {
     revision: state.revision ?? 0,
     moveCount: state.moveCount ?? 0,
     turnDeadlineMs: state.turnDeadlineMs ?? 0,
-    viewerCount: viewers.length,
+    viewerCount: state.viewers ? viewers.length : (state.viewerCount ?? 0),
     board,
     legalTargets,
     players,
