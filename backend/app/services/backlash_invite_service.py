@@ -12,11 +12,15 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from app.config import settings
+from app.core.encryption import decrypt_secret
 from app.models.notification import Notification, NotificationType
 from app.repositories.notification import NotificationRepository
+from app.repositories.organization import OrganizationRepository
 from app.repositories.user import UserRepository
 from app.services.colyseus_bridge import publish_to_colyseus_room
 from app.services.event_bus import publish
+from app.services.slack_client import chat_post_message, conversations_open
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -95,7 +99,74 @@ async def send_backlash_invite(
             recipient_user_id=str(recipient_user_id),
             room_id=room_id,
         )
+    await _send_backlash_invite_slack(
+        db,
+        org_id=org_id,
+        recipient_user_id=recipient_user_id,
+        host_name=clean_name,
+        room_id=room_id,
+    )
     return notification.id
+
+
+async def _send_backlash_invite_slack(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    recipient_user_id: uuid.UUID,
+    host_name: str,
+    room_id: str,
+) -> None:
+    """Best-effort Slack DM mirror for a persisted Backlash challenge."""
+    try:
+        user = await UserRepository(db).get_by_id_in_org(recipient_user_id, org_id)
+        if user is None or not user.slack_id:
+            return
+        encrypted_token = await OrganizationRepository(db).get_slack_bot_token(org_id)
+        if not encrypted_token:
+            return
+        bot_token = decrypt_secret(encrypted_token)
+        if not bot_token:
+            logger.error(
+                "backlash_invite_slack_token_decrypt_failed",
+                org_id=str(org_id),
+                room_id=room_id,
+            )
+            return
+        dm_channel = await conversations_open(bot_token, user.slack_id)
+        if dm_channel is None:
+            logger.info(
+                "backlash_invite_slack_skipped",
+                reason="dm_open_failed",
+                recipient_user_id=str(recipient_user_id),
+                room_id=room_id,
+            )
+            return
+        deep_link = f"{settings.frontend_url.rstrip('/')}/games/backlash/{room_id}"
+        message = f"⚫ *{host_name}* challenged you to *Backlash*.\nPlay: {deep_link}"
+        result = await chat_post_message(bot_token, dm_channel, message)
+        if result is None:
+            logger.info(
+                "backlash_invite_slack_skipped",
+                reason="post_message_failed",
+                recipient_user_id=str(recipient_user_id),
+                room_id=room_id,
+            )
+            return
+        logger.info(
+            "backlash_invite_sent_via_slack",
+            recipient_user_id=str(recipient_user_id),
+            room_id=room_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "backlash_invite_slack_send_failed",
+            recipient_user_id=str(recipient_user_id),
+            org_id=str(org_id),
+            room_id=room_id,
+            error_class=type(exc).__name__,
+            exc_info=True,
+        )
 
 
 async def decline_backlash_invite(
@@ -129,9 +200,7 @@ async def decline_backlash_invite(
     try:
         host_user_id = uuid.UUID(host_raw)
         expires_at = (
-            dt.datetime.fromisoformat(expires_raw)
-            if isinstance(expires_raw, str)
-            else None
+            dt.datetime.fromisoformat(expires_raw) if isinstance(expires_raw, str) else None
         )
     except (ValueError, TypeError):
         original.is_dismissed = True

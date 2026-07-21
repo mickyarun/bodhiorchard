@@ -33,20 +33,20 @@
     </section>
 
     <section v-else-if="state" class="game-layout">
-      <aside class="player-card" :class="playerCardClass(opponent)">
-        <div class="player-card__token" :class="pieceColorClass(opponent?.color)">
-          {{ initials(opponent?.name) }}
+      <aside class="player-card" :class="playerCardClass(topPlayer)">
+        <div class="player-card__token" :class="pieceColorClass(topPlayer?.color)">
+          {{ initials(topPlayer?.name) }}
         </div>
         <div class="player-card__copy">
-          <span class="player-card__label">Opponent</span>
-          <strong>{{ opponent?.name || 'Waiting for opponent…' }}</strong>
+          <span class="player-card__label">{{ isViewer ? topColorLabel : 'Opponent' }}</span>
+          <strong>{{ topPlayer?.name || 'Waiting for opponent…' }}</strong>
           <span class="player-card__status">
-            <i :class="{ offline: opponent && !opponent.connected }" />
-            {{ opponent ? (opponent.connected ? 'Connected' : 'Reconnecting') : 'Invited' }}
+            <i :class="{ offline: topPlayer && !topPlayer.connected }" />
+            {{ topPlayer ? (topPlayer.connected ? 'Connected' : 'Reconnecting') : 'Invited' }}
           </span>
         </div>
-        <div v-if="opponent" class="player-card__score">
-          <strong>{{ pieceTotal(opponent.color) }}</strong><span>pieces</span>
+        <div v-if="topPlayer" class="player-card__score">
+          <strong>{{ pieceTotal(topPlayer.color) }}</strong><span>pieces</span>
         </div>
       </aside>
 
@@ -62,7 +62,7 @@
               <span class="turn-strip__hint">{{ turnHint }}</span>
             </template>
             <template v-else>
-              {{ opponent?.name || 'Opponent' }} is thinking
+              {{ turnPlayer?.name || 'Opponent' }} is thinking
             </template>
           </span>
           <span v-if="turnSeconds !== null" class="turn-clock" :class="{ urgent: turnSeconds <= 10 }">
@@ -71,10 +71,10 @@
         </div>
 
         <div class="capture-rack capture-rack--opponent">
-          <span class="capture-rack__label">Removed from {{ opponent?.name || 'opponent' }}</span>
+          <span class="capture-rack__label">Removed from {{ topPlayer?.name || 'opponent' }}</span>
           <TransitionGroup name="captured-token" tag="div" class="capture-rack__pieces">
             <span
-              v-for="piece in removedOpponentPieces"
+              v-for="piece in removedTopPieces"
               :key="piece.id"
               class="capture-token"
               :class="[`capture-token--${piece.color}`, `capture-token--${piece.kind}`]"
@@ -83,7 +83,7 @@
               <b v-if="piece.kind === 'overling'">B</b>
             </span>
           </TransitionGroup>
-          <span v-if="removedOpponentPieces.length === 0" class="capture-rack__empty">None</span>
+          <span v-if="removedTopPieces.length === 0" class="capture-rack__empty">None</span>
         </div>
 
         <div class="board-frame" :class="{ 'board-frame--locked': !canInteract }">
@@ -139,14 +139,26 @@
             </div>
           </div>
           <div class="board-mark board-mark--top">{{ topColorLabel }}</div>
-          <div class="board-mark board-mark--bottom">{{ myColorLabel }}</div>
+          <div class="board-mark board-mark--bottom">{{ bottomColorLabel }}</div>
+          <TransitionGroup name="crowd-reaction">
+            <div
+              v-for="reaction in encouragementVisuals"
+              :key="reaction.key"
+              class="crowd-reaction"
+              :class="`crowd-reaction--${reaction.slot}`"
+              aria-live="polite"
+            >
+              <strong>{{ reaction.reaction }}</strong>
+              <span>{{ reaction.name }}</span>
+            </div>
+          </TransitionGroup>
         </div>
 
         <div class="capture-rack capture-rack--mine">
-          <span class="capture-rack__label">Your removed pieces</span>
+          <span class="capture-rack__label">Removed from {{ bottomPlayer?.name || 'player' }}</span>
           <TransitionGroup name="captured-token" tag="div" class="capture-rack__pieces">
             <span
-              v-for="piece in removedMyPieces"
+              v-for="piece in removedBottomPieces"
               :key="piece.id"
               class="capture-token"
               :class="[`capture-token--${piece.color}`, `capture-token--${piece.kind}`]"
@@ -155,7 +167,7 @@
               <b v-if="piece.kind === 'overling'">B</b>
             </span>
           </TransitionGroup>
-          <span v-if="removedMyPieces.length === 0" class="capture-rack__empty">None</span>
+          <span v-if="removedBottomPieces.length === 0" class="capture-rack__empty">None</span>
         </div>
 
         <div v-if="state.phase === 'jump' && isMyTurn" class="chain-panel">
@@ -176,7 +188,7 @@
             <li>Remove every enemy piece to win.</li>
           </ol>
         </section>
-        <section class="reserve">
+        <section v-if="!isViewer" class="reserve">
           <h3>Your reserve</h3>
           <div class="reserve__pieces">
             <i v-for="token in myPlayer?.capturedOverlings ?? 0" :key="token" :class="pieceColorClass(myColor)" />
@@ -184,22 +196,28 @@
           </div>
           <p>Reserved Overlings can replace an Underling that reaches the opposite edge.</p>
         </section>
+        <BacklashCrowdPanel
+          :viewer="isViewer"
+          :viewer-count="state.viewerCount"
+          :disabled="!encouragementReady || !matchIsLive"
+          @encourage="sendEncouragement"
+        />
         <section class="match-meta">
           <span>Move {{ state.moveCount }}</span><span>Room {{ shortRoomId }}</span>
         </section>
       </aside>
 
-      <aside class="player-card player-card--me" :class="playerCardClass(myPlayer)">
-        <div class="player-card__token" :class="pieceColorClass(myPlayer?.color)">
-          {{ initials(myPlayer?.name) }}
+      <aside class="player-card player-card--me" :class="playerCardClass(bottomPlayer)">
+        <div class="player-card__token" :class="pieceColorClass(bottomPlayer?.color)">
+          {{ initials(bottomPlayer?.name) }}
         </div>
         <div class="player-card__copy">
-          <span class="player-card__label">You · {{ myColorLabel }}</span>
-          <strong>{{ myPlayer?.name || 'You' }}</strong>
-          <span class="player-card__status"><i /> Ready</span>
+          <span class="player-card__label">{{ isViewer ? bottomColorLabel : `You · ${bottomPlayerColorLabel}` }}</span>
+          <strong>{{ bottomPlayer?.name || 'You' }}</strong>
+          <span class="player-card__status"><i :class="{ offline: bottomPlayer && !bottomPlayer.connected }" />{{ bottomPlayer?.connected ? 'Ready' : 'Reconnecting' }}</span>
         </div>
         <div class="player-card__score">
-          <strong>{{ pieceTotal(myPlayer?.color) }}</strong><span>pieces</span>
+          <strong>{{ pieceTotal(bottomPlayer?.color) }}</strong><span>pieces</span>
         </div>
       </aside>
     </section>
@@ -226,11 +244,11 @@
         <p>{{ resultDescription }}</p>
         <div class="result-card__stats">
           <span><strong>{{ state?.moveCount ?? 0 }}</strong> moves</span>
-          <span><strong>{{ pieceTotal(myColor) }}</strong> pieces left</span>
+          <span><strong>{{ pieceTotal(bottomColor) }}</strong> pieces left</span>
         </div>
         <div class="result-card__actions">
           <v-btn variant="text" @click="leaveGame">Exit</v-btn>
-          <v-btn color="deep-orange-darken-2" :disabled="rematchUnavailable" @click="requestRematch">
+          <v-btn v-if="!isViewer" color="deep-orange-darken-2" :disabled="rematchUnavailable" @click="requestRematch">
             {{ rematchButtonLabel }}
           </v-btn>
         </div>
@@ -250,10 +268,17 @@ import {
   type BacklashColor,
   type BacklashPiece,
 } from '@shared/minigames/backlash'
+import {
+  BACKLASH_ENCOURAGEMENT_COOLDOWN_MS,
+  isBacklashLivePhase,
+  type BacklashEncouragement,
+} from '@shared/minigames/backlashSocial'
 import { useAuthStore } from '@/stores/auth'
 import { useMinigamesStore } from '@/stores/minigames'
+import BacklashCrowdPanel from '@/components/backlash/BacklashCrowdPanel.vue'
 import {
   BacklashRoomClient,
+  type BacklashEncouragementEvent,
   type BacklashPlayerSnapshot,
   type BacklashSnapshot,
 } from '@/multiplayer/BacklashRoomClient'
@@ -276,7 +301,12 @@ const selectedIndex = ref<number | null>(null)
 const rulesOpen = ref(false)
 const nowMs = ref(Date.now())
 const captureEffects = ref<CaptureEffect[]>([])
+const encouragementVisuals = ref<EncouragementVisual[]>([])
+const encouragementReady = ref(true)
 const captureEffectTimers = new Set<number>()
+const encouragementTimers = new Set<number>()
+const ENCOURAGEMENT_VISUAL_MS = 2_200
+let encouragementCooldownTimer: number | null = null
 let clockTimer: number | null = null
 
 interface CaptureEffect {
@@ -285,12 +315,35 @@ interface CaptureEffect {
   piece: BacklashPiece
 }
 
+interface EncouragementVisual extends BacklashEncouragementEvent {
+  key: string
+  slot: number
+}
+
 const myPlayer = computed(() => state.value?.players.find((player) => player.userId === auth.user?.id))
-const opponent = computed(() => state.value?.players.find((player) => player.userId !== auth.user?.id))
+const otherPlayer = computed(() => state.value?.players.find((player) => player.userId !== auth.user?.id))
 const myColor = computed<BacklashColor | null>(() => myPlayer.value?.color ?? null)
-const myColorLabel = computed(() => myColor.value ? `${capitalize(myColor.value)} side` : 'Unassigned')
-const topColorLabel = computed(() => myColor.value === 'black' ? 'White side' : 'Black side')
+const isViewer = computed(() => Boolean(state.value && !myPlayer.value))
+const bottomColor = computed<BacklashColor>(() => myColor.value ?? 'white')
+const topColor = computed<BacklashColor>(() => bottomColor.value === 'white' ? 'black' : 'white')
+const topColorLabel = computed(() => `${capitalize(topColor.value)} side`)
+const bottomColorLabel = computed(() => `${capitalize(bottomColor.value)} side`)
+const topPlayer = computed(() => (
+  state.value?.players.find((player) => player.color === topColor.value)
+  ?? (isViewer.value ? state.value?.players[0] : otherPlayer.value)
+))
+const bottomPlayer = computed(() => (
+  state.value?.players.find((player) => player.color === bottomColor.value)
+  ?? (isViewer.value ? state.value?.players[1] : myPlayer.value)
+))
+const bottomPlayerColorLabel = computed(() => (
+  bottomPlayer.value?.color ? `${capitalize(bottomPlayer.value.color)} side` : 'Unassigned'
+))
+const turnPlayer = computed(() => state.value?.players.find((player) => player.userId === state.value?.turnUserId))
 const isMyTurn = computed(() => state.value?.turnUserId === auth.user?.id)
+const matchIsLive = computed(() => Boolean(
+  state.value && isBacklashLivePhase(state.value.phase),
+))
 const canInteract = computed(() => Boolean(
   state.value
   && isMyTurn.value
@@ -298,7 +351,7 @@ const canInteract = computed(() => Boolean(
   && (state.value.phase === 'playing' || state.value.phase === 'jump'),
 ))
 const displayIndices = computed(() => Array.from({ length: BACKLASH_BOARD_SIZE ** 2 }, (_, index) =>
-  myColor.value === 'white' ? BACKLASH_BOARD_SIZE ** 2 - 1 - index : index,
+  bottomColor.value === 'white' ? BACKLASH_BOARD_SIZE ** 2 - 1 - index : index,
 ))
 const shortRoomId = computed(() => props.roomId.length > 10 ? `${props.roomId.slice(0, 8)}…` : props.roomId)
 const showPromotion = computed(() => state.value?.phase === 'promotion' && isMyTurn.value)
@@ -339,10 +392,12 @@ const positionedPieces = computed(() => {
   })
 })
 
-const removedOpponentPieces = computed(() => (
-  findRemovedBacklashPieces(state.value?.board, opponent.value?.color)
+const removedTopPieces = computed(() => (
+  findRemovedBacklashPieces(state.value?.board, topPlayer.value?.color)
 ))
-const removedMyPieces = computed(() => findRemovedBacklashPieces(state.value?.board, myColor.value))
+const removedBottomPieces = computed(() => (
+  findRemovedBacklashPieces(state.value?.board, bottomPlayer.value?.color)
+))
 const positionedCaptureEffects = computed(() => captureEffects.value.map((effect) => ({
   ...effect,
   style: positionStyle(effect.index),
@@ -350,11 +405,17 @@ const positionedCaptureEffects = computed(() => captureEffects.value.map((effect
 
 const resultTone = computed(() => {
   if (!state.value || state.value.outcome === 'draw') return 'draw'
+  if (isViewer.value) return 'spectator'
   return state.value.winnerId === auth.user?.id ? 'win' : 'loss'
 })
-const resultSymbol = computed(() => resultTone.value === 'win' ? '✦' : resultTone.value === 'draw' ? '◇' : '◆')
-const resultTitle = computed(() => resultTone.value === 'win' ? 'Brilliant victory' : resultTone.value === 'draw' ? 'Honours even' : 'Outmanoeuvred')
+const winner = computed(() => state.value?.players.find((player) => player.userId === state.value?.winnerId))
+const resultSymbol = computed(() => resultTone.value === 'win' ? '✦' : resultTone.value === 'draw' ? '◇' : resultTone.value === 'spectator' ? '●' : '◆')
+const resultTitle = computed(() => {
+  if (resultTone.value === 'spectator') return winner.value ? `${winner.value.name} wins` : 'Match complete'
+  return resultTone.value === 'win' ? 'Brilliant victory' : resultTone.value === 'draw' ? 'Honours even' : 'Outmanoeuvred'
+})
 const resultDescription = computed(() => {
+  if (isViewer.value) return 'Thanks for watching and cheering the players on.'
   const reason = state.value?.outcomeReason ?? ''
   const descriptions: Record<string, string> = {
     all_pieces: resultTone.value === 'win' ? 'You took every opposing piece.' : 'Your final piece was captured.',
@@ -393,6 +454,7 @@ onMounted(async () => {
       connectionStatus.value = 'disconnected'
       if (state.value?.phase !== 'finished') error.value = humanizeReason(reason)
     }
+    roomClient.onEncouragement = showEncouragement
     await roomClient.joinById(props.roomId, {
       userId: user.id,
       name: user.name,
@@ -409,6 +471,9 @@ onBeforeUnmount(() => {
   if (clockTimer !== null) window.clearInterval(clockTimer)
   for (const timer of captureEffectTimers) window.clearTimeout(timer)
   captureEffectTimers.clear()
+  for (const timer of encouragementTimers) window.clearTimeout(timer)
+  encouragementTimers.clear()
+  if (encouragementCooldownTimer !== null) window.clearTimeout(encouragementCooldownTimer)
   client.value?.destroy()
 })
 
@@ -429,12 +494,37 @@ function animateCapturedPieces(
 }
 
 function positionStyle(index: number): { transform: string } {
-  const physicalIndex = myColor.value === 'white'
+  const physicalIndex = bottomColor.value === 'white'
     ? BACKLASH_BOARD_SIZE ** 2 - 1 - index
     : index
   const row = Math.floor(physicalIndex / BACKLASH_BOARD_SIZE)
   const column = physicalIndex % BACKLASH_BOARD_SIZE
   return { transform: `translate(${column * 100}%, ${row * 100}%)` }
+}
+
+function showEncouragement(event: BacklashEncouragementEvent): void {
+  const key = `${event.id}-${event.createdAtMs}`
+  encouragementVisuals.value.push({
+    ...event,
+    key,
+    slot: encouragementVisuals.value.length % 4,
+  })
+  const timer = window.setTimeout(() => {
+    encouragementVisuals.value = encouragementVisuals.value.filter((item) => item.key !== key)
+    encouragementTimers.delete(timer)
+  }, ENCOURAGEMENT_VISUAL_MS)
+  encouragementTimers.add(timer)
+}
+
+function sendEncouragement(reaction: BacklashEncouragement): void {
+  if (!encouragementReady.value || !matchIsLive.value) return
+  encouragementReady.value = false
+  client.value?.sendEncouragement(reaction)
+  if (encouragementCooldownTimer !== null) window.clearTimeout(encouragementCooldownTimer)
+  encouragementCooldownTimer = window.setTimeout(() => {
+    encouragementReady.value = true
+    encouragementCooldownTimer = null
+  }, BACKLASH_ENCOURAGEMENT_COOLDOWN_MS)
 }
 
 function selectSquare(index: number): void {
@@ -612,6 +702,11 @@ async function leaveGame(): Promise<void> {
 .capture-token--underling { transform: scale(.82); }
 .captured-token-enter-active { animation: captured-token-in .42s cubic-bezier(.18,.86,.24,1.3); }
 @keyframes captured-token-in { from { opacity: 0; transform: translateY(-12px) scale(.35) rotate(-24deg); } }
+.crowd-reaction { position: absolute; z-index: 12; right: 7%; bottom: 8%; display: flex; flex-direction: column; align-items: center; pointer-events: none; filter: drop-shadow(0 7px 9px rgba(0,0,0,.45)); animation: crowd-float 2.2s ease-out forwards; }
+.crowd-reaction strong { font-size: clamp(30px, 4vw, 54px); line-height: 1; }
+.crowd-reaction span { max-width: 110px; overflow: hidden; color: #fff5dd; font-size: 9px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.crowd-reaction--1 { right: 22%; bottom: 14%; }.crowd-reaction--2 { right: 10%; bottom: 27%; }.crowd-reaction--3 { right: 30%; bottom: 5%; }
+@keyframes crowd-float { 0% { opacity: 0; transform: translateY(18px) scale(.5) rotate(-8deg); } 18% { opacity: 1; transform: translateY(0) scale(1.12) rotate(4deg); } 72% { opacity: 1; } 100% { opacity: 0; transform: translateY(-80px) scale(.82) rotate(-4deg); } }
 .board-mark { position: absolute; left: 50%; transform: translateX(-50%); color: rgba(255,235,205,.62); font-size: 8px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; }
 .board-mark--top { top: 8px; }.board-mark--bottom { bottom: 8px; }
 .board-frame--locked .board { filter: saturate(.76); }
@@ -637,7 +732,7 @@ async function leaveGame(): Promise<void> {
 @keyframes result-in { from { opacity: 0; transform: scale(.35) rotate(-30deg); } }
 .result-card__burst { position: absolute; width: 280px; height: 280px; left: 50%; top: -80px; transform: translateX(-50%); background: repeating-conic-gradient(from 0deg, rgba(221,137,58,.09) 0 8deg, transparent 8deg 18deg); animation: burst-spin 14s linear infinite; }
 @keyframes burst-spin { to { transform: translateX(-50%) rotate(360deg); } }
-.result-card--loss { filter: saturate(.68); }.result-card--draw { background: linear-gradient(150deg, #191715, #3c3831); }
+.result-card--loss { filter: saturate(.68); }.result-card--draw, .result-card--spectator { background: linear-gradient(150deg, #191715, #3c3831); }
 .result-card__stats { display: grid; grid-template-columns: 1fr 1fr; margin-top: 20px; border-block: 1px solid rgba(255,255,255,.09); }
 .result-card__stats span { display: flex; flex-direction: column; padding: 10px; color: rgba(255,244,222,.48); font-size: 9px; text-transform: uppercase; }.result-card__stats strong { color: #fff1d5; font-size: 17px; }
 @media (max-width: 980px) {

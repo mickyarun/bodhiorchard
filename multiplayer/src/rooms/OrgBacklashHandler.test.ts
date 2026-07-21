@@ -2,7 +2,9 @@
 // Licensed under the Apache License, Version 2.0
 
 import { describe, expect, it } from "vitest"
-import { parseBacklashCreateMessage } from "./OrgBacklashHandler"
+import type { Room } from "colyseus"
+import { OrgRoomState } from "../schema/OrgRoomState"
+import { addActiveBacklash, parseBacklashCreateMessage } from "./OrgBacklashHandler"
 
 describe("parseBacklashCreateMessage", () => {
   it("accepts exactly one non-empty opponent id", () => {
@@ -22,5 +24,21 @@ describe("parseBacklashCreateMessage", () => {
     { invitedUserId: "x".repeat(65) },
   ])("rejects malformed opponent payload %#", (input) => {
     expect(parseBacklashCreateMessage(input)).toBeNull()
+  })
+})
+
+describe("addActiveBacklash", () => {
+  it("publishes a lobby summary with both participant ids", () => {
+    const state = new OrgRoomState()
+    const room = { state } as Room<{ state: OrgRoomState }>
+
+    addActiveBacklash(room, "room-1", "host-1", "Alice", "invitee-1")
+
+    const summary = state.activeBacklashes.get("room-1")
+    expect(summary).toBeDefined()
+    expect(summary?.hostName).toBe("Alice")
+    expect(summary?.invitedName).toBe("Opponent")
+    expect(Array.from(summary?.participantUserIds ?? [])).toEqual(["host-1", "invitee-1"])
+    expect(summary?.phase).toBe("lobby")
   })
 })

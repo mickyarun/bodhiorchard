@@ -25,9 +25,10 @@ import { Schema, MapSchema, type } from "@colyseus/schema"
 import { MemberState } from "./MemberState"
 import { AgentState } from "./AgentState"
 import { ActiveRaceSummary } from "./ActiveRaceSummary"
+import { ActiveBacklashSummary } from "./ActiveBacklashSummary"
 
 export class OrgRoomState extends Schema {
-  @type("string") version = "1.2.0"
+  @type("string") version = "1.3.0"
   @type("string") orgId = ""
 
   /** All members keyed by user_id. */
@@ -43,4 +44,7 @@ export class OrgRoomState extends Schema {
    * handler and removed when the RaceRoom disposes.
    */
   @type({ map: ActiveRaceSummary }) activeRaces = new MapSchema<ActiveRaceSummary>()
+
+  /** Live Backlash rooms published for dashboard discovery and spectating. */
+  @type({ map: ActiveBacklashSummary }) activeBacklashes = new MapSchema<ActiveBacklashSummary>()
 }

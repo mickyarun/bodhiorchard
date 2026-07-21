@@ -12,8 +12,17 @@ import {
   encodeBacklashPiece,
   type BacklashColor,
 } from "../../../shared/minigames/backlash"
+import {
+  BACKLASH_ENCOURAGEMENT_COOLDOWN_MS,
+  BACKLASH_MAX_VIEWERS,
+  isBacklashEncouragement,
+  isBacklashLivePhase,
+} from "../../../shared/minigames/backlashSocial"
 import { postBacklashResults, verifyUserToken } from "../bridge/BackendClient"
 import {
+  fireBacklashDispose,
+  fireBacklashPhase,
+  fireBacklashViewerCount,
   registerBacklashDeclineHandler,
   unregisterBacklashDeclineHandler,
 } from "../bridge/BacklashRegistry"
@@ -27,6 +36,7 @@ interface BacklashRoomOptions {
   userId?: string
   name?: string
   token?: string
+  viewer?: boolean
 }
 
 interface MovePayload {
@@ -47,7 +57,7 @@ function replaceArraySchema<T>(target: ArraySchema<T>, values: readonly T[]): vo
 }
 
 export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
-  maxClients = 2
+  maxClients = 2 + BACKLASH_MAX_VIEWERS
 
   private readonly engine = new BacklashEngine()
   private readonly postedMatches = new Set<string>()
@@ -55,6 +65,8 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
   private matchStartedAtMs = 0
   private timerGeneration = 0
   private closing = false
+  private encouragementSequence = 0
+  private readonly lastEncouragementAt = new Map<string, number>()
 
   onCreate(rawOptions: unknown): void {
     const options = (rawOptions ?? {}) as BacklashRoomOptions
@@ -70,6 +82,7 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
     this.onMessage("backlash_promote", (client, raw) => this.handlePromotion(client, raw))
     this.onMessage("backlash_rematch", (client) => this.handleRematch(client))
     this.onMessage("backlash_cancel", (client) => this.handleCancel(client))
+    this.onMessage("backlash_encourage", (client, raw) => this.handleEncouragement(client, raw))
 
     registerBacklashDeclineHandler(this.roomId, (userId) => this.handleInviteDeclined(userId))
     this.clock.setTimeout(() => {
@@ -80,14 +93,14 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
   async onAuth(_client: Client, options: BacklashRoomOptions): Promise<BacklashRoomOptions> {
     if (!options.token) {
       if (process.env.NODE_ENV === "production") throw new Error("auth token required")
-      return this.validateParticipant(options)
+      return this.validateJoin(options)
     }
     const verified = await verifyUserToken(options.token, this.state.orgId)
     if (!verified.valid || !verified.user_id || !verified.org_id) {
       throw new Error(verified.reason ?? "invalid auth token")
     }
     if (verified.org_id !== this.state.orgId) throw new Error("token org mismatch")
-    return this.validateParticipant({
+    return this.validateJoin({
       ...options,
       userId: verified.user_id,
       name: verified.name ?? options.name ?? "Player",
@@ -96,7 +109,13 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
 
   onJoin(client: Client, options: BacklashRoomOptions): void {
     const userId = options.userId!
-    client.userData = { userId }
+    const name = options.name?.trim() || "Viewer"
+    client.userData = { userId, name, viewer: options.viewer === true }
+    if (options.viewer) {
+      this.state.viewerCount = Math.min(BACKLASH_MAX_VIEWERS, this.state.viewerCount + 1)
+      fireBacklashViewerCount(this.roomId, this.state.viewerCount)
+      return
+    }
     let player = this.state.players.get(userId)
     if (!player) {
       player = new BacklashPlayerState()
@@ -112,7 +131,20 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
     }
   }
 
-  async onLeave(client: Client): Promise<void> {
+  async onLeave(client: Client, code?: number): Promise<void> {
+    if (this.isViewer(client)) {
+      if (this.closing) return
+      if (code === 1000) {
+        this.removeViewer()
+        return
+      }
+      try {
+        await this.allowReconnection(client, BACKLASH_RECONNECT_SECONDS)
+      } catch {
+        this.removeViewer()
+      }
+      return
+    }
     const userId = this.userIdFor(client)
     const player = userId ? this.state.players.get(userId) : undefined
     if (!player) return
@@ -140,18 +172,20 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
   onDispose(): void {
     this.timerGeneration += 1
     unregisterBacklashDeclineHandler(this.roomId)
+    fireBacklashDispose(this.roomId)
   }
 
   declineInvite(userId: string): void {
     this.handleInviteDeclined(userId)
   }
 
-  private validateParticipant(options: BacklashRoomOptions): BacklashRoomOptions {
+  private validateJoin(options: BacklashRoomOptions): BacklashRoomOptions {
     const userId = options.userId ?? ""
-    if (userId !== this.state.hostUserId && userId !== this.state.invitedUserId) {
-      throw new Error("not invited to this Backlash match")
-    }
-    return { ...options, userId }
+    if (!userId) throw new Error("authenticated user required")
+    const participant = userId === this.state.hostUserId || userId === this.state.invitedUserId
+    if (participant) return { ...options, userId, viewer: false }
+    if (this.state.phase === "lobby") throw new Error("Backlash match is not live yet")
+    return { ...options, userId, viewer: true }
   }
 
   private assignInitialColors(): void {
@@ -249,6 +283,38 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
     this.closeLobby("cancelled")
   }
 
+  private handleEncouragement(client: Client, raw: unknown): void {
+    if (!isBacklashLivePhase(this.state.phase)) {
+      client.send("backlash_error", { reason: "encouragement_unavailable" })
+      return
+    }
+    const reaction = typeof raw === "object" && raw !== null
+      ? (raw as { reaction?: unknown }).reaction
+      : undefined
+    if (!isBacklashEncouragement(reaction)) {
+      client.send("backlash_error", { reason: "invalid_encouragement" })
+      return
+    }
+    const userId = this.userIdFor(client)
+    if (!userId) return
+    const now = Date.now()
+    const lastSentAt = this.lastEncouragementAt.get(userId) ?? 0
+    if (now - lastSentAt < BACKLASH_ENCOURAGEMENT_COOLDOWN_MS) {
+      client.send("backlash_error", { reason: "encouragement_rate_limited" })
+      return
+    }
+    this.lastEncouragementAt.set(userId, now)
+    this.encouragementSequence += 1
+    const userData = client.userData as { name?: string } | undefined
+    this.broadcast("backlash_encouragement", {
+      id: `${this.roomId}:${this.encouragementSequence}`,
+      userId,
+      name: userData?.name?.slice(0, 120) || "Teammate",
+      reaction,
+      createdAtMs: now,
+    })
+  }
+
   private handleInviteDeclined(userId: string): void {
     if (this.state.phase !== "lobby" || userId !== this.state.invitedUserId) return
     this.broadcast("backlash_invite_declined", { userId })
@@ -344,6 +410,7 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
 
   private syncState(): void {
     this.state.phase = this.engine.phase
+    fireBacklashPhase(this.roomId, this.state.phase)
     this.state.turnColor = this.engine.turn
     this.state.turnUserId = this.userIdForColor(this.engine.turn) ?? ""
     this.state.lockedJumpIndex = this.engine.lockedJumpIndex
@@ -375,6 +442,15 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
 
   private userIdFor(client: Client): string {
     return (client.userData as { userId?: string } | undefined)?.userId ?? ""
+  }
+
+  private isViewer(client: Client): boolean {
+    return (client.userData as { viewer?: boolean } | undefined)?.viewer === true
+  }
+
+  private removeViewer(): void {
+    this.state.viewerCount = Math.max(0, this.state.viewerCount - 1)
+    fireBacklashViewerCount(this.roomId, this.state.viewerCount)
   }
 
   private colorForClient(client: Client): BacklashColor | null {

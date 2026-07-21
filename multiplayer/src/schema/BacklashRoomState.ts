@@ -28,6 +28,7 @@ export class BacklashRoomState extends Schema {
   @type("uint16") revision = 0
   @type("uint16") moveCount = 0
   @type("float64") turnDeadlineMs = 0
+  @type("uint8") viewerCount = 0
   @type(["string"]) board = new ArraySchema<string>()
   @type(["uint8"]) legalTargets = new ArraySchema<number>()
   @type({ map: BacklashPlayerState }) players = new MapSchema<BacklashPlayerState>()

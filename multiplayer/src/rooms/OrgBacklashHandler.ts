@@ -1,9 +1,13 @@
 // Copyright 2025-2026 Arun Rajkumar
 // Licensed under the Apache License, Version 2.0
 
+import { ArraySchema } from "@colyseus/schema"
 import { matchMaker, type Client, type Room } from "colyseus"
+import { BACKLASH_MAX_VIEWERS } from "../../../shared/minigames/backlashSocial"
 import type { OrgRoomState } from "../schema/OrgRoomState"
 import { postBacklashInvite } from "../bridge/BackendClient"
+import { registerBacklashSummaryHooks } from "../bridge/BacklashRegistry"
+import { ActiveBacklashSummary } from "../schema/ActiveBacklashSummary"
 
 interface BacklashCreateMessage {
   invitedUserId: string
@@ -68,9 +72,47 @@ async function handleBacklashCreate(
       client.send("backlash_create_failed", { reason: "invite_delivery_failed" })
       return
     }
+    addActiveBacklash(
+      room,
+      created.roomId,
+      hostUserId,
+      userData?.name?.trim() || "Player",
+      parsed.invitedUserId,
+    )
+    registerBacklashSummaryHooks(created.roomId, {
+      onDispose: () => room.state.activeBacklashes.delete(created.roomId),
+      onPhase: (phase) => {
+        const summary = room.state.activeBacklashes.get(created.roomId)
+        if (!summary) return
+        summary.phase = phase
+      },
+      onViewerCount: (viewerCount) => {
+        const summary = room.state.activeBacklashes.get(created.roomId)
+        if (summary) {
+          summary.viewerCount = Math.max(0, Math.min(BACKLASH_MAX_VIEWERS, viewerCount))
+        }
+      },
+    })
     client.send("backlash_created", { roomId: created.roomId })
   } catch (error) {
     console.error("[OrgBacklashHandler] room creation failed", error)
     client.send("backlash_create_failed", { reason: "server_error" })
   }
+}
+
+export function addActiveBacklash(
+  room: Room<{ state: OrgRoomState }>,
+  roomId: string,
+  hostUserId: string,
+  hostName: string,
+  invitedUserId: string,
+): void {
+  const summary = new ActiveBacklashSummary()
+  summary.roomId = roomId
+  summary.hostUserId = hostUserId
+  summary.hostName = hostName
+  summary.invitedName = room.state.members.get(invitedUserId)?.name?.trim() || "Opponent"
+  summary.phase = "lobby"
+  summary.participantUserIds = new ArraySchema<string>(hostUserId, invitedUserId)
+  room.state.activeBacklashes.set(roomId, summary)
 }

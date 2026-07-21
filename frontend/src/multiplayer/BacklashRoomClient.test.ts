@@ -3,7 +3,10 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { BACKLASH_BOARD_SIZE, boardIndex } from '@shared/minigames/backlash'
-import { BacklashRoomClient } from './BacklashRoomClient'
+import {
+  BacklashRoomClient,
+  parseBacklashEncouragementEvent,
+} from './BacklashRoomClient'
 
 const { getStateCallbacksMock } = vi.hoisted(() => ({
   getStateCallbacksMock: vi.fn(),
@@ -54,6 +57,31 @@ function collectionListeners(): CollectionListeners {
 }
 
 describe('BacklashRoomClient message contracts', () => {
+  it('accepts only complete server encouragement payloads', () => {
+    expect(parseBacklashEncouragementEvent({
+      id: 'room:1',
+      userId: 'viewer-1',
+      name: 'Viewer',
+      reaction: '👏',
+      createdAtMs: 123,
+    })).toEqual({
+      id: 'room:1',
+      userId: 'viewer-1',
+      name: 'Viewer',
+      reaction: '👏',
+      createdAtMs: 123,
+    })
+    expect(parseBacklashEncouragementEvent(null)).toBeNull()
+    expect(parseBacklashEncouragementEvent({ reaction: 'not-allowed' })).toBeNull()
+    expect(parseBacklashEncouragementEvent({
+      id: 'room:1',
+      userId: 'viewer-1',
+      name: 'Viewer',
+      reaction: '👏',
+      createdAtMs: Number.NaN,
+    })).toBeNull()
+  })
+
   it('sends a revision-guarded move payload', () => {
     const client = new BacklashRoomClient('ws://test')
     const room = fakeRoom()
@@ -76,6 +104,7 @@ describe('BacklashRoomClient message contracts', () => {
     client.sendPromotion(false)
     client.sendRematch()
     client.sendCancel()
+    client.sendEncouragement('🔥')
 
     expect(room.calls).toEqual([
       { type: 'backlash_end_jump', payload: {} },
@@ -83,6 +112,7 @@ describe('BacklashRoomClient message contracts', () => {
       { type: 'backlash_promote', payload: { accept: false } },
       { type: 'backlash_rematch', payload: {} },
       { type: 'backlash_cancel', payload: {} },
+      { type: 'backlash_encourage', payload: { reaction: '🔥' } },
     ])
   })
 
@@ -95,6 +125,7 @@ describe('BacklashRoomClient message contracts', () => {
       client.sendPromotion(true)
       client.sendRematch()
       client.sendCancel()
+      client.sendEncouragement('👏')
     }).not.toThrow()
   })
 

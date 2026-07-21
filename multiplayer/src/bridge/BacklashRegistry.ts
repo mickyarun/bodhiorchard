@@ -5,6 +5,14 @@ type DeclineHandler = (userId: string) => void
 
 const declineHandlers = new Map<string, DeclineHandler>()
 
+interface BacklashSummaryHooks {
+  onDispose: () => void
+  onPhase: (phase: string) => void
+  onViewerCount: (viewerCount: number) => void
+}
+
+const summaryHooks = new Map<string, BacklashSummaryHooks>()
+
 export function registerBacklashDeclineHandler(roomId: string, handler: DeclineHandler): void {
   declineHandlers.set(roomId, handler)
 }
@@ -18,4 +26,43 @@ export function fireBacklashInviteDeclined(roomId: string, userId: string): bool
   if (!handler) return false
   handler(userId)
   return true
+}
+
+export function registerBacklashSummaryHooks(
+  roomId: string,
+  hooks: BacklashSummaryHooks,
+): void {
+  summaryHooks.set(roomId, hooks)
+}
+
+export function fireBacklashPhase(roomId: string, phase: string): void {
+  const hooks = summaryHooks.get(roomId)
+  if (!hooks) return
+  runSummaryHook(roomId, "phase", () => hooks.onPhase(phase))
+}
+
+export function fireBacklashViewerCount(roomId: string, viewerCount: number): void {
+  const hooks = summaryHooks.get(roomId)
+  if (!hooks) return
+  runSummaryHook(roomId, "viewer count", () => hooks.onViewerCount(viewerCount))
+}
+
+export function fireBacklashDispose(roomId: string): void {
+  const hooks = summaryHooks.get(roomId)
+  if (!hooks) return
+  summaryHooks.delete(roomId)
+  runSummaryHook(roomId, "dispose", hooks.onDispose)
+}
+
+function runSummaryHook(roomId: string, operation: string, callback: () => void): void {
+  try {
+    callback()
+  } catch (error) {
+    console.error(
+      "[BacklashRegistry] %s hook for room %s failed:",
+      operation,
+      roomId.replace(/[\r\n]/g, ""),
+      error,
+    )
+  }
 }

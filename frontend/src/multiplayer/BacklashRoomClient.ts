@@ -9,6 +9,10 @@ import {
   type BacklashBoard,
   type BacklashColor,
 } from '@shared/minigames/backlash'
+import {
+  isBacklashEncouragement,
+  type BacklashEncouragement,
+} from '@shared/minigames/backlashSocial'
 import { resolveColyseusUrl } from './colyseusUrl'
 
 export type BacklashPhase = 'lobby' | 'playing' | 'jump' | 'promotion' | 'finished'
@@ -38,9 +42,18 @@ export interface BacklashSnapshot {
   revision: number
   moveCount: number
   turnDeadlineMs: number
+  viewerCount: number
   board: BacklashBoard
   legalTargets: number[]
   players: BacklashPlayerSnapshot[]
+}
+
+export interface BacklashEncouragementEvent {
+  id: string
+  userId: string
+  name: string
+  reaction: BacklashEncouragement
+  createdAtMs: number
 }
 
 export interface BacklashAuth {
@@ -75,6 +88,7 @@ interface BacklashStateShape {
   revision?: number
   moveCount?: number
   turnDeadlineMs?: number
+  viewerCount?: number
   board: ArraySchema<string>
   legalTargets: ArraySchema<number>
   players: MapSchema<RawPlayer>
@@ -91,6 +105,7 @@ export class BacklashRoomClient {
   onConnectionChange: ((status: 'connected' | 'reconnecting' | 'disconnected') => void) | null = null
   onError: ((reason: string) => void) | null = null
   onClosed: ((reason: string) => void) | null = null
+  onEncouragement: ((event: BacklashEncouragementEvent) => void) | null = null
 
   constructor(serverUrl?: string) {
     this.client = new Client(serverUrl ?? resolveColyseusUrl())
@@ -128,6 +143,10 @@ export class BacklashRoomClient {
     this.room?.send('backlash_cancel', {})
   }
 
+  sendEncouragement(reaction: BacklashEncouragement): void {
+    this.room?.send('backlash_encourage', { reaction })
+  }
+
   async leave(): Promise<void> {
     this.stopped = true
     const room = this.room
@@ -146,6 +165,7 @@ export class BacklashRoomClient {
     this.onConnectionChange = null
     this.onError = null
     this.onClosed = null
+    this.onEncouragement = null
   }
 
   private attachRoom(room: Room<BacklashStateShape>): void {
@@ -160,6 +180,10 @@ export class BacklashRoomClient {
       this.room = null
       this.onConnectionChange?.('disconnected')
       this.onClosed?.(reason)
+    })
+    room.onMessage('backlash_encouragement', (payload: unknown) => {
+      const event = parseBacklashEncouragementEvent(payload)
+      if (event) this.onEncouragement?.(event)
     })
     this.wireState(room)
     const reconnectionToken = room.reconnectionToken
@@ -257,9 +281,32 @@ function snapshotFromState(state: BacklashStateShape): BacklashSnapshot {
     revision: state.revision ?? 0,
     moveCount: state.moveCount ?? 0,
     turnDeadlineMs: state.turnDeadlineMs ?? 0,
+    viewerCount: state.viewerCount ?? 0,
     board,
     legalTargets,
     players,
+  }
+}
+
+export function parseBacklashEncouragementEvent(
+  payload: unknown,
+): BacklashEncouragementEvent | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const value = payload as Record<string, unknown>
+  if (
+    typeof value.id !== 'string'
+    || typeof value.userId !== 'string'
+    || typeof value.name !== 'string'
+    || !isBacklashEncouragement(value.reaction)
+    || typeof value.createdAtMs !== 'number'
+    || !Number.isFinite(value.createdAtMs)
+  ) return null
+  return {
+    id: value.id,
+    userId: value.userId,
+    name: value.name.slice(0, 120),
+    reaction: value.reaction,
+    createdAtMs: value.createdAtMs,
   }
 }
 

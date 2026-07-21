@@ -113,6 +113,27 @@ interface RawActiveRace {
   participantUserIds?: ArrayLike<string>
 }
 
+/** Summary of one live Backlash room — mirrors ActiveBacklashSummary. */
+export interface ActiveBacklashSummary {
+  roomId: string
+  hostUserId: string
+  hostName: string
+  invitedName: string
+  phase: string
+  viewerCount: number
+  participantUserIds: readonly string[]
+}
+
+interface RawActiveBacklash {
+  roomId?: string
+  hostUserId?: string
+  hostName?: string
+  invitedName?: string
+  phase?: string
+  viewerCount?: number
+  participantUserIds?: ArrayLike<string>
+}
+
 /** How long to wait for `race_created` / `race_create_failed` before giving up. */
 const RACE_CREATE_TIMEOUT_MS = 5_000
 const BACKLASH_CREATE_TIMEOUT_MS = 5_000
@@ -190,6 +211,8 @@ export class OrgRoomClient {
   /** Most recent snapshot of OrgRoomState.activeRaces, keyed by roomId. */
   private activeRaceSnapshots = new Map<string, ActiveRaceSummary>()
   private activeRaceListeners = new Set<(summaries: ActiveRaceSummary[]) => void>()
+  private activeBacklashSnapshots = new Map<string, ActiveBacklashSummary>()
+  private activeBacklashListeners = new Set<(summaries: ActiveBacklashSummary[]) => void>()
 
   /** Callbacks set by the engine. */
   onMemberAdd:    ((userId: string, data: MemberStateSnapshot) => void) | null = null
@@ -214,6 +237,10 @@ export class OrgRoomClient {
   /** Whether we're currently connected to an org room. */
   get isConnected(): boolean {
     return this.room !== null
+  }
+
+  get connectionStatus(): ConnectionStatus {
+    return this.currentStatus
   }
 
   get sessionId(): string | undefined {
@@ -383,7 +410,24 @@ export class OrgRoomClient {
   private clearRoomState(): void {
     this.room = null
     this.memberSnapshots.clear()
+    const hadActiveRaces = this.activeRaceSnapshots.size > 0
+    const hadActiveBacklashes = this.activeBacklashSnapshots.size > 0
     this.activeRaceSnapshots.clear()
+    this.activeBacklashSnapshots.clear()
+    if (hadActiveRaces) {
+      for (const listener of this.activeRaceListeners) {
+        try { listener([]) } catch (error) {
+          console.warn("[OrgRoomClient] active-race listener threw during cleanup:", error)
+        }
+      }
+    }
+    if (hadActiveBacklashes) {
+      for (const listener of this.activeBacklashListeners) {
+        try { listener([]) } catch (error) {
+          console.warn("[OrgRoomClient] active-Backlash listener threw during cleanup:", error)
+        }
+      }
+    }
   }
 
   /** Disconnect from the org room. */
@@ -549,6 +593,15 @@ export class OrgRoomClient {
     return () => { this.activeRaceListeners.delete(listener) }
   }
 
+  /** Subscribe to org-scoped Backlash rooms that can be watched live. */
+  addActiveBacklashListener(
+    listener: (summaries: ActiveBacklashSummary[]) => void,
+  ): () => void {
+    this.activeBacklashListeners.add(listener)
+    listener(Array.from(this.activeBacklashSnapshots.values()))
+    return () => { this.activeBacklashListeners.delete(listener) }
+  }
+
   /** Temporary dev tool: fire a simulated dev_activity for the current user. */
   sendSimulateDevActivity(): void {
     this.room?.send("simulate_dev_activity")
@@ -662,6 +715,29 @@ export class OrgRoomClient {
       this.activeRaceSnapshots.delete(roomId)
       emitActiveRaces()
     })
+
+    const emitActiveBacklashes = (): void => {
+      const list = Array.from(this.activeBacklashSnapshots.values())
+      for (const listener of this.activeBacklashListeners) {
+        try { listener(list) } catch (err) {
+          console.warn("[OrgRoomClient] active-Backlash listener threw:", err)
+        }
+      }
+    }
+
+    stateProxy.activeBacklashes.onAdd((match, roomId) => {
+      this.activeBacklashSnapshots.set(roomId, activeBacklashToSnapshot(match))
+      emitActiveBacklashes()
+      $(match).onChange(() => {
+        this.activeBacklashSnapshots.set(roomId, activeBacklashToSnapshot(match))
+        emitActiveBacklashes()
+      })
+    }, true)
+
+    stateProxy.activeBacklashes.onRemove((_match, roomId) => {
+      this.activeBacklashSnapshots.delete(roomId)
+      emitActiveBacklashes()
+    })
   }
 }
 
@@ -682,6 +758,22 @@ function activeRaceToSnapshot(r: RawActiveRace): ActiveRaceSummary {
   }
 }
 
+export function activeBacklashToSnapshot(
+  match: RawActiveBacklash,
+): ActiveBacklashSummary {
+  return {
+    roomId: match.roomId ?? "",
+    hostUserId: match.hostUserId ?? "",
+    hostName: match.hostName?.trim() || "Player",
+    invitedName: match.invitedName?.trim() || "Opponent",
+    phase: match.phase ?? "lobby",
+    viewerCount: match.viewerCount ?? 0,
+    participantUserIds: match.participantUserIds
+      ? Array.from(match.participantUserIds)
+      : [],
+  }
+}
+
 // ─── Helpers ────────────────────────────────
 
 /** Structural shape the callback proxy needs — matches server OrgRoomState. */
@@ -689,6 +781,7 @@ interface OrgRoomStateShape {
   members: Map<string, RawMember>
   agents: Map<string, RawAgent>
   activeRaces: Map<string, RawActiveRace>
+  activeBacklashes: Map<string, RawActiveBacklash>
 }
 
 function memberToSnapshot(m: RawMember): MemberStateSnapshot {

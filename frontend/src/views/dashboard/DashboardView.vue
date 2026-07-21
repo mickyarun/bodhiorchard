@@ -163,6 +163,8 @@
         />
       </Transition>
 
+      <LiveMatchesPanel />
+
       <div v-if="!displayData" class="d-flex align-center justify-center fill-height">
         <div class="text-center text-medium-emphasis">
           <img src="/assets/bodhiorchard-logo.png" width="64" height="64" alt="" class="mb-3" style="border-radius: 50%; opacity: 0.6;" />
@@ -217,6 +219,7 @@ import QuizHub from '@/components/quiz/QuizHub.vue'
 import { useQuizStore } from '@/stores/quiz'
 import { useQuizSocket } from '@/composables/useQuizSocket'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
+import LiveMatchesPanel from '@/components/minigames/LiveMatchesPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
