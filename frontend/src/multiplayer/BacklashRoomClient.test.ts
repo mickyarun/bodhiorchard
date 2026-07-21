@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 import { describe, expect, it, vi } from 'vitest'
+import { BACKLASH_BOARD_SIZE, boardIndex } from '@shared/minigames/backlash'
 import { BacklashRoomClient } from './BacklashRoomClient'
 
 const { getStateCallbacksMock } = vi.hoisted(() => ({
@@ -97,9 +98,11 @@ describe('BacklashRoomClient message contracts', () => {
     }).not.toThrow()
   })
 
-  it('publishes replacement operations when a piece moves to another square', () => {
-    const board = Array<string>(64).fill('')
-    board[9] = 'white-underling-1|white|underling'
+  it('publishes one complete snapshot after all piece replacements are decoded', async () => {
+    const board = Array<string>(BACKLASH_BOARD_SIZE ** 2).fill('')
+    const origin = boardIndex(1, 1)
+    const destination = boardIndex(2, 1)
+    board[origin] = 'white-underling-1|white|underling'
     const state = {
       phase: 'playing',
       turnColor: 'white',
@@ -122,21 +125,26 @@ describe('BacklashRoomClient message contracts', () => {
     const client = new BacklashRoomClient('ws://test')
     const snapshots = vi.fn()
     client.onStateChange = snapshots
+    ;(client as unknown as { room: unknown }).room = room
 
     ;(client as unknown as { wireState: (value: unknown) => void }).wireState(room)
     snapshots.mockClear()
 
-    board[17] = board[9]
-    board[9] = ''
+    board[origin] = ''
     const onBoardChange = boardListeners.onChange.mock.calls[0]?.[0] as (() => void) | undefined
     onBoardChange?.()
+    expect(snapshots).not.toHaveBeenCalled()
+
+    board[destination] = 'white-underling-1|white|underling'
+    onBoardChange?.()
+    await Promise.resolve()
 
     expect(boardListeners.onChange).toHaveBeenCalledOnce()
     expect(legalTargetListeners.onChange).toHaveBeenCalledOnce()
     expect(snapshots).toHaveBeenCalledOnce()
     const snapshot = snapshots.mock.calls[0]?.[0]
-    expect(snapshot.board[9]).toBeNull()
-    expect(snapshot.board[17]).toEqual({
+    expect(snapshot.board[origin]).toBeNull()
+    expect(snapshot.board[destination]).toEqual({
       id: 'white-underling-1',
       color: 'white',
       kind: 'underling',

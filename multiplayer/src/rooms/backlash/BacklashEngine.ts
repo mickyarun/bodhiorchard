@@ -14,6 +14,7 @@ import {
   promoteUnderling,
   type BacklashBoard,
   type BacklashColor,
+  type BacklashMove,
   type BacklashOutcome,
 } from "../../../../shared/minigames/backlash"
 
@@ -27,7 +28,7 @@ export interface BacklashEngineResult {
 
 export interface BacklashMoveResult {
   accepted: boolean
-  reason?: "finished" | "wrong_turn" | "invalid_move" | "jump_piece_locked"
+  reason?: "finished" | "wrong_turn" | "invalid_move" | "jump_piece_locked" | "no_legal_moves"
   from?: number
   to?: number
   capturedIndex?: number | null
@@ -170,15 +171,30 @@ export class BacklashEngine {
     this.finish("forfeit", opponentColor(loser), reason)
   }
 
-  currentLegalTargets(): number[] {
-    if (this.phase === "finished" || this.phase === "promotion") return []
-    if (this.phase === "jump" && this.lockedJumpIndex >= 0) {
-      return legalMovesForPiece(this.board, this.lockedJumpIndex, {
-        jumpOnly: true,
-        excludedLandings: this.jumpVisited,
-      }).map((move) => move.to)
+  playAutomaticMove(): BacklashMoveResult {
+    if (this.phase === "finished") return { accepted: false, reason: "finished" }
+    if (this.phase === "promotion") return { accepted: false, reason: "invalid_move" }
+    const move = this.currentLegalMoves().sort(compareAutomaticMoves)[0]
+    if (!move) {
+      this.finish("win", opponentColor(this.turn), "no_legal_moves")
+      return { accepted: false, reason: "no_legal_moves", phase: this.phase }
     }
-    return legalMovesForColor(this.board, this.turn).map((move) => move.to)
+    return this.move(this.turn, move.from, move.to)
+  }
+
+  currentLegalTargets(): number[] {
+    return this.currentLegalMoves().map((move) => move.to)
+  }
+
+  private currentLegalMoves(): BacklashMove[] {
+    if (this.phase === "finished" || this.phase === "promotion") return []
+    if (this.phase !== "jump" || this.lockedJumpIndex < 0) {
+      return legalMovesForColor(this.board, this.turn)
+    }
+    return legalMovesForPiece(this.board, this.lockedJumpIndex, {
+      jumpOnly: true,
+      excludedLandings: this.jumpVisited,
+    })
   }
 
   private completeTurn(): void {
@@ -224,4 +240,9 @@ export class BacklashEngine {
     this.pendingPromotionIndex = -1
     this.result = { outcome, winnerColor, reason }
   }
+}
+
+function compareAutomaticMoves(left: BacklashMove, right: BacklashMove): number {
+  const capturePriority = Number(right.isCapture) - Number(left.isCapture)
+  return capturePriority || left.from - right.from || left.to - right.to
 }

@@ -4,6 +4,7 @@
 import { Client, getStateCallbacks, Room } from '@colyseus/sdk'
 import type { ArraySchema, MapSchema } from '@colyseus/schema'
 import {
+  BACKLASH_BOARD_SIZE,
   decodeBacklashPiece,
   type BacklashBoard,
   type BacklashColor,
@@ -196,13 +197,24 @@ export class BacklashRoomClient {
   private wireState(room: Room<BacklashStateShape>): void {
     const $ = getStateCallbacks(room)
     const state = $(room.state)
-    const publish = (): void => this.onStateChange?.(snapshotFromState(room.state))
+    let publishPending = false
+    const publishNow = (): void => {
+      if (this.room === room) this.onStateChange?.(snapshotFromState(room.state))
+    }
+    const publish = (): void => {
+      if (publishPending) return
+      publishPending = true
+      queueMicrotask(() => {
+        publishPending = false
+        publishNow()
+      })
+    }
 
     state.onChange(() => publish())
-    state.board.onAdd(() => publish(), true)
+    state.board.onAdd(() => publish())
     state.board.onChange(() => publish())
     state.board.onRemove(() => publish())
-    state.legalTargets.onAdd(() => publish(), true)
+    state.legalTargets.onAdd(() => publish())
     state.legalTargets.onChange(() => publish())
     state.legalTargets.onRemove(() => publish())
     state.players.onAdd((player: RawPlayer) => {
@@ -210,12 +222,12 @@ export class BacklashRoomClient {
       $(player).onChange(() => publish())
     }, true)
     state.players.onRemove(() => publish())
-    publish()
+    publishNow()
   }
 }
 
 function snapshotFromState(state: BacklashStateShape): BacklashSnapshot {
-  const board: BacklashBoard = Array.from({ length: 64 }, (_, index) =>
+  const board: BacklashBoard = Array.from({ length: BACKLASH_BOARD_SIZE ** 2 }, (_, index) =>
     decodeBacklashPiece(state.board?.at(index) ?? ''),
   )
   const legalTargets: number[] = []

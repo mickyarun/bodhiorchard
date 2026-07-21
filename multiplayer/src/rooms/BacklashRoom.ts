@@ -38,7 +38,7 @@ interface MovePayload {
 function replaceArraySchema<T>(target: ArraySchema<T>, values: readonly T[]): void {
   if (target.length === values.length) {
     values.forEach((value, index) => {
-      target[index] = value
+      if (target[index] !== value) target[index] = value
     })
     return
   }
@@ -265,8 +265,21 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
         || this.engine.phase === "finished"
         || this.engine.turn !== expectedTurn
       ) return
-      this.engine.forfeit(expectedTurn, "timeout")
-      this.finishMatch()
+      const result = this.engine.playAutomaticMove()
+      if (!result.accepted) {
+        if (this.engine.result) this.finishMatch()
+        return
+      }
+      this.state.revision = (this.state.revision + 1) & 0xffff
+      this.syncState()
+      this.broadcast("backlash_move_applied", { ...result, automatic: true })
+      if (result.phase === "finished") {
+        this.finishMatch()
+      } else if (result.phase === "promotion") {
+        this.schedulePromotionDefault(expectedTurn)
+      } else {
+        this.scheduleTurnTimeout()
+      }
     }, BACKLASH_TURN_MS)
   }
 

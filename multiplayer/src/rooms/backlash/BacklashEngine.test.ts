@@ -2,11 +2,15 @@
 // Licensed under the Apache License, Version 2.0
 
 import { describe, expect, it } from "vitest"
-import { boardIndex, type BacklashBoard } from "../../../../shared/minigames/backlash"
+import {
+  BACKLASH_BOARD_SIZE,
+  boardIndex,
+  type BacklashBoard,
+} from "../../../../shared/minigames/backlash"
 import { BacklashEngine } from "./BacklashEngine"
 
 function sparseBoard(entries: Array<[number, BacklashBoard[number]]>): BacklashBoard {
-  const board: BacklashBoard = Array.from({ length: 64 }, () => null)
+  const board: BacklashBoard = Array.from({ length: BACKLASH_BOARD_SIZE ** 2 }, () => null)
   for (const [index, piece] of entries) board[index] = piece
   return board
 }
@@ -94,9 +98,50 @@ describe("BacklashEngine", () => {
     expect(engine.result).toEqual({ outcome: "forfeit", winnerColor: "black", reason: "timeout" })
   })
 
+  it("plays one deterministic legal move instead of forfeiting on inactivity", () => {
+    const engine = new BacklashEngine()
+    engine.board = sparseBoard([
+      [boardIndex(3, 3), { id: "wu", color: "white", kind: "underling" }],
+      [boardIndex(7, 7), { id: "bo", color: "black", kind: "overling" }],
+    ])
+
+    const result = engine.playAutomaticMove()
+
+    expect(result).toMatchObject({
+      accepted: true,
+      from: boardIndex(3, 3),
+      to: boardIndex(2, 2),
+    })
+    expect(engine.board[boardIndex(3, 3)]).toBeNull()
+    expect(engine.board[boardIndex(2, 2)]?.id).toBe("wu")
+    expect(engine.turn).toBe("black")
+    expect(engine.result).toBeNull()
+  })
+
+  it("finishes safely if an automatic turn has no legal move", () => {
+    const engine = new BacklashEngine()
+    engine.board = Array.from({ length: BACKLASH_BOARD_SIZE ** 2 }, (_, index) => ({
+      id: `black-${index}`,
+      color: "black" as const,
+      kind: "overling" as const,
+    }))
+    engine.board[boardIndex(0, 0)] = { id: "wo", color: "white", kind: "overling" }
+
+    expect(engine.playAutomaticMove()).toMatchObject({
+      accepted: false,
+      reason: "no_legal_moves",
+      phase: "finished",
+    })
+    expect(engine.result).toEqual({
+      outcome: "win",
+      winnerColor: "black",
+      reason: "no_legal_moves",
+    })
+  })
+
   it("wins when the next player has no legal move", () => {
     const engine = new BacklashEngine()
-    engine.board = Array.from({ length: 64 }, (_, index) => ({
+    engine.board = Array.from({ length: BACKLASH_BOARD_SIZE ** 2 }, (_, index) => ({
       id: `bo-${index}`,
       color: "black" as const,
       kind: "overling" as const,
