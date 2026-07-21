@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Backlash two-player game** — server-authoritative tactical matches with turn-timeout autoplay, animated captures, rematches, Slack and in-app challenges, live spectators, named watcher counts, and crowd encouragements.
+
 ## [0.1.0] - 2026-05-11
 
 First public release. Bodhiorchard™ ships as an open-source, local-first AI dev-ops platform under Apache 2.0.
