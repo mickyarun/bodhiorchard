@@ -85,23 +85,21 @@
               <span v-if="legalTargetSet.has(index)" class="legal-dot" />
             </button>
 
-            <TransitionGroup name="piece">
-              <div
-                v-for="item in positionedPieces"
-                :key="item.piece.id"
-                class="piece"
-                :class="[
-                  `piece--${item.piece.color}`,
-                  `piece--${item.piece.kind}`,
-                  { 'piece--selected': selectedIndex === item.index },
-                ]"
-                :style="item.style"
-                aria-hidden="true"
-              >
-                <span class="piece__rim" />
-                <span v-if="item.piece.kind === 'overling'" class="piece__crown">B</span>
-              </div>
-            </TransitionGroup>
+            <div
+              v-for="item in positionedPieces"
+              :key="item.piece.id"
+              class="piece"
+              :class="[
+                `piece--${item.piece.color}`,
+                `piece--${item.piece.kind}`,
+                { 'piece--selected': selectedIndex === item.index },
+              ]"
+              :style="item.style"
+              aria-hidden="true"
+            >
+              <span class="piece__rim" />
+              <span v-if="item.piece.kind === 'overling'" class="piece__crown">B</span>
+            </div>
           </div>
           <div class="board-mark board-mark--top">{{ topColorLabel }}</div>
           <div class="board-mark board-mark--bottom">{{ myColorLabel }}</div>
@@ -496,8 +494,6 @@ async function leaveGame(): Promise<void> {
 .piece--black .piece__crown { color: #c0ad94; }
 .piece--selected { filter: drop-shadow(0 0 8px #ffc762); animation: selected-float .65s infinite alternate; }
 @keyframes selected-float { to { margin-top: -3px; } }
-.piece-leave-active { transition: transform .25s, opacity .25s; }
-.piece-leave-to { opacity: 0; transform: scale(.2) rotate(80deg) !important; }
 .board-mark { position: absolute; left: 50%; transform: translateX(-50%); color: rgba(255,235,205,.62); font-size: 8px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; }
 .board-mark--top { top: 8px; }.board-mark--bottom { bottom: 8px; }
 .board-frame--locked .board { filter: saturate(.76); }
