@@ -96,18 +96,18 @@ function decline(): void {
   background: linear-gradient(135deg, #160f0c, #431d18); color: #fff5e2;
   box-shadow: 0 24px 60px rgba(0,0,0,.5), 0 0 30px rgba(171,67,41,.15);
 }
-.invite__board { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); padding: 14px; background: #9b613d; transform: rotate(-4deg) scale(1.1); }
+.invite__board { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); overflow: hidden; padding: 14px; background: #9b613d; }
 .invite__board span { aspect-ratio: 1; background: #c99767; border: 1px solid rgba(43,22,13,.15); }
 .invite__board span.dark { background: #714027; }
 .piece { position: absolute; width: 31px; height: 31px; border-radius: 50%; border: 3px solid; box-shadow: 0 5px 8px rgba(0,0,0,.5), inset 0 0 0 3px rgba(255,255,255,.08); }
 .piece--black { left: 24px; top: 27px; background: #171717; border-color: #302c29; }
 .piece--white { right: 22px; bottom: 29px; background: #eee5d3; border-color: #fffaf0; }
-.invite__body { display: flex; flex-direction: column; padding: 18px 38px 17px 18px; }
+.invite__body { position: relative; z-index: 1; display: flex; min-width: 0; flex-direction: column; padding: 18px 38px 17px 18px; }
 .invite__eyebrow { color: #e3a55d; font-size: 9px; font-weight: 900; letter-spacing: .18em; }
 .invite__body strong { margin-top: 4px; font-family: Georgia, serif; font-size: 22px; }
 .invite__body > span { color: rgba(255,245,226,.65); font-size: 12px; }
-.invite__actions { display: flex; gap: 8px; margin-top: 13px; }
-.invite__actions button { border-radius: 8px; padding: 8px 13px; font-size: 12px; font-weight: 800; cursor: pointer; }
+.invite__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
+.invite__actions button { border-radius: 8px; padding: 8px 13px; font-size: 12px; font-weight: 800; white-space: nowrap; cursor: pointer; }
 .accept { border: 0; background: linear-gradient(135deg, #d0683c, #9c3028); color: white; }
 .decline { border: 1px solid rgba(255,255,255,.16); background: transparent; color: rgba(255,255,255,.72); }
 .decline:disabled { opacity: .5; }

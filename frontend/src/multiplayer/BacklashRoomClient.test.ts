@@ -1,8 +1,18 @@
 // Copyright 2025-2026 Arun Rajkumar
 // Licensed under the Apache License, Version 2.0
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { BacklashRoomClient } from './BacklashRoomClient'
+
+const { getStateCallbacksMock } = vi.hoisted(() => ({
+  getStateCallbacksMock: vi.fn(),
+}))
+
+vi.mock('@colyseus/sdk', () => ({
+  Client: class Client {},
+  Room: class Room {},
+  getStateCallbacks: getStateCallbacksMock,
+}))
 
 interface SentMessage {
   type: string
@@ -13,6 +23,12 @@ interface FakeRoom {
   calls: SentMessage[]
   send: (type: string, payload: unknown) => void
   leave: () => Promise<void>
+}
+
+interface CollectionListeners {
+  onAdd: ReturnType<typeof vi.fn>
+  onChange: ReturnType<typeof vi.fn>
+  onRemove: ReturnType<typeof vi.fn>
 }
 
 function fakeRoom(): FakeRoom {
@@ -26,6 +42,14 @@ function fakeRoom(): FakeRoom {
 
 function withRoom(client: BacklashRoomClient, room: FakeRoom): void {
   ;(client as unknown as { room: FakeRoom }).room = room
+}
+
+function collectionListeners(): CollectionListeners {
+  return {
+    onAdd: vi.fn(),
+    onChange: vi.fn(),
+    onRemove: vi.fn(),
+  }
 }
 
 describe('BacklashRoomClient message contracts', () => {
@@ -71,5 +95,51 @@ describe('BacklashRoomClient message contracts', () => {
       client.sendRematch()
       client.sendCancel()
     }).not.toThrow()
+  })
+
+  it('publishes replacement operations when a piece moves to another square', () => {
+    const board = Array<string>(64).fill('')
+    board[9] = 'white-underling-1|white|underling'
+    const state = {
+      phase: 'playing',
+      turnColor: 'white',
+      board,
+      legalTargets: [] as number[],
+      players: new Map(),
+    }
+    const boardListeners = collectionListeners()
+    const legalTargetListeners = collectionListeners()
+    const stateListeners = {
+      onChange: vi.fn(),
+      board: boardListeners,
+      legalTargets: legalTargetListeners,
+      players: collectionListeners(),
+    }
+    getStateCallbacksMock.mockReturnValue((target: unknown) => (
+      target === state ? stateListeners : { onChange: vi.fn() }
+    ))
+    const room = { state }
+    const client = new BacklashRoomClient('ws://test')
+    const snapshots = vi.fn()
+    client.onStateChange = snapshots
+
+    ;(client as unknown as { wireState: (value: unknown) => void }).wireState(room)
+    snapshots.mockClear()
+
+    board[17] = board[9]
+    board[9] = ''
+    const onBoardChange = boardListeners.onChange.mock.calls[0]?.[0] as (() => void) | undefined
+    onBoardChange?.()
+
+    expect(boardListeners.onChange).toHaveBeenCalledOnce()
+    expect(legalTargetListeners.onChange).toHaveBeenCalledOnce()
+    expect(snapshots).toHaveBeenCalledOnce()
+    const snapshot = snapshots.mock.calls[0]?.[0]
+    expect(snapshot.board[9]).toBeNull()
+    expect(snapshot.board[17]).toEqual({
+      id: 'white-underling-1',
+      color: 'white',
+      kind: 'underling',
+    })
   })
 })

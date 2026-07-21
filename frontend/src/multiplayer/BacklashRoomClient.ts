@@ -200,8 +200,10 @@ export class BacklashRoomClient {
 
     state.onChange(() => publish())
     state.board.onAdd(() => publish(), true)
+    state.board.onChange(() => publish())
     state.board.onRemove(() => publish())
     state.legalTargets.onAdd(() => publish(), true)
+    state.legalTargets.onChange(() => publish())
     state.legalTargets.onRemove(() => publish())
     state.players.onAdd((player: RawPlayer) => {
       publish()
