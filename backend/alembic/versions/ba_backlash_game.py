@@ -4,7 +4,7 @@
 """Add Backlash match/stat tables and minigame invite notification type.
 
 Revision ID: ba_backlash_game
-Revises: 18519f3dd565
+Revises: 66d1260b47ec
 Create Date: 2026-07-21
 """
 
@@ -16,7 +16,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "ba_backlash_game"
-down_revision: str | None = "18519f3dd565"
+down_revision: str | None = "66d1260b47ec"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
