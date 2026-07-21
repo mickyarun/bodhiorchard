@@ -18,7 +18,7 @@
   reward is your best score and the org leaderboard.
 -->
 <template>
-  <v-dialog :model-value="modelValue" max-width="520" @update:model-value="close">
+  <v-dialog :model-value="modelValue" max-width="620" @update:model-value="close">
     <v-card rounded="xl" class="hub">
       <!-- Header -->
       <div class="hub__header px-5 pt-4 pb-3 d-flex align-center ga-3">
@@ -51,9 +51,12 @@
               <span class="game-card__art">{{ GAME_ART[game.key] ?? '🎲' }}</span>
               <span class="game-card__name">{{ game.name }}</span>
               <span class="game-card__best">
-                Best <strong>{{ game.best_score }}</strong>
+                {{ game.score_label }} <strong>{{ game.best_score }}</strong>
               </span>
-              <span v-if="game.played_today" class="game-card__badge">✓ played today</span>
+              <span v-if="game.mode === 'versus'" class="game-card__badge game-card__badge--go">
+                ⚔ challenge
+              </span>
+              <span v-else-if="game.played_today" class="game-card__badge">✓ played today</span>
               <span v-else class="game-card__badge game-card__badge--go">▶ play</span>
             </button>
           </div>
@@ -122,6 +125,7 @@
       </v-card-actions>
     </v-card>
   </v-dialog>
+  <BacklashChallengeDialog v-model="challengeOpen" />
 </template>
 
 <script setup lang="ts">
@@ -131,6 +135,7 @@ import type { MinigameResult } from '@/multiplayer/MinigameRoomClient'
 import FishingGame from './FishingGame.vue'
 import PollenPop from './PollenPop.vue'
 import FireflyFollow from './FireflyFollow.vue'
+import BacklashChallengeDialog from '@/components/backlash/BacklashChallengeDialog.vue'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
@@ -139,6 +144,7 @@ const GAME_ART: Record<string, string> = {
   fishing: '🎣',
   pollen_pop: '🌸',
   firefly: '✨',
+  backlash: '⚫',
 }
 const MEDALS = ['🥇', '🥈', '🥉']
 
@@ -146,6 +152,7 @@ const store = useMinigamesStore()
 const activeGame = ref<string | null>(null)
 const playing = ref(false)
 const lastResult = ref<MinigameResult | null>(null)
+const challengeOpen = ref(false)
 
 const activeGameName = computed(
   () => store.games.find((g) => g.key === activeGame.value)?.name ?? '',
@@ -167,6 +174,11 @@ watch(
 )
 
 function openGame(key: string): void {
+  const game = store.games.find((candidate) => candidate.key === key)
+  if (game?.mode === 'versus') {
+    challengeOpen.value = true
+    return
+  }
   activeGame.value = key
   playing.value = true
   void store.fetchLeaderboard(key)
@@ -258,6 +270,11 @@ function close(value: boolean): void {
 }
 .game-card--firefly {
   background: linear-gradient(160deg, #1a1840 0%, #3b2d6e 55%, #6a4fa0 100%);
+}
+.game-card--backlash {
+  background:
+    radial-gradient(circle at 24% 28%, rgba(255, 244, 214, 0.18) 0 5%, transparent 6%),
+    linear-gradient(145deg, #2c160e 0%, #6d241c 58%, #ad5930 100%);
 }
 .game-card__art {
   font-size: 44px;

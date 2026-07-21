@@ -938,6 +938,7 @@ export type NotificationType =
   | 'developer_assigned'
   | 'reassignment_done'
   | 'race_invite'
+  | 'minigame_invite'
 
 /**
  * Structured payload attached to a race-invite notification.
@@ -960,6 +961,17 @@ export interface RaceInviteMeta {
    * hide the Decline button so the host can't decline their own race
    * back at themselves.
    */
+  declinedBy?: string
+  declinedByName?: string
+}
+
+/** Structured payload for a private Backlash challenge notification. */
+export interface BacklashInviteMeta {
+  game?: 'backlash'
+  roomId?: string
+  hostUserId?: string
+  hostName?: string
+  expiresAt?: string
   declinedBy?: string
   declinedByName?: string
 }

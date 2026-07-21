@@ -93,6 +93,35 @@ export interface TokenVerification {
 }
 
 const FETCH_TIMEOUT_MS = 3000
+const BACKLASH_INVITE_PATH = "/api/v1/internal/colyseus/backlash-invite"
+const BACKLASH_RESULTS_PATH = "/api/v1/internal/colyseus/backlash-results"
+const BACKLASH_RESULT_RETRY_DELAYS_MS = [0, 300, 1_200] as const
+
+async function postBridgeJson<TResponse>(
+  path: string,
+  payload: unknown,
+  operation: string,
+): Promise<TResponse | null> {
+  try {
+    const response = await fetch(`${BACKEND_URL}${path}`, {
+      method: "POST",
+      headers: {
+        "X-Bridge-Secret": BRIDGE_SECRET,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    })
+    if (!response.ok) {
+      console.warn(`[BackendClient] ${operation} HTTP ${response.status}`)
+      return null
+    }
+    return (await response.json()) as TResponse
+  } catch (err) {
+    console.warn(`[BackendClient] ${operation} unreachable:`, err)
+    return null
+  }
+}
 
 /** Fetch an org snapshot from the backend. Returns null on failure. */
 export async function fetchOrgSnapshot(orgId: string): Promise<OrgSnapshotResponse | null> {
@@ -252,6 +281,65 @@ export async function postMinigameResults(
     console.warn(`[BackendClient] minigame-results unreachable:`, err)
     return null
   }
+}
+
+export interface BacklashInvitePayload {
+  orgId: string
+  recipientUserId: string
+  hostUserId: string
+  hostName: string
+  roomId: string
+}
+
+export async function postBacklashInvite(payload: BacklashInvitePayload): Promise<boolean> {
+  return (await postBridgeJson<{ notificationId: string }>(
+    BACKLASH_INVITE_PATH,
+    payload,
+    "backlash-invite",
+  )) !== null
+}
+
+export interface BacklashResultsPayload {
+  matchId: string
+  roomId: string
+  orgId: string
+  whiteUserId: string
+  blackUserId: string
+  winnerUserId: string | null
+  outcome: "win" | "draw" | "forfeit"
+  reason: string
+  moveCount: number
+  durationMs: number
+}
+
+export interface BacklashPlayerStatsResponse {
+  userId: string
+  wins: number
+  losses: number
+  draws: number
+  matches: number
+  currentStreak: number
+  bestStreak: number
+}
+
+export interface BacklashResultsResponse {
+  recorded: boolean
+  players: BacklashPlayerStatsResponse[]
+}
+
+export async function postBacklashResults(
+  payload: BacklashResultsPayload,
+): Promise<BacklashResultsResponse | null> {
+  for (const delayMs of BACKLASH_RESULT_RETRY_DELAYS_MS) {
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
+    const response = await postBridgeJson<BacklashResultsResponse>(
+      BACKLASH_RESULTS_PATH,
+      payload,
+      "backlash-results",
+    )
+    if (response) return response
+  }
+  return null
 }
 
 /** Verify a user JWT against the backend. */

@@ -41,6 +41,7 @@ import { CoffeeBarRoom } from "./rooms/CoffeeBarRoom"
 import { CafeteriaRoom } from "./rooms/CafeteriaRoom"
 import { RaceRoom } from "./rooms/RaceRoom"
 import { MinigameRoom } from "./rooms/MinigameRoom"
+import { BacklashRoom } from "./rooms/BacklashRoom"
 import { handleBridgePublish } from "./bridge/BridgeEndpoint"
 
 const port = parseInt(process.env.PORT || "2567", 10)
@@ -53,6 +54,7 @@ const server = defineServer({
     cafeteria: defineRoom(CafeteriaRoom),
     race: defineRoom(RaceRoom),
     minigame: defineRoom(MinigameRoom),
+    backlash: defineRoom(BacklashRoom),
   },
 
   transport: new WebSocketTransport({
@@ -69,7 +71,7 @@ const server = defineServer({
     app.get("/health", (_req: Request, res: Response) => {
       res.json({
         status: "ok",
-        rooms: ["org", "house", "coffeebar", "cafeteria", "race", "minigame"],
+        rooms: ["org", "house", "coffeebar", "cafeteria", "race", "minigame", "backlash"],
       })
     })
 

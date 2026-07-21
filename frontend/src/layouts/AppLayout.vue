@@ -315,6 +315,7 @@
     <!-- Race invite toast + watch banner — both mount layout-wide so they
          survive route changes while the user is signed in. -->
     <RaceInviteToast v-if="authStore.user?.id" />
+    <BacklashInviteToast v-if="authStore.user?.id" />
     <RaceWatchBanner v-if="authStore.user?.id" />
 
     <!-- Cross-BUD job-completion toast. Surfaces when a chat / agent
@@ -345,6 +346,7 @@ import YieldOfferDialogs from '@/components/common/YieldOfferDialogs.vue'
 import XPToast from '@/components/common/XPToast.vue'
 import ChatCompletionToast from '@/components/common/ChatCompletionToast.vue'
 import RaceInviteToast from '@/components/race/RaceInviteToast.vue'
+import BacklashInviteToast from '@/components/backlash/BacklashInviteToast.vue'
 import RaceWatchBanner from '@/components/race/RaceWatchBanner.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useXPSocket } from '@/composables/useXPSocket'

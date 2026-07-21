@@ -22,6 +22,7 @@ from app.models.agent_activity import AgentActivityLog
 from app.models.agent_skill import AgentSkill, AgentType
 from app.models.agent_skill_bud_stage import AgentSkillBudStage
 from app.models.backend_route_cache import BackendRouteCache
+from app.models.backlash import BacklashMatch, BacklashPlayerStats
 from app.models.base import Base, BaseModel
 from app.models.bud import (
     BUDChatMessage,
@@ -115,6 +116,8 @@ __all__ = [
     "AgentTaskStatus",
     "AgentType",
     "BackendRouteCache",
+    "BacklashMatch",
+    "BacklashPlayerStats",
     "BUDAgentTask",
     "Base",
     "BaseModel",

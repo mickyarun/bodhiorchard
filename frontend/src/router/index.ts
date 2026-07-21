@@ -265,6 +265,12 @@ const router = createRouter({
           component: () => import('@/views/race/RaceRoomView.vue'),
           props: true,
         },
+        {
+          path: 'games/backlash/:roomId',
+          name: 'backlash-room',
+          component: () => import('@/views/backlash/BacklashRoomView.vue'),
+          props: true,
+        },
       ],
     },
   ],

@@ -28,6 +28,8 @@ export interface MinigameInfo {
   max_score: number
   best_score: number
   played_today: boolean
+  mode: 'solo' | 'versus'
+  score_label: string
 }
 
 export interface LeaderboardEntry {

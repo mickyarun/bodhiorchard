@@ -54,6 +54,8 @@ class MinigameResultsResponse(BaseModel):
 class MinigameInfo(BaseModel):
     key: str
     name: str
+    mode: str = "solo"
+    score_label: str = "Best"
     max_score: int
     best_score: int
     played_today: bool

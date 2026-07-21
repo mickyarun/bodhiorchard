@@ -59,6 +59,7 @@ import {
 } from "../bridge/BackendClient"
 import { registerOrgRoom, unregisterOrgRoom } from "../bridge/BridgeEndpoint"
 import { installRaceCreateHandler } from "./OrgRaceHandler"
+import { installBacklashCreateHandler } from "./OrgBacklashHandler"
 
 // Server simulation tick rate — 20Hz matches Colyseus default state sync cadence
 const SIM_TICK_MS = 50
@@ -230,6 +231,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     // creation, ActiveRaceSummary population, invite fan-out, and the
     // client-side `race_created` / `race_create_failed` response.
     installRaceCreateHandler(this)
+    installBacklashCreateHandler(this)
 
     // Drive the server-side simulation at 20Hz — walking, phrase cycles, idle timeouts.
     // setSimulationInterval passes dt in milliseconds; sim tick expects seconds.

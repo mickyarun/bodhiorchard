@@ -115,6 +115,7 @@ interface RawActiveRace {
 
 /** How long to wait for `race_created` / `race_create_failed` before giving up. */
 const RACE_CREATE_TIMEOUT_MS = 5_000
+const BACKLASH_CREATE_TIMEOUT_MS = 5_000
 
 interface RawAgent {
   agentId?: string
@@ -499,6 +500,41 @@ export class OrgRoomClient {
         },
       )
       room.send("race_create", body)
+    })
+  }
+
+  /** Create a private two-player Backlash room and deliver its invitation. */
+  async sendBacklashCreate(body: { invitedUserId: string }): Promise<{ roomId: string }> {
+    if (!this.room) throw new Error("OrgRoomClient: not connected")
+    const room = this.room
+    return new Promise<{ roomId: string }>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        cleanup()
+        reject(new Error("Backlash challenge timed out"))
+      }, BACKLASH_CREATE_TIMEOUT_MS)
+      const cleanup = (): void => {
+        window.clearTimeout(timeout)
+        okHandle?.()
+        failHandle?.()
+      }
+      const okHandle = room.onMessage("backlash_created", (message: { roomId?: unknown }) => {
+        if (typeof message.roomId !== "string" || message.roomId.length === 0) {
+          cleanup()
+          reject(new Error("Backlash server returned an invalid room"))
+          return
+        }
+        cleanup()
+        resolve({ roomId: message.roomId })
+      })
+      const failHandle = room.onMessage(
+        "backlash_create_failed",
+        (message: { reason?: unknown }) => {
+          cleanup()
+          const reason = typeof message.reason === "string" ? message.reason : "unknown_error"
+          reject(new Error(`Could not create Backlash challenge: ${reason.replace(/_/g, " ")}`))
+        },
+      )
+      room.send("backlash_create", body)
     })
   }
 

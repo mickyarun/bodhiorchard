@@ -1,0 +1,268 @@
+// Copyright 2025-2026 Arun Rajkumar
+// Licensed under the Apache License, Version 2.0
+
+import { Client, getStateCallbacks, Room } from '@colyseus/sdk'
+import type { ArraySchema, MapSchema } from '@colyseus/schema'
+import {
+  decodeBacklashPiece,
+  type BacklashBoard,
+  type BacklashColor,
+} from '@shared/minigames/backlash'
+import { resolveColyseusUrl } from './colyseusUrl'
+
+export type BacklashPhase = 'lobby' | 'playing' | 'jump' | 'promotion' | 'finished'
+
+export interface BacklashPlayerSnapshot {
+  userId: string
+  name: string
+  color: BacklashColor | null
+  connected: boolean
+  rematchReady: boolean
+  capturedOverlings: number
+}
+
+export interface BacklashSnapshot {
+  orgId: string
+  hostUserId: string
+  invitedUserId: string
+  phase: BacklashPhase
+  turnColor: BacklashColor
+  turnUserId: string
+  matchId: string
+  winnerId: string
+  outcome: '' | 'win' | 'draw' | 'forfeit'
+  outcomeReason: string
+  lockedJumpIndex: number
+  pendingPromotionIndex: number
+  revision: number
+  moveCount: number
+  turnDeadlineMs: number
+  board: BacklashBoard
+  legalTargets: number[]
+  players: BacklashPlayerSnapshot[]
+}
+
+export interface BacklashAuth {
+  userId: string
+  name: string
+  orgId: string
+  token?: string
+}
+
+interface RawPlayer {
+  userId?: string
+  name?: string
+  color?: string
+  connected?: boolean
+  rematchReady?: boolean
+  capturedOverlings?: number
+}
+
+interface BacklashStateShape {
+  orgId?: string
+  hostUserId?: string
+  invitedUserId?: string
+  phase?: string
+  turnColor?: string
+  turnUserId?: string
+  matchId?: string
+  winnerId?: string
+  outcome?: string
+  outcomeReason?: string
+  lockedJumpIndex?: number
+  pendingPromotionIndex?: number
+  revision?: number
+  moveCount?: number
+  turnDeadlineMs?: number
+  board: ArraySchema<string>
+  legalTargets: ArraySchema<number>
+  players: MapSchema<RawPlayer>
+}
+
+const RECONNECT_DELAYS_MS = [500, 1_500, 3_000, 5_000, 8_000] as const
+
+export class BacklashRoomClient {
+  private readonly client: Client
+  private room: Room<BacklashStateShape> | null = null
+  private stopped = false
+
+  onStateChange: ((snapshot: BacklashSnapshot) => void) | null = null
+  onConnectionChange: ((status: 'connected' | 'reconnecting' | 'disconnected') => void) | null = null
+  onError: ((reason: string) => void) | null = null
+  onClosed: ((reason: string) => void) | null = null
+
+  constructor(serverUrl?: string) {
+    this.client = new Client(serverUrl ?? resolveColyseusUrl())
+  }
+
+  async joinById(roomId: string, auth: BacklashAuth): Promise<void> {
+    await this.leave()
+    this.stopped = false
+    const room = await this.client.joinById<BacklashStateShape>(roomId, {
+      userId: auth.userId,
+      name: auth.name,
+      orgId: auth.orgId,
+      token: auth.token ?? '',
+    })
+    this.attachRoom(room)
+  }
+
+  sendMove(from: number, to: number, turnRevision: number): void {
+    this.room?.send('backlash_move', { from, to, turnRevision })
+  }
+
+  sendEndJump(): void {
+    this.room?.send('backlash_end_jump', {})
+  }
+
+  sendPromotion(accept: boolean): void {
+    this.room?.send('backlash_promote', { accept })
+  }
+
+  sendRematch(): void {
+    this.room?.send('backlash_rematch', {})
+  }
+
+  sendCancel(): void {
+    this.room?.send('backlash_cancel', {})
+  }
+
+  async leave(): Promise<void> {
+    this.stopped = true
+    const room = this.room
+    this.room = null
+    if (!room) return
+    try {
+      await room.leave()
+    } catch {
+      // A closed socket needs no additional cleanup.
+    }
+  }
+
+  destroy(): void {
+    void this.leave()
+    this.onStateChange = null
+    this.onConnectionChange = null
+    this.onError = null
+    this.onClosed = null
+  }
+
+  private attachRoom(room: Room<BacklashStateShape>): void {
+    this.room = room
+    this.onConnectionChange?.('connected')
+    room.onMessage('backlash_error', (payload: { reason?: unknown }) => {
+      this.onError?.(typeof payload.reason === 'string' ? payload.reason : 'invalid_action')
+    })
+    room.onMessage('backlash_closed', (payload: { reason?: unknown }) => {
+      const reason = typeof payload.reason === 'string' ? payload.reason : 'room_closed'
+      this.stopped = true
+      this.room = null
+      this.onConnectionChange?.('disconnected')
+      this.onClosed?.(reason)
+    })
+    this.wireState(room)
+    const reconnectionToken = room.reconnectionToken
+    room.onLeave((code) => {
+      if (this.stopped || this.room !== room) return
+      this.room = null
+      if (code === 1000) {
+        this.onConnectionChange?.('disconnected')
+        return
+      }
+      void this.reconnect(reconnectionToken)
+    })
+  }
+
+  private async reconnect(reconnectionToken: string): Promise<void> {
+    this.onConnectionChange?.('reconnecting')
+    for (const delayMs of RECONNECT_DELAYS_MS) {
+      await wait(delayMs)
+      if (this.stopped) return
+      try {
+        const room = await this.client.reconnect<BacklashStateShape>(reconnectionToken)
+        if (this.stopped) {
+          await room.leave()
+          return
+        }
+        this.attachRoom(room)
+        return
+      } catch {
+        // Retry within the server's 30-second reconnection window.
+      }
+    }
+    if (!this.stopped) this.onConnectionChange?.('disconnected')
+  }
+
+  private wireState(room: Room<BacklashStateShape>): void {
+    const $ = getStateCallbacks(room)
+    const state = $(room.state)
+    const publish = (): void => this.onStateChange?.(snapshotFromState(room.state))
+
+    state.onChange(() => publish())
+    state.board.onAdd(() => publish(), true)
+    state.board.onRemove(() => publish())
+    state.legalTargets.onAdd(() => publish(), true)
+    state.legalTargets.onRemove(() => publish())
+    state.players.onAdd((player: RawPlayer) => {
+      publish()
+      $(player).onChange(() => publish())
+    }, true)
+    state.players.onRemove(() => publish())
+    publish()
+  }
+}
+
+function snapshotFromState(state: BacklashStateShape): BacklashSnapshot {
+  const board: BacklashBoard = Array.from({ length: 64 }, (_, index) =>
+    decodeBacklashPiece(state.board?.at(index) ?? ''),
+  )
+  const legalTargets: number[] = []
+  state.legalTargets?.forEach((target) => legalTargets.push(target))
+  const players: BacklashPlayerSnapshot[] = []
+  state.players?.forEach((player) => players.push({
+    userId: player.userId ?? '',
+    name: player.name?.trim() || 'Player',
+    color: toColor(player.color),
+    connected: player.connected ?? false,
+    rematchReady: player.rematchReady ?? false,
+    capturedOverlings: player.capturedOverlings ?? 0,
+  }))
+  return {
+    orgId: state.orgId ?? '',
+    hostUserId: state.hostUserId ?? '',
+    invitedUserId: state.invitedUserId ?? '',
+    phase: toPhase(state.phase),
+    turnColor: toColor(state.turnColor) ?? 'white',
+    turnUserId: state.turnUserId ?? '',
+    matchId: state.matchId ?? '',
+    winnerId: state.winnerId ?? '',
+    outcome: toOutcome(state.outcome),
+    outcomeReason: state.outcomeReason ?? '',
+    lockedJumpIndex: state.lockedJumpIndex ?? -1,
+    pendingPromotionIndex: state.pendingPromotionIndex ?? -1,
+    revision: state.revision ?? 0,
+    moveCount: state.moveCount ?? 0,
+    turnDeadlineMs: state.turnDeadlineMs ?? 0,
+    board,
+    legalTargets,
+    players,
+  }
+}
+
+function toColor(value: string | undefined): BacklashColor | null {
+  return value === 'white' || value === 'black' ? value : null
+}
+
+function toPhase(value: string | undefined): BacklashPhase {
+  return value === 'playing' || value === 'jump' || value === 'promotion' || value === 'finished'
+    ? value
+    : 'lobby'
+}
+
+function toOutcome(value: string | undefined): BacklashSnapshot['outcome'] {
+  return value === 'win' || value === 'draw' || value === 'forfeit' ? value : ''
+}
+
+function wait(delayMs: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, delayMs))
+}

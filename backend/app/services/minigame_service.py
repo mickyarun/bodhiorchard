@@ -32,6 +32,7 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.minigame import LeaderboardRow, MinigameRepository
+from app.services.backlash_service import get_backlash_leaderboard, get_backlash_stats
 
 
 class MinigameValidationError(ValueError):
@@ -56,6 +57,9 @@ GAMES: dict[str, GameSpec] = {
     "pollen_pop": GameSpec(name="Pollen Pop", max_score=6000),
     "firefly": GameSpec(name="Firefly Follow", max_score=50),
 }
+
+BACKLASH_GAME_KEY = "backlash"
+BACKLASH_GAME_NAME = "Backlash"
 
 
 async def submit_score(
@@ -113,11 +117,26 @@ async def get_status(
             {
                 "key": key,
                 "name": spec.name,
+                "mode": "solo",
+                "score_label": "Best",
                 "max_score": spec.max_score,
                 "best_score": row.best_score if row else 0,
                 "played_today": bool(row and row.last_played_date == today),
             }
         )
+
+    backlash = await get_backlash_stats(db, org_id=org_id, user_id=user_id)
+    games.append(
+        {
+            "key": BACKLASH_GAME_KEY,
+            "name": BACKLASH_GAME_NAME,
+            "mode": "versus",
+            "score_label": "Wins",
+            "max_score": 0,
+            "best_score": backlash.wins if backlash else 0,
+            "played_today": bool(backlash and backlash.last_played_date == today),
+        }
+    )
 
     # The header chip shows the user's strongest live streak. A streak is
     # "live" only if its last play was today or yesterday — older rows are
@@ -126,6 +145,8 @@ async def get_status(
     for row in rows.values():
         if row.last_played_date and (today - row.last_played_date).days <= 1:
             live_streak = max(live_streak, row.current_streak)
+    if backlash and backlash.last_played_date and (today - backlash.last_played_date).days <= 1:
+        live_streak = max(live_streak, backlash.current_streak)
 
     return {
         "games": games,
@@ -140,6 +161,17 @@ async def get_leaderboard(
     game: str,
     limit: int,
 ) -> list[LeaderboardRow]:
+    if game == BACKLASH_GAME_KEY:
+        rows = await get_backlash_leaderboard(db, org_id=org_id, limit=limit)
+        return [
+            LeaderboardRow(
+                user_id=row.user_id,
+                user_name=row.user_name,
+                best_score=row.wins,
+                plays=row.matches,
+            )
+            for row in rows
+        ]
     if game not in GAMES:
         raise MinigameValidationError(f"unknown game: {game}")
     repo = MinigameRepository(db, org_id=org_id)

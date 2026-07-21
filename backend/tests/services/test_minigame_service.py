@@ -114,16 +114,22 @@ async def test_status_reports_best_played_and_live_streak() -> None:
 
     with (
         patch("app.services.minigame_service.MinigameRepository", return_value=repo),
+        patch(
+            "app.services.minigame_service.get_backlash_stats",
+            new=AsyncMock(return_value=None),
+        ),
         patch("app.services.minigame_service.datetime") as dt,
     ):
         dt.now.return_value.date.return_value = today
         status = await get_status(db, user_id=USER_ID, org_id=ORG_ID)
 
     games = {g["key"]: g for g in status["games"]}  # type: ignore[union-attr]
-    assert set(games) == set(GAMES)
+    assert set(games) == {*GAMES, "backlash"}
     assert games["fishing"]["best_score"] == 30
     assert games["fishing"]["played_today"] is True
     assert games["pollen_pop"]["played_today"] is False
+    assert games["backlash"]["mode"] == "versus"
+    assert games["backlash"]["score_label"] == "Wins"
     # Only fishing's streak is live (played today); pollen_pop's is stale.
     assert status["streak_count"] == 4
 

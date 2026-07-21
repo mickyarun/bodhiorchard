@@ -19,6 +19,8 @@ from fastapi import APIRouter
 from app.api.health import router as health_router
 from app.api.v1.agent_skills import router as agent_skills_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.backlash import internal_router as backlash_internal_router
+from app.api.v1.backlash import router as backlash_router
 from app.api.v1.bud import router as bud_router
 from app.api.v1.bug_comments import router as bug_comments_router
 from app.api.v1.bugs import router as bugs_router
@@ -96,6 +98,8 @@ api_router.include_router(mcp_router)
 api_router.include_router(mcp_remote_router)
 api_router.include_router(internal_colyseus_router, prefix="/api/v1")
 api_router.include_router(minigames_router, prefix="/api/v1/minigames")
+api_router.include_router(backlash_router, prefix="/api/v1/minigames/backlash")
+api_router.include_router(backlash_internal_router, prefix="/api/v1")
 api_router.include_router(quiz_router, prefix="/api/v1/quiz")
 api_router.include_router(quiz_review_router, prefix="/api/v1/quiz")
 api_router.include_router(races_router, prefix="/api/v1/races")

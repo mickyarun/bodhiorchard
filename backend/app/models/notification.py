@@ -40,6 +40,7 @@ class NotificationType(StrEnum):
     PR_MERGED = "pr_merged"
     ALL_PRS_MERGED = "all_prs_merged"
     RACE_INVITE = "race_invite"
+    MINIGAME_INVITE = "minigame_invite"
 
 
 class Notification(BaseModel):

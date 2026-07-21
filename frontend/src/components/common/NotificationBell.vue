@@ -188,6 +188,19 @@
                   Decline
                 </v-btn>
                 <v-btn
+                  v-if="canDeclineBacklashInvite(notif)"
+                  variant="tonal"
+                  size="x-small"
+                  density="comfortable"
+                  color="error"
+                  class="notif-decline-btn"
+                  :disabled="store.pendingDeclineIds.has(notif.id)"
+                  :loading="store.pendingDeclineIds.has(notif.id)"
+                  @click.stop="store.declineBacklashInvite(notif.id)"
+                >
+                  Decline
+                </v-btn>
+                <v-btn
                   v-if="notif.deepLink"
                   icon
                   variant="text"
@@ -248,7 +261,8 @@ import { useYieldOfferSocket } from '@/composables/useYieldOfferSocket'
 import { useYieldOfferActions } from '@/composables/useYieldOfferActions'
 import { useMembersStore } from '@/stores/members'
 import { usePermissions } from '@/composables/usePermissions'
-import type { AppNotification, RaceInviteMeta, YieldOffer } from '@/types'
+import type { AppNotification, BacklashInviteMeta, RaceInviteMeta, YieldOffer } from '@/types'
+import { isInviteUnexpired } from '@/utils/inviteExpiry'
 
 const props = defineProps<{ userId: string }>()
 
@@ -365,6 +379,14 @@ function canDeclineRaceInvite(notif: AppNotification): boolean {
   return meta.hostUserId !== props.userId
 }
 
+function canDeclineBacklashInvite(notif: AppNotification): boolean {
+  if (notif.type !== 'minigame_invite') return false
+  const meta = (notif.meta ?? {}) as BacklashInviteMeta
+  return meta.game === 'backlash' && Boolean(meta.hostUserId) && !meta.declinedBy
+    && isInviteUnexpired(meta.expiresAt)
+    && meta.hostUserId !== props.userId
+}
+
 function handleClearAll(): void {
   store.dismissAll()
   menuOpen.value = false
@@ -378,6 +400,7 @@ function notifIcon(type: string): string {
     case 'approval_rejected': return 'mdi-close-circle-outline'
     case 'developer_assigned': return 'mdi-account-check'
     case 'reassignment_done': return 'mdi-swap-horizontal'
+    case 'minigame_invite': return 'mdi-sword-cross'
     default: return 'mdi-check-circle'
   }
 }

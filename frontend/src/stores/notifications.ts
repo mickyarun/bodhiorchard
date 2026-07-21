@@ -95,11 +95,16 @@ export const useNotificationStore = defineStore('notifications', () => {
    * Optimistically removes the row on success; on failure the user
    * can retry from the same row since we don't touch it on error.
    */
-  async function declineRaceInvite(id: string): Promise<void> {
+  async function declineInvite(
+    id: string,
+    endpoint: string,
+    unavailableMessage: string,
+    failureMessage: string,
+  ): Promise<void> {
     if (pendingDeclineIds.value.has(id)) return
     pendingDeclineIds.value.add(id)
     try {
-      await api.post(`/v1/races/invites/${id}/decline`)
+      await api.post(endpoint)
       items.value = items.value.filter(n => n.id !== id)
     } catch (err) {
       // 404 is the "already declined / not yours" path — the row is
@@ -108,18 +113,36 @@ export const useNotificationStore = defineStore('notifications', () => {
       const status = isAxiosError(err) ? err.response?.status : undefined
       if (status === 404) {
         items.value = items.value.filter(n => n.id !== id)
-        error.value = 'Race invite is no longer available'
+        error.value = unavailableMessage
       } else {
-        error.value = `Failed to decline race invite${status ? ` (${status})` : ''}`
+        error.value = `${failureMessage}${status ? ` (${status})` : ''}`
       }
     } finally {
       pendingDeclineIds.value.delete(id)
     }
   }
 
+  async function declineRaceInvite(id: string): Promise<void> {
+    await declineInvite(
+      id,
+      `/v1/races/invites/${id}/decline`,
+      'Race invite is no longer available',
+      'Failed to decline race invite',
+    )
+  }
+
+  async function declineBacklashInvite(id: string): Promise<void> {
+    await declineInvite(
+      id,
+      `/v1/minigames/backlash/invites/${id}/decline`,
+      'Backlash challenge is no longer available',
+      'Failed to decline Backlash challenge',
+    )
+  }
+
   return {
     items, loading, error, unreadCount, pendingDeclineIds,
     fetchAll, markRead, markAllRead, dismiss, dismissAll, addFromSocket,
-    declineRaceInvite,
+    declineRaceInvite, declineBacklashInvite,
   }
 })

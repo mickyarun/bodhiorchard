@@ -30,6 +30,7 @@ import type { Request, Response } from "express"
 import { timingSafeEqual } from "crypto"
 import { OrgRoom } from "../rooms/OrgRoom"
 import { fireRaceInviteDeclined } from "./RaceRegistry"
+import { fireBacklashInviteDeclined } from "./BacklashRegistry"
 import { safeLog } from "./logSanitize"
 
 // Fail-closed in production: if the secret isn't configured, refuse to start.
@@ -164,6 +165,16 @@ function dispatchRoomScoped(payload: BridgePayload, res: Response): true {
     }
     fireRaceInviteDeclined(roomId, userId)
     res.status(200).json({ delivered: true })
+    return true
+  }
+  if (payload.type === "backlash_invite_declined") {
+    const userId = typeof data.userId === "string" ? data.userId : null
+    if (!userId) {
+      res.status(400).json({ error: "backlash_invite_declined needs userId" })
+      return true
+    }
+    const delivered = fireBacklashInviteDeclined(roomId, userId)
+    res.status(200).json({ delivered })
     return true
   }
   res.status(400).json({
