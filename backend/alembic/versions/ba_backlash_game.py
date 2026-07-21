@@ -116,8 +116,8 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("org_id", "user_id", name="uq_backlash_stats_org_user"),
     )
-    op.create_index("ix_backlash_stats_org_id", "backlash_player_stats", ["org_id"])
-    op.create_index("ix_backlash_stats_user_id", "backlash_player_stats", ["user_id"])
+    op.create_index("ix_backlash_player_stats_org_id", "backlash_player_stats", ["org_id"])
+    op.create_index("ix_backlash_player_stats_user_id", "backlash_player_stats", ["user_id"])
     op.create_index("ix_backlash_stats_org_wins", "backlash_player_stats", ["org_id", "wins"])
 
 
