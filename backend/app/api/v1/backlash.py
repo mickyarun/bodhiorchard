@@ -137,7 +137,7 @@ async def create_backlash_invite(
             detail=str(error),
         ) from error
     await db.commit()
-    return BacklashInviteResponse(notificationId=notification_id)
+    return BacklashInviteResponse(notification_id=notification_id)
 
 
 @internal_router.post("/backlash-results", response_model=BacklashResultsResponse)
@@ -169,8 +169,7 @@ async def create_backlash_result(
     return BacklashResultsResponse(
         recorded=recorded,
         players=[
-            BacklashPlayerStatsRead.model_validate(stats_payload(player))
-            for player in players
+            BacklashPlayerStatsRead.model_validate(stats_payload(player)) for player in players
         ],
     )
 
@@ -194,13 +193,13 @@ async def backlash_leaderboard(
     return BacklashLeaderboardResponse(
         entries=[
             BacklashLeaderboardEntry(
-                userId=row.user_id,
-                userName=row.user_name,
+                user_id=row.user_id,
+                user_name=row.user_name,
                 wins=row.wins,
                 losses=row.losses,
                 draws=row.draws,
                 matches=row.matches,
-                winRate=row.win_rate,
+                win_rate=row.win_rate,
             )
             for row in rows
         ]
@@ -222,4 +221,4 @@ async def decline_backlash_invite_endpoint(
             detail="Backlash invite not found",
         )
     await db.commit()
-    return BacklashDeclineResponse(hostNotificationId=host_notification_id)
+    return BacklashDeclineResponse(host_notification_id=host_notification_id)
