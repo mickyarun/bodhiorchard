@@ -92,8 +92,10 @@ async def check_connection(
     caps = capabilities_for(provider)
     env = build_provider_env(provider, env_extra)
 
+    probe_error: str | None = None
     if caps.preflight is not None:
-        version = await caps.preflight(env_extra)
+        probe = await caps.preflight(env_extra)
+        version, probe_error = probe.version, probe.error
     else:
         version = await _cli_version(provider, env)
     result: dict[str, Any] = {
@@ -105,7 +107,10 @@ async def check_connection(
         "error": None,
     }
     if version is None:
-        result["error"] = caps.install_hint
+        # The probe's own reason when it has one — a server that answered and
+        # rejected the credential is a configuration problem, not a missing
+        # install, and the install hint would send the reader to the wrong page.
+        result["error"] = probe_error or caps.install_hint
         return result
 
     run = await provider_instance(provider).run(

@@ -72,6 +72,11 @@ TOOL_SCHEMA = [
 # A variable annotation, so PEP 563 keeps it unevaluated — safe on 3.8.
 results: list[tuple[bool, str]] = []
 
+# Set once from --token. A local Ollama needs no credential; a hosted endpoint
+# behind a gateway does, and without this the whole run would fail at check 1
+# with a 401 that says nothing about the rest.
+auth_header: dict[str, str] = {}
+
 
 def say(line: str = "") -> None:
     """Print immediately.
@@ -96,7 +101,9 @@ def call(base: str, path: str, payload: Json | None = None) -> tuple[Json | None
     """Return (json, elapsed_seconds, error). Never raises."""
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(
-        base.rstrip("/") + path, data=data, headers={"Content-Type": "application/json"}
+        base.rstrip("/") + path,
+        data=data,
+        headers={"Content-Type": "application/json", **auth_header},
     )
     start = time.time()
     try:
@@ -104,6 +111,8 @@ def call(base: str, path: str, payload: Json | None = None) -> tuple[Json | None
             body = json.load(resp)
             return (body if isinstance(body, dict) else None), time.time() - start, ""
     except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            return None, time.time() - start, f"HTTP {exc.code} (credential rejected)"
         return None, time.time() - start, f"HTTP {exc.code}"
     except urllib.error.URLError as exc:
         return None, time.time() - start, f"cannot connect ({exc.reason})"
@@ -281,8 +290,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Check Ollama readiness for bodhiorchard.")
     parser.add_argument("--base-url", default="http://localhost:11434")
     parser.add_argument("--model", default="", help="Model to test (default: first tool-capable)")
+    parser.add_argument(
+        "--token", default="", help="Bearer token, for a hosted endpoint behind a gateway"
+    )
     args = parser.parse_args()
     base = resolve_base_url(args.base_url)
+    if args.token.strip():
+        auth_header["Authorization"] = "Bearer " + args.token.strip()
 
     say(f"\nbodhiorchard Ollama readiness check -> {base}")
     # Echo the environment: if this script itself fails, its interpreter and

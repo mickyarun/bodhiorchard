@@ -14,8 +14,9 @@
 
 """Discovery against a live Ollama host: which models exist, and can it run?
 
-Unlike the CLI providers, Ollama's usable models are a property of the user's
-own machine, not of a table we ship — so they are read at runtime.
+Unlike the CLI providers, Ollama's usable models are a property of the server
+the org points at — their own machine, or a shared/hosted endpoint — not of a
+table we ship, so they are read at runtime.
 
 Everything here degrades to empty/None rather than raising: this is called
 while rendering the settings page, and an unreachable Ollama must not 500 it.
@@ -26,13 +27,29 @@ Callers own presentation types; this returns plain strings.
 """
 
 import asyncio
-import ipaddress
 import time
 from collections.abc import Mapping
-from urllib.parse import urlparse
 
 import httpx
 import structlog
+
+from app.services.ai_runner.capability_types import ProbeResult
+from app.services.ai_runner.ollama_url import clean_base_url
+
+__all__ = [
+    "OLLAMA_API_KEY_ENV",
+    "OLLAMA_DEFAULT_BASE_URL",
+    "OLLAMA_HOST_ENV",
+    "OLLAMA_MODEL_ENV",
+    "OLLAMA_THINK_ENV",
+    "api_key_from_env",
+    "auth_headers",
+    "base_url_from_env",
+    "clean_base_url",
+    "clear_model_cache",
+    "list_tool_models",
+    "ollama_probe",
+]
 
 logger = structlog.get_logger(__name__)
 
@@ -44,133 +61,46 @@ OLLAMA_HOST_ENV = "OLLAMA_HOST"
 # would leak one org's choice into another's run.
 OLLAMA_THINK_ENV = "OLLAMA_THINK"  # "1"/"0"
 OLLAMA_MODEL_ENV = "OLLAMA_MODEL"
+# Bearer token for a hosted endpoint. Empty/absent for a local server, which
+# has no auth at all — that is the difference between the two auth modes.
+OLLAMA_API_KEY_ENV = "OLLAMA_API_KEY"
 
 # Short: this runs inside a settings-page request. A slow or absent host must
-# degrade quickly, not hold the page open.
-_PROBE_TIMEOUT_S = 2.0
-_LIST_BUDGET_S = 5.0
+# degrade quickly, not hold the page open. Roomier than a purely local server
+# needs, because a hosted endpoint pays a TLS handshake and a network hop
+# before answering — at 2s a working remote gateway looked like a dead one.
+# The TTL cache keeps a genuinely dead host from costing this on every load.
+_PROBE_TIMEOUT_S = 5.0
+_LIST_BUDGET_S = 12.0
 _CACHE_TTL_S = 60.0
 
 # Ollama reports per-model capabilities; only models advertising this can drive
 # agents. Without it a model answers in prose instead of calling a tool.
 _TOOLS_CAPABILITY = "tools"
 
-# Keyed by base_url. Every settings load would otherwise re-probe every model.
-_model_cache: dict[str, tuple[float, list[str]]] = {}
+# Every settings load would otherwise re-probe every model. Keyed by address
+# *and* token: two orgs can share a hosted endpoint while being entitled to
+# different models, and a cache keyed on the address alone would serve the
+# first org's answer to the second.
+_model_cache: dict[tuple[str, str], tuple[float, list[str]]] = {}
 
 
-# Hostnames that name the local machine across our documented deployments: the
-# default, and the bridge Docker Desktop / Linux exposes for host-gateway. A
-# mapping, not a set, because the value returned is the one we send — looked up
-# here rather than copied from the request.
-_LOCAL_HOSTNAMES = {
-    "localhost": "localhost",
-    "host.docker.internal": "host.docker.internal",
-}
+def auth_headers(api_key: str | None) -> dict[str, str]:
+    """Bearer header for a hosted endpoint, or ``{}`` for a local one.
 
-
-def _safe_host(host: str) -> str:
-    """Return our own rendering of ``host``, or raise ``ValueError``.
-
-    Nothing the caller wrote reaches the result. A known hostname is answered
-    with the literal from :data:`_LOCAL_HOSTNAMES`; an address is parsed to a
-    number, checked, and rendered back from that number. So the string handed to
-    the HTTP client is always one this module produced.
-
-    That is a guarantee, not a formality. Validating one spelling of an address
-    and then sending the caller's spelling is the shape of every parser-mismatch
-    bypass: the checker and the HTTP client disagree about what ``0177.0.0.1``
-    or a zero-padded octet means, and the request goes somewhere the check never
-    saw. Re-rendering from the integer removes the disagreement by construction.
+    A local Ollama has no auth and rejects nothing, so sending an empty bearer
+    would be noise at best; hosted gateways in front of Ollama expect the
+    standard header.
     """
-    canonical = _LOCAL_HOSTNAMES.get(host)
-    if canonical is not None:
-        return canonical
-    _assert_reachable_host(host)
-    ip = ipaddress.ip_address(host)
-    # Round-trip through the numeric form: the output is derived from the
-    # validated number, never from the text that was parsed.
-    rebuilt: ipaddress.IPv4Address | ipaddress.IPv6Address = (
-        ipaddress.IPv6Address(int(ip)) if ip.version == 6 else ipaddress.IPv4Address(int(ip))
-    )
-    # An IPv6 authority needs the brackets urlparse stripped.
-    return f"[{rebuilt}]" if rebuilt.version == 6 else str(rebuilt)
+    key = (api_key or "").strip()
+    return {"Authorization": f"Bearer {key}"} if key else {}
 
 
-def _assert_reachable_host(host: str) -> None:
-    """Reject an address the backend has no business being pointed at.
-
-    The value reaches an HTTP client server-side, so whoever supplies it is
-    choosing a destination on the backend's network — one the browser cannot
-    reach itself. Left open, an authenticated member can sweep internal admin
-    ports, or read a cloud instance's credentials off its metadata endpoint,
-    using the model list as an oracle for what answered.
-
-    Ollama is a local provider by definition ("runs against a server on your own
-    machine"), so the honest bound is the machine and its private network. An IP
-    literal must be loopback or private; a name must be one we know is local.
-    Link-local is refused explicitly rather than by omission — 169.254.169.254
-    is the metadata address, and it is the reason this check exists.
-
-    Names are not resolved here: a DNS lookup would block the event loop, and
-    resolving at validation time proves nothing about the address used at
-    request time anyway. Anyone with a hostname for a LAN server can give its
-    address instead, which is what the error says.
-
-    Called by :func:`_safe_host` once the known-hostname case is already handled,
-    so anything arriving here has to parse as an address.
-    """
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        raise ValueError(
-            f"'{host}' is not a recognised local address. Use localhost, "
-            "host.docker.internal, or the server's IP address on your network."
-        ) from None
-    if ip.is_link_local:
-        raise ValueError(
-            "Link-local addresses are not allowed — that range holds cloud "
-            "instance metadata, not an Ollama server."
-        )
-    if not (ip.is_loopback or ip.is_private):
-        raise ValueError(
-            f"{host} is a public address. Ollama runs on your own machine or "
-            "private network, so only loopback and private addresses are allowed."
-        )
-
-
-def clean_base_url(value: str | None) -> str | None:
-    """Normalise a user-supplied server address; ``None`` means "use the default".
-
-    Raises ``ValueError`` for anything that isn't an http/https URL pointing at
-    a local or private host. Every caller that accepts this from a request has
-    to run it through here — including the ones that only probe and never
-    persist, since a probe is still a server-side request to a caller-chosen
-    address. See :func:`_assert_reachable_host` for why the host is bounded.
-    """
-    cleaned = (value or "").strip().rstrip("/")
-    if not cleaned:
+def api_key_from_env(env: Mapping[str, str] | None) -> str | None:
+    """Read the run's bearer token, or None when the server needs no auth."""
+    if not env:
         return None
-    parsed = urlparse(cleaned)
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError("base_url must start with http:// or https://")
-    if not parsed.hostname:
-        raise ValueError("base_url must include a host, e.g. http://localhost:11434")
-    try:
-        port = parsed.port
-    except ValueError:
-        raise ValueError("base_url has an invalid port") from None
-
-    # Assemble the result from values this module owns, so nothing the caller
-    # wrote is passed through to the HTTP client. The scheme is one of two
-    # literals chosen by comparison; the host comes back from ``_safe_host`` as
-    # either a table entry or an address re-rendered from its numeric form; the
-    # port is an int. Everything else the caller may have written — credentials,
-    # a path that shifts what /api/tags resolves to, a query riding on every
-    # request — has no route into the output at all.
-    scheme = "https" if parsed.scheme == "https" else "http"
-    host = _safe_host(parsed.hostname)
-    return f"{scheme}://{host}:{port}" if port else f"{scheme}://{host}"
+    return (env.get(OLLAMA_API_KEY_ENV) or "").strip() or None
 
 
 def base_url_from_env(env: Mapping[str, str] | None) -> str:
@@ -186,10 +116,46 @@ def base_url_from_env(env: Mapping[str, str] | None) -> str:
     return OLLAMA_DEFAULT_BASE_URL
 
 
-def _remember(base_url: str, at: float, models: list[str]) -> list[str]:
+def _remember(key: tuple[str, str], at: float, models: list[str]) -> list[str]:
     """Cache and return a probe result, successful or not."""
-    _model_cache[base_url] = (at, models)
+    _model_cache[key] = (at, models)
     return list(models)
+
+
+async def _get_json_with_reason(
+    client: httpx.AsyncClient, url: str
+) -> tuple[dict[str, object] | None, str | None]:
+    """GET one JSON object; on failure return why, in the operator's terms.
+
+    The reason exists because every failure here otherwise collapses to "no
+    server". A hosted endpoint that answers and rejects the token is a live
+    server with a wrong setting, and saying "install Ollama" sends the reader
+    to the wrong page.
+    """
+    try:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        body = resp.json()
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code
+        logger.info("ollama_request_failed", url=url, status=code)
+        if code in (401, 403):
+            return None, (
+                f"The server at {url.rsplit('/api/', 1)[0]} rejected the credential "
+                f"(HTTP {code}). Check the token, or choose no authentication for a "
+                "server that needs none."
+            )
+        if code == 404:
+            return None, (
+                f"HTTP 404 from {url}. If the endpoint serves Ollama under a path "
+                "prefix, include it in the server address — and note it must speak "
+                "Ollama's own API, not an OpenAI-compatible one."
+            )
+        return None, f"The server answered HTTP {code}."
+    except (httpx.HTTPError, OSError, ValueError) as exc:
+        logger.info("ollama_request_failed", url=url, error=str(exc))
+        return None, None
+    return (body if isinstance(body, dict) else None), None
 
 
 async def _get_json(client: httpx.AsyncClient, url: str) -> dict[str, object] | None:
@@ -198,31 +164,22 @@ async def _get_json(client: httpx.AsyncClient, url: str) -> dict[str, object] | 
     ``url`` is built from an address that has been through
     :func:`clean_base_url`, either when it was saved or in
     ``capability_gate.provider_env`` — the point every caller converges on, so
-    the guarantee does not rest on each one remembering. That validation bounds
-    the destination to loopback, private ranges, or a hostname from a fixed
-    table, refuses link-local (the cloud metadata range) by name, and re-renders
-    the address from its parsed numeric form so the string sent is the one that
-    was checked.
+    the guarantee does not rest on each one remembering. That validation
+    regenerates the address from its parsed parts, so the string sent is one we
+    produced rather than one the caller wrote, and refuses the link-local range
+    that holds cloud instance metadata.
 
-    CodeQL reports ``py/partial-ssrf`` here and will keep reporting it: the URL
-    does derive from a user-supplied value, which is what the feature is. The
-    analysis cannot see the validation because it happens in another module.
-    Inline suppression comments are not honoured by GitHub code scanning, so
-    clearing it needs a dismissal recorded against the alert itself; this
-    docstring is the justification for that decision.
-
-    Re-examine if the bound ever widens: allowing arbitrary hostnames, or
-    resolving names before the request, would make the finding real again
-    rather than merely unprovable to the analysis.
+    It no longer confines the destination to the local machine: a shared or
+    hosted Ollama is the deployment this provider now serves, so the operator
+    chooses the host. CodeQL reports ``py/partial-ssrf`` here, and with that
+    widening the report is a fair description of the design rather than a false
+    positive. What limits it is that choosing the address takes
+    ``integrations:configure`` — not that the destination is bounded, and not
+    the link-local refusal, which catches that range written as an address but
+    not a hostname resolving into it.
     """
-    try:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        body = resp.json()
-    except (httpx.HTTPError, OSError, ValueError) as exc:
-        logger.info("ollama_request_failed", url=url, error=str(exc))
-        return None
-    return body if isinstance(body, dict) else None
+    body, _ = await _get_json_with_reason(client, url)
+    return body
 
 
 async def _model_has_tools(client: httpx.AsyncClient, base_url: str, name: str) -> str | None:
@@ -242,27 +199,32 @@ async def _model_has_tools(client: httpx.AsyncClient, base_url: str, name: str) 
     return None
 
 
-async def list_tool_models(base_url: str) -> list[str]:
+async def list_tool_models(base_url: str, api_key: str | None = None) -> list[str]:
     """Installed models that can actually run agents, newest-listed first.
 
     Filters to tool-capable models: offering one without that capability would
     let a user pick a model that fails at the first tool call. Returns ``[]``
     on any failure — an unreachable host means "nothing to offer", not an error.
+    A hosted endpoint that rejects the token answers the same way, which is why
+    the settings page pairs an empty list with the address, not a bare "none".
     """
     base_url = base_url.rstrip("/")
-    cached = _model_cache.get(base_url)
+    key = (base_url, api_key or "")
+    cached = _model_cache.get(key)
     now = time.monotonic()
     if cached and now - cached[0] < _CACHE_TTL_S:
         return list(cached[1])
 
-    async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_S) as client:
+    async with httpx.AsyncClient(
+        timeout=_PROBE_TIMEOUT_S, headers=auth_headers(api_key)
+    ) as client:
         tags = await _get_json(client, f"{base_url}/api/tags")
         if tags is None:
             # Cache the failure too. This is probed on every settings load, for
             # every org — including ones on another provider entirely. A host
             # that drops packets rather than refusing costs the full timeout,
             # and without this that is paid on every page view forever.
-            return _remember(base_url, now, [])
+            return _remember(key, now, [])
         raw = tags.get("models")
         names = [
             m["name"]
@@ -270,7 +232,7 @@ async def list_tool_models(base_url: str) -> list[str]:
             if isinstance(m, dict) and isinstance(m.get("name"), str) and m["name"]
         ]
         if not names:
-            return _remember(base_url, now, [])
+            return _remember(key, now, [])
         try:
             checked = await asyncio.wait_for(
                 asyncio.gather(
@@ -281,7 +243,7 @@ async def list_tool_models(base_url: str) -> list[str]:
             )
         except (TimeoutError, asyncio.CancelledError):
             logger.info("ollama_list_models_timeout", base_url=base_url, count=len(names))
-            return _remember(base_url, now, [])
+            return _remember(key, now, [])
 
     for outcome in checked:
         if isinstance(outcome, BaseException):
@@ -290,26 +252,28 @@ async def list_tool_models(base_url: str) -> list[str]:
             # no trace of why.
             logger.warning("ollama_show_unexpected_error", error=str(outcome))
     capable = [r for r in checked if isinstance(r, str)]
-    _remember(base_url, now, capable)
+    _remember(key, now, capable)
     logger.info(
         "ollama_models_listed", base_url=base_url, installed=len(names), tool_capable=len(capable)
     )
     return list(capable)
 
 
-async def ollama_probe(env: Mapping[str, str] | None) -> str | None:
-    """Liveness probe: a version string if the host answers, else None.
+async def ollama_probe(env: Mapping[str, str] | None) -> ProbeResult:
+    """Liveness probe: the server's version, or why it could not be read.
 
     Stands in for the CLI providers' ``version_cmd`` — there is no binary to
     invoke, so reachability is the equivalent signal.
     """
     base_url = base_url_from_env(env)
-    async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_S) as client:
-        body = await _get_json(client, f"{base_url}/api/version")
+    async with httpx.AsyncClient(
+        timeout=_PROBE_TIMEOUT_S, headers=auth_headers(api_key_from_env(env))
+    ) as client:
+        body, reason = await _get_json_with_reason(client, f"{base_url}/api/version")
     if body is None:
-        return None
+        return ProbeResult(version=None, error=reason)
     version = body.get("version")
-    return f"Ollama {version}" if isinstance(version, str) else "Ollama"
+    return ProbeResult(f"Ollama {version}" if isinstance(version, str) else "Ollama")
 
 
 def clear_model_cache() -> None:

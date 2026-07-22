@@ -37,6 +37,7 @@ from app.services.ai_runner.ollama_chat import OllamaChatError, chat
 from app.services.ai_runner.ollama_models import (
     OLLAMA_MODEL_ENV,
     OLLAMA_THINK_ENV,
+    api_key_from_env,
     base_url_from_env,
 )
 from app.services.claude_runner import (
@@ -72,6 +73,7 @@ class OllamaProvider:
         config = config or ClaudeRunnerConfig()
         env = config.env_extra or {}
         base_url = base_url_from_env(env)
+        api_key = api_key_from_env(env)
         think = env.get(OLLAMA_THINK_ENV) == "1"
         # The org's model, NOT the skill's. Skill frontmatter names Claude
         # tiers ("sonnet", "haiku") which mean nothing to a local server and
@@ -99,14 +101,17 @@ class OllamaProvider:
             base_url=base_url,
             model=model,
             think=think,
+            authenticated=api_key is not None,
             mcp_enabled=config.mcp is not None,
             max_turns=config.max_turns,
             prompt_preview=prompt[:100],
         )
         try:
             if config.mcp is None:
-                return await self._single_shot(base_url, model, prompt, think, config)
-            return await self._tool_loop(base_url, model, prompt, think, config, progress_callback)
+                return await self._single_shot(base_url, model, prompt, think, api_key, config)
+            return await self._tool_loop(
+                base_url, model, prompt, think, api_key, config, progress_callback
+            )
         except OllamaChatError as exc:
             logger.error("ollama_run_failed", error=str(exc))
             return ClaudeRunResult(success=False, output="", error=str(exc))
@@ -117,6 +122,7 @@ class OllamaProvider:
         model: str,
         prompt: str,
         think: bool,
+        api_key: str | None,
         config: ClaudeRunnerConfig,
     ) -> ClaudeRunResult:
         """One turn, no tools — the pure-LLM callers."""
@@ -126,6 +132,7 @@ class OllamaProvider:
             [{"role": "user", "content": prompt}],
             timeout_s=config.timeout_seconds,
             think=think,
+            api_key=api_key,
             # Several callers parse strict JSON and fall back to a default on
             # failure. Asking Ollama to constrain the output makes the good
             # path much more likely on a small model.
@@ -139,6 +146,7 @@ class OllamaProvider:
         model: str,
         prompt: str,
         think: bool,
+        api_key: str | None,
         config: ClaudeRunnerConfig,
         progress_callback: ProgressCallback | None,
     ) -> ClaudeRunResult:
@@ -191,6 +199,7 @@ class OllamaProvider:
                     messages,
                     timeout_s=config.timeout_seconds,
                     think=think,
+                    api_key=api_key,
                     tools=tools,
                 )
                 calls = message.get("tool_calls") or []

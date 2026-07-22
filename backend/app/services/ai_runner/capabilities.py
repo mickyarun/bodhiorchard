@@ -35,6 +35,7 @@ from app.services.ai_runner.capability_types import (
     ProviderCapabilities,
 )
 from app.services.ai_runner.ollama_models import (
+    OLLAMA_API_KEY_ENV,
     OLLAMA_DEFAULT_BASE_URL,
     OLLAMA_HOST_ENV,
     ollama_probe,
@@ -62,9 +63,12 @@ _HOST_COPILOT = AuthModeSpec("host", "Host gh / Copilot login", False, ("GH_TOKE
 _TOKEN_COPILOT = AuthModeSpec("api_key", "GitHub token", True, ("COPILOT_GITHUB_TOKEN",))
 _HOST_CODEX = AuthModeSpec("host", "Host Codex login", False, ())
 _API_KEY_CODEX = AuthModeSpec("api_key", "OpenAI API key", True, ("OPENAI_API_KEY",))
-# Ollama has no credential at all — "host" here means "no auth", not "inherit a
+# Ollama itself has no auth — "host" here means "no credential", not "inherit a
 # login". The env var names the base URL so the auth dispatcher preserves it.
-_HOST_OLLAMA = AuthModeSpec("host", "Local Ollama (no auth)", False, (OLLAMA_HOST_ENV,))
+# A hosted endpoint is normally reached through a gateway that does want one,
+# so the second mode carries a bearer token.
+_HOST_OLLAMA = AuthModeSpec("host", "No authentication", False, (OLLAMA_HOST_ENV,))
+_TOKEN_OLLAMA = AuthModeSpec("api_key", "Bearer token", True, (OLLAMA_API_KEY_ENV,))
 
 
 CAPABILITIES: dict[AIProvider, ProviderCapabilities] = {
@@ -161,9 +165,10 @@ CAPABILITIES: dict[AIProvider, ProviderCapabilities] = {
         # several rounds of write_synthesis_feature calls, while still bounding
         # a model that would otherwise loop forever.
         max_turns_cap=25,
-        auth_modes=(_HOST_OLLAMA,),
+        auth_modes=(_HOST_OLLAMA, _TOKEN_OLLAMA),
         install_hint=(
-            "Install Ollama (https://ollama.com), then `ollama pull qwen3`. "
+            "Point this at a local Ollama (https://ollama.com, then "
+            "`ollama pull qwen3`) or at a shared/hosted Ollama endpoint. "
             "Only models with the `tools` capability can run agents."
         ),
         docs_url="https://docs.ollama.com",

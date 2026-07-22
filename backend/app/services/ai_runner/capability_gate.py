@@ -32,9 +32,11 @@ from pathlib import Path
 
 import structlog
 
+from app.core.encryption import decrypt_secret
 from app.models.organization import Organization
 from app.services.ai_runner.capability_types import ProviderCapabilities
 from app.services.ai_runner.ollama_models import (
+    OLLAMA_API_KEY_ENV,
     OLLAMA_HOST_ENV,
     OLLAMA_MODEL_ENV,
     OLLAMA_THINK_ENV,
@@ -79,12 +81,29 @@ def unsupported_reason(
     return None
 
 
+def org_api_key(caps: ProviderCapabilities, org: Organization | None) -> str | None:
+    """The org's decrypted bearer token, or None when its mode uses none.
+
+    The credential column is shared across providers, so the org's *current*
+    auth mode decides whether there is a token at all: an org that switched
+    from a credentialed provider still holds an encrypted value, and sending
+    that to an unrelated endpoint would leak one provider's secret to another.
+    """
+    if org is None or not org.claude_api_key_encrypted:
+        return None
+    spec = next((m for m in caps.auth_modes if m.value == org.claude_auth_mode), None)
+    if spec is None or not spec.requires_secret:
+        return None
+    return decrypt_secret(org.claude_api_key_encrypted) or None
+
+
 def provider_env(
     caps: ProviderCapabilities,
     *,
     base_url: str | None,
     model: str | None,
     thinking: bool,
+    api_key: str | None = None,
 ) -> dict[str, str]:
     """The per-run settings ``caps``' provider needs, as an env mapping.
 
@@ -115,6 +134,11 @@ def provider_env(
             logger.warning("provider_env_rejected_base_url", provider=caps.provider.value)
             safe = None
         env[OLLAMA_HOST_ENV] = safe or default
+        # Carried per-run rather than through os.environ for the same reason as
+        # the address: one process serves every org, and a shared endpoint may
+        # issue each of them a different token.
+        if (api_key or "").strip():
+            env[OLLAMA_API_KEY_ENV] = (api_key or "").strip()
     if caps.supports_thinking:
         env[OLLAMA_THINK_ENV] = "1" if thinking else "0"
     if caps.dynamic_models and (model or "").strip():
@@ -166,6 +190,7 @@ def adapt_config(
             base_url=org.ai_base_url if org else None,
             model=org.ai_model if org else None,
             thinking=bool(org.ai_thinking) if org else False,
+            api_key=org_api_key(caps, org),
         )
         if provider_settings:
             changes["env_extra"] = {**(config.env_extra or {}), **provider_settings}

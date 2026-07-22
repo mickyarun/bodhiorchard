@@ -111,7 +111,7 @@
             density="comfortable"
             autocomplete="off"
             prepend-inner-icon="mdi-server-network-outline"
-            :hint="`Leave blank for ${currentCaps.default_base_url}`"
+            :hint="`Leave blank for ${currentCaps.default_base_url}. A shared or hosted server works too — include its path prefix if it has one.`"
             persistent-hint
             class="mb-4"
           />
@@ -498,7 +498,8 @@ const connectSteps = computed<string[]>(() => {
 })
 
 function recommendedMode(caps: ProviderCaps): ClaudeAuthMode {
-  if (deploymentMode.value === 'docker') {
+  // See authOptions: Docker only rules out a *host CLI* login.
+  if (deploymentMode.value === 'docker' && caps.cli !== null) {
     const cred = caps.auth_modes.find((m) => m.requires_secret)
     return (cred?.value ?? 'api_key') as ClaudeAuthMode
   }
@@ -553,9 +554,13 @@ interface AuthOption {
   badge?: string
 }
 
-function modeDescription(mode: AuthModeSpec): string {
+function modeDescription(mode: AuthModeSpec, caps: ProviderCaps): string {
   if (!mode.requires_secret) {
-    return "Uses the host machine's CLI login / process env. Nothing is stored."
+    // A CLI provider inherits a login the host already has; an HTTP provider
+    // just sends nothing. Same flag, different thing to tell the reader.
+    return caps.cli === null
+      ? 'Sends no credential — for a server that does not require one.'
+      : "Uses the host machine's CLI login / process env. Nothing is stored."
   }
   if (mode.value === 'subscription') {
     return 'Paste an OAuth token from `claude setup-token`. Uses your Claude plan.'
@@ -568,12 +573,16 @@ const authOptions = computed<ReadonlyArray<AuthOption>>(() => {
   if (!caps) return []
   const recommended = recommendedMode(caps)
   return caps.auth_modes
-    .filter((m) => !(deploymentMode.value === 'docker' && m.value === 'host'))
+    // Hide host mode in Docker only for a CLI provider, whose host login a
+    // container cannot reach. For an HTTP provider "host" means "no
+    // credential", and hiding it would force a token onto a server that has
+    // none — or, for a provider offering nothing else, leave no tile at all.
+    .filter((m) => !(deploymentMode.value === 'docker' && m.value === 'host' && caps.cli !== null))
     .map((m) => ({
       value: m.value as ClaudeAuthMode,
       title: m.label,
       icon: MODE_ICONS[m.value] ?? 'mdi-key',
-      description: modeDescription(m),
+      description: modeDescription(m, caps),
       badge: m.value === recommended ? 'Recommended' : undefined,
     }))
 })

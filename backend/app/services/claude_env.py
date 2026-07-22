@@ -60,7 +60,7 @@ _OAUTH_ENV_VAR = "CLAUDE_CODE_OAUTH_TOKEN"
 # can't shadow the active one. GH_TOKEN is deliberately EXCLUDED — it's the
 # host's git/gh credential, never app-managed, so we must not clear it.
 _MANAGED_CRED_VARS = frozenset(
-    {_API_KEY_ENV_VAR, _OAUTH_ENV_VAR, "COPILOT_GITHUB_TOKEN", "OPENAI_API_KEY"}
+    {_API_KEY_ENV_VAR, _OAUTH_ENV_VAR, "COPILOT_GITHUB_TOKEN", "OPENAI_API_KEY", "OLLAMA_API_KEY"}
 )
 
 

@@ -2,7 +2,7 @@
 
 Bodhiorchard is **AI-engine-agnostic**. An organisation picks its provider in **Settings → AI Config** (or during setup), and every agent run routes through it. Today: Claude Code, GitHub Copilot, OpenAI Codex, and Ollama.
 
-The first three drive a CLI. Ollama does not — it talks HTTP to a server on your own machine, for deployments where those CLIs cannot be installed. That difference is not cosmetic: **a provider without a CLI has no file access**, so it cannot run every feature. See [Ollama](#today--ollama-fully-local-no-cli) below before choosing it.
+The first three drive a CLI. Ollama does not — it talks HTTP to an Ollama server, on your own machine or a shared one, for deployments where those CLIs cannot be installed. That difference is not cosmetic: **a provider without a CLI has no file access**, so it cannot run every feature. See [Ollama](#today--ollama-fully-local-no-cli) below before choosing it.
 
 ## Today — Claude Code (codebase-aware agents)
 
@@ -22,7 +22,7 @@ Each provider declares the modes it supports, so the Settings page can only offe
 |---|---|---|
 | `api_key` | Full Docker deployments, or any host without a Claude subscription. Also used by Copilot (a GitHub token) and Codex (an OpenAI key) | Encrypted in Postgres (Fernet AES-128) and pushed into the backend's process env on save |
 | `subscription` | A Claude Pro / Max plan, via an OAuth token from `claude setup-token` | Encrypted in Postgres, same as `api_key` |
-| `host` | Hybrid deployments where the developer already runs `claude` interactively. For Ollama it means *no auth at all* — there is no credential to store | The host's existing login session — nothing stored in the database |
+| `host` | Hybrid deployments where the developer already runs `claude` interactively. For Ollama it means *no authentication* — nothing is sent | The host's existing login session — nothing stored in the database |
 
 The backend auto-detects the deployment (via `/.dockerenv`) and the Settings page only surfaces options that work there — except where a provider has nothing else to offer, since a provider needing no credential still has to be selectable in Docker.
 
@@ -30,11 +30,20 @@ The backend auto-detects the deployment (via `/.dockerenv`) and the Settings pag
 
 Triage, Bug-Linker, and Standup don't need to read files — they reason over chat messages, bug reports, and aggregated activity. For those, Bodhiorchard skips Claude Code and calls the Anthropic API directly. Lower latency, lower per-call cost, same `sk-ant-…` key (configured at **Settings → AI Configuration → Anthropic API**).
 
-## Today — Ollama (fully local, no CLI)
+## Today — Ollama (no CLI)
 
-For machines where an agent CLI cannot be installed, or where code must not leave the network. Ollama runs locally over HTTP; Bodhiorchard calls it directly and executes MCP tools in-process, so there is no CLI, no subprocess, and no credential.
+For machines where an agent CLI cannot be installed, or where code must not leave the network. Bodhiorchard speaks Ollama's HTTP API directly and executes MCP tools in-process, so there is no CLI and no subprocess.
 
-**Setup:** install [Ollama](https://ollama.com), then `ollama pull qwen3`. Choose *Ollama (local)* in **Settings → AI Config**, set the server address if it isn't on this machine, and pick a model.
+**Setup:** install [Ollama](https://ollama.com), then `ollama pull qwen3`. Choose *Ollama* in **Settings → AI Config**, set the server address if it isn't on this machine, and pick a model.
+
+### Local or hosted
+
+The server address accepts any `http`/`https` URL, so one shared or hosted Ollama can serve the whole organisation instead of every machine running its own model.
+
+- **Path prefix** — if the endpoint serves Ollama under a prefix (`https://gw.example.com/ollama`), include it. Bodhiorchard appends Ollama's own paths (`/api/chat`, `/api/tags`) to whatever you save.
+- **Authentication** — a local server needs none; pick *No authentication*. For a hosted endpoint behind a gateway, pick *Bearer token* and paste the credential. It is stored encrypted and sent as `Authorization: Bearer …`.
+- **It must speak Ollama's own API.** An OpenAI-compatible endpoint (`/v1/chat/completions`) is a different protocol and will not work — a 404 on `/api/chat` is the symptom.
+- Link-local addresses (the `169.254.0.0/16` cloud-metadata range) are refused.
 
 Before deploying to a restricted machine, run the readiness check on it — it verifies the two things this integration depends on, and reports the latency you should expect:
 
@@ -57,11 +66,11 @@ Everything that reasons over text rather than files works: Slack triage and PRD 
 
 ### Speed
 
-Local inference is far slower than a hosted API, and slower still without a GPU. Latency tracks how much the model *writes*: a tool call emits a handful of tokens and stays fast, while a long prose answer dominates. **Reasoning** ("thinking") roughly doubles response time — it is off by default and switchable in Settings.
+Self-hosted inference is far slower than a frontier hosted API, and slower still without a GPU. Latency tracks how much the model *writes*: a tool call emits a handful of tokens and stays fast, while a long prose answer dominates. **Reasoning** ("thinking") roughly doubles response time — it is off by default and switchable in Settings.
 
 ### Docker
 
-In Full Docker, `localhost` is the container, not your machine. Point the server address at `http://host.docker.internal:11434` to reach an Ollama running on the host; the backend service already declares the `extra_hosts` entry that makes this resolve on Linux.
+In Full Docker, `localhost` is the container, not your machine. Point the server address at `http://host.docker.internal:11434` to reach an Ollama running on the host; the backend service already declares the `extra_hosts` entry that makes this resolve on Linux. A hosted endpoint needs none of this — the container reaches it like any other URL.
 
 ## Coming soon
 

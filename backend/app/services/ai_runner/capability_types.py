@@ -51,6 +51,22 @@ class AuthModeSpec:
 
 
 @dataclass(frozen=True)
+class ProbeResult:
+    """What a ``preflight`` probe learned about an HTTP provider's server.
+
+    Carries ``error`` alongside ``version`` because "did not answer" and
+    "answered, and refused your credential" need different advice, and a bare
+    ``str | None`` cannot tell them apart. Without this the connection test
+    falls back to the provider's install hint, which for a hosted endpoint with
+    a stale token reads "install Ollama" — pointing at the wrong setting
+    entirely.
+    """
+
+    version: str | None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
 class ProviderCapabilities:
     """Everything the UI and backend need to drive one provider.
 
@@ -88,4 +104,4 @@ class ProviderCapabilities:
     timeout_multiplier: float = 1.0
     max_turns_cap: int | None = None
     # Liveness probe for providers with no CLI to version-check.
-    preflight: Callable[[Mapping[str, str] | None], Awaitable[str | None]] | None = None
+    preflight: Callable[[Mapping[str, str] | None], Awaitable[ProbeResult]] | None = None

@@ -122,7 +122,9 @@
         class="mb-1"
       />
       <div class="text-caption text-medium-emphasis">
-        Leave blank for <code>{{ currentCaps.default_base_url }}</code>.
+        Leave blank for <code>{{ currentCaps.default_base_url }}</code>. A shared or hosted
+        server works too — include the path prefix if it serves Ollama under one, and pick
+        the token auth mode below if it needs a credential.
         <template v-if="deploymentMode === 'docker'">
           Running in Docker, so <code>localhost</code> is the container — use
           <code>http://host.docker.internal:11434</code> to reach a server on this machine.
@@ -329,9 +331,15 @@ const modelOptions = computed(() => currentCaps.value?.models ?? [])
 /** What the selected provider cannot do — empty for the CLI providers. */
 const limitations = computed(() => providerLimitations(currentCaps.value))
 
-function modeDescription(mode: AuthModeSpec): string {
+function modeDescription(mode: AuthModeSpec, caps: ProviderCaps): string {
   if (!mode.requires_secret) {
-    return 'Inherits the host login / process environment. Nothing is stored in the database.'
+    // Two different meanings share the "no secret" shape: a CLI provider
+    // inherits a login that already exists on the host, while an HTTP provider
+    // simply sends no credential. Describing the second as the first sends the
+    // reader looking for a login they never made.
+    return caps.cli === null
+      ? 'Sends no credential — for a server that does not require one.'
+      : 'Inherits the host login / process environment. Nothing is stored in the database.'
   }
   if (mode.value === 'subscription') {
     return 'Paste an OAuth token from `claude setup-token`. Uses your Claude plan, stored encrypted.'
@@ -342,30 +350,31 @@ function modeDescription(mode: AuthModeSpec): string {
 const authOptions = computed(() => {
   const caps = currentCaps.value
   if (!caps) return []
-  // Full Docker can't reach a host login session — hide the host tile there,
-  // but only when the provider offers something else. For a provider with no
-  // credential at all, "host" means "no auth" rather than "the host's login",
-  // and hiding it would leave no tiles to pick and nothing to save.
+  // Full Docker can't reach a host login session, so hide the host tile there —
+  // but only for a provider that HAS a host login to inherit, which is exactly
+  // the providers driven by a CLI. For an HTTP provider (cli === null) "host"
+  // means "no authentication", which works fine from inside a container.
+  // Testing "does it offer another mode?" instead would break the moment such a
+  // provider gained a second mode: the only tile that works in Docker would be
+  // the one hidden there.
   const modes = caps.auth_modes.filter(
-    (m) =>
-      !(
-        deploymentMode.value === 'docker' &&
-        m.value === 'host' &&
-        caps.auth_modes.length > 1
-      ),
+    (m) => !(deploymentMode.value === 'docker' && m.value === 'host' && caps.cli !== null),
   )
   const recommended = recommendedMode(caps)
   return modes.map((m) => ({
     value: m.value,
     title: m.label,
     icon: MODE_META[m.value]?.icon ?? 'mdi-key',
-    description: modeDescription(m),
+    description: modeDescription(m, caps),
     badge: m.value === recommended ? 'Recommended' : undefined,
   }))
 })
 
 function recommendedMode(caps: ProviderCaps): string {
-  if (deploymentMode.value === 'docker') {
+  // Docker steers to a credential only because a container cannot reach a host
+  // CLI login. An HTTP provider has no such login, so its no-auth mode is as
+  // valid in a container as anywhere else.
+  if (deploymentMode.value === 'docker' && caps.cli !== null) {
     const cred = caps.auth_modes.find((m) => m.requires_secret)
     return cred?.value ?? caps.auth_modes[0]?.value ?? 'api_key'
   }

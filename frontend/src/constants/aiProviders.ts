@@ -32,7 +32,7 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
   claude: { title: 'Claude', icon: 'mdi-robot-happy-outline' },
   copilot: { title: 'GitHub Copilot', icon: 'mdi-github' },
   codex: { title: 'OpenAI Codex', icon: 'mdi-alpha-c-box-outline' },
-  ollama: { title: 'Ollama (local)', icon: 'mdi-server-network-outline' },
+  ollama: { title: 'Ollama', icon: 'mdi-server-network-outline' },
 }
 
 /** An auth mode as the capabilities endpoint describes it. */

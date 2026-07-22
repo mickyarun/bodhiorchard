@@ -25,6 +25,8 @@ from typing import Any
 import httpx
 import structlog
 
+from app.services.ai_runner.ollama_models import auth_headers
+
 logger = structlog.get_logger(__name__)
 
 # Keeps the model resident between the turns of a tool loop. Without it a cold
@@ -45,12 +47,16 @@ async def chat(
     think: bool = False,
     tools: list[dict[str, Any]] | None = None,
     json_format: bool = False,
+    api_key: str | None = None,
 ) -> dict[str, Any]:
     """POST one /api/chat turn and return the assistant message.
 
     ``think`` is the org's setting, not a constant: reasoning roughly doubles
     latency, which matters most on the CPU-only hosts this targets, but it can
     help the harder structured tasks — so the choice belongs to the operator.
+
+    ``api_key`` is empty for a local server, which has no auth, and set for a
+    hosted endpoint behind a gateway.
 
     Raises ``OllamaChatError`` on any failure; the caller decides whether that
     fails the run. Never returns a partial or invented message.
@@ -68,7 +74,7 @@ async def chat(
         payload["format"] = "json"
 
     try:
-        async with httpx.AsyncClient(timeout=timeout_s) as client:
+        async with httpx.AsyncClient(timeout=timeout_s, headers=auth_headers(api_key)) as client:
             resp = await client.post(f"{base_url.rstrip('/')}/api/chat", json=payload)
             resp.raise_for_status()
             body = resp.json()
@@ -78,6 +84,19 @@ async def chat(
         detail = f"HTTP {exc.response.status_code}"
         if tools and exc.response.status_code == 400:
             detail += f" — {model} may not support tool calling"
+        elif exc.response.status_code in (401, 403):
+            # A hosted endpoint refusing the credential looks identical to a
+            # missing model unless we name it: both arrive as a failed run.
+            detail += (
+                " — the server rejected the credential. Check the token in "
+                "Settings -> AI Config, or switch to no-auth for a local server."
+            )
+        elif exc.response.status_code == 404:
+            detail += (
+                f" — {base_url}/api/chat was not found. A hosted endpoint may "
+                "need its path prefix in the server address, and must speak "
+                "Ollama's own API rather than an OpenAI-compatible one."
+            )
         raise OllamaChatError(f"Ollama rejected the request: {detail}") from exc
     except (httpx.HTTPError, OSError) as exc:
         raise OllamaChatError(f"Cannot reach Ollama at {base_url}: {exc}") from exc
