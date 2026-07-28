@@ -54,7 +54,11 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
 
       - name: Install ruff
-        run: pip install ruff
+        # Pinned. An unpinned install silently tracks new ruff releases, and a
+        # release that changes formatting (0.16 began formatting code fenced in
+        # markdown) turns every open PR red for a change nobody made. Bump this
+        # deliberately, alongside the matching pin in backend/pyproject.toml.
+        run: pip install ruff==0.16.0
 
       - name: ruff check
         run: ruff check app/

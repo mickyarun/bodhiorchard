@@ -42,9 +42,7 @@ MCP context — can adapt to the idioms of that toolchain.
 
        @property
        def design_globs(self) -> tuple[str, ...]:
-           return DEFAULT_COMMON_GLOBS + (
-               "src/theme/**/*.ts",
-           )
+           return DEFAULT_COMMON_GLOBS + ("src/theme/**/*.ts",)
 
        @property
        def skip_dirs(self) -> tuple[str, ...]:
