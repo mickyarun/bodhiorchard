@@ -27,8 +27,10 @@ Callers own presentation types; this returns plain strings.
 """
 
 import asyncio
+import ssl
 import time
 from collections.abc import Mapping
+from functools import lru_cache
 
 import httpx
 import structlog
@@ -49,6 +51,7 @@ __all__ = [
     "clear_model_cache",
     "list_tool_models",
     "ollama_probe",
+    "verify_context",
 ]
 
 logger = structlog.get_logger(__name__)
@@ -83,6 +86,30 @@ _TOOLS_CAPABILITY = "tools"
 # different models, and a cache keyed on the address alone would serve the
 # first org's answer to the second.
 _model_cache: dict[tuple[str, str], tuple[float, list[str]]] = {}
+
+
+@lru_cache(maxsize=1)
+def verify_context() -> ssl.SSLContext:
+    """TLS trust for Ollama requests, backed by the operating system's store.
+
+    ``httpx`` verifies against ``certifi`` — a fixed list of *public* CAs. A
+    hosted Ollama is commonly reached through an internal gateway whose
+    certificate is signed by a company CA: present in the machine's own trust
+    store (IT pushes it there), absent from certifi. So httpx rejects it as a
+    "self-signed certificate in certificate chain" while every browser and CLI
+    on the same box accepts it — which is exactly the report from the field,
+    and exactly why the stdlib readiness script (which uses this same context)
+    succeeded where the backend did not.
+
+    ``create_default_context`` loads the OS store, so a policy-installed CA is
+    trusted without configuration, and it still honours ``SSL_CERT_FILE`` for a
+    container that must be pointed at a specific CA bundle. Verification stays
+    on: this restores trust the machine already extends, it does not disable it.
+
+    Cached because parsing the whole store on every request would be wasteful;
+    a process restart re-reads it.
+    """
+    return ssl.create_default_context()
 
 
 def auth_headers(api_key: str | None) -> dict[str, str]:
@@ -154,6 +181,16 @@ async def _get_json_with_reason(
         return None, f"The server answered HTTP {code}."
     except (httpx.HTTPError, OSError, ValueError) as exc:
         logger.info("ollama_request_failed", url=url, error=str(exc))
+        # A TLS trust failure is otherwise invisible: the list comes back empty
+        # and the settings page says "install a model", pointing at the wrong
+        # thing entirely. Name it, because the fix is to trust the CA where the
+        # backend runs, not to touch the server.
+        if "certificate" in str(exc).lower():
+            return None, (
+                "The server's TLS certificate is not trusted where the backend "
+                "runs. If it uses an internal or self-signed certificate, install "
+                "that CA on the host (or set SSL_CERT_FILE to its bundle in Docker)."
+            )
         return None, None
     return (body if isinstance(body, dict) else None), None
 
@@ -216,7 +253,7 @@ async def list_tool_models(base_url: str, api_key: str | None = None) -> list[st
         return list(cached[1])
 
     async with httpx.AsyncClient(
-        timeout=_PROBE_TIMEOUT_S, headers=auth_headers(api_key)
+        timeout=_PROBE_TIMEOUT_S, headers=auth_headers(api_key), verify=verify_context()
     ) as client:
         tags = await _get_json(client, f"{base_url}/api/tags")
         if tags is None:
@@ -267,7 +304,9 @@ async def ollama_probe(env: Mapping[str, str] | None) -> ProbeResult:
     """
     base_url = base_url_from_env(env)
     async with httpx.AsyncClient(
-        timeout=_PROBE_TIMEOUT_S, headers=auth_headers(api_key_from_env(env))
+        timeout=_PROBE_TIMEOUT_S,
+        headers=auth_headers(api_key_from_env(env)),
+        verify=verify_context(),
     ) as client:
         body, reason = await _get_json_with_reason(client, f"{base_url}/api/version")
     if body is None:

@@ -25,7 +25,7 @@ from typing import Any
 import httpx
 import structlog
 
-from app.services.ai_runner.ollama_models import auth_headers
+from app.services.ai_runner.ollama_models import auth_headers, verify_context
 
 logger = structlog.get_logger(__name__)
 
@@ -74,7 +74,9 @@ async def chat(
         payload["format"] = "json"
 
     try:
-        async with httpx.AsyncClient(timeout=timeout_s, headers=auth_headers(api_key)) as client:
+        async with httpx.AsyncClient(
+            timeout=timeout_s, headers=auth_headers(api_key), verify=verify_context()
+        ) as client:
             resp = await client.post(f"{base_url.rstrip('/')}/api/chat", json=payload)
             resp.raise_for_status()
             body = resp.json()
