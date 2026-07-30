@@ -57,8 +57,13 @@
 
 ## Common Commands
 ```bash
-# Run dev server
-uvicorn app.main:app --reload
+# Run dev server (picks --reload per platform; see dev_server.py)
+python dev_server.py
+
+# Direct uvicorn works too, but NOT with --reload on native Windows: it forces
+# a SelectorEventLoop that cannot spawn subprocesses, so git, scans and agent
+# runs all fail with NotImplementedError.
+uvicorn app.main:app --reload   # macOS / Linux only
 
 # Run tests
 pytest

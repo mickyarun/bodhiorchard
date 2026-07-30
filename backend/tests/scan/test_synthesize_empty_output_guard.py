@@ -70,12 +70,18 @@ class _FakeSession:
 class _FakeOutcome:
     """Engine outcome matching the duck-typed shape used by ``stage.run``."""
 
-    def __init__(self, success: bool) -> None:
+    def __init__(self, success: bool, provider: str = "claude", output: str = "") -> None:
         self.success = success
         self.input_tokens: int | None = None
         self.output_tokens: int | None = None
         self.cost_usd: float = 0.0
         self.error: str | None = None
+        # Read by ``_empty_synthesis_error`` when the run wrote nothing, so the
+        # message can name who ran and quote what they said instead of asserting
+        # a cause it never checked.
+        self.provider = provider
+        self.model = ""
+        self.output = output
 
 
 class _FakeEngine:
@@ -142,6 +148,35 @@ def _patch_org_repo(monkeypatch: pytest.MonkeyPatch) -> None:
             return _FakeOrg()
 
     monkeypatch.setattr(stage, "OrganizationRepository", _FakeOrgRepo)
+
+
+def test_empty_synthesis_error_names_the_provider_that_ran() -> None:
+    """The old message hard-coded "Claude" and asserted an MCP-registration
+    failure it never verified. On a local-provider org both are wrong — a
+    different agent ran, and it registers no MCP server at all. The message must
+    name the actual provider and quote the agent instead of guessing."""
+    outcome = _FakeOutcome(
+        success=True,
+        provider="ollama",
+        output="I found three features: auth, billing, and search.",
+    )
+
+    msg = stage._empty_synthesis_error(outcome, community_count=4)
+
+    assert "ollama" in msg
+    assert "Claude" not in msg
+    assert "MCP registration" not in msg and "Tools API" not in msg
+    assert "auth, billing, and search" in msg  # the agent's own words are quoted
+    assert "0 features from 4 communities" in msg
+
+
+def test_empty_synthesis_error_handles_a_silent_agent() -> None:
+    """A run that wrote nothing AND said nothing must still read cleanly, not
+    trail off with an empty quote."""
+    msg = stage._empty_synthesis_error(_FakeOutcome(success=True, provider="", output=""), 2)
+
+    assert "the agent" in msg  # falls back when provider is unset
+    assert "no output to explain why" in msg
 
 
 async def test_raises_when_reconcile_persists_zero_for_nonempty_input(

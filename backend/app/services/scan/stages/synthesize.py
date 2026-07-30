@@ -82,6 +82,7 @@ from app.services.scan.synthesis.runner import (
     DEFAULT_TIMEOUT_SECONDS,
     AgentCliEngine,
     SynthesisEngine,
+    SynthesisOutcome,
     SynthesisRequest,
 )
 
@@ -285,12 +286,7 @@ async def run(
             if runtime is not None:
                 reset_for_org(str(runtime.org_id))
                 reset_tool_progress_for_org(str(runtime.org_id))
-            raise RuntimeError(
-                f"synthesis produced 0 features from {len(communities)} "
-                f"communities (Claude emitted no write_synthesis_feature "
-                f"calls — likely MCP registration rejected by the Tools "
-                f"API). Failing repo run so soft-deleted features roll back."
-            )
+            raise RuntimeError(_empty_synthesis_error(outcome, len(communities)))
 
     # Replace the placeholder kept_count with the live row count
     # actually persisted via the reconciler. Logged for ops too.
@@ -431,6 +427,33 @@ async def _count_synthesized_features(config: dict[str, Any]) -> int:
     except Exception:
         logger.exception("scan_synthesize_feature_count_failed")
         return 0
+
+
+def _empty_synthesis_error(outcome: SynthesisOutcome, community_count: int) -> str:
+    """Describe a run that finished cleanly having written no features.
+
+    Reports what was observed and hands over the agent's own words. The
+    previous message asserted a cause it had not checked — that Claude's MCP
+    registration was rejected by the Tools API — and named Claude regardless of
+    which provider ran. On an org using a local provider that is wrong twice
+    over: a different agent ran, and it registers no MCP server at all because
+    its tools are dispatched in-process. Someone reading it went looking for a
+    registration failure that could not have happened.
+
+    The agent's final message is the direct evidence, so it leads. A model that
+    described the features in prose rather than calling ``write_synthesis_feature``
+    says so plainly there, and no guess beats reading it.
+    """
+    who = outcome.provider or "the agent"
+    if outcome.model:
+        who = f"{who} ({outcome.model})"
+    said = outcome.output.strip()
+    tail = f' It answered: "{said}"' if said else " It returned no output to explain why."
+    return (
+        f"synthesis produced 0 features from {community_count} communities — "
+        f"{who} finished without calling write_synthesis_feature.{tail} "
+        f"Failing the repo run so soft-deleted features roll back."
+    )
 
 
 def _resolve_engine(config: dict[str, Any]) -> SynthesisEngine:

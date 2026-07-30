@@ -28,7 +28,7 @@ from sqlalchemy import select
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from app.api.router import api_router
-from app.core.event_loop import configure_event_loop_policy
+from app.core.event_loop import configure_event_loop_policy, warn_if_subprocess_unsupported
 from app.core.logging import setup_logging
 from app.core.middleware import RequestLoggingMiddleware
 from app.services.mcp_audit_cleanup import run_forever as run_audit_cleanup
@@ -58,6 +58,11 @@ logger = structlog.get_logger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler for startup and shutdown events."""
     logger.info("bodhiorchard_startup", version="0.1.0")
+
+    # Say it here, once, while the cause is still attributable: a loop that
+    # cannot spawn subprocesses fails every git call later, from inside a
+    # request, where it reads as a problem with whatever the user just typed.
+    warn_if_subprocess_unsupported()
 
     # 0. Static contract check: every MCP tool's schema ↔ handler must agree.
     # Catches the class of bug that once let `write_bud` silently clobber

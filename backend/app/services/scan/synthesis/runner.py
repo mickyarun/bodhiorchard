@@ -84,9 +84,9 @@ class SynthesisRequest:
 class SynthesisOutcome:
     """What the engine returns to the stage.
 
-    Feature counts come from the DB after the run, not from this object —
-    Claude writes features inline via ``write_synthesis_feature`` MCP
-    calls, so the stage queries the DB to count them once Claude is done.
+    Feature counts come from the DB after the run, not from this object — the
+    agent writes features inline via ``write_synthesis_feature`` calls, so the
+    stage queries the DB to count them once the run is done.
     """
 
     success: bool
@@ -96,6 +96,16 @@ class SynthesisOutcome:
     input_tokens: int | None = None
     output_tokens: int | None = None
     raw: dict[str, object] = field(default_factory=dict)
+    # Which agent produced this, for the stage's error reporting. A run that
+    # exits cleanly having written nothing is reported by the stage, and
+    # naming the wrong provider there sends the reader after the wrong cause.
+    provider: str = ""
+    model: str = ""
+    # The agent's own final message. Kept on success too, which is the case
+    # that needs it: a run that wrote no features exits 0 with its reasoning
+    # here, and that text is the only direct evidence of why. Truncated
+    # because it is bound for a log line and an error string.
+    output: str = ""
 
 
 class SynthesisEngine(Protocol):
@@ -171,4 +181,7 @@ class AgentCliEngine:
             cost_usd=getattr(result, "cost_usd", None),
             input_tokens=getattr(result, "input_tokens", None),
             output_tokens=getattr(result, "output_tokens", None),
+            provider=provider.value,
+            model=resolved_model or "(provider default)",
+            output=(result.output or "")[:600],
         )

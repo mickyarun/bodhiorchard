@@ -892,16 +892,29 @@ async function addPathToList(): Promise<void> {
     inputPath.value = ''
   } catch (err: unknown) {
     let detail = ''
+    let status = 0
     if (err && typeof err === 'object' && 'response' in err) {
-      const axiosErr = err as { response?: { data?: { detail?: string } } }
+      const axiosErr = err as { response?: { status?: number; data?: { detail?: string } } }
       detail = axiosErr.response?.data?.detail || ''
+      status = axiosErr.response?.status || 0
     }
-    // Backend says e.g. "Not a git repository: <path>"; append the actionable
-    // hint since the #1 cause is pointing at a downloaded ZIP (no .git).
-    localPathError.value =
-      (detail || `Couldn't add "${p}".`)
-      + ' Point to an absolute path to a git checkout (a folder containing .git).'
-      + ' A downloaded ZIP has no git history — use "git clone" instead.'
+    // Only blame the path when the backend actually rejected it. A 5xx carries
+    // no detail, and appending the git-checkout hint to it told one evaluator
+    // their checkout had no .git while `git status` in that very folder said
+    // otherwise — sending them after a phantom instead of the server error
+    // that really happened.
+    if (status >= 500 || (!detail && status === 0)) {
+      localPathError.value =
+        `Couldn't add "${p}" — the server errored while reading it.`
+        + ' Check the backend logs; the path itself may be fine.'
+    } else {
+      // Backend says e.g. "Not a git repository: <path>"; append the actionable
+      // hint since the #1 cause is pointing at a downloaded ZIP (no .git).
+      localPathError.value =
+        (detail || `Couldn't add "${p}".`)
+        + ' Point to an absolute path to a git checkout (a folder containing .git).'
+        + ' A downloaded ZIP has no git history — use "git clone" instead.'
+    }
   } finally {
     addingPath.value = false
   }

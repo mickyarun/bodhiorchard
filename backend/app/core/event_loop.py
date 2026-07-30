@@ -17,6 +17,10 @@
 import asyncio
 import sys
 
+import structlog
+
+logger = structlog.get_logger(__name__)
+
 
 def configure_event_loop_policy() -> None:
     """On Windows, force the Proactor event loop so asyncio can spawn subprocesses.
@@ -34,3 +38,51 @@ def configure_event_loop_policy() -> None:
     """
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+
+def loop_cannot_spawn_subprocesses() -> bool:
+    """Whether the running loop will refuse ``create_subprocess_exec``.
+
+    Only true on Windows, and only when something replaced the policy set above
+    after it was applied. uvicorn does exactly that: ``asyncio_setup`` installs
+    ``WindowsSelectorEventLoopPolicy`` whenever ``--reload`` or ``--workers``
+    is used, and it creates the loop before importing this app — so the policy
+    we set at import time is already too late to matter.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    # ``ProactorEventLoop`` is defined only on Windows — the attribute is absent
+    # on macOS/Linux, so name it through getattr rather than dotted access. In
+    # production the platform guard above means this line is only reached on
+    # Windows, where the class exists; the fallback matters only when a test
+    # simulates win32 on another OS, and an empty tuple makes ``isinstance``
+    # answer False there, which is the "not a Proactor loop" case we report.
+    proactor_cls = getattr(asyncio, "ProactorEventLoop", ())
+    return not isinstance(loop, proactor_cls)
+
+
+def warn_if_subprocess_unsupported() -> None:
+    """Log a loud, actionable error when git and agent runs are going to fail.
+
+    Every scan, clone and CLI agent run shells out. On a loop that cannot spawn
+    subprocesses each of those raises ``NotImplementedError`` from deep inside a
+    request, which surfaces as a 500 the UI then reports as a problem with the
+    user's input — a Windows evaluator was sent looking for a missing ``.git``
+    in a checkout that had one. Saying it once at boot, where the cause is
+    still visible, costs nothing and stops that hunt before it starts.
+    """
+    if not loop_cannot_spawn_subprocesses():
+        return
+    logger.error(
+        "event_loop_cannot_spawn_subprocesses",
+        remedy=(
+            "Run 'python backend\\dev_server.py' (or drop --reload). uvicorn's "
+            "--reload and --workers force a SelectorEventLoop on Windows, which "
+            "cannot spawn subprocesses — git, repository scans and agent runs "
+            "will all fail with NotImplementedError until this is changed."
+        ),
+    )
