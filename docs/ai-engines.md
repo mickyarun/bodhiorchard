@@ -43,6 +43,7 @@ The server address accepts any `http`/`https` URL, so one shared or hosted Ollam
 - **Path prefix** — if the endpoint serves Ollama under a prefix (`https://gw.example.com/ollama`), include it. Bodhiorchard appends Ollama's own paths (`/api/chat`, `/api/tags`) to whatever you save.
 - **Authentication** — a local server needs none; pick *No authentication*. For a hosted endpoint behind a gateway, pick *Bearer token* and paste the credential. It is stored encrypted and sent as `Authorization: Bearer …`.
 - **It must speak Ollama's own API.** An OpenAI-compatible endpoint (`/v1/chat/completions`) is a different protocol and will not work — a 404 on `/api/chat` is the symptom.
+- **Internal-CA / self-signed TLS.** Requests trust the machine's own certificate store, so a gateway whose certificate is signed by a company CA works once that CA is installed on the host (as IT usually does). In Full Docker the container has its own store — mount the CA bundle and set `SSL_CERT_FILE=/path/to/ca.pem` for the backend. A `self-signed certificate in certificate chain` error in the backend log means the CA isn't trusted where the backend runs.
 - Link-local addresses (the `169.254.0.0/16` cloud-metadata range) are refused.
 
 Before deploying to a restricted machine, run the readiness check on it — it verifies the two things this integration depends on, and reports the latency you should expect:

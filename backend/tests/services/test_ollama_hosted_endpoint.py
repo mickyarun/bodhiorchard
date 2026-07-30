@@ -222,3 +222,40 @@ def test_probe_and_list_share_the_header_builder() -> None:
     assert ollama_models.auth_headers(" tok ") == {"Authorization": "Bearer tok"}
     assert ollama_models.auth_headers("") == {}
     assert ollama_models.auth_headers(None) == {}
+
+
+async def test_a_tls_trust_failure_is_named_not_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The field failure: an internal-CA cert the backend didn't trust returned
+    an empty list and a "install a model" hint. The probe must say it was the
+    certificate, so the fix lands on the trust store, not the server."""
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(
+            "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
+            "self-signed certificate in certificate chain",
+            request=request,
+        )
+
+    _install(monkeypatch, refuse)
+
+    probe = await ollama_probe({OLLAMA_HOST_ENV: "https://gw.example.com"})
+
+    assert probe.version is None
+    assert probe.error is not None
+    assert "certificate is not trusted" in probe.error
+
+
+def test_tls_trust_comes_from_the_os_store_not_certifi() -> None:
+    """A hosted gateway commonly presents an internal-CA certificate: trusted by
+    the machine's own store, absent from certifi. httpx's certifi default
+    rejected it as self-signed while the OS (and the readiness script) accepted
+    it — the exact field failure. The context must load the OS default certs,
+    and stay a single cached instance so it isn't rebuilt per request."""
+    import ssl
+
+    ctx = ollama_models.verify_context()
+    assert isinstance(ctx, ssl.SSLContext)
+    assert ctx.verify_mode == ssl.CERT_REQUIRED  # trust is restored, not disabled
+    assert ollama_models.verify_context() is ctx  # cached, one instance
