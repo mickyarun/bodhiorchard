@@ -543,7 +543,18 @@ async function checkConnection(): Promise<void> {
   claudeVersion.value = ''
   showInstallHint.value = false
   try {
-    const { data } = await api.post('/v1/settings/claude/test', null, { timeout: 120_000 })
+    // Send the on-screen host settings so the test checks the same address the
+    // model dropdown just probed, not the last-saved one — otherwise a host
+    // typed but not yet saved tests against the default (localhost) and reports
+    // a working server as broken. Non-host providers ignore these fields.
+    const body = currentCaps.value?.requires_base_url
+      ? {
+          base_url: baseUrl.value.trim() || undefined,
+          model: model.value || undefined,
+          thinking: thinking.value,
+        }
+      : null
+    const { data } = await api.post('/v1/settings/claude/test', body, { timeout: 120_000 })
     applyTestResult(data)
   } catch (err) {
     claudeStatus.value = 'failed'
