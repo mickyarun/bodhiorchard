@@ -253,14 +253,46 @@ async def update_claude_settings(
     return _read_model(org)
 
 
+class ClaudeConnectionTest(BaseModel):
+    """On-screen host settings to test, so "Test connection" checks what the
+    user is looking at rather than only what was last saved.
+
+    All optional: an omitted field falls back to the stored value, and an empty
+    body reproduces the original "test what's saved" behaviour. Carries no
+    credential — the token comes from storage, so a test can't be used to send a
+    secret to a just-typed address.
+    """
+
+    base_url: str | None = Field(None, description="Server address, for HTTP-based providers.")
+    model: str | None = None
+    thinking: bool | None = None
+
+
 @router.post("/claude/test")
 async def test_claude_settings(
+    body: ClaudeConnectionTest | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Run the org's provider version check + a trivial prompt against its auth."""
+    """Run the org's provider version check + a trivial prompt against its auth.
+
+    Tests the on-screen host settings when the client sends them, so the Test
+    button checks the same address the model dropdown just probed instead of the
+    last-saved one — a host entered but not yet saved was otherwise tested
+    against localhost and reported broken.
+    """
     # Ensure the most recent stored credential (if any) is in process env
     # first, in case the backend was restarted since the last PATCH.
     org = await OrganizationRepository(db).get_for_user(current_user)
     apply_claude_auth_to_env(org)
-    return await check_provider_connection(org)
+    if body is None:
+        return await check_provider_connection(org)
+    # Validate the address here so a bad one is a clear 400, not a silent probe
+    # of the default. _clean_base_url returns None for an empty string, which the
+    # connection check reads as "use the stored value".
+    return await check_provider_connection(
+        org,
+        base_url=_clean_base_url(body.base_url) if body.base_url is not None else None,
+        model=body.model,
+        thinking=body.thinking,
+    )
