@@ -29,6 +29,7 @@ from app.models.organization import Organization
 from app.models.user import OrgToUser, User, UserRole
 from app.repositories.developer_xp import DeveloperXPRepository, RewardEventRepository
 from app.repositories.organization import OrganizationRepository
+from app.repositories.pull_request import PullRequestRepository
 from app.repositories.role import RoleRepository
 from app.repositories.skill_profile import SkillProfileRepository
 from app.repositories.user import UserRepository
@@ -609,12 +610,29 @@ async def merge_members(
     event_repo = RewardEventRepository(db, org_id=org.id)
     repointed_events = await event_repo.repoint_user(source.id, target.id)
 
+    # 1c. Re-point the source's pull requests. PR ingestion binds
+    # author_user_id to whichever row owns the GitHub login — normally the
+    # provisioned stub — so without this the surviving member shows zero
+    # PRs while the deactivated row holds the entire history.
+    pr_repo = PullRequestRepository(db, org_id=org.id)
+    repointed_prs = await pr_repo.repoint_author(source.id, target.id)
+
     # 2. Rebind every email source owned (primary + aliases) onto target.
     # Force-overwrite any prior conflicting row so a stale alias from an
     # earlier bad merge cannot strand attribution on a deactivated user.
     source_aliases = await user_repo.list_aliases(source.id)
     emails_to_rebind = {source.email} | {a.email for a in source_aliases}
     await user_repo.rebind_aliases_to_target(org.id, target.id, emails_to_rebind)
+
+    # 2b. Move the GitHub login onto the target and clear it from the
+    # source. The stub is usually the only row carrying it, so leaving it
+    # behind would keep routing every future PR back to a deactivated
+    # member — the merge would silently undo itself on the next webhook.
+    claimed_login = source.github_username
+    if claimed_login and not target.github_username:
+        target.github_username = claimed_login
+    if claimed_login:
+        source.github_username = None
 
     # 3. Deactivate source + revoke its MCP tokens. Token revocation must
     # happen here (not via the FK CASCADE) because is_active=False is a
@@ -632,6 +650,8 @@ async def merge_members(
         xp_merged=moved["xp"],
         sp_merged=moved["sp"],
         reward_events_repointed=repointed_events,
+        pull_requests_repointed=repointed_prs,
+        github_login_claimed=claimed_login,
         emails_rebound=len(emails_to_rebind),
         mcp_tokens_revoked=revoked_tokens,
         had_tokens_to_revoke=bool(revoked_tokens),

@@ -30,7 +30,6 @@ from app.models.pull_request import PRReviewStatus, PRState, PullRequest
 from app.models.tracked_repository import SetupPrState, TrackedRepository
 from app.repositories.bud import BUDRepository
 from app.repositories.pull_request import PullRequestRepository
-from app.repositories.user import UserRepository
 from app.schemas.github import (
     GitHubComment,
     GitHubPullRequest,
@@ -38,6 +37,7 @@ from app.schemas.github import (
     GitHubReviewThread,
 )
 from app.services.bud_timeline import record_event
+from app.services.identity_resolution import resolve_canonical_user
 from app.services.org_settings import is_uat_enabled
 from app.services.pr_auto_transition import (
     check_all_prs_merged,
@@ -928,5 +928,22 @@ async def _resolve_github_user(
     org_id: uuid.UUID,
     github_login: str,
 ) -> uuid.UUID | None:
-    """Resolve a GitHub login to a user_id within the org."""
-    return await UserRepository(db).get_id_by_github_login(org_id, github_login)
+    """Resolve a GitHub login to a user_id within the org.
+
+    Looking the login up in ``users.github_username`` alone strands PRs on
+    the provisioned stub: the stub owns the login, while the real member —
+    invited by work email — usually has ``github_username`` unset. Once an
+    admin merges the two, the stub's ``{login}@users.noreply.github.com``
+    address survives as a :class:`UserEmailAlias` on the target, so the
+    email arm of :func:`resolve_canonical_user` follows the merge and
+    lands on the surviving member.
+    """
+    login = (github_login or "").strip()
+    if not login:
+        return None
+    return await resolve_canonical_user(
+        db,
+        org_id,
+        github_login=login,
+        email=f"{login}@users.noreply.github.com",
+    )

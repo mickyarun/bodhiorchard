@@ -310,13 +310,27 @@ class UserRepository(BaseRepository[User]):
     async def get_id_by_github_login(
         self, org_id: uuid.UUID, github_login: str
     ) -> uuid.UUID | None:
-        """Resolve a GitHub login to a user_id within an org. None if no match."""
+        """Resolve a GitHub login to a user_id within an org. None if no match.
+
+        GitHub logins are case-insensitive, so the comparison is folded to
+        lower case on both sides.
+
+        A merged-away stub keeps its ``github_username`` until the merge
+        clears it, and duplicate imports can leave two rows carrying the
+        same login. Active members are therefore ordered first so a stale
+        or deactivated row never wins the lookup, making the result
+        deterministic instead of dependent on physical row order.
+        """
         if not github_login:
             return None
         stmt = (
             select(User.id)
             .join(OrgToUser, OrgToUser.user_id == User.id)
-            .where(User.github_username == github_login, OrgToUser.org_id == org_id)
+            .where(
+                func.lower(User.github_username) == github_login.strip().lower(),
+                OrgToUser.org_id == org_id,
+            )
+            .order_by(User.is_active.desc(), User.created_at.asc())
             .limit(1)
         )
         result = await self._db.execute(stmt)

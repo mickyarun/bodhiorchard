@@ -18,11 +18,12 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pull_request import PRState, PullRequest
 from app.models.tracked_repository import TrackedRepository
-from app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository, rowcount
 
 
 class PullRequestRepository(BaseRepository[PullRequest]):
@@ -46,6 +47,27 @@ class PullRequestRepository(BaseRepository[PullRequest]):
         )
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def repoint_author(self, source_user_id: uuid.UUID, target_user_id: uuid.UUID) -> int:
+        """Re-attribute every PR authored by the source user to the target.
+
+        Called from member-merge. Without this the merged-away stub keeps
+        every PR it ingested, so contributor breakdowns, per-person
+        throughput and capacity views all report zero for the surviving
+        member while the deactivated row holds the real history.
+
+        Returns:
+            The number of pull requests re-pointed.
+        """
+        result = await self._db.execute(
+            sql_update(PullRequest)
+            .where(
+                PullRequest.author_user_id == source_user_id,
+                PullRequest.org_id == self._org_id,
+            )
+            .values(author_user_id=target_user_id)
+        )
+        return rowcount(result)
 
     async def map_shas_to_bud_ids(self, shas: list[str]) -> dict[str, uuid.UUID]:
         """For each SHA in ``shas`` that matches a PR's ``merge_commit_sha``
