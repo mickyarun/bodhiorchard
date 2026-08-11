@@ -32,16 +32,25 @@ same transfer the Settings → Members → Merge flow now does:
 Run with ``--dry-run`` first: it prints the full pairing table and
 changes nothing. Nothing is written until ``--apply`` is passed.
 
-Pairing is deliberately conservative. A stub matches a real member only
-when the GitHub login maps to exactly one candidate by (in order) an
-existing alias, the local-part of the work email, or an exact
-case-insensitive name match. Ambiguous or unmatched stubs are reported
-and skipped for a human to resolve — the script never guesses.
+Pairing is deliberately conservative. Only *active* members are eligible
+targets — a deactivated row is usually the losing side of an earlier
+merge, and folding fresh history onto it would re-bury the attribution
+this script exists to recover. A stub matches only when it maps to
+exactly one candidate by, in order: an alias on its own address; an
+alias on a sibling stub sharing its GitHub login; the work-email local
+part; or a unique display-name match. Ambiguous or unmatched stubs are
+reported and skipped for a human to resolve — the script never guesses.
+
+Where a login resembles neither the work email nor the display name,
+pair it explicitly with ``--map LOGIN=EMAIL`` rather than loosening the
+rules for everyone. An override naming a login with no matching stub is
+a hard error, so a typo fails loudly instead of silently skipping.
 
 Usage::
 
     python -m scripts.backfill_github_identities --org-slug acme --dry-run
-    python -m scripts.backfill_github_identities --org-slug acme --apply
+    python -m scripts.backfill_github_identities --org-slug acme \\
+        --map someone01=someone@acme.com --apply
 """
 
 from __future__ import annotations
@@ -144,6 +153,7 @@ def _pair(
     reals: list[User],
     pr_counts: dict[uuid.UUID, int],
     aliases: dict[str, uuid.UUID],
+    overrides: dict[str, str],
 ) -> list[Candidate]:
     """Pair each stub to at most one real member, conservatively.
 
@@ -154,6 +164,9 @@ def _pair(
 
     Rules run in descending order of evidence strength:
 
+    0. an operator-supplied ``--map login=email`` override — the only
+       way to pair a login that shares nothing with the member's work
+       email or display name, and deliberately a conscious human call;
     1. an alias on this stub's own address;
     2. an alias on a *sibling* stub carrying the same GitHub login —
        GitHub issues both ``login@`` and ``{id}+login@`` forms for one
@@ -165,6 +178,7 @@ def _pair(
     Anything else is reported and skipped rather than guessed.
     """
     active = [u for u in reals if u.is_active]
+    by_email = {u.email.lower(): u for u in active}
     by_id = {u.id: u for u in active}
     by_local = {u.email.split("@", 1)[0].lower(): u for u in active}
     by_name: dict[str, list[User]] = {}
@@ -190,12 +204,15 @@ def _pair(
             pr_count=pr_counts.get(stub.id, 0),
         )
 
+        forced = by_email.get(overrides.get(key, "")) if key else None
         direct = by_id.get(aliases.get(stub.email.lower(), uuid.uuid4()))
         sibling = by_sibling_login.get(key) if key else None
         local = by_local.get(key) if key else None
         same_name = by_name.get(stub.name.strip().lower(), [])
 
-        if direct is not None:
+        if forced is not None:
+            match, reason = forced, "operator override"
+        elif direct is not None:
             match, reason = direct, "existing alias"
         elif sibling is not None:
             match, reason = sibling, "sibling-login alias"
@@ -287,10 +304,29 @@ async def main() -> None:
     """Entry point: pair stubs to members, report, and optionally apply."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--org-slug", required=True, help="Organization slug to process.")
+    parser.add_argument(
+        "--map",
+        action="append",
+        default=[],
+        metavar="LOGIN=EMAIL",
+        dest="overrides",
+        help=(
+            "Force a GitHub login onto a member's work email, for people whose "
+            "login resembles neither their email nor their display name. "
+            "Repeatable."
+        ),
+    )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true", help="Report only; write nothing.")
     mode.add_argument("--apply", action="store_true", help="Perform the transfer.")
     args = parser.parse_args()
+
+    overrides: dict[str, str] = {}
+    for pair in args.overrides:
+        login, sep, email = pair.partition("=")
+        if not sep or not login.strip() or not email.strip():
+            sys.exit(f"--map expects LOGIN=EMAIL, got {pair!r}.")
+        overrides[login.strip().lower()] = email.strip().lower()
 
     async with AsyncSessionLocal() as db:
         org = await _load_org(db, args.org_slug)
@@ -300,7 +336,11 @@ async def main() -> None:
 
         stubs = [u for u in members if _login_of(u.email) is not None]
         reals = [u for u in members if _login_of(u.email) is None]
-        candidates = _pair(stubs, reals, pr_counts, aliases)
+        candidates = _pair(stubs, reals, pr_counts, aliases, overrides)
+
+        unknown = overrides.keys() - {(c.stub_login or "").lower() for c in candidates}
+        if unknown:
+            sys.exit(f"--map login(s) not present as a GitHub stub: {', '.join(sorted(unknown))}")
 
         print(f"Org: {org.name} ({org.slug})")
         print(f"{len(members)} member rows — {len(stubs)} GitHub stub(s), {len(reals)} real.")
