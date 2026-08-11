@@ -338,9 +338,21 @@ async def main() -> None:
         reals = [u for u in members if _login_of(u.email) is None]
         candidates = _pair(stubs, reals, pr_counts, aliases, overrides)
 
-        unknown = overrides.keys() - {(c.stub_login or "").lower() for c in candidates}
-        if unknown:
-            sys.exit(f"--map login(s) not present as a GitHub stub: {', '.join(sorted(unknown))}")
+        # Validate both halves of every override. A silent miss on either
+        # side would drop the stub back onto the weaker automatic rules
+        # while the operator believed the pairing was forced.
+        stub_logins = {(c.stub_login or "").lower() for c in candidates}
+        active_emails = {u.email.lower() for u in reals if u.is_active}
+        bad_login = sorted(overrides.keys() - stub_logins)
+        bad_email = sorted(
+            f"{login}={email}"
+            for login, email in overrides.items()
+            if email not in active_emails
+        )
+        if bad_login:
+            sys.exit(f"--map login(s) not present as a GitHub stub: {', '.join(bad_login)}")
+        if bad_email:
+            sys.exit(f"--map target(s) not an active member: {', '.join(bad_email)}")
 
         print(f"Org: {org.name} ({org.slug})")
         print(f"{len(members)} member rows — {len(stubs)} GitHub stub(s), {len(reals)} real.")

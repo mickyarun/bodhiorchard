@@ -75,3 +75,38 @@ async def resolve_user_by_email(
             return user
 
     return None
+
+
+async def walk_to_active_user(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    user: User | None,
+) -> User | None:
+    """Follow the alias backlink chain until an active user is found.
+
+    Members → Merge deactivates the source and records its primary email
+    as a :class:`UserEmailAlias` on the target, so a deactivated row is a
+    signpost to whoever absorbed it. Merges compose (A → B, then B → C),
+    hence the loop rather than a single hop.
+
+    This matters because a merged-away row keeps its primary email, and
+    :func:`resolve_user_by_email` matches primary addresses before
+    aliases — so a GitHub stub's ``{login}@users.noreply.github.com``
+    resolves to the *stub* even after the merge. Walking the backlink
+    turns that stale hit into the surviving member.
+
+    Returns ``None`` when the chain dead-ends on a deactivated user with
+    no alias to follow, so callers can log a miss rather than credit a
+    row nobody owns. A visited set guards against alias cycles that
+    would otherwise loop forever.
+    """
+    visited: set[uuid.UUID] = set()
+    while user is not None and not user.is_active:
+        if user.id in visited:
+            return None
+        visited.add(user.id)
+        next_user = await UserRepository(db).find_user_by_alias_email(org_id, user.email)
+        if next_user is None or next_user.id == user.id:
+            return None
+        user = next_user
+    return user

@@ -43,6 +43,7 @@ from app.models.pull_request import PRState, PullRequest
 from app.models.user import OrgToUser, User
 from app.repositories.pull_request import PullRequestRepository
 from app.repositories.user import UserRepository
+from app.services.identity_resolution import resolve_canonical_user
 
 pytestmark = pytest.mark.integration
 
@@ -202,10 +203,95 @@ async def test_github_login_lookup_is_case_insensitive(
     """GitHub logins are case-insensitive; the lookup must match that."""
     org_id = await _seed_org(pg_session_factory)
     user_id = await _add_user(
-        pg_session_factory, org_id, _unique("mixed"), github_username="Vignesh-Atoa"
+        pg_session_factory, org_id, _unique("mixed"), github_username="Mixed-Case-Dev"
     )
 
     async with pg_session_factory() as db:
         repo = UserRepository(db)
-        assert await repo.get_id_by_github_login(org_id, "vignesh-atoa") == user_id
-        assert await repo.get_id_by_github_login(org_id, "VIGNESH-ATOA") == user_id
+        assert await repo.get_id_by_github_login(org_id, "mixed-case-dev") == user_id
+        assert await repo.get_id_by_github_login(org_id, "MIXED-CASE-DEV") == user_id
+
+
+@pytest.mark.asyncio
+async def test_login_survives_when_target_already_has_one(
+    pg_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A target's own login must not silently destroy the source's.
+
+    There is no alias table for GitHub logins, so clearing the source
+    when the target already owns a different login would erase the only
+    record of that identity — the next PR under it would provision a
+    fresh stub and re-split the member the merge just consolidated.
+    """
+    org_id = await _seed_org(pg_session_factory)
+    stub = await _add_user(pg_session_factory, org_id, _unique("stub"), github_username="oldlogin")
+    target = await _add_user(
+        pg_session_factory, org_id, _unique("real"), github_username="newlogin"
+    )
+
+    async with pg_session_factory() as db:
+        src = await db.get(User, stub)
+        tgt = await db.get(User, target)
+        assert src is not None and tgt is not None
+        # Mirror the handler's guarded transfer.
+        if src.github_username and not tgt.github_username:
+            tgt.github_username = src.github_username
+            src.github_username = None
+        src.is_active = False
+        await db.commit()
+
+    async with pg_session_factory() as db:
+        src = await db.get(User, stub)
+        tgt = await db.get(User, target)
+        assert src is not None and tgt is not None
+        assert tgt.github_username == "newlogin"
+        assert src.github_username == "oldlogin"
+
+
+@pytest.mark.asyncio
+async def test_resolution_walks_from_deactivated_stub_to_target(
+    pg_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The noreply address must resolve past a merged-away stub.
+
+    A stub keeps its primary email after the merge, and
+    resolve_user_by_email matches primary addresses before aliases, so
+    without the alias walk this lands on the deactivated stub.
+    """
+    org_id = await _seed_org(pg_session_factory)
+    noreply = f"devlogin-{uuid.uuid4().hex[:6]}@users.noreply.github.com"
+    stub = await _add_user(pg_session_factory, org_id, noreply)
+    target = await _add_user(pg_session_factory, org_id, _unique("real"))
+
+    async with pg_session_factory() as db:
+        repo = UserRepository(db)
+        await repo.rebind_aliases_to_target(org_id, target, {noreply})
+        src = await db.get(User, stub)
+        assert src is not None
+        src.is_active = False
+        await db.commit()
+
+    async with pg_session_factory() as db:
+        resolved = await resolve_canonical_user(db, org_id, email=noreply)
+
+    assert resolved == target
+
+
+@pytest.mark.asyncio
+async def test_resolution_stops_on_alias_cycle(
+    pg_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A cycle between two deactivated rows must not loop forever."""
+    org_id = await _seed_org(pg_session_factory)
+    email_a, email_b = _unique("a"), _unique("b")
+    user_a = await _add_user(pg_session_factory, org_id, email_a, is_active=False)
+    user_b = await _add_user(pg_session_factory, org_id, email_b, is_active=False)
+
+    async with pg_session_factory() as db:
+        repo = UserRepository(db)
+        await repo.add_email_alias(org_id, user_b, email_a)
+        await repo.add_email_alias(org_id, user_a, email_b)
+        await db.commit()
+
+    async with pg_session_factory() as db:
+        assert await resolve_canonical_user(db, org_id, email=email_a) is None

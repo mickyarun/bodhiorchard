@@ -24,6 +24,13 @@ of silently dropping them.
 Member-merge consolidates alternate emails onto the target user as
 ``user_email_aliases`` rows, so the email path already follows a merge
 through :func:`resolve_user_by_email`.
+
+Both arms then run through :func:`walk_to_active_user`, because a
+merged-away row keeps its primary email and its GitHub login. Without
+the walk, a GitHub stub's ``{login}@users.noreply.github.com`` would
+keep resolving to the deactivated stub instead of whoever absorbed it —
+re-stranding exactly the attribution the merge was meant to
+consolidate.
 """
 
 from __future__ import annotations
@@ -33,8 +40,9 @@ import uuid
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.user import User
 from app.repositories.user import UserRepository
-from app.services.user_resolution import resolve_user_by_email
+from app.services.user_resolution import resolve_user_by_email, walk_to_active_user
 
 logger = structlog.get_logger(__name__)
 
@@ -55,12 +63,15 @@ async def resolve_canonical_user(
     if github_login:
         user_id = await UserRepository(db).get_id_by_github_login(org_id, github_login)
         if user_id is not None:
-            return user_id
+            active = await walk_to_active_user(db, org_id, await db.get(User, user_id))
+            if active is not None:
+                return active.id
 
     if email:
         user = await resolve_user_by_email(db, org_id, email)
-        if user is not None:
-            return user.id
+        active = await walk_to_active_user(db, org_id, user)
+        if active is not None:
+            return active.id
 
     logger.debug(
         "canonical_user_unresolved",

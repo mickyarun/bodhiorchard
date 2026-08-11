@@ -624,14 +624,23 @@ async def merge_members(
     emails_to_rebind = {source.email} | {a.email for a in source_aliases}
     await user_repo.rebind_aliases_to_target(org.id, target.id, emails_to_rebind)
 
-    # 2b. Move the GitHub login onto the target and clear it from the
-    # source. The stub is usually the only row carrying it, so leaving it
-    # behind would keep routing every future PR back to a deactivated
-    # member — the merge would silently undo itself on the next webhook.
-    claimed_login = source.github_username
-    if claimed_login and not target.github_username:
+    # 2b. Move the GitHub login onto the target, but only when the target
+    # has none of its own. Leaving it on the source would keep routing
+    # every future PR back to a deactivated member — the merge would
+    # silently undo itself on the next webhook.
+    #
+    # When the target already owns a *different* login, the source keeps
+    # its own. Clearing it would destroy the only record of that identity
+    # (there is no alias table for GitHub logins), so the next PR under it
+    # would provision a fresh stub and re-split the very member we just
+    # merged. A deactivated row holding a login is harmless now that
+    # get_id_by_github_login orders active members first, and
+    # bud_learning_alias_resolver still walks the alias backlink from it
+    # to the surviving member.
+    claimed_login: str | None = None
+    if source.github_username and not target.github_username:
+        claimed_login = source.github_username
         target.github_username = claimed_login
-    if claimed_login:
         source.github_username = None
 
     # 3. Deactivate source + revoke its MCP tokens. Token revocation must

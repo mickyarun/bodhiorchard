@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
 from app.repositories.user import UserRepository
+from app.services.user_resolution import walk_to_active_user
 
 
 async def resolve_aliased_contributors(
@@ -101,7 +102,7 @@ async def _resolve_active_target(
             user = await db.get(User, uuid.UUID(str(uid_str)))
         except ValueError:
             user = None
-        return await _walk_to_active(user_repo, org_id, user)
+        return await walk_to_active_user(db, org_id, user)
 
     login = row.get("github_login")
     if not login:
@@ -110,31 +111,7 @@ async def _resolve_active_target(
     if resolved_uid is None:
         return None
     user = await db.get(User, resolved_uid)
-    return await _walk_to_active(user_repo, org_id, user)
-
-
-async def _walk_to_active(
-    user_repo: UserRepository,
-    org_id: uuid.UUID,
-    user: User | None,
-) -> User | None:
-    """Follow the alias backlink chain until an active user is found.
-
-    Members → Merge can be applied repeatedly (A → B, then B → C). Each
-    hop records the source's email as a UserEmailAlias on the target,
-    so we walk while the current user is deactivated. A visited set
-    guards against alias cycles that would otherwise loop forever.
-    """
-    visited: set[uuid.UUID] = set()
-    while user is not None and not user.is_active:
-        if user.id in visited:
-            return None
-        visited.add(user.id)
-        next_user = await user_repo.find_user_by_alias_email(org_id, user.email)
-        if next_user is None or next_user.id == user.id:
-            return None
-        user = next_user
-    return user
+    return await walk_to_active_user(db, org_id, user)
 
 
 def _row_counts(row: dict[str, Any]) -> dict[str, int]:

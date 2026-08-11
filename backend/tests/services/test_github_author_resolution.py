@@ -41,11 +41,11 @@ async def test_passes_both_login_and_noreply_email() -> None:
     canonical = AsyncMock(return_value=uuid.uuid4())
 
     with patch("app.services.github_webhook_handler.resolve_canonical_user", new=canonical):
-        await _resolve_github_user(MagicMock(), org_id, "kannan-atoa")
+        await _resolve_github_user(MagicMock(), org_id, "octo-dev")
 
     _, kwargs = canonical.call_args
-    assert kwargs["github_login"] == "kannan-atoa"
-    assert kwargs["email"] == "kannan-atoa@users.noreply.github.com"
+    assert kwargs["github_login"] == "octo-dev"
+    assert kwargs["email"] == "octo-dev@users.noreply.github.com"
 
 
 @pytest.mark.asyncio
@@ -55,7 +55,7 @@ async def test_resolves_merged_member_via_alias() -> None:
     canonical = AsyncMock(return_value=target_id)
 
     with patch("app.services.github_webhook_handler.resolve_canonical_user", new=canonical):
-        resolved = await _resolve_github_user(MagicMock(), uuid.uuid4(), "vignesh-atoa")
+        resolved = await _resolve_github_user(MagicMock(), uuid.uuid4(), "mixed-case-dev")
 
     assert resolved == target_id
 
@@ -79,11 +79,11 @@ async def test_login_is_trimmed() -> None:
     canonical = AsyncMock(return_value=None)
 
     with patch("app.services.github_webhook_handler.resolve_canonical_user", new=canonical):
-        await _resolve_github_user(MagicMock(), uuid.uuid4(), "  raseeth-atoa  ")
+        await _resolve_github_user(MagicMock(), uuid.uuid4(), "  spaced-dev  ")
 
     _, kwargs = canonical.call_args
-    assert kwargs["github_login"] == "raseeth-atoa"
-    assert kwargs["email"] == "raseeth-atoa@users.noreply.github.com"
+    assert kwargs["github_login"] == "spaced-dev"
+    assert kwargs["email"] == "spaced-dev@users.noreply.github.com"
 
 
 @pytest.mark.asyncio
