@@ -36,7 +36,8 @@ from app.services.event_bus import publish
 # emitter (bud_development, bud_assignment) and the startup reconciler
 # stay in sync — adding a new phase worker requires touching exactly one
 # list.
-PHASE_WORKER_SLUGS: list[str] = ["phase_assigner", "pert_estimator"]
+PHASE_ASSIGNER_SLUG = "phase_assigner"
+PHASE_WORKER_SLUGS: list[str] = [PHASE_ASSIGNER_SLUG, "pert_estimator"]
 
 logger = structlog.get_logger(__name__)
 

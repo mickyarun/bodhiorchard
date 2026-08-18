@@ -218,6 +218,8 @@ async def test_accept_routes_through_assign_unassign_with_correct_method(
     unassign_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(yield_offer_service, "assign_bud", assign_mock)
     monkeypatch.setattr(yield_offer_service, "unassign_bud", unassign_mock)
+    # Unrelated to this assertion; stubbed so the close guard no-ops.
+    _stub_parked(monkeypatch, None)
 
     published: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(
@@ -285,6 +287,10 @@ async def test_reject_flips_status_and_publishes(monkeypatch: pytest.MonkeyPatch
         "YieldOfferRepository",
         MagicMock(return_value=yield_repo),
     )
+    bud_repo = MagicMock()
+    bud_repo.get_by_id = AsyncMock(return_value=_bud(BUDPriority.P0))
+    monkeypatch.setattr(yield_offer_service, "BUDRepository", MagicMock(return_value=bud_repo))
+    _stub_parked(monkeypatch, None)
     published: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(
         yield_offer_service, "publish", lambda topic, data: published.append((topic, data))
@@ -295,3 +301,309 @@ async def test_reject_flips_status_and_publishes(monkeypatch: pytest.MonkeyPatch
     result = await yield_offer_service.reject_offer(db, uuid.uuid4(), offer.id, target_id)
     assert result.status == YieldOfferStatus.REJECTED
     assert published and published[0][1]["resolution"] == "rejected"
+
+
+# --- phase-assigner unlock -------------------------------------------------
+#
+# Raising a yield offer parks ``phase_assigner`` on a terminal-less
+# ``skill_invoked``, which ``get_active_phase_worker`` reads as "an agent
+# is running" and the BUD page turns into ``agentLocked`` — the entire
+# status menu goes dead. Every path that resolves an offer therefore has
+# to emit a terminal event. Before this was wired, the only thing that
+# ever cleared it was the startup reconciler, so a long-lived deployment
+# accumulated permanently frozen BUDs.
+
+
+def _capture_activity(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    calls: list[dict[str, object]] = []
+
+    async def _fake(_db: object, **kwargs: object) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(yield_offer_service, "log_agent_activity", _fake)
+    return calls
+
+
+def _stub_parked(monkeypatch: pytest.MonkeyPatch, offer_id: uuid.UUID | None) -> None:
+    """Stand up the parked ``skill_invoked`` the close guard looks for.
+
+    ``offer_id=None`` simulates a BUD whose phase assigner was already
+    closed (e.g. by the startup reconciler) — the close must then no-op
+    rather than stamp a stale terminal event on an unrelated run.
+    """
+    parked = (
+        None
+        if offer_id is None
+        else SimpleNamespace(
+            metadata_={"offer_id": str(offer_id), "reason": "yield_offer_pending"}
+        )
+    )
+    activity_repo = MagicMock()
+    activity_repo.get_active_phase_worker = AsyncMock(return_value=parked)
+    monkeypatch.setattr(
+        yield_offer_service,
+        "AgentActivityLogRepository",
+        MagicMock(return_value=activity_repo),
+    )
+
+
+def _phase_assigner_calls(calls: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [c for c in calls if c.get("skill_slug") == "phase_assigner"]
+
+
+@pytest.mark.asyncio
+async def test_reject_closes_phase_assigner(monkeypatch: pytest.MonkeyPatch) -> None:
+    target_id = uuid.uuid4()
+    incoming = _bud(BUDPriority.P0)
+    offer = SimpleNamespace(
+        id=uuid.uuid4(),
+        target_user_id=target_id,
+        incoming_bud_id=incoming.id,
+        yieldable_bud_id=uuid.uuid4(),
+        status=YieldOfferStatus.PENDING,
+    )
+    yield_repo = MagicMock()
+    yield_repo.get_by_id = AsyncMock(return_value=offer)
+    monkeypatch.setattr(
+        yield_offer_service, "YieldOfferRepository", MagicMock(return_value=yield_repo)
+    )
+    bud_repo = MagicMock()
+    bud_repo.get_by_id = AsyncMock(return_value=incoming)
+    monkeypatch.setattr(yield_offer_service, "BUDRepository", MagicMock(return_value=bud_repo))
+    monkeypatch.setattr(yield_offer_service, "publish", lambda topic, data: None)
+    _stub_parked(monkeypatch, offer.id)
+    calls = _capture_activity(monkeypatch)
+
+    db = MagicMock()
+    db.flush = AsyncMock()
+    await yield_offer_service.reject_offer(db, uuid.uuid4(), offer.id, target_id)
+
+    closed = _phase_assigner_calls(calls)
+    assert len(closed) == 1
+    assert closed[0]["event_type"] == "skill_failed"
+    assert closed[0]["bud_id"] == incoming.id
+    assert closed[0]["metadata_"] == {"reason": "yield_offer_rejected"}
+
+
+@pytest.mark.asyncio
+async def test_accept_closes_phase_assigner(monkeypatch: pytest.MonkeyPatch) -> None:
+    target_id = uuid.uuid4()
+    incoming = _bud(BUDPriority.P0)
+    yieldable = _bud(BUDPriority.P3, assignee_id=target_id)
+    offer = SimpleNamespace(
+        id=uuid.uuid4(),
+        target_user_id=target_id,
+        incoming_bud_id=incoming.id,
+        yieldable_bud_id=yieldable.id,
+        status=YieldOfferStatus.PENDING,
+    )
+    yield_repo = MagicMock()
+    yield_repo.get_by_id = AsyncMock(return_value=offer)
+    monkeypatch.setattr(
+        yield_offer_service, "YieldOfferRepository", MagicMock(return_value=yield_repo)
+    )
+    bud_repo = MagicMock()
+    bud_repo.get_by_id = AsyncMock(side_effect=[yieldable, incoming])
+    monkeypatch.setattr(yield_offer_service, "BUDRepository", MagicMock(return_value=bud_repo))
+    monkeypatch.setattr(yield_offer_service, "assign_bud", AsyncMock(return_value=None))
+    monkeypatch.setattr(yield_offer_service, "unassign_bud", AsyncMock(return_value=None))
+    monkeypatch.setattr(yield_offer_service, "publish", lambda topic, data: None)
+    _stub_parked(monkeypatch, offer.id)
+    calls = _capture_activity(monkeypatch)
+
+    db = MagicMock()
+    db.flush = AsyncMock()
+    await yield_offer_service.accept_offer(db, uuid.uuid4(), offer.id, target_id, "Dev")
+
+    closed = _phase_assigner_calls(calls)
+    assert len(closed) == 1
+    # Accept actually assigns the BUD, so the worker completed rather than failed.
+    assert closed[0]["event_type"] == "skill_completed"
+    assert closed[0]["metadata_"] == {"reason": "yield_offer_accepted"}
+
+
+@pytest.mark.asyncio
+async def test_ttl_expiry_closes_phase_assigner_for_each_bud(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The TTL sweep is where the prod lock came from — 10 of 11 stuck BUDs
+    had an offer that had already expired, so the unlock has to fire per
+    expired row, not only on accept/reject."""
+    org_id = uuid.uuid4()
+    offer_a, offer_b = uuid.uuid4(), uuid.uuid4()
+    bud_a, bud_b = uuid.uuid4(), uuid.uuid4()
+
+    yield_repo = MagicMock()
+    yield_repo.expire_overdue = AsyncMock(return_value=[(offer_a, bud_a), (offer_b, bud_b)])
+    yield_repo.list_pending_for_user = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        yield_offer_service, "YieldOfferRepository", MagicMock(return_value=yield_repo)
+    )
+    bud_repo = MagicMock()
+    bud_repo.get_minimal_info_by_ids = AsyncMock(
+        return_value={
+            bud_a: {"number": 7, "title": "A"},
+            bud_b: {"number": 8, "title": "B"},
+        }
+    )
+    monkeypatch.setattr(yield_offer_service, "BUDRepository", MagicMock(return_value=bud_repo))
+    # Each BUD is still parked on its own offer, so both close.
+    activity_repo = MagicMock()
+    activity_repo.get_active_phase_worker = AsyncMock(
+        side_effect=[
+            SimpleNamespace(metadata_={"offer_id": str(offer_a)}),
+            SimpleNamespace(metadata_={"offer_id": str(offer_b)}),
+        ]
+    )
+    monkeypatch.setattr(
+        yield_offer_service,
+        "AgentActivityLogRepository",
+        MagicMock(return_value=activity_repo),
+    )
+    calls = _capture_activity(monkeypatch)
+
+    await yield_offer_service.list_pending_with_expiry(MagicMock(), org_id, uuid.uuid4())
+
+    closed = _phase_assigner_calls(calls)
+    assert [c["bud_id"] for c in closed] == [bud_a, bud_b]
+    assert {c["event_type"] for c in closed} == {"skill_failed"}
+    assert {c["metadata_"]["reason"] for c in closed} == {"yield_offer_expired"}  # type: ignore[index]
+    assert [c["bud_number"] for c in closed] == [7, 8]
+
+
+@pytest.mark.asyncio
+async def test_ttl_expiry_emits_nothing_when_no_offer_expired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The common case: bell-open with nothing overdue must stay silent."""
+    yield_repo = MagicMock()
+    yield_repo.expire_overdue = AsyncMock(return_value=[])
+    yield_repo.list_pending_for_org = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        yield_offer_service, "YieldOfferRepository", MagicMock(return_value=yield_repo)
+    )
+    bud_repo = MagicMock()
+    bud_repo.get_minimal_info_by_ids = AsyncMock(return_value={})
+    monkeypatch.setattr(yield_offer_service, "BUDRepository", MagicMock(return_value=bud_repo))
+    calls = _capture_activity(monkeypatch)
+
+    await yield_offer_service.list_org_pending_with_expiry(MagicMock(), uuid.uuid4())
+
+    assert _phase_assigner_calls(calls) == []
+    bud_repo.get_minimal_info_by_ids.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reject_skips_close_when_phase_assigner_already_moved_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A restart-time reconcile can close the loop before the offer resolves.
+
+    The BUD then carries on into other phases. Stamping a terminal event
+    anyway would either raise a stale "assignment skipped" banner on a BUD
+    that has moved on, or clobber a genuinely in-flight phase worker.
+    """
+    target_id = uuid.uuid4()
+    incoming = _bud(BUDPriority.P0)
+    offer = SimpleNamespace(
+        id=uuid.uuid4(),
+        target_user_id=target_id,
+        incoming_bud_id=incoming.id,
+        yieldable_bud_id=uuid.uuid4(),
+        status=YieldOfferStatus.PENDING,
+    )
+    yield_repo = MagicMock()
+    yield_repo.get_by_id = AsyncMock(return_value=offer)
+    monkeypatch.setattr(
+        yield_offer_service, "YieldOfferRepository", MagicMock(return_value=yield_repo)
+    )
+    bud_repo = MagicMock()
+    bud_repo.get_by_id = AsyncMock(return_value=incoming)
+    monkeypatch.setattr(yield_offer_service, "BUDRepository", MagicMock(return_value=bud_repo))
+    monkeypatch.setattr(yield_offer_service, "publish", lambda topic, data: None)
+    _stub_parked(monkeypatch, None)  # nothing parked — already reconciled
+    calls = _capture_activity(monkeypatch)
+
+    db = MagicMock()
+    db.flush = AsyncMock()
+    result = await yield_offer_service.reject_offer(db, uuid.uuid4(), offer.id, target_id)
+
+    # The reject itself still lands; only the redundant unlock is skipped.
+    assert result.status == YieldOfferStatus.REJECTED
+    assert _phase_assigner_calls(calls) == []
+
+
+@pytest.mark.asyncio
+async def test_close_skips_when_parked_event_belongs_to_another_offer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two offers can exist for one BUD; only the parked one may close it."""
+    target_id = uuid.uuid4()
+    incoming = _bud(BUDPriority.P0)
+    offer = SimpleNamespace(
+        id=uuid.uuid4(),
+        target_user_id=target_id,
+        incoming_bud_id=incoming.id,
+        yieldable_bud_id=uuid.uuid4(),
+        status=YieldOfferStatus.PENDING,
+    )
+    yield_repo = MagicMock()
+    yield_repo.get_by_id = AsyncMock(return_value=offer)
+    monkeypatch.setattr(
+        yield_offer_service, "YieldOfferRepository", MagicMock(return_value=yield_repo)
+    )
+    bud_repo = MagicMock()
+    bud_repo.get_by_id = AsyncMock(return_value=incoming)
+    monkeypatch.setattr(yield_offer_service, "BUDRepository", MagicMock(return_value=bud_repo))
+    monkeypatch.setattr(yield_offer_service, "publish", lambda topic, data: None)
+    _stub_parked(monkeypatch, uuid.uuid4())  # a different offer holds the lock
+    calls = _capture_activity(monkeypatch)
+
+    db = MagicMock()
+    db.flush = AsyncMock()
+    await yield_offer_service.reject_offer(db, uuid.uuid4(), offer.id, target_id)
+
+    assert _phase_assigner_calls(calls) == []
+
+
+@pytest.mark.asyncio
+async def test_close_failure_propagates_instead_of_being_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed activity write must surface, not be logged and ignored.
+
+    ``log_agent_activity`` flushes on the caller's session, so a swallowed
+    failure leaves the transaction needing rollback — the request would
+    then die at commit with an opaque PendingRollbackError, and the TTL
+    sweep would fail identically on every retry because it could never
+    commit. Propagating keeps the unlock atomic with the reject.
+    """
+    target_id = uuid.uuid4()
+    incoming = _bud(BUDPriority.P0)
+    offer = SimpleNamespace(
+        id=uuid.uuid4(),
+        target_user_id=target_id,
+        incoming_bud_id=incoming.id,
+        yieldable_bud_id=uuid.uuid4(),
+        status=YieldOfferStatus.PENDING,
+    )
+    yield_repo = MagicMock()
+    yield_repo.get_by_id = AsyncMock(return_value=offer)
+    monkeypatch.setattr(
+        yield_offer_service, "YieldOfferRepository", MagicMock(return_value=yield_repo)
+    )
+    bud_repo = MagicMock()
+    bud_repo.get_by_id = AsyncMock(return_value=incoming)
+    monkeypatch.setattr(yield_offer_service, "BUDRepository", MagicMock(return_value=bud_repo))
+    monkeypatch.setattr(yield_offer_service, "publish", lambda topic, data: None)
+    _stub_parked(monkeypatch, offer.id)
+    monkeypatch.setattr(
+        yield_offer_service,
+        "log_agent_activity",
+        AsyncMock(side_effect=RuntimeError("activity write failed")),
+    )
+
+    db = MagicMock()
+    db.flush = AsyncMock()
+    with pytest.raises(RuntimeError, match="activity write failed"):
+        await yield_offer_service.reject_offer(db, uuid.uuid4(), offer.id, target_id)

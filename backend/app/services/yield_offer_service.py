@@ -25,6 +25,7 @@ deliver it. The developer's Accept/Reject lives in
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,8 +33,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.bud import BUDDocument
 from app.models.user import User
 from app.models.yield_offer import YieldOffer, YieldOfferStatus
+from app.repositories.agent_activity import AgentActivityLogRepository
 from app.repositories.bud import BUDRepository
 from app.repositories.yield_offer import YieldOfferRepository
+from app.services.agent_activity_logger import PHASE_ASSIGNER_SLUG, log_agent_activity
 from app.services.assignment_policy import BUD_PRIORITY_WEIGHTS, TERMINAL_BUD_STATUSES
 from app.services.bud_assignment_actions import assign_bud, unassign_bud
 from app.services.event_bus import publish
@@ -42,6 +45,63 @@ logger = structlog.get_logger(__name__)
 
 # How long a pending offer survives before it's marked expired on read.
 YIELD_OFFER_TTL = timedelta(hours=24)
+
+
+async def _close_phase_assigner(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    offer_id: uuid.UUID,
+    incoming_bud_id: uuid.UUID,
+    resolution: Literal["accepted", "rejected", "expired"],
+    message: str,
+    bud_number: int | None = None,
+    bud_title: str | None = None,
+) -> None:
+    """Emit the terminal ``phase_assigner`` event for a resolved offer.
+
+    ``auto_assign_for_phase`` logs ``skill_invoked`` with
+    ``reason=yield_offer_pending`` and returns, so the phase worker stays
+    in-flight for as long as the offer is open. ``get_active_phase_worker``
+    reads a trailing ``skill_invoked`` as "an agent is running right now",
+    which the BUD detail page turns into ``agentLocked`` — disabling the
+    entire status menu, Delete, and the AI panel. Without this call the
+    only thing that ever cleared that state was
+    ``reconcile_orphan_phase_workers`` on the next backend start, so a
+    long-lived deployment accumulated permanently frozen BUDs.
+
+    No-ops unless the BUD's newest ``phase_assigner`` event is still the
+    ``skill_invoked`` *this* offer parked. A restart-time reconcile (or any
+    later assignment run) can close the loop first and let the BUD carry on
+    into other phases; emitting unconditionally would then either raise a
+    stale "assignment skipped" banner on a BUD that has long since moved
+    on, or — if a real phase worker happens to be mid-flight — tear down a
+    live progress banner and unlock a BUD while an agent is mutating it.
+
+    Writes on the caller's session and lets failures propagate, so the
+    unlock is atomic with the accept/reject/expire that earned it. Catching
+    here would be actively harmful: ``log_agent_activity`` flushes, so a
+    failed write leaves the session needing rollback, and swallowing it
+    just converts a clear error into a ``PendingRollbackError`` at commit —
+    or, in the expiry loop, an endpoint that fails identically on every
+    retry because the sweep can never commit.
+    """
+    activity_repo = AgentActivityLogRepository(db, org_id=org_id)
+    parked = await activity_repo.get_active_phase_worker(incoming_bud_id, [PHASE_ASSIGNER_SLUG])
+    if parked is None or (parked.metadata_ or {}).get("offer_id") != str(offer_id):
+        return
+
+    await log_agent_activity(
+        db,
+        org_id=org_id,
+        event_type="skill_completed" if resolution == "accepted" else "skill_failed",
+        skill_slug=PHASE_ASSIGNER_SLUG,
+        message=message,
+        bud_id=incoming_bud_id,
+        bud_number=bud_number,
+        bud_title=bud_title,
+        metadata_={"reason": f"yield_offer_{resolution}"},
+    )
 
 
 async def maybe_raise_yield_offer(
@@ -161,6 +221,17 @@ async def accept_offer(
     offer.status = YieldOfferStatus.ACCEPTED
     await db.flush()
 
+    await _close_phase_assigner(
+        db,
+        org_id=org_id,
+        offer_id=offer.id,
+        incoming_bud_id=incoming_bud.id,
+        resolution="accepted",
+        message=f"Yield offer accepted — assigned to {acting_user_name or 'the developer'}",
+        bud_number=incoming_bud.bud_number,
+        bud_title=incoming_bud.title,
+    )
+
     publish(
         f"yield_offer:{acting_user_id}",
         {
@@ -189,6 +260,18 @@ async def reject_offer(
     offer.status = YieldOfferStatus.REJECTED
     await db.flush()
 
+    incoming = await BUDRepository(db, org_id=org_id).get_by_id(offer.incoming_bud_id)
+    await _close_phase_assigner(
+        db,
+        org_id=org_id,
+        offer_id=offer.id,
+        incoming_bud_id=offer.incoming_bud_id,
+        resolution="rejected",
+        message="Yield offer declined — assignment skipped",
+        bud_number=incoming.bud_number if incoming else None,
+        bud_title=incoming.title if incoming else None,
+    )
+
     publish(
         f"yield_offer:{acting_user_id}",
         {
@@ -202,6 +285,36 @@ async def reject_offer(
     return offer
 
 
+async def _expire_overdue_and_unlock(db: AsyncSession, org_id: uuid.UUID) -> None:
+    """Run the TTL sweep and close the phase assigner for each expiry.
+
+    Shared by both ``*_with_expiry`` readers so the unlock can never be
+    wired into one entry point and forgotten on the other — the failure
+    mode this whole change exists to remove.
+    """
+    repo = YieldOfferRepository(db, org_id=org_id)
+    expired = await repo.expire_overdue(older_than=datetime.now(UTC) - YIELD_OFFER_TTL)
+    if not expired:
+        return
+    # Org-scoped lookup: this runs per-request, unlike the cross-tenant
+    # startup reconciler, so tenant isolation stays enforced at the
+    # repository rather than resting on where the ids came from.
+    bud_repo = BUDRepository(db, org_id=org_id)
+    bud_info = await bud_repo.get_minimal_info_by_ids({bud_id for _, bud_id in expired})
+    for offer_id, bud_id in expired:
+        info = bud_info.get(bud_id)
+        await _close_phase_assigner(
+            db,
+            org_id=org_id,
+            offer_id=offer_id,
+            incoming_bud_id=bud_id,
+            resolution="expired",
+            message="Yield offer expired with no response — assignment skipped",
+            bud_number=int(info["number"]) if info else None,
+            bud_title=str(info["title"]) if info else None,
+        )
+
+
 async def list_pending_with_expiry(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -213,9 +326,8 @@ async def list_pending_with_expiry(
     "expire stale rows" + "fetch pending" into one call so handlers
     don't have to remember the order.
     """
-    repo = YieldOfferRepository(db, org_id=org_id)
-    await repo.expire_overdue(older_than=datetime.now(UTC) - YIELD_OFFER_TTL)
-    return await repo.list_pending_for_user(user_id)
+    await _expire_overdue_and_unlock(db, org_id)
+    return await YieldOfferRepository(db, org_id=org_id).list_pending_for_user(user_id)
 
 
 async def list_org_pending_with_expiry(
@@ -223,9 +335,8 @@ async def list_org_pending_with_expiry(
     org_id: uuid.UUID,
 ) -> list[YieldOffer]:
     """Admin lens: every pending offer in the org, post-expiry."""
-    repo = YieldOfferRepository(db, org_id=org_id)
-    await repo.expire_overdue(older_than=datetime.now(UTC) - YIELD_OFFER_TTL)
-    return await repo.list_pending_for_org()
+    await _expire_overdue_and_unlock(db, org_id)
+    return await YieldOfferRepository(db, org_id=org_id).list_pending_for_org()
 
 
 async def reassign_offer(

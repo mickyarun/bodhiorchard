@@ -30,7 +30,7 @@ from app.models.user import User, UserRole
 from app.repositories.bud import BUDRepository
 from app.repositories.bud_timeline import BUDTimelineRepository
 from app.repositories.user import UserRepository
-from app.services.agent_activity_logger import log_agent_activity
+from app.services.agent_activity_logger import PHASE_ASSIGNER_SLUG, log_agent_activity
 from app.services.assignment_policy import (
     BUD_PRIORITY_WEIGHTS,
     MAX_ACTIVE_BUDS_PER_ROLE,
@@ -79,7 +79,7 @@ _SMART_ASSIGNMENT_PHASES = {
 }
 
 # Skill slug used for lifecycle events emitted by this service.
-_PHASE_ASSIGNER_SLUG = "phase_assigner"
+_PHASE_ASSIGNER_SLUG = PHASE_ASSIGNER_SLUG
 
 
 def _team_scope_metadata(outcome: "_ChainOutcome") -> dict[str, Any]:

@@ -21,7 +21,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.yield_offer import YieldOffer, YieldOfferStatus
-from app.repositories.base import BaseRepository, rowcount
+from app.repositories.base import BaseRepository
 
 
 class YieldOfferRepository(BaseRepository[YieldOffer]):
@@ -65,15 +65,24 @@ class YieldOfferRepository(BaseRepository[YieldOffer]):
         offers = await self.list_pending_for_user(user_id)
         return len(offers)
 
-    async def expire_overdue(self, *, older_than: datetime) -> int:
+    async def expire_overdue(self, *, older_than: datetime) -> list[tuple[uuid.UUID, uuid.UUID]]:
         """Flip every still-pending offer created before ``older_than`` to expired.
 
         TTL-on-read pattern (per the plan) — invoked from the service
         layer just before any read so callers never see stale offers.
         Cheap probe-first: skip the UPDATE entirely when no row is
         overdue, so concurrent bell-opens (the common case) don't take
-        row locks just to confirm there's nothing to do. Returns the
-        number of rows updated.
+        row locks just to confirm there's nothing to do.
+
+        Returns ``(offer_id, incoming_bud_id)`` for every offer just
+        expired. The caller needs both to close the matching
+        ``phase_assigner`` loop — an expiring offer leaves the phase
+        worker mid-flight, which keeps the whole BUD's status menu
+        disabled until someone restarts the backend, and the offer id is
+        what proves the parked event belongs to *this* offer rather than
+        a later, unrelated assignment run. RETURNING (rather than a bare
+        rowcount) keeps that SQL in the repository instead of forcing the
+        service to re-query for the rows it just mutated.
         """
         probe = self._scoped(
             select(YieldOffer.id)
@@ -82,18 +91,20 @@ class YieldOfferRepository(BaseRepository[YieldOffer]):
             .limit(1)
         )
         if (await self._db.execute(probe)).scalar_one_or_none() is None:
-            return 0
+            return []
         stmt = (
             update(YieldOffer)
             .where(YieldOffer.status == YieldOfferStatus.PENDING)
             .where(YieldOffer.created_at < older_than)
             .values(status=YieldOfferStatus.EXPIRED)
+            .returning(YieldOffer.id, YieldOffer.incoming_bud_id)
         )
         if self._org_id is not None:
             stmt = stmt.where(YieldOffer.org_id == self._org_id)
         result = await self._db.execute(stmt)
+        expired = [(row.id, row.incoming_bud_id) for row in result.all()]
         await self._db.flush()
-        return rowcount(result) or 0
+        return expired
 
     async def has_pending_for_incoming_bud(self, incoming_bud_id: uuid.UUID) -> bool:
         """True iff a pending offer for this incoming BUD already exists.
