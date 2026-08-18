@@ -281,9 +281,9 @@ export const useBUDStore = defineStore('bud', () => {
     try {
       const formData = new FormData()
       formData.append('file', file)
-      const { data } = await api.post(`/v1/buds/${id}/import/${section}`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      // No Content-Type override needed: the request interceptor clears
+      // it for FormData so the browser can attach the boundary.
+      const { data } = await api.post(`/v1/buds/${id}/import/${section}`, formData)
       if (currentBUD.value?.id === id) currentBUD.value = data
       return true
     } catch {
@@ -354,9 +354,10 @@ export const useBUDStore = defineStore('bud', () => {
   ): Promise<BUDDesign> {
     // Multipart POST so the raw HTML bytes go straight to the backend
     // instead of round-tripping through an LLM tool argument (which times
-    // out on large wireframes). Let axios set the multipart boundary — do
-    // NOT hand-set Content-Type. Rethrows the backend ``detail`` so the
-    // caller can show the size/type/phase rejection reason inline.
+    // out on large wireframes). The request interceptor in services/api.ts
+    // clears the instance's JSON Content-Type for FormData bodies — without
+    // that, axios rewrites this form to JSON and drops the file. Rethrows
+    // the backend ``detail`` so the caller can show the rejection reason.
     const form = new FormData()
     form.append('file', file)
     if (repoId) form.append('repo_id', repoId)

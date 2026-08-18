@@ -19,10 +19,13 @@ import { fileURLToPath, URL } from 'node:url'
 /**
  * Vitest config — dual-environment.
  *
- * Pure-logic modules live in ``*.test.ts`` and run under the lightweight
- * node environment. Vue single-file-component tests live in ``*.spec.ts``
- * and run under jsdom with the @vitejs/plugin-vue pipeline so SFCs
- * compile and DOM APIs (``mount``, ``getByText``) work.
+ * Suffix selects the environment, not the subject under test. ``*.test.ts``
+ * runs under the lightweight node environment — use it for pure-logic
+ * modules. ``*.spec.ts`` runs under jsdom with the @vitejs/plugin-vue
+ * pipeline, so SFCs compile and DOM APIs (``mount``, ``getByText``) work.
+ * Most ``*.spec.ts`` files are component tests, but any module needing a
+ * browser global (``localStorage``, ``File``, ``FormData``) belongs there
+ * too — see ``services/api.formdata.spec.ts``.
  *
  * Path alias `@/` is mirrored from vite.config.ts so test imports match
  * production imports.

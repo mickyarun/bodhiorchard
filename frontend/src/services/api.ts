@@ -23,13 +23,36 @@ const api = axios.create({
   timeout: 30000,
 })
 
-api.interceptors.request.use((config) => {
+/**
+ * Per-request header fixups. Exported so the FormData rule can be
+ * asserted against axios's real ``transformRequest`` in tests.
+ *
+ * The instance default above is ``application/json``, which axios does
+ * NOT treat as a passive default: ``transformRequest`` branches on it,
+ * and for a FormData body with a JSON content-type it rewrites the form
+ * into JSON via ``formDataToJSON`` — silently dropping every File, so
+ * the backend sees no multipart part at all and rejects the request as
+ * ``{"loc": ["body", "file"], "msg": "Field required"}``.
+ *
+ * Clearing the header for FormData bodies keeps the form intact, and
+ * axios's ``resolveConfig`` then lets the browser supply
+ * ``multipart/form-data`` with the boundary it alone can generate.
+ * Doing it here means no upload call site has to remember the rule.
+ */
+export function applyRequestHeaders(
+  config: InternalAxiosRequestConfig,
+): InternalAxiosRequestConfig {
   const token = localStorage.getItem('bodhiorchard_token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+    config.headers.delete('Content-Type')
+  }
   return config
-})
+}
+
+api.interceptors.request.use(applyRequestHeaders)
 
 // Track whether a token refresh is in progress to avoid multiple simultaneous refreshes
 let isRefreshing = false
