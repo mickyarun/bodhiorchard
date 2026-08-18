@@ -178,6 +178,7 @@
 import { diffLines as diffLinesFn } from 'diff'
 import { computed, ref, watch } from 'vue'
 import api from '@/services/api'
+import type { BUDDesign } from '@/types'
 
 interface BUDVersionSummary {
   id: string
@@ -406,10 +407,12 @@ async function fetchCurrentContent(): Promise<void> {
   try {
     if (cfg.format === 'html') {
       // Design content lives in bud_designs — pull the BUD-level row.
-      const { data } = await api.get<{ designs: Array<{ repo_id: string | null; design_html: string | null }> }>(
-        `/v1/buds/${props.budId}/designs`,
-      )
-      const budLevel = data.designs.find((d) => d.repo_id == null)
+      // The endpoint responds with a bare array (``response_model=
+      // list[BUDDesignRead]``), not an envelope; type it off the shared
+      // BUDDesign so a backend shape change fails the build instead of
+      // throwing at runtime.
+      const { data } = await api.get<BUDDesign[]>(`/v1/buds/${props.budId}/designs`)
+      const budLevel = data.find((d) => d.repo_id == null)
       currentContent.value = budLevel?.design_html ?? ''
     } else {
       const { data } = await api.get<Record<string, unknown>>(`/v1/buds/${props.budId}`)
