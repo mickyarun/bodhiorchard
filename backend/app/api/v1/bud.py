@@ -104,6 +104,7 @@ from app.services.bud_learning_alias_resolver import resolve_aliased_contributor
 from app.services.bud_metrics import compute_and_persist as compute_bud_metrics
 from app.services.bud_timeline import record_event
 from app.services.job_queue import JOB_BUD_AGENT, create_job
+from app.services.yield_offer_lock import is_awaiting_human_decision
 
 logger = structlog.get_logger(__name__)
 
@@ -208,10 +209,19 @@ async def _bud_response(
     activity_repo = AgentActivityLogRepository(db, org_id=org_id)
     active_phase = await activity_repo.get_active_phase_worker(bud.id, PHASE_WORKER_SLUGS)
     if active_phase is not None:
-        bud_data.active_phase_worker = {
+        phase_payload = {
             "skill_slug": active_phase.skill_slug or "",
             "message": active_phase.message or "",
         }
+        # A parked yield offer wears the same ``skill_invoked`` shape as a
+        # running worker, but no agent is executing — the chain is waiting
+        # on a person to accept or decline. Routing it to its own field
+        # keeps the banner while leaving the status menu usable; treating
+        # it as in-flight froze the BUD for the offer's whole 24h life.
+        if is_awaiting_human_decision(active_phase):
+            bud_data.awaiting_human_decision = phase_payload
+        else:
+            bud_data.active_phase_worker = phase_payload
 
     # Sticky failure banner: most recent skill_failed newer than the
     # user's dismissal timestamp. Covers the restart-recovery and

@@ -159,10 +159,21 @@ let currentActivityTopic: string | null = null
 let currentActivityHandler: ((data: unknown) => void) | null = null
 let currentActivityBudId: string | null = null
 
+// A phase worker that stopped and is waiting on a person — today only a
+// pending yield offer. Deliberately NOT part of ``phaseInFlight``: that
+// drives ``agentLocked`` in the parent, and nothing is executing here, so
+// locking would freeze the BUD's status menu for the offer's whole 24h
+// life. It still feeds the banner, so the BUD doesn't just look
+// unassigned with no explanation.
+const awaitingDecision = ref('')
+
 const phaseInFlight = computed(() => inFlightCount.value > 0)
-const agentGenerating = computed(() => taskGenerating.value || phaseInFlight.value)
+const agentGenerating = computed(
+  () => taskGenerating.value || phaseInFlight.value || !!awaitingDecision.value,
+)
 const agentStatusMessage = computed(() => {
   if (phaseInFlight.value && phaseMessage.value) return phaseMessage.value
+  if (awaitingDecision.value) return awaitingDecision.value
   return taskStatusMessage.value
 })
 
@@ -301,6 +312,9 @@ function trackAgentTask(task: { job_id: string | null; task_type: string; status
   })
 }
 
+// Mirrors ``AWAITING_DECISION_REASON`` in services/yield_offer_lock.py.
+const AWAITING_DECISION_REASON = 'yield_offer_pending'
+
 interface AgentActivityEnvelope {
   event_type?: string
   skill_slug?: string
@@ -337,6 +351,12 @@ function trackAgentActivity(orgId: string, budId: string): void {
   // decrement back to 0 and clean up; on the next `skill_invoked` we
   // bump back up — both branches behave correctly regardless of the
   // seed.
+  const waiting = props.bud.awaiting_human_decision
+  if (waiting) {
+    awaitingDecision.value = waiting.message || 'Waiting on a yield decision'
+    agentName.value = AGENT_CONFIG[waiting.skill_slug]?.name || 'AI Agent'
+  }
+
   const seeded = props.bud.active_phase_worker
   if (seeded) {
     inFlightCount.value = 1
@@ -354,6 +374,25 @@ function trackAgentActivity(orgId: string, budId: string): void {
     const slug = env.skill_slug || ''
     const label = AGENT_CONFIG[slug]?.label
     const friendly = AGENT_CONFIG[slug]?.name
+
+    // Same routing as the seed above: a parked offer must not enter the
+    // in-flight count, or the live event would re-lock a BUD the page
+    // load correctly left usable.
+    const reason = (env.metadata as { reason?: string } | null | undefined)?.reason
+    if (reason === AWAITING_DECISION_REASON) {
+      awaitingDecision.value = env.message || label || 'Waiting on a yield decision'
+      if (friendly) agentName.value = friendly
+      return
+    }
+    if (reason?.startsWith('yield_offer_')) {
+      // Terminal event for a parked offer — clears the banner without
+      // touching a counter it never incremented.
+      awaitingDecision.value = ''
+      agentName.value = ''
+      void budStore.refreshBUDIfCurrent(budId)
+      emit('reload-timeline')
+      return
+    }
 
     if (env.event_type === 'skill_invoked') {
       inFlightCount.value += 1
@@ -409,6 +448,7 @@ function stopAgentActivity(): void {
 
 defineExpose({
   agentGenerating,
+  awaitingDecision,
   agentName,
   agentStatusMessage,
   phaseInFlight,

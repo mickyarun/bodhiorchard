@@ -31,6 +31,7 @@ from typing import Literal
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.agent_activity import AgentActivityLog
 from app.repositories.agent_activity import AgentActivityLogRepository
 from app.repositories.bud import BUDRepository
 from app.repositories.yield_offer import YieldOfferRepository
@@ -40,6 +41,27 @@ from app.services.event_bus import publish
 logger = structlog.get_logger(__name__)
 
 Resolution = Literal["accepted", "rejected", "expired", "superseded"]
+
+# Stamped on the parked ``skill_invoked`` by ``bud_assignment`` when it
+# raises an offer, and read back by the BUD detail endpoint to tell
+# "waiting on a person" apart from "an agent is running". Both wear the
+# same event type, and only the second should lock the BUD.
+AWAITING_DECISION_REASON = "yield_offer_pending"
+
+
+def is_awaiting_human_decision(activity: AgentActivityLog | None) -> bool:
+    """True when a parked phase-worker event is waiting on a person.
+
+    ``get_active_phase_worker`` cannot tell the two apart on its own —
+    both are a trailing ``skill_invoked``. Only the metadata says whether
+    an agent is executing or whether the chain stopped for someone to
+    accept or decline a yield offer. The distinction decides whether the
+    BUD gets locked, so it lives here next to the reason string rather
+    than as an inline metadata poke in the API handler.
+    """
+    if activity is None:
+        return False
+    return (activity.metadata_ or {}).get("reason") == AWAITING_DECISION_REASON
 
 
 async def close_phase_assigner(

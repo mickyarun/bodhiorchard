@@ -51,7 +51,10 @@ from app.services.team_scope import (
 from app.services.todo_assignment import (
     assign_todos_per_repo_team,
 )
-from app.services.yield_offer_lock import supersede_offers_for_assigned_bud
+from app.services.yield_offer_lock import (
+    AWAITING_DECISION_REASON,
+    supersede_offers_for_assigned_bud,
+)
 from app.services.yield_offer_service import maybe_raise_yield_offer
 
 # Re-export for callers (and tests) that still patch this attribute name.
@@ -236,7 +239,7 @@ async def auto_assign_for_phase(
                 bud_number=bud.bud_number,
                 bud_title=bud.title,
                 metadata_={
-                    "reason": "yield_offer_pending",
+                    "reason": AWAITING_DECISION_REASON,
                     "role": primary_role.value,
                     "phase": phase_value,
                     "offer_id": str(offer.id),

@@ -192,7 +192,8 @@
                — task.job_id only tracks the first design's worker
                anyway, so the unified label would be misleading. -->
           <div
-            v-if="workflowRef?.agentGenerating && bud.status !== 'design'"
+            v-if="(workflowRef?.agentGenerating && bud.status !== 'design')
+              || workflowRef?.awaitingDecision"
             class="agent-banner mx-12 mb-3"
           >
             <div class="d-flex align-center ga-3">

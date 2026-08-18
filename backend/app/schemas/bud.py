@@ -242,7 +242,14 @@ class BUDRead(BaseModel):
     active_agent_task: BUDAgentTaskRead | None = None
     # In-flight phase-worker event (assignment / todo-gen / estimation):
     # see services/agent_activity_logger.py. ``None`` when nothing is running.
+    # Drives the client's ``agentLocked``, so it must mean "an agent is
+    # executing right now" and nothing looser.
     active_phase_worker: dict[str, str] | None = None
+    # A phase worker that stopped and is waiting on a person — today only a
+    # pending yield offer. It shares the ``skill_invoked`` event shape with
+    # the field above but must NOT lock the BUD: nothing is running, and who
+    # picks the work up is unrelated to whether it can change phase.
+    awaiting_human_decision: dict[str, str] | None = None
     # Sticky last-failed-phase banner sourced from agent_activity_logs newer
     # than ``phase_failure_acknowledged_at``; cleared via the dismiss endpoint.
     last_phase_failure: dict[str, Any] | None = None

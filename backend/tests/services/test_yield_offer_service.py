@@ -742,3 +742,39 @@ async def test_accept_settles_its_own_offer_before_assigning(
 
     # Already terminal by the time assign_bud runs, so the sweep skips it.
     assert status_when_assigned == [YieldOfferStatus.ACCEPTED]
+
+
+# --- a pending offer must not lock the BUD ---------------------------------
+#
+# Both a running phase worker and an offer waiting on a person show up as a
+# trailing ``skill_invoked``. Only the first should set ``agentLocked``:
+# nothing is executing while an offer is open, and who ends up owning the
+# BUD has no bearing on whether it can change phase. Conflating them froze
+# the status menu for the offer's entire 24h life.
+
+
+def test_parked_yield_offer_is_not_a_running_worker() -> None:
+    parked = SimpleNamespace(
+        skill_slug="phase_assigner",
+        metadata_={"reason": "yield_offer_pending", "offer_id": str(uuid.uuid4())},
+    )
+    assert yield_offer_lock.is_awaiting_human_decision(parked) is True
+
+
+def test_genuine_phase_worker_still_locks() -> None:
+    running = SimpleNamespace(skill_slug="pert_estimator", metadata_={"role": "developer"})
+    assert yield_offer_lock.is_awaiting_human_decision(running) is False
+
+
+def test_worker_with_no_metadata_still_locks() -> None:
+    """Most invoked events carry no metadata; they must keep locking."""
+    assert (
+        yield_offer_lock.is_awaiting_human_decision(
+            SimpleNamespace(skill_slug="phase_assigner", metadata_=None)
+        )
+        is False
+    )
+
+
+def test_no_active_worker_is_not_awaiting() -> None:
+    assert yield_offer_lock.is_awaiting_human_decision(None) is False

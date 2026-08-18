@@ -243,6 +243,10 @@ export interface BUDDocument extends BUDListItem {
   // change — synthetic skills don't have BUDAgentTask rows, so this is
   // the only signal the banner has for phase chains on remount.
   active_phase_worker: { skill_slug: string; message: string } | null
+  // A phase worker parked on a human decision (today: a pending yield
+  // offer). Feeds the banner but must NOT lock the BUD — mirrors
+  // ``awaiting_human_decision`` in backend/app/schemas/bud.py.
+  awaiting_human_decision?: { skill_slug: string; message: string } | null
   // Sticky last-failed-phase banner. Most recent unresolved skill_failed
   // event for this BUD (later skill_completed for same slug clears it),
   // newer than the user's last dismissal. Cleared by POSTing to
