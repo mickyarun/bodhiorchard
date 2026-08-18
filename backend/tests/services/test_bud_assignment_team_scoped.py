@@ -33,6 +33,9 @@ from app.services import bud_assignment
 @pytest.fixture(autouse=True)
 def _stub_yield_offer(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bud_assignment, "maybe_raise_yield_offer", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        bud_assignment, "supersede_offers_for_assigned_bud", AsyncMock(return_value=None)
+    )
 
 
 @pytest.fixture

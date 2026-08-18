@@ -106,6 +106,33 @@ class YieldOfferRepository(BaseRepository[YieldOffer]):
         await self._db.flush()
         return expired
 
+    async def supersede_pending_for_incoming_bud(
+        self, incoming_bud_id: uuid.UUID
+    ) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """Mark every pending offer for this incoming BUD as superseded.
+
+        Called when the BUD gains an assignee by some other route, which
+        answers the question the offer was asking. Returns
+        ``(offer_id, target_user_id)`` for each row just flipped: the
+        offer id releases the phase-assigner lock it was holding, and the
+        target id addresses the resolved-event publish that drops the row
+        from that user's board notice and bell. Empty when nothing was
+        pending, which is the overwhelmingly common case.
+        """
+        stmt = (
+            update(YieldOffer)
+            .where(YieldOffer.incoming_bud_id == incoming_bud_id)
+            .where(YieldOffer.status == YieldOfferStatus.PENDING)
+            .values(status=YieldOfferStatus.SUPERSEDED)
+            .returning(YieldOffer.id, YieldOffer.target_user_id)
+        )
+        if self._org_id is not None:
+            stmt = stmt.where(YieldOffer.org_id == self._org_id)
+        result = await self._db.execute(stmt)
+        superseded = [(row.id, row.target_user_id) for row in result.all()]
+        await self._db.flush()
+        return superseded
+
     async def has_pending_for_incoming_bud(self, incoming_bud_id: uuid.UUID) -> bool:
         """True iff a pending offer for this incoming BUD already exists.
 

@@ -29,7 +29,7 @@ import pytest
 
 from app.models.bud import BUDPriority
 from app.models.yield_offer import YieldOfferStatus
-from app.services import yield_offer_service
+from app.services import yield_offer_lock, yield_offer_service
 
 
 def _bud(priority: BUDPriority, assignee_id: uuid.UUID | None = None) -> SimpleNamespace:
@@ -320,7 +320,7 @@ def _capture_activity(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]
     async def _fake(_db: object, **kwargs: object) -> None:
         calls.append(kwargs)
 
-    monkeypatch.setattr(yield_offer_service, "log_agent_activity", _fake)
+    monkeypatch.setattr(yield_offer_lock, "log_agent_activity", _fake)
     return calls
 
 
@@ -341,7 +341,7 @@ def _stub_parked(monkeypatch: pytest.MonkeyPatch, offer_id: uuid.UUID | None) ->
     activity_repo = MagicMock()
     activity_repo.get_active_phase_worker = AsyncMock(return_value=parked)
     monkeypatch.setattr(
-        yield_offer_service,
+        yield_offer_lock,
         "AgentActivityLogRepository",
         MagicMock(return_value=activity_repo),
     )
@@ -456,7 +456,7 @@ async def test_ttl_expiry_closes_phase_assigner_for_each_bud(
         ]
     )
     monkeypatch.setattr(
-        yield_offer_service,
+        yield_offer_lock,
         "AgentActivityLogRepository",
         MagicMock(return_value=activity_repo),
     )
@@ -598,7 +598,7 @@ async def test_close_failure_propagates_instead_of_being_swallowed(
     monkeypatch.setattr(yield_offer_service, "publish", lambda topic, data: None)
     _stub_parked(monkeypatch, offer.id)
     monkeypatch.setattr(
-        yield_offer_service,
+        yield_offer_lock,
         "log_agent_activity",
         AsyncMock(side_effect=RuntimeError("activity write failed")),
     )
@@ -607,3 +607,138 @@ async def test_close_failure_propagates_instead_of_being_swallowed(
     db.flush = AsyncMock()
     with pytest.raises(RuntimeError, match="activity write failed"):
         await yield_offer_service.reject_offer(db, uuid.uuid4(), offer.id, target_id)
+
+
+# --- superseding an offer whose BUD got assigned elsewhere ------------------
+#
+# An offer only exists because the incoming BUD had nobody. Assigning it by
+# any other route answers that question, so leaving the offer pending would
+# both keep nagging the target and hold the phase-assigner lock (disabling
+# the BUD's whole status menu) until the 24h TTL or the next restart.
+
+
+@pytest.mark.asyncio
+async def test_assigning_the_incoming_bud_supersedes_its_pending_offer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id, bud_id, offer_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    target_id = uuid.uuid4()
+
+    yield_repo = MagicMock()
+    yield_repo.supersede_pending_for_incoming_bud = AsyncMock(return_value=[(offer_id, target_id)])
+    monkeypatch.setattr(
+        yield_offer_lock, "YieldOfferRepository", MagicMock(return_value=yield_repo)
+    )
+    bud_repo = MagicMock()
+    bud_repo.get_minimal_info_by_ids = AsyncMock(
+        return_value={bud_id: {"number": 12, "title": "T"}}
+    )
+    monkeypatch.setattr(yield_offer_lock, "BUDRepository", MagicMock(return_value=bud_repo))
+    _stub_parked(monkeypatch, offer_id)
+    calls = _capture_activity(monkeypatch)
+    published: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        yield_offer_lock, "publish", lambda topic, data: published.append((topic, data))
+    )
+
+    await yield_offer_lock.supersede_offers_for_assigned_bud(MagicMock(), org_id, bud_id)
+
+    yield_repo.supersede_pending_for_incoming_bud.assert_awaited_once_with(bud_id)
+    closed = _phase_assigner_calls(calls)
+    assert len(closed) == 1
+    assert closed[0]["event_type"] == "skill_failed"
+    assert closed[0]["metadata_"] == {"reason": "yield_offer_superseded"}
+    assert closed[0]["bud_number"] == 12
+    # Somebody else's request resolved this offer, so the target's board
+    # notice only drops the row if we publish — otherwise they click
+    # Accept and hit the pending-status guard.
+    assert published == [
+        (
+            f"yield_offer:{target_id}",
+            {
+                "event": "resolved",
+                "offer_id": str(offer_id),
+                "org_id": str(org_id),
+                "target_user_id": str(target_id),
+                "resolution": "superseded",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_assignment_with_no_pending_offer_touches_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The overwhelmingly common path: assignment must not pay for a BUD lookup."""
+    yield_repo = MagicMock()
+    yield_repo.supersede_pending_for_incoming_bud = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        yield_offer_lock, "YieldOfferRepository", MagicMock(return_value=yield_repo)
+    )
+    bud_repo = MagicMock()
+    bud_repo.get_minimal_info_by_ids = AsyncMock(return_value={})
+    monkeypatch.setattr(yield_offer_lock, "BUDRepository", MagicMock(return_value=bud_repo))
+    published: list[object] = []
+    monkeypatch.setattr(
+        yield_offer_lock, "publish", lambda topic, data: published.append((topic, data))
+    )
+    calls = _capture_activity(monkeypatch)
+
+    await yield_offer_lock.supersede_offers_for_assigned_bud(
+        MagicMock(), uuid.uuid4(), uuid.uuid4()
+    )
+
+    assert published == []
+
+    assert _phase_assigner_calls(calls) == []
+    bud_repo.get_minimal_info_by_ids.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_accept_settles_its_own_offer_before_assigning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accept must not supersede itself.
+
+    ``assign_bud`` supersedes every offer still pending for the BUD it
+    assigns. If accept flipped its own status afterwards, its row would be
+    caught by that sweep and emit ``yield_offer_superseded`` instead of
+    ``yield_offer_accepted``. Pinning the ordering keeps the audit honest.
+    """
+    target_id = uuid.uuid4()
+    incoming = _bud(BUDPriority.P0)
+    yieldable = _bud(BUDPriority.P3, assignee_id=target_id)
+    offer = SimpleNamespace(
+        id=uuid.uuid4(),
+        target_user_id=target_id,
+        incoming_bud_id=incoming.id,
+        yieldable_bud_id=yieldable.id,
+        status=YieldOfferStatus.PENDING,
+    )
+    yield_repo = MagicMock()
+    yield_repo.get_by_id = AsyncMock(return_value=offer)
+    monkeypatch.setattr(
+        yield_offer_service, "YieldOfferRepository", MagicMock(return_value=yield_repo)
+    )
+    bud_repo = MagicMock()
+    bud_repo.get_by_id = AsyncMock(side_effect=[yieldable, incoming])
+    monkeypatch.setattr(yield_offer_service, "BUDRepository", MagicMock(return_value=bud_repo))
+    monkeypatch.setattr(yield_offer_service, "unassign_bud", AsyncMock(return_value=None))
+    monkeypatch.setattr(yield_offer_service, "publish", lambda topic, data: None)
+    _stub_parked(monkeypatch, offer.id)
+    _capture_activity(monkeypatch)
+
+    status_when_assigned: list[YieldOfferStatus] = []
+
+    async def _assign(*_a: object, **_k: object) -> None:
+        status_when_assigned.append(offer.status)
+
+    monkeypatch.setattr(yield_offer_service, "assign_bud", _assign)
+
+    db = MagicMock()
+    db.flush = AsyncMock()
+    await yield_offer_service.accept_offer(db, uuid.uuid4(), offer.id, target_id, "Dev")
+
+    # Already terminal by the time assign_bud runs, so the sweep skips it.
+    assert status_when_assigned == [YieldOfferStatus.ACCEPTED]

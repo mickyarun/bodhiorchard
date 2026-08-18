@@ -39,6 +39,10 @@ class YieldOfferStatus(StrEnum):
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     EXPIRED = "expired"
+    # The incoming BUD was assigned by some other route, so the offer's
+    # premise ("this BUD has nobody") no longer holds. Distinct from
+    # EXPIRED, which means the target simply never answered in time.
+    SUPERSEDED = "superseded"
 
 
 class YieldOffer(BaseModel):

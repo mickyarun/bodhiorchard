@@ -43,8 +43,16 @@ def _stub_yield_offer(monkeypatch: pytest.MonkeyPatch) -> None:
 
     Tests that exercise yield-offer behaviour explicitly override this
     via their own ``monkeypatch.setattr`` on ``bud_assignment.maybe_raise_yield_offer``.
+
+    Also neutralises the supersede hook every assignment path now runs.
+    It is asserted directly in ``test_every_assignment_path_supersedes_
+    pending_offers`` below; here it would drag the yield-offer and BUD
+    repositories into every unrelated assignment test.
     """
     monkeypatch.setattr(bud_assignment, "maybe_raise_yield_offer", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        bud_assignment, "supersede_offers_for_assigned_bud", AsyncMock(return_value=None)
+    )
 
 
 @pytest.fixture
@@ -795,6 +803,8 @@ async def test_manual_assign_records_role_for_continuity_lookups(
     )
     record_event = AsyncMock(return_value=None)
     monkeypatch.setattr(bud_assignment_actions, "record_event", record_event)
+    supersede = AsyncMock(return_value=None)
+    monkeypatch.setattr(bud_assignment_actions, "supersede_offers_for_assigned_bud", supersede)
 
     db = MagicMock(name="AsyncSession")
     db.get = AsyncMock(return_value=assignee)
@@ -813,6 +823,9 @@ async def test_manual_assign_records_role_for_continuity_lookups(
     # ``phase`` must be stamped so continuity lookups on future re-entry
     # can match by phase rather than role-in-chain.
     assert detail["phase"] == BUDStatus.BUD.value
+    # Assigning answers whatever a pending yield offer was asking, so the
+    # offer must be closed out here rather than lingering for its 24h TTL.
+    supersede.assert_awaited_once_with(db, org_id, bud.id)
 
 
 # ── Phase-scoped continuity (no cross-phase bleed via fallback roles) ──
@@ -972,3 +985,41 @@ async def test_same_phase_re_entry_still_uses_continuity(
     completed = log_activity.await_args_list[-1].kwargs["metadata_"]
     assert completed["method"] == "continuity"
     assert completed["continuity_from_role"] == "designer"
+
+
+@pytest.mark.asyncio
+async def test_automated_assignment_supersedes_pending_offers(
+    monkeypatch: pytest.MonkeyPatch,
+    org_id: uuid.UUID,
+) -> None:
+    """``_record_assignment`` is the sink for every automated assignment.
+
+    It writes ``bud.assignee_id`` directly rather than going through
+    ``assign_bud``, so it needs the supersede hook of its own. Without it
+    a phase transition could assign the incoming BUD while its offer
+    stayed pending — and Accept on that dead offer would take the BUD
+    back off whoever had just been given it.
+    """
+    supersede = AsyncMock(return_value=None)
+    monkeypatch.setattr(bud_assignment, "supersede_offers_for_assigned_bud", supersede)
+    monkeypatch.setattr(bud_assignment, "record_event", AsyncMock(return_value=None))
+
+    db = MagicMock(name="AsyncSession")
+    db.flush = AsyncMock()
+    bud = _make_bud()
+    bud.assignee_id = None
+    chosen = SimpleNamespace(id=uuid.uuid4(), name="Auto", email="a@x")
+
+    await bud_assignment._record_assignment(
+        db,
+        org_id=org_id,
+        bud=bud,
+        chosen=chosen,
+        role_name=UserRole.DEVELOPER,
+        phase_value=BUDStatus.DEVELOPMENT.value,
+        method="smart_match",
+        actor_id=None,
+        actor_name=None,
+    )
+
+    supersede.assert_awaited_once_with(db, org_id, bud.id)

@@ -51,6 +51,7 @@ from app.services.team_scope import (
 from app.services.todo_assignment import (
     assign_todos_per_repo_team,
 )
+from app.services.yield_offer_lock import supersede_offers_for_assigned_bud
 from app.services.yield_offer_service import maybe_raise_yield_offer
 
 # Re-export for callers (and tests) that still patch this attribute name.
@@ -906,6 +907,8 @@ async def _record_assignment(
             detail={"previous_assignee_id": str(old_assignee_id), "reason": "reassigned"},
         )
     bud.assignee_id = chosen.id
+    # Any offer still asking somebody to yield for this BUD is now moot.
+    await supersede_offers_for_assigned_bud(db, org_id, bud.id)
     detail: dict[str, Any] = {
         "assignee_id": str(chosen.id),
         "assignee_name": chosen.name,

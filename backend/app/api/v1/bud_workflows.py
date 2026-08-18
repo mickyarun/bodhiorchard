@@ -27,6 +27,7 @@ from app.repositories.bud import BUDRepository
 from app.repositories.bud_timeline import BUDTimelineRepository
 from app.schemas.bud import BUDRead, ReassignmentRequest, RejectTechArchRequest
 from app.services.bud_development import on_bud_development_started
+from app.services.yield_offer_lock import supersede_offers_for_assigned_bud
 
 router = APIRouter()
 
@@ -348,6 +349,8 @@ async def request_reassignment(
         )
         # Assign new
         bud.assignee_id = new_dev.id
+        # Any offer still asking somebody to yield for this BUD is now moot.
+        await supersede_offers_for_assigned_bud(db, current_user.org_id, bud.id)
         await record_event(
             db,
             current_user.org_id,

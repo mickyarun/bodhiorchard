@@ -147,7 +147,12 @@ export type BUDPriority = 'P0' | 'P1' | 'P2' | 'P3'
 
 export const BUD_PRIORITIES: readonly BUDPriority[] = ['P0', 'P1', 'P2', 'P3'] as const
 
-export type YieldOfferStatus = 'pending' | 'accepted' | 'rejected' | 'expired'
+export type YieldOfferStatus =
+  | 'pending'
+  | 'accepted'
+  | 'rejected'
+  | 'expired'
+  | 'superseded'
 
 /** A pending request asking a developer to yield a lower-priority BUD
  *  so a higher-priority one can take its slot. Shape matches

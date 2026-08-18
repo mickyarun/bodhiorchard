@@ -34,6 +34,7 @@ from app.models.user import User
 from app.repositories.user import UserRepository
 from app.services.bud_timeline import record_event
 from app.services.todo_assignment import cascade_assignee_to_todos
+from app.services.yield_offer_lock import supersede_offers_for_assigned_bud
 
 
 async def assign_bud(
@@ -58,6 +59,13 @@ async def assign_bud(
     completed, or has been taken over via ``takeover_todo``. In that
     case the cascade is skipped to preserve developer claims, and the
     top-level reassignment still goes through for visibility.
+
+    Any yield offer still pending for this BUD is superseded here rather
+    than at the call sites, so a future assignment path cannot forget
+    it. An offer only exists because the BUD had nobody; giving it an
+    assignee answers that question, and leaving the offer open would
+    keep the BUD's phase-assigner lock — and so its entire status
+    menu — disabled until the 24h TTL.
     """
     assignee = await db.get(User, assignee_id)
     bud.assignee_id = assignee_id
@@ -82,6 +90,8 @@ async def assign_bud(
         actor_name=actor_name,
         detail=detail,
     )
+
+    await supersede_offers_for_assigned_bud(db, org_id, bud.id)
 
     if bud.status == BUDStatus.DEVELOPMENT:
         # The cascade returns -1 (and is a no-op) when any TODO has been
