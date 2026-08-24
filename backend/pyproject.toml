@@ -31,7 +31,7 @@ dependencies = [
     # passlib 1.7.x reads `bcrypt.__about__.__version__`, removed in bcrypt 5.0.
     # Without this pin, passlib's backend probe raises ValueError on every
     # hash/verify call. Hold at 4.x until passlib 2.x ships.
-    "bcrypt>=4.1,<5.0",
+    "bcrypt>=4.1,<6.0",
     "python-multipart>=0.0.6",
     "httpx>=0.27.0",
     "fastembed>=0.4.0",
