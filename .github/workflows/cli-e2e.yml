@@ -39,7 +39,7 @@ jobs:
           npm run build
 
       - name: Build backend image (:e2e)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           file: ./backend/Dockerfile
@@ -49,7 +49,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=backend
 
       - name: Build frontend image (:e2e)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./frontend/Dockerfile
@@ -60,7 +60,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=frontend
 
       - name: Build multiplayer image (:e2e)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./multiplayer/Dockerfile
