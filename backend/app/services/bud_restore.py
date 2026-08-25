@@ -124,6 +124,20 @@ async def restore_discarded_bud(
         },
     )
 
+    # Discard freezes the estimation columns rather than clearing them, so
+    # a BUD binned three weeks into development returns carrying a deadline
+    # three weeks in the past. That is not cosmetic: the standup risk
+    # detector (``BUDRepository.list_lagging_in_statuses``) selects on
+    # ``current_phase_deadline < now()``, and the board paints the card's
+    # phase line red — a BUD would come back already "late" for time it
+    # spent in the bin. Null both instead of recomputing here: the
+    # estimator is an AI-PERT + Monte Carlo run, far too heavy (and too
+    # failure-prone) to hold a restore open, and "not set" renders as
+    # absent everywhere. The next estimation run re-derives them from the
+    # phase the BUD actually resumes at.
+    bud.current_phase_deadline = None
+    bud.prod_p70_date = None
+
     bud.status = target
     await db.flush()
     await db.refresh(bud)

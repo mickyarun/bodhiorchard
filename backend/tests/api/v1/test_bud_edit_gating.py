@@ -115,7 +115,7 @@ async def test_patch_title_is_always_allowed(
     _patch_bud_repo(monkeypatch, bud)
     # Patch out everything else PATCH touches so the call doesn't blow
     # up downstream — we only care that the gate doesn't reject title.
-    monkeypatch.setattr(bud_handlers, "_bud_response", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(bud_handlers, "build_bud_response", AsyncMock(return_value=MagicMock()))
     monkeypatch.setattr("app.services.bud_timeline.record_event", AsyncMock(return_value=None))
     monkeypatch.setattr(
         bud_handlers.bud_version_repo, "insert_snapshot", AsyncMock(return_value=MagicMock())

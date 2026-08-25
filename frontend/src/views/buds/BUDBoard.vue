@@ -262,8 +262,7 @@
                   size="x-small"
                   color="primary"
                   prepend-icon="mdi-restore"
-                  :loading="restoringId === bud.id"
-                  @click.stop.prevent="askRestore(bud)"
+                  @click.stop.prevent="restoreDialog?.open(bud)"
                 >
                   Restore
                 </v-btn>
@@ -435,35 +434,10 @@
       </v-card>
     </v-dialog>
 
-    <!-- Restore confirmation. The target phase is resolved server-side
-         (whatever the BUD was discarded from), so the copy stays vague
-         here and the snackbar reports where it actually landed. -->
-    <v-dialog v-model="showRestoreDialog" max-width="440">
-      <v-card color="surface" class="pa-6">
-        <div class="text-h6 font-weight-bold mb-2">Restore BUD?</div>
-        <div class="text-body-2 text-medium-emphasis mb-4">
-          <strong>{{ restoreTargetLabel }}</strong> goes back into the pipeline
-          at the phase it was in when it was discarded, and its linked feature
-          becomes active again.
-        </div>
-        <v-card-actions class="pa-0">
-          <v-spacer />
-          <v-btn variant="text" @click="showRestoreDialog = false">Cancel</v-btn>
-          <v-btn
-            color="primary"
-            variant="flat"
-            :loading="restoringId !== null"
-            @click="confirmRestore"
-          >
-            Restore
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
-    <v-snackbar v-model="restoreSnackbar" :color="restoreError ? 'error' : 'success'" :timeout="4000">
-      {{ restoreMessage }}
-    </v-snackbar>
+    <!-- Confirmation + result snackbar for restoring a discarded BUD.
+         Shared with the BUD detail page so both entry points behave
+         identically. -->
+    <BUDRestoreDialog ref="restoreDialog" />
   </div>
 </template>
 
@@ -478,10 +452,11 @@ import { useAgentSkillsStore, type AgentType, type AgentSkill } from '@/stores/a
 import { useSettingsStore } from '@/stores/settings'
 import { useTeamsStore } from '@/stores/teams'
 import { BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_PRIORITIES } from '@/types'
-import type { BUDStatus, BUDPriority, BUDListItem } from '@/types'
+import type { BUDStatus, BUDPriority } from '@/types'
 import { usePhaseOrder } from '@/composables/usePhaseOrder'
 import { usePermissions } from '@/composables/usePermissions'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
+import BUDRestoreDialog from '@/components/buds/BUDRestoreDialog.vue'
 import YieldOfferNotice from '@/components/buds/YieldOfferNotice.vue'
 
 // Theme-token color for each priority. Used by the chip on each card
@@ -783,51 +758,11 @@ function phaseProgress(status: BUDStatus): number {
   return idx >= 0 ? Math.min(100, ((idx + 1) / activePhaseCount.value) * 100) : 0
 }
 
-// Restore flow for discarded BUDs. It lives on the board because a
-// discarded BUD is usually spotted while scanning the column, not while
-// reading the BUD itself — the detail header offers the same action.
-// The landing phase is resolved server-side (whatever the BUD was
-// discarded from), so we report it from the response rather than
-// predicting it here.
-const showRestoreDialog = ref(false)
-const restoreTarget = ref<BUDListItem | null>(null)
-const restoringId = ref<string | null>(null)
-const restoreSnackbar = ref(false)
-const restoreMessage = ref('')
-const restoreError = ref(false)
-
-const restoreTargetLabel = computed(() =>
-  restoreTarget.value ? budRef(restoreTarget.value) : '',
-)
-
-function budRef(bud: BUDListItem): string {
-  return `BUD-${String(bud.bud_number).padStart(3, '0')}`
-}
-
-function askRestore(bud: BUDListItem): void {
-  restoreTarget.value = bud
-  showRestoreDialog.value = true
-}
-
-async function confirmRestore(): Promise<void> {
-  const bud = restoreTarget.value
-  if (!bud) return
-  restoringId.value = bud.id
-  try {
-    const result = await budStore.restoreBUD(bud.id)
-    restoreError.value = result === null
-    // The store already replaced the row in ``buds``, so the card moves
-    // to its restored column on its own — no refetch needed.
-    restoreMessage.value = result
-      ? `${budRef(bud)} restored to ${BUD_STATUS_LABELS[result.status]}`
-      : budStore.error || 'Failed to restore BUD'
-    restoreSnackbar.value = true
-  } finally {
-    restoringId.value = null
-    showRestoreDialog.value = false
-    restoreTarget.value = null
-  }
-}
+// Restore flow for discarded BUDs lives in BUDRestoreDialog — the board
+// only needs a handle to open it. The BUD detail page mounts the same
+// component, so the confirmation, the store call and the "restored to X"
+// snackbar stay in one place.
+const restoreDialog = ref<InstanceType<typeof BUDRestoreDialog> | null>(null)
 
 function deadlineColor(deadline: string): string {
   const days = (new Date(deadline).getTime() - Date.now()) / 86400000

@@ -52,11 +52,18 @@ const DISCARDED_ROW: BUDListItem = {
   current_phase_deadline: null,
   assignee_id: null,
   assignee_name: null,
-  open_bug_count: 0,
+  open_bug_count: 3,
   created_at: '2026-08-01T00:00:00Z',
   updated_at: '2026-08-02T00:00:00Z',
 }
-const RESTORED_ROW: BUDListItem = { ...DISCARDED_ROW, status: 'testing' }
+// The server's restore payload is a BUDRead, which carries no
+// ``open_bug_count`` — that transient is injected by the list endpoint
+// only. Omitting it here is what makes the store's carry-over line
+// testable: a plain `buds[idx] = data` would blank the bug badge.
+const { open_bug_count: _omitted, ...RESTORE_RESPONSE } = {
+  ...DISCARDED_ROW,
+  status: 'testing' as const,
+}
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -65,7 +72,7 @@ beforeEach(() => {
 
 describe('useBUDStore.restoreBUD', () => {
   it('POSTs the restore endpoint and swaps the row in buds + currentBUD', async () => {
-    vi.mocked(api.post).mockResolvedValueOnce({ data: RESTORED_ROW })
+    vi.mocked(api.post).mockResolvedValueOnce({ data: RESTORE_RESPONSE })
 
     const store = useBUDStore()
     store.buds = [DISCARDED_ROW]
@@ -74,11 +81,13 @@ describe('useBUDStore.restoreBUD', () => {
     const result = await store.restoreBUD(BUD_ID)
 
     expect(api.post).toHaveBeenCalledWith(`/v1/buds/${BUD_ID}/restore`)
-    expect(result).toEqual(RESTORED_ROW)
+    expect(result).toEqual(RESTORE_RESPONSE)
     // The card must move columns off this response alone — a stale row
     // here would leave it sitting in Discarded until a full refetch.
     expect(store.buds[0].status).toBe('testing')
     expect(store.currentBUD?.status).toBe('testing')
+    // Carried over from the row being replaced, not from the response.
+    expect(store.buds[0].open_bug_count).toBe(3)
     expect(store.error).toBe('')
   })
 

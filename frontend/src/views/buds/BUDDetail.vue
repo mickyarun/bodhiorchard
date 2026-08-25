@@ -79,6 +79,10 @@
             @open-history="openHeaderHistory"
           />
 
+          <!-- Same confirm-and-restore flow the board uses; reloads the
+               timeline so the restore event appears without a refresh. -->
+          <BUDRestoreDialog ref="restoreDialog" @restored="loadTimeline" />
+
           <!-- External-LLM mode banner. Shown when EVERY phase in
                auto_generate_phases is off (or the dict is empty / null
                — the default for newly-created BUDs). The user drives
@@ -558,6 +562,7 @@ import ChatPanel from '@/components/buds/ChatPanel.vue'
 import BUDEstimationSection from '@/components/buds/BUDEstimationSection.vue'
 import BUDActivitySection from '@/components/buds/BUDActivitySection.vue'
 import BUDHeader from '@/components/buds/BUDHeader.vue'
+import BUDRestoreDialog from '@/components/buds/BUDRestoreDialog.vue'
 import BUDSkillSettingsDialog from '@/components/buds/BUDSkillSettingsDialog.vue'
 import BUDDesignPanel from '@/components/buds/BUDDesignPanel.vue'
 import BUDDevelopmentPanel from '@/components/buds/BUDDevelopmentPanel.vue'
@@ -1101,19 +1106,18 @@ watch(
   { immediate: true },
 )
 
-// Single source of truth for status → tab mapping
-// Bring a discarded BUD back into the pipeline. The landing phase is
-// decided server-side (whatever it was discarded from), and the
-// ``bud.status`` watcher below moves the active tab to match, so there's
-// nothing to route here. Failures surface through ``budStore.error`` in
-// the alert at the top of the page, same as any other mutation.
-async function handleRestore(): Promise<void> {
-  const current = bud.value
-  if (!current) return
-  const result = await budStore.restoreBUD(current.id)
-  if (result) await loadTimeline()
+// Bring a discarded BUD back into the pipeline. The confirmation, the
+// store call and the result snackbar all live in BUDRestoreDialog, shared
+// with the board. The landing phase is decided server-side, and the
+// ``bud.status`` watcher below moves the active tab to match, so there is
+// nothing to route here.
+const restoreDialog = ref<InstanceType<typeof BUDRestoreDialog> | null>(null)
+
+function handleRestore(): void {
+  if (bud.value) restoreDialog.value?.open(bud.value)
 }
 
+// Single source of truth for status → tab mapping
 const STATUS_TAB_MAP: Record<string, string> = {
   bud: 'requirements',
   design: 'design',

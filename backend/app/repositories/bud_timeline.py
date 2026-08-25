@@ -141,6 +141,14 @@ class BUDTimelineRepository(BaseRepository[BUDTimelineEvent]):
         ``to_status`` must be the ``BUDStatus`` *value* (e.g.
         ``BUDStatus.DISCARDED.value``), matching the ``detail["to"]``
         string written by the status-change recorder.
+
+        "Newest" is resolved by ``created_at``, which carries Postgres'
+        ``now()`` — the *transaction* clock, not the statement clock. Two
+        events written inside one transaction therefore share a timestamp
+        and their relative order here is undefined. That is sound for
+        status changes, which arrive one per request, but it is why an
+        integration test must commit between transitions to reproduce a
+        real discard → restore → discard sequence.
         """
         stmt = self._scoped(
             select(BUDTimelineEvent.detail["from"].astext)
