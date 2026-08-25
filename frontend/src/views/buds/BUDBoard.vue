@@ -97,17 +97,22 @@
         </v-tooltip>
         <!-- Discarded BUDs are hidden by default — they're terminal and
              clutter the active pipeline. This toggle appends a Discarded
-             column so they stay reachable for review/audit. -->
+             column so they stay reachable for review, audit and restore.
+             Labelled rather than icon-only: it sits in a row of icon
+             buttons where a bare bin glyph reads as "delete", not
+             "show the discarded ones". -->
         <v-tooltip :text="showDiscarded ? 'Hide discarded BUDs' : 'Show discarded BUDs'" location="bottom">
           <template #activator="{ props: tipProps }">
             <v-btn
               v-bind="tipProps"
-              :icon="showDiscarded ? 'mdi-delete' : 'mdi-delete-outline'"
+              :prepend-icon="showDiscarded ? 'mdi-delete' : 'mdi-delete-outline'"
               variant="text"
               size="small"
               :color="showDiscarded ? 'primary' : undefined"
               @click="showDiscarded = !showDiscarded"
-            />
+            >
+              Discarded
+            </v-btn>
           </template>
         </v-tooltip>
         <!-- Customize lifecycle stages — same permission gate as the
@@ -244,8 +249,24 @@
               <div v-if="bud.status === 'closed'" class="text-caption text-success mb-2">
                 ▸ Released: {{ formatDate(bud.updated_at) }}
               </div>
-              <div v-else-if="bud.status === 'discarded'" class="text-caption text-error mb-2">
-                ▸ Discarded: {{ formatDate(bud.updated_at) }}
+              <!-- Discarded cards carry their own restore affordance so a
+                   BUD can be brought back without opening it first. The
+                   card is a router-link, hence .stop.prevent on the button. -->
+              <div v-else-if="bud.status === 'discarded'" class="d-flex align-center justify-space-between mb-2">
+                <span class="text-caption text-error">
+                  ▸ Discarded: {{ formatDate(bud.updated_at) }}
+                </span>
+                <v-btn
+                  v-if="canEditBuds"
+                  variant="text"
+                  size="x-small"
+                  color="primary"
+                  prepend-icon="mdi-restore"
+                  :loading="restoringId === bud.id"
+                  @click.stop.prevent="askRestore(bud)"
+                >
+                  Restore
+                </v-btn>
               </div>
               <div v-else-if="bud.prod_p70_date" class="text-caption text-medium-emphasis mb-2">
                 ▸ Live: {{ formatDate(bud.prod_p70_date) }} (70%)
@@ -413,6 +434,36 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- Restore confirmation. The target phase is resolved server-side
+         (whatever the BUD was discarded from), so the copy stays vague
+         here and the snackbar reports where it actually landed. -->
+    <v-dialog v-model="showRestoreDialog" max-width="440">
+      <v-card color="surface" class="pa-6">
+        <div class="text-h6 font-weight-bold mb-2">Restore BUD?</div>
+        <div class="text-body-2 text-medium-emphasis mb-4">
+          <strong>{{ restoreTargetLabel }}</strong> goes back into the pipeline
+          at the phase it was in when it was discarded, and its linked feature
+          becomes active again.
+        </div>
+        <v-card-actions class="pa-0">
+          <v-spacer />
+          <v-btn variant="text" @click="showRestoreDialog = false">Cancel</v-btn>
+          <v-btn
+            color="primary"
+            variant="flat"
+            :loading="restoringId !== null"
+            @click="confirmRestore"
+          >
+            Restore
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-snackbar v-model="restoreSnackbar" :color="restoreError ? 'error' : 'success'" :timeout="4000">
+      {{ restoreMessage }}
+    </v-snackbar>
   </div>
 </template>
 
@@ -427,7 +478,7 @@ import { useAgentSkillsStore, type AgentType, type AgentSkill } from '@/stores/a
 import { useSettingsStore } from '@/stores/settings'
 import { useTeamsStore } from '@/stores/teams'
 import { BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_PRIORITIES } from '@/types'
-import type { BUDStatus, BUDPriority } from '@/types'
+import type { BUDStatus, BUDPriority, BUDListItem } from '@/types'
 import { usePhaseOrder } from '@/composables/usePhaseOrder'
 import { usePermissions } from '@/composables/usePermissions'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
@@ -717,7 +768,7 @@ function priorityColor(priority: BUDPriority): string {
 // kanban columns and progress-bar denominator both use this so the board
 // reacts when the org toggles UAT off, without a page reload.
 const { phaseOrder } = usePhaseOrder()
-const { canViewQAAutomation, canCreateBuds } = usePermissions()
+const { canViewQAAutomation, canCreateBuds, canEditBuds } = usePermissions()
 const boardColumns = computed<BUDStatus[]>(() =>
   phaseOrder.value.filter(s => s !== 'discarded' || showDiscarded.value),
 )
@@ -730,6 +781,52 @@ function phaseProgress(status: BUDStatus): number {
   // progress bar is consistent regardless of whether UAT is enabled.
   const idx = phaseOrder.value.indexOf(status)
   return idx >= 0 ? Math.min(100, ((idx + 1) / activePhaseCount.value) * 100) : 0
+}
+
+// Restore flow for discarded BUDs. It lives on the board because a
+// discarded BUD is usually spotted while scanning the column, not while
+// reading the BUD itself — the detail header offers the same action.
+// The landing phase is resolved server-side (whatever the BUD was
+// discarded from), so we report it from the response rather than
+// predicting it here.
+const showRestoreDialog = ref(false)
+const restoreTarget = ref<BUDListItem | null>(null)
+const restoringId = ref<string | null>(null)
+const restoreSnackbar = ref(false)
+const restoreMessage = ref('')
+const restoreError = ref(false)
+
+const restoreTargetLabel = computed(() =>
+  restoreTarget.value ? budRef(restoreTarget.value) : '',
+)
+
+function budRef(bud: BUDListItem): string {
+  return `BUD-${String(bud.bud_number).padStart(3, '0')}`
+}
+
+function askRestore(bud: BUDListItem): void {
+  restoreTarget.value = bud
+  showRestoreDialog.value = true
+}
+
+async function confirmRestore(): Promise<void> {
+  const bud = restoreTarget.value
+  if (!bud) return
+  restoringId.value = bud.id
+  try {
+    const result = await budStore.restoreBUD(bud.id)
+    restoreError.value = result === null
+    // The store already replaced the row in ``buds``, so the card moves
+    // to its restored column on its own — no refetch needed.
+    restoreMessage.value = result
+      ? `${budRef(bud)} restored to ${BUD_STATUS_LABELS[result.status]}`
+      : budStore.error || 'Failed to restore BUD'
+    restoreSnackbar.value = true
+  } finally {
+    restoringId.value = null
+    showRestoreDialog.value = false
+    restoreTarget.value = null
+  }
 }
 
 function deadlineColor(deadline: string): string {

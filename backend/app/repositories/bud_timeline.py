@@ -128,6 +128,34 @@ class BUDTimelineRepository(BaseRepository[BUDTimelineEvent]):
             return None
         return (row[0], row[1])
 
+    async def latest_status_change_from(self, bud_id: uuid.UUID, to_status: str) -> str | None:
+        """``detail["from"]`` of the most recent status change INTO ``to_status``.
+
+        Answers "what phase was this BUD in just before it entered
+        <stage>?" — the signal behind restoring a discarded BUD to where
+        it left off. Reads the newest matching event (a BUD can be
+        discarded, restored and discarded again), and returns ``None``
+        when no such transition was ever recorded or the event predates
+        the ``from`` key.
+
+        ``to_status`` must be the ``BUDStatus`` *value* (e.g.
+        ``BUDStatus.DISCARDED.value``), matching the ``detail["to"]``
+        string written by the status-change recorder.
+        """
+        stmt = self._scoped(
+            select(BUDTimelineEvent.detail["from"].astext)
+            .where(
+                BUDTimelineEvent.bud_id == bud_id,
+                BUDTimelineEvent.event_type == "status_change",
+                BUDTimelineEvent.detail["to"].astext == to_status,
+            )
+            .order_by(BUDTimelineEvent.created_at.desc())
+            .limit(1)
+        )
+        result = await self._db.execute(stmt)
+        row = result.first()
+        return row[0] if row is not None else None
+
     async def distinct_actors_for_event(
         self, bud_id: uuid.UUID, event_type: str
     ) -> set[uuid.UUID]:

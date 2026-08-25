@@ -314,3 +314,28 @@ async def transition_feature_for_bud(
     # the single owner of that table now. This handler stays focused on
     # the feature-registry state machine (planned → in_progress →
     # mark_inactive) so the two concerns can evolve independently.
+
+
+async def restore_feature_for_bud(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    bud_number: int,
+) -> None:
+    """Revive the feature that was deactivated when this BUD was discarded.
+
+    Exact inverse of the ``DISCARDED`` branch in
+    :func:`transition_feature_for_bud`. Discard only flips ``is_active``
+    — ``feature_status`` is left untouched — so reviving is enough to put
+    the row back in whatever planned / in_progress state it held before,
+    with no need to re-derive the phase from the BUD.
+
+    No-op when the BUD never had a feature (BUDs only get one once the PM
+    agent has run) or when the feature is already active.
+    """
+    bud_ref = f"BUD-{bud_number:03d}"
+    feat_repo = FeatureRepository(db, org_id=org_id)
+    feature = await feat_repo.get_by_source_ref(bud_ref, source="bud")
+    if feature is None or feature.is_active:
+        return
+    await feat_repo.revive(feature.id, last_seen_sha=feature.last_seen_sha)
+    logger.info("feature_reactivated", bud_ref=bud_ref)

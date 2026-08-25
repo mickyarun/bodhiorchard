@@ -46,6 +46,10 @@ const props = defineProps<{
   // (tech lead / PM / org owner roles). When false, the chip is
   // read-only and the menu activator is suppressed.
   canEditPriority: boolean
+  // True when the current user holds ``buds:edit``. Gates the restore
+  // action on a discarded BUD, mirroring the backend permission on
+  // POST /buds/{id}/restore.
+  canEditBuds: boolean
 }>()
 
 const emit = defineEmits<{
@@ -54,6 +58,7 @@ const emit = defineEmits<{
   'change-assignee': [memberId: string | null]
   'change-priority': [priority: BUDPriority]
   'update-status': [status: BUDStatus]
+  restore: []
   delete: []
   'save-title': [title: string]
   'open-skill-settings': []
@@ -214,7 +219,19 @@ function saveTitle(): void {
           </template>
           <v-list density="compact" min-width="180">
             <v-list-subheader>Change Status</v-list-subheader>
-            <v-list-item v-if="isClosed" disabled>
+            <!-- Discarded is recoverable, closed is not: closed BUDs have
+                 already run their close-out side effects (XP, SP, learning
+                 recap), so reopening one would let those re-fire. -->
+            <v-list-item
+              v-if="bud.status === 'discarded' && canEditBuds"
+              @click="emit('restore')"
+            >
+              <div class="d-flex align-center">
+                <v-icon icon="mdi-restore" size="18" class="mr-2" />
+                Restore BUD
+              </div>
+            </v-list-item>
+            <v-list-item v-else-if="isClosed" disabled>
               <span class="text-caption text-medium-emphasis">
                 {{ bud.status === 'discarded' ? 'Discarded' : 'Closed' }} — cannot change status
               </span>

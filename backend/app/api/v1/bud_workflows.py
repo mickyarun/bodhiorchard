@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""BUD workflow endpoints: tech arch approval, rejection, and reassignment."""
+"""BUD workflow endpoints: tech arch approval, rejection, reassignment, restore."""
 
 import uuid
 from datetime import UTC, datetime
@@ -27,6 +27,7 @@ from app.repositories.bud import BUDRepository
 from app.repositories.bud_timeline import BUDTimelineRepository
 from app.schemas.bud import BUDRead, ReassignmentRequest, RejectTechArchRequest
 from app.services.bud_development import on_bud_development_started
+from app.services.bud_restore import restore_discarded_bud
 from app.services.yield_offer_lock import supersede_offers_for_assigned_bud
 
 router = APIRouter()
@@ -385,4 +386,39 @@ async def request_reassignment(
 
     await db.flush()
     await db.refresh(bud)
+    return bud
+
+
+@router.post(
+    "/restore",
+    response_model=BUDRead,
+    dependencies=[Depends(require_permissions("buds:edit"))],
+)
+async def restore_bud(
+    bud_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BUDDocument:
+    """Bring a discarded BUD back into the pipeline at its previous phase.
+
+    ``buds:edit`` rather than ``buds:test``: undoing a discard is an
+    owner/PM decision, and the QA scope (``_QA_OWNED_TRANSITIONS`` in
+    ``bud.py``) covers forward testing promotions only.
+
+    Rejects anything that is not currently ``discarded`` — including
+    ``closed``, which stays terminal on purpose. See
+    :mod:`app.services.bud_restore` for why.
+    """
+    bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    bud = await bud_repo.get_by_id(bud_id)
+    if bud is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
+
+    if bud.status != BUDStatus.DISCARDED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(f"Only discarded BUDs can be restored; this one is '{bud.status.value}'."),
+        )
+
+    await restore_discarded_bud(db, bud, current_user)
     return bud

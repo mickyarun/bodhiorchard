@@ -39,6 +39,11 @@ export function usePermissions() {
   // gate (buds:create) so roles without it — developer, qa, viewer —
   // don't see a button that would 403.
   const canCreateBuds = computed(() => hasPermission('buds:create'))
+  // Gates BUD-mutating affordances that aren't creation — today the
+  // "restore discarded BUD" action on the board and detail header.
+  // Mirrors the POST /v1/buds/{id}/restore gate (buds:edit) so QA users,
+  // who hold buds:test only, don't see a control that would 403.
+  const canEditBuds = computed(() => hasPermission('buds:edit'))
   const canManageMembers = computed(() => hasPermission('team:manage'))
   const canViewSettings = computed(() =>
     hasAnyPermission('org:view_settings', 'integrations:view'),
@@ -80,6 +85,7 @@ export function usePermissions() {
     isOrgAdmin,
     canApprove,
     canCreateBuds,
+    canEditBuds,
     canManageMembers,
     canViewSettings,
     canViewConnections,

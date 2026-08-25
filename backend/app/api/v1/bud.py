@@ -781,15 +781,26 @@ async def update_bud(
     user_perms = await get_user_permissions(current_user, db)
     _enforce_qa_scope(user_perms, bud.status, update_data)
 
-    # Guard: closed/discarded BUDs cannot be reopened. Placed before ANY
-    # side-effect-producing code (transition_feature_for_bud, assignments)
-    # so a rejected request never mutates state.
+    # Guard: terminal BUDs cannot be moved through the normal status
+    # PATCH. Placed before ANY side-effect-producing code
+    # (transition_feature_for_bud, assignments) so a rejected request
+    # never mutates state.
+    #
+    # Discarded BUDs are recoverable, but only through
+    # ``POST /buds/{id}/restore`` — that path returns the BUD to its
+    # pre-discard phase and revives the linked feature, neither of which
+    # this handler does. Keeping it out of here means the phase guards
+    # below (which all reason about forward transitions) never have to
+    # account for a BUD arriving from a terminal state.
     if "status" in update_data and bud.status in (BUDStatus.CLOSED, BUDStatus.DISCARDED):
+        remedy = (
+            "Use the restore action to bring it back."
+            if bud.status == BUDStatus.DISCARDED
+            else "Create a new BUD instead."
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Cannot change status of a {bud.status.value} BUD. Create a new BUD instead."
-            ),
+            detail=f"Cannot change status of a {bud.status.value} BUD. {remedy}",
         )
 
     # Guard: leaving the design phase while wireframe generation is still

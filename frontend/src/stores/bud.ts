@@ -178,6 +178,35 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
+  /**
+   * Bring a discarded BUD back into the pipeline. The backend picks the
+   * phase (whatever it was discarded from) and returns the updated BUD,
+   * so the caller reads ``result.status`` to tell the user where it
+   * landed rather than guessing client-side.
+   *
+   * Kept separate from ``updateBUD`` because PATCH deliberately refuses
+   * to move a BUD out of a terminal status — restoring also revives the
+   * linked feature, which a plain status write does not do.
+   */
+  async function restoreBUD(id: string): Promise<BUDDocument | null> {
+    error.value = ''
+    try {
+      const { data } = await api.post(`/v1/buds/${id}/restore`)
+      const idx = buds.value.findIndex(p => p.id === id)
+      if (idx !== -1) {
+        // BUDRead carries no ``open_bug_count`` (it's a transient the list
+        // endpoint injects), so a verbatim swap would blank the bug badge
+        // on the restored card until the next full fetch. Carry it over.
+        buds.value[idx] = { ...data, open_bug_count: buds.value[idx].open_bug_count }
+      }
+      if (currentBUD.value?.id === id) currentBUD.value = data
+      return data
+    } catch (err) {
+      error.value = extractApiError(err, 'Failed to restore BUD')
+      return null
+    }
+  }
+
   async function deleteBUD(id: string): Promise<boolean> {
     error.value = ''
     try {
@@ -664,6 +693,7 @@ export const useBUDStore = defineStore('bud', () => {
     refreshBUDIfCurrent,
     createBUD,
     updateBUD,
+    restoreBUD,
     deleteBUD,
     chatBUD,
     exportBUDUrl,

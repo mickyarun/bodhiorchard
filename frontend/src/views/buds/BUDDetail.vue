@@ -66,11 +66,13 @@
             :chat-open="chatOpen"
             :chatable="currentSectionChatable"
             :can-edit-priority="canEditBud"
+            :can-edit-buds="canEditBud"
             @back="router.push('/buds')"
             @update:chat-open="chatOpen = $event"
             @change-assignee="handleAssigneeChange"
             @change-priority="handlePriorityChange"
             @update-status="updateStatus"
+            @restore="handleRestore"
             @delete="confirmDelete = true"
             @save-title="handleSaveTitle"
             @open-skill-settings="skillSettingsOpen = true"
@@ -1100,6 +1102,18 @@ watch(
 )
 
 // Single source of truth for status → tab mapping
+// Bring a discarded BUD back into the pipeline. The landing phase is
+// decided server-side (whatever it was discarded from), and the
+// ``bud.status`` watcher below moves the active tab to match, so there's
+// nothing to route here. Failures surface through ``budStore.error`` in
+// the alert at the top of the page, same as any other mutation.
+async function handleRestore(): Promise<void> {
+  const current = bud.value
+  if (!current) return
+  const result = await budStore.restoreBUD(current.id)
+  if (result) await loadTimeline()
+}
+
 const STATUS_TAB_MAP: Record<string, string> = {
   bud: 'requirements',
   design: 'design',
