@@ -17,7 +17,23 @@ import vue from '@vitejs/plugin-vue'
 import vuetify from 'vite-plugin-vuetify'
 import wasm from 'vite-plugin-wasm'
 import topLevelAwait from 'vite-plugin-top-level-await'
+import { createRequire } from 'node:module'
+import { dirname, resolve } from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
+
+// Where dependencies actually live on disk.
+//
+// npm hoists this workspace's packages to the repo root, and a git
+// worktree checks out *beside* that root rather than inside it — so
+// node_modules ends up outside Vite's project root. Vite's filesystem
+// guard then refuses to serve anything from there with a 403, which
+// shows up as every icon rendering as an empty box: the CSS is bundled
+// fine, but the webfont it points at never loads.
+//
+// Resolved from a real dependency rather than hardcoded, so it points
+// at the right place whether node_modules is local or hoisted.
+const require = createRequire(import.meta.url)
+const depsRoot = resolve(dirname(require.resolve('vuetify/package.json')), '..', '..')
 
 export default defineConfig({
   plugins: [
@@ -93,6 +109,11 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    fs: {
+      // Additive: Vite still allows its own project root, this just
+      // adds the hoisted dependency tree when it sits outside it.
+      allow: [depsRoot],
+    },
     allowedHosts: ['frontendchat.ngrok.app', 'macbook-pro.taile1406f.ts.net'],
     proxy: {
       '/api': {
