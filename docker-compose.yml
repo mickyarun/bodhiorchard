@@ -74,6 +74,15 @@ services:
       # Persistent store for the backend's ed25519 deploy keypair used to
       # clone private GitHub repos. Only the public key is ever exposed.
       - ssh_data:/data/ssh
+      # Uploaded files (QA evidence, bug attachments) when the local-disk
+      # storage backend is in use, which is the default. WORKDIR is /app
+      # and FILE_STORAGE_LOCAL_DIR defaults to the relative
+      # ``data/uploads``, so without this they live on the container's
+      # writable layer and every redeploy silently orphans them: the DB
+      # rows survive and point at bytes that are gone. Deploys that set
+      # FILE_STORAGE_S3=true don't use this path, and an unused named
+      # volume costs nothing.
+      - uploads_data:/app/data/uploads
     # Defense-in-depth hardening around the ``claude`` subprocess.
     # To enable the egress firewall on a Linux host:
     #
@@ -142,3 +151,4 @@ volumes:
   postgres_data:
   repos_data:
   ssh_data:
+  uploads_data:
