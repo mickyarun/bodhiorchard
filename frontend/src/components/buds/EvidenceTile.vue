@@ -15,251 +15,43 @@
  -->
 
 <template>
-  <div class="evidence-tile" :class="{ 'is-image': isImage, 'is-loading': loading }">
-    <!-- Image thumbnail -->
-    <button
-      v-if="isImage"
-      type="button"
-      class="tile-surface tile-image"
-      :disabled="!blobUrl"
-      :aria-label="`Preview ${evidence.filename}`"
-      @click="$emit('preview', blobUrl)"
-    >
-      <img v-if="blobUrl" :src="blobUrl" :alt="evidence.filename" />
-      <v-icon v-else-if="errored" icon="mdi-image-broken-variant" size="24" />
-      <v-progress-circular v-else indeterminate size="18" width="2" />
-    </button>
-
-    <!-- Non-image: file icon tile. Click = download. -->
-    <button
-      v-else
-      type="button"
-      class="tile-surface tile-file"
-      :aria-label="`Download ${evidence.filename}`"
-      @click="downloadFile"
-    >
-      <v-icon :icon="fileIcon" size="28" />
-    </button>
-
-    <div class="tile-meta">
-      <div class="tile-filename" :title="evidence.filename">{{ evidence.filename }}</div>
-    </div>
-
-    <v-btn
-      class="delete-btn"
-      icon
-      size="x-small"
-      variant="flat"
-      density="comfortable"
-      aria-label="Delete evidence. Upload a replacement after deleting."
-      @click.stop="$emit('delete')"
-    >
-      <v-icon size="14">mdi-close</v-icon>
-      <v-tooltip activator="parent" location="top">
-        Delete, then re-upload to replace
-      </v-tooltip>
-    </v-btn>
-  </div>
+  <AttachmentTile
+    :filename="evidence.filename"
+    :mime-type="evidence.mime_type"
+    :fetch-path="`/v1/buds/${budId}/qa/evidence/${evidence.id}`"
+    remove-label="Delete evidence. Upload a replacement after deleting."
+    remove-tooltip="Delete, then re-upload to replace"
+    @remove="$emit('delete')"
+    @preview="(url) => $emit('preview', url)"
+    @error="(message) => $emit('error', message)"
+  />
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useAuthStore } from '@/stores/auth'
+import AttachmentTile from '@/components/common/AttachmentTile.vue'
 import type { TestEvidence } from '@/types'
 
-const props = defineProps<{
+/**
+ * QA-evidence adapter over the shared {@link AttachmentTile}.
+ *
+ * The tile owns everything visual and every fetch: thumbnail vs icon,
+ * authenticated blob loading, object-URL lifecycle, download. This
+ * component only maps an evidence row onto the tile's props and keeps
+ * the QA-specific delete wording, which differs from the generic
+ * "Remove" because replacing evidence here means delete-then-re-upload.
+ *
+ * ``size_bytes`` is deliberately not passed: the evidence API doesn't
+ * return it, and the tile hides the size line when it is absent — so
+ * these tiles look exactly as they did before the refactor.
+ */
+defineProps<{
   evidence: TestEvidence
   budId: string
 }>()
 
-const emit = defineEmits<{
+defineEmits<{
   (e: 'delete'): void
-  (e: 'preview', blobUrl: string | null): void
-  // Surfaces fetch failures (download endpoint 500, thumbnail load
-  // refusal, network outage, expired token) so the parent panel can
-  // render the same error banner used by upload / delete instead of
-  // leaving the user with a broken-image icon and no explanation.
+  (e: 'preview', objectUrl: string | null): void
   (e: 'error', message: string): void
 }>()
-
-const authStore = useAuthStore()
-
-// blobUrl is an object URL created from a fetched blob. Object URLs must
-// be revoked on unmount to avoid leaking browser memory — every tile
-// allocates one, so over a long test-run session this adds up.
-const blobUrl = ref<string | null>(null)
-const loading = ref(false)
-const errored = ref(false)
-
-const isImage = computed(() => props.evidence.mime_type.startsWith('image/'))
-
-const fileIcon = computed(() => {
-  const mime = props.evidence.mime_type
-  if (mime === 'application/pdf') return 'mdi-file-pdf-box'
-  if (mime.startsWith('text/')) return 'mdi-file-document-outline'
-  if (mime.startsWith('video/')) return 'mdi-file-video-outline'
-  if (mime.startsWith('audio/')) return 'mdi-file-music-outline'
-  return 'mdi-file-outline'
-})
-
-async function fetchBlob(): Promise<Blob> {
-  // The evidence download endpoint is auth-gated with a Bearer token, so a
-  // plain <img src="/api/..."> won't work — the browser doesn't attach the
-  // Authorization header to img requests. We fetch manually and turn the
-  // result into an object URL.
-  const resp = await fetch(
-    `/api/v1/buds/${props.budId}/qa/evidence/${props.evidence.id}`,
-    {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    },
-  )
-  if (!resp.ok) {
-    // Try to lift the backend's ``{"detail": "..."}`` so a 404
-    // ("Evidence not found") or 500 (storage backend issue) reaches
-    // the user rather than degrading silently to a broken-image icon.
-    let detail = `HTTP ${resp.status}`
-    try {
-      const body = await resp.clone().json()
-      if (body?.detail) detail = String(body.detail)
-    }
-    catch { /* non-JSON body — keep the status fallback */ }
-    throw new Error(detail)
-  }
-  return await resp.blob()
-}
-
-function describeFetchError(err: unknown, action: 'thumbnail' | 'download'): string {
-  const reason = err instanceof Error ? err.message : 'unknown error'
-  const verb = action === 'thumbnail' ? 'load preview for' : 'download'
-  return `Couldn't ${verb} "${props.evidence.filename}" (${reason}).`
-}
-
-async function loadThumbnail(): Promise<void> {
-  loading.value = true
-  errored.value = false
-  try {
-    const blob = await fetchBlob()
-    blobUrl.value = URL.createObjectURL(blob)
-  }
-  catch (e) {
-    errored.value = true
-    const message = describeFetchError(e, 'thumbnail')
-    console.error(message, e)
-    emit('error', message)
-  }
-  finally {
-    loading.value = false
-  }
-}
-
-async function downloadFile(): Promise<void> {
-  // Fetch-then-click pattern: browsers download via <a download> only when
-  // the href is reachable without extra headers. We build an object URL
-  // from the authenticated blob, click, then revoke.
-  try {
-    const blob = await fetchBlob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = props.evidence.filename
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-  catch (e) {
-    const message = describeFetchError(e, 'download')
-    console.error(message, e)
-    emit('error', message)
-  }
-}
-
-onMounted(() => {
-  if (isImage.value) {
-    void loadThumbnail()
-  }
-})
-
-onBeforeUnmount(() => {
-  if (blobUrl.value) {
-    URL.revokeObjectURL(blobUrl.value)
-    blobUrl.value = null
-  }
-})
 </script>
-
-<style scoped>
-.evidence-tile {
-  position: relative;
-  width: 104px;
-  height: 104px;
-  border-radius: 8px;
-  overflow: hidden;
-  background: rgba(var(--v-theme-on-surface), 0.04);
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.1);
-  display: flex;
-  flex-direction: column;
-}
-
-.evidence-tile:hover {
-  border-color: rgba(var(--v-theme-primary), 0.5);
-}
-
-.tile-surface {
-  all: unset;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  background: transparent;
-}
-
-.tile-surface:disabled {
-  cursor: default;
-}
-
-.tile-image img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.tile-file {
-  color: rgba(var(--v-theme-on-surface), 0.6);
-}
-
-.tile-meta {
-  padding: 4px 6px;
-  background: rgba(var(--v-theme-surface), 0.9);
-  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-}
-
-.tile-filename {
-  font-size: 10px;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: rgba(var(--v-theme-on-surface), 0.75);
-}
-
-/* Persistently visible — hover-only discovery left users unable to find
- * the delete affordance on touch devices, and made "I want to replace
- * this upload" feel unsupported. The tile has plenty of corner space
- * for an always-on × badge without obscuring the thumbnail. */
-.delete-btn {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  background: rgba(0, 0, 0, 0.55) !important;
-  color: white !important;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  transition: background 0.15s ease, transform 0.1s ease;
-}
-
-.delete-btn:hover {
-  background: rgba(var(--v-theme-error), 0.95) !important;
-  transform: scale(1.08);
-}
-</style>

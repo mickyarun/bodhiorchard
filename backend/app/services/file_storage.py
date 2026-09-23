@@ -26,33 +26,26 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from app.config import FileStorageConfig, settings
 from app.core.paths import PathTraversalError, safe_join
+from app.services.upload_policy import QA_EVIDENCE_POLICY, UploadPolicy, UploadPolicyError
 
 logger = structlog.get_logger(__name__)
 
-# Maximum file size for QA evidence uploads: 10 MB. The cap is
-# enforced in FOUR coordinated places that MUST stay in sync:
-#   * here (backend storage guard, emits ``FileStorageError`` with this number);
+# Upload rules (size caps, accepted types) live in ``upload_policy`` so each
+# surface declares its own; this module only enforces whichever policy the
+# caller passes. The two names below are re-exported for the QA-evidence
+# call sites that predate policies.
+#
+# The QA evidence cap is mirrored in three other places that MUST stay in
+# sync when it changes:
 #   * ``backend/app/api/v1/bud_qa.py`` (read cap on the request body so we
 #     don't buffer arbitrarily large uploads into memory just to reject them);
-#   * ``frontend/nginx.conf`` (``client_max_body_size``, set ~2 MB above
+#   * ``frontend/nginx.conf.template`` (``client_max_body_size``, set above
 #     this so the at-the-limit request reaches the backend's clean JSON
 #     413 instead of nginx's HTML page);
 #   * ``frontend/src/composables/useQATestCases.ts`` (``MAX_UPLOAD_BYTES``
 #     used by the 413 fallback message and the upload-limit hint).
-# Bumping the limit means updating all four.
-MAX_FILE_SIZE = 10 * 1024 * 1024
-
-# Allowed MIME types for evidence uploads
-ALLOWED_MIME_TYPES = {
-    "image/png",
-    "image/jpeg",
-    "image/gif",
-    "image/webp",
-    "application/pdf",
-    "text/plain",
-    "video/mp4",
-    "video/webm",
-}
+MAX_FILE_SIZE = QA_EVIDENCE_POLICY.max_bytes
+ALLOWED_MIME_TYPES = QA_EVIDENCE_POLICY.mime_types
 
 
 class FileStorageError(Exception):
@@ -143,6 +136,8 @@ class FileStorage:
         relative_path: str,
         data: bytes,
         content_type: str,
+        *,
+        policy: UploadPolicy = QA_EVIDENCE_POLICY,
     ) -> str:
         """Upload a file and return the storage path.
 
@@ -151,23 +146,20 @@ class FileStorage:
             relative_path: Path within the org namespace (e.g., qa-evidence/bud-id/tc-id/file.png).
             data: Raw file bytes.
             content_type: MIME type of the file.
+            policy: Rules the file must satisfy. Defaults to the
+                QA-evidence policy so the original call sites keep their
+                behaviour; every new surface passes its own.
 
         Returns:
             The storage path (local path or S3 key).
 
         Raises:
-            FileStorageError: If file is too large or MIME type is not allowed.
+            FileStorageError: If the file violates ``policy``.
         """
-        if len(data) > MAX_FILE_SIZE:
-            raise FileStorageError(
-                f"File exceeds maximum size of {MAX_FILE_SIZE // (1024 * 1024)} MB"
-            )
-
-        if content_type not in ALLOWED_MIME_TYPES:
-            raise FileStorageError(
-                f"MIME type '{content_type}' is not allowed. "
-                f"Allowed: {', '.join(sorted(ALLOWED_MIME_TYPES))}"
-            )
+        try:
+            policy.validate(data, content_type)
+        except UploadPolicyError as exc:
+            raise FileStorageError(str(exc)) from exc
 
         full_path = f"{org_id}/{relative_path}"
 

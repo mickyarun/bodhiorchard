@@ -22,6 +22,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.backlash import internal_router as backlash_internal_router
 from app.api.v1.backlash import router as backlash_router
 from app.api.v1.bud import router as bud_router
+from app.api.v1.bug_attachments import router as bug_attachments_router
 from app.api.v1.bug_comments import router as bug_comments_router
 from app.api.v1.bugs import router as bugs_router
 from app.api.v1.claude import router as claude_router
@@ -68,6 +69,7 @@ api_router.include_router(orgs_router, prefix="/api/v1/organizations")
 api_router.include_router(bud_router, prefix="/api/v1/buds")
 api_router.include_router(bugs_router, prefix="/api/v1/bugs")
 api_router.include_router(bug_comments_router, prefix="/api/v1/bugs")
+api_router.include_router(bug_attachments_router, prefix="/api/v1/bugs")
 api_router.include_router(dashboard_router, prefix="/api/v1/dashboard")
 api_router.include_router(design_system_router, prefix="/api/v1/design-systems")
 api_router.include_router(features_router, prefix="/api/v1/features")

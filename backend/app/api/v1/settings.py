@@ -68,6 +68,7 @@ from app.services.github_app_slug import (
 )
 from app.services.org_settings import (
     get_bud_stage_settings,
+    get_bug_attachment_settings,
     get_jira_settings,
     get_presence_settings,
     get_qa_settings,
@@ -129,6 +130,7 @@ async def get_connections(
     # directly from `config` — the helpers are the single source of truth.
     qa_cfg = get_qa_settings(config)
     stage_cfg = get_bud_stage_settings(config)
+    attachment_cfg = get_bug_attachment_settings(config)
     presence_cfg = get_presence_settings(config)
 
     return ConnectionsRead(
@@ -165,6 +167,7 @@ async def get_connections(
         # directly — one source of defaults.
         qa_automation=qa_cfg,
         bud_stages=stage_cfg,
+        bug_attachments=attachment_cfg,
         presence=presence_cfg,
         jira=_build_jira_read(config),
     )
@@ -292,6 +295,12 @@ async def update_connections(
     # BUD stage toggles (e.g. whether UAT is part of this org's lifecycle)
     if body.bud_stages is not None:
         config["bud_stages"] = body.bud_stages.model_dump()
+
+    # Bug attachment limits (per-file size, files per bug). Stored in the
+    # canonical snake_case shape that ``get_bug_attachment_settings`` reads
+    # back, so the write and read paths stay aligned through the one class.
+    if body.bug_attachments is not None:
+        config["bug_attachments"] = body.bug_attachments.model_dump()
 
     # Presence / auto-mode settings (working days, hours, timezone).
     # by_alias=False so stored JSON stays in snake_case to match the other

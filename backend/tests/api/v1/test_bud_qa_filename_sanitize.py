@@ -5,7 +5,7 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
-"""Regression guards on ``_sanitize_filename``.
+"""Regression guards on the filename sanitiser behind QA evidence uploads.
 
 Production crash that prompted this: ``Screenshot 2026-05-20 at
 4.00.01 PM.png`` (with the macOS-typed narrow no-break space `` ``
@@ -28,7 +28,17 @@ from __future__ import annotations
 
 import pytest
 
-from app.api.v1.bud_qa import _sanitize_filename
+from app.core.paths import sanitize_filename
+
+
+def _sanitize_filename(raw: str | None) -> str:
+    """Call the shared sanitiser the way the QA evidence routes do.
+
+    The helper moved to ``app.core.paths`` when bug attachments started
+    sharing it; the QA routes pin ``fallback="evidence"``, so these
+    regression guards keep exercising that exact configuration.
+    """
+    return sanitize_filename(raw, fallback="evidence")
 
 
 def _latin1_ok(value: str) -> bool:

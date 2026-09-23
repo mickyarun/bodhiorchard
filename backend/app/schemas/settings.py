@@ -212,6 +212,53 @@ class BUDStageSettings(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+# Hard ceiling on the per-org bug-attachment size limit, in MB.
+#
+# This is NOT a preference — it is the largest body the edge proxy will
+# forward. ``frontend/nginx.conf.template`` sets ``client_max_body_size``
+# just above this value so a request at the configured limit still
+# reaches the backend and gets a clean JSON 413 instead of nginx's HTML
+# error page. Raising this constant means raising that directive too,
+# or admins can save a limit that silently fails at the proxy.
+MAX_CONFIGURABLE_ATTACHMENT_MB = 25
+
+# Hard ceiling on the per-org attachments-per-bug limit. Unlike the size
+# cap this is a usability bound, not an infrastructure one: past a few
+# dozen the detail panel's strip stops being scannable.
+MAX_CONFIGURABLE_ATTACHMENTS_PER_BUG = 50
+
+
+class BugAttachmentSettings(BaseModel):
+    """Org-level limits on files attached to a bug report.
+
+    The accepted file types (JPG/PNG screenshots, PDFs, Excel sheets)
+    are fixed in ``app.services.upload_policy``; only the two limits
+    below are tunable, because they are the ones that depend on a
+    team's storage budget and reporting habits rather than on what the
+    app can render.
+    """
+
+    # Per-file size cap. Bounded above by the proxy ceiling (see
+    # MAX_CONFIGURABLE_ATTACHMENT_MB) — an org cannot configure a limit
+    # that its own edge would reject.
+    max_file_mb: int = Field(
+        default=10,
+        alias="maxFileMb",
+        ge=1,
+        le=MAX_CONFIGURABLE_ATTACHMENT_MB,
+    )
+    # Cap on attachments per bug. Keeps the detail panel legible and
+    # bounds worst-case storage per bug at max_files_per_bug x max_file_mb.
+    max_files_per_bug: int = Field(
+        default=10,
+        alias="maxFilesPerBug",
+        ge=1,
+        le=MAX_CONFIGURABLE_ATTACHMENTS_PER_BUG,
+    )
+
+    model_config = {"populate_by_name": True}
+
+
 # Valid day-of-week keys for PresenceSettings.working_days.
 WeekdayKey = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
@@ -372,6 +419,10 @@ class ConnectionsRead(BaseModel):
         default_factory=BUDStageSettings,
         alias="budStages",
     )
+    bug_attachments: BugAttachmentSettings = Field(
+        default_factory=BugAttachmentSettings,
+        alias="bugAttachments",
+    )
     presence: PresenceSettings = Field(default_factory=PresenceSettings)
     jira: "JiraSettingsRead" = Field(default_factory=lambda: JiraSettingsRead())
 
@@ -517,6 +568,7 @@ class ConnectionsUpdate(BaseModel):
     scan: ScanSettings | None = None
     qa_automation: QAAutomationSettings | None = Field(None, alias="qaAutomation")
     bud_stages: BUDStageSettings | None = Field(None, alias="budStages")
+    bug_attachments: BugAttachmentSettings | None = Field(None, alias="bugAttachments")
     presence: PresenceSettings | None = None
     jira: JiraSettingsUpdate | None = None
 

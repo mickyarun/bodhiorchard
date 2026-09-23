@@ -4,14 +4,17 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
-    # Upload size cap. Slightly above the backend's 10 MB evidence
-    # ceiling (``MAX_FILE_SIZE`` in ``app/services/file_storage.py``)
-    # so an at-the-limit upload reaches the backend and gets a clean
-    # JSON 413 ``{"detail": "File exceeds 10 MB limit"}`` instead of
-    # nginx's HTML ``413 Request Entity Too Large`` page, which the
-    # frontend can't usefully render to the user. nginx's default is
-    # 1 MB — every multi-megabyte screenshot hit that wall silently.
-    client_max_body_size 12M;
+    # Upload size cap. Sits 1 MB above the largest limit any org can
+    # configure (``MAX_CONFIGURABLE_ATTACHMENT_MB`` in
+    # ``backend/app/schemas/settings.py``, currently 25 MB) so an
+    # at-the-limit upload reaches the backend and gets a clean JSON 413
+    # ``{"detail": "... exceeds the N MB limit."}`` instead of nginx's
+    # HTML ``413 Request Entity Too Large`` page, which the frontend
+    # can't usefully render. Raising the configurable ceiling means
+    # raising this directive in the same change, or admins can save a
+    # limit that silently fails at the proxy. nginx's default is 1 MB —
+    # every multi-megabyte screenshot hit that wall silently.
+    client_max_body_size 26M;
 
     # Runtime DNS resolver. Without this + runtime-resolved upstreams
     # below, nginx caches the backend/multiplayer IPs at startup — so

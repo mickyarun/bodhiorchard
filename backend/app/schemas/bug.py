@@ -14,6 +14,7 @@
 
 """Pydantic schemas for the Bug CRUD endpoints and the bug comment thread."""
 
+import uuid
 from datetime import datetime
 from typing import Literal
 
@@ -202,5 +203,47 @@ class BugCommentListResponse(BaseModel):
 
     items: list[BugCommentRead]
     total: int
+
+    model_config = {"populate_by_name": True}
+
+
+class BugAttachmentRead(BaseModel):
+    """A single file attached to a bug.
+
+    Deliberately omits ``storage_path``: it is an internal pointer, and
+    the only supported way to read the bytes is the authenticated
+    download route keyed on ``id``.
+    """
+
+    id: uuid.UUID
+    filename: str
+    mime_type: str = Field(alias="mimeType")
+    size_bytes: int = Field(alias="sizeBytes")
+    uploaded_by: uuid.UUID | None = Field(None, alias="uploadedBy")
+    created_at: datetime = Field(alias="createdAt")
+
+    model_config = {"populate_by_name": True, "from_attributes": True}
+
+
+class BugAttachmentLimits(BaseModel):
+    """The org's attachment limits, echoed alongside the file list.
+
+    Sent with every list response so the picker can size-check a file
+    before uploading and disable itself at the cap, without a second
+    round-trip to the settings endpoint on every bug the user opens.
+    """
+
+    max_file_mb: int = Field(alias="maxFileMb")
+    max_files_per_bug: int = Field(alias="maxFilesPerBug")
+    accepted_extensions: list[str] = Field(alias="acceptedExtensions")
+
+    model_config = {"populate_by_name": True}
+
+
+class BugAttachmentListResponse(BaseModel):
+    """Response for GET /bugs/{bug_id}/attachments."""
+
+    items: list[BugAttachmentRead]
+    limits: BugAttachmentLimits
 
     model_config = {"populate_by_name": True}

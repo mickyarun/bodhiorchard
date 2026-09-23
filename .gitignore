@@ -124,3 +124,8 @@ output/
 
 # Resolved skill pins for local plugin installs; machine-specific.
 skills-lock.json
+
+# Local-disk file storage (QA evidence, bug attachments). Written at
+# runtime under FILE_STORAGE_LOCAL_DIR when FILE_STORAGE_S3 is false,
+# which is the default for a dev checkout — user uploads, never source.
+backend/data/

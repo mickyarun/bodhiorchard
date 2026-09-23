@@ -72,10 +72,48 @@ function processQueue(error: unknown, token: string | null): void {
   failedQueue = []
 }
 
+/**
+ * Replace a Blob error body with its parsed JSON, in place.
+ *
+ * A request made with ``responseType: 'blob'`` gets a Blob back even on
+ * failure, so ``error.response.data`` holds an unparsed Blob rather than
+ * the backend's ``{"detail": "..."}``. Everything downstream reads
+ * ``.detail`` — the password-change branch below, ``extractApiError``,
+ * the attachment tile's error text — and silently degrades to a generic
+ * "Request failed with status code 404" instead of the real reason.
+ *
+ * Normalising here means blob callers need no special handling, and a
+ * 403 on a download still reaches the change-password redirect.
+ */
+async function parseBlobErrorBody(error: AxiosError): Promise<void> {
+  const response = error.response
+  if (!response || !(response.data instanceof Blob)) return
+  try {
+    response.data = JSON.parse(await response.data.text())
+  } catch {
+    // Not JSON — an nginx HTML error page, or a truncated stream. Leave
+    // the Blob alone; every consumer already handles a missing detail.
+  }
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError<ApiError>) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
+
+    // Deliberately skipped for 401s. Everything between here and the
+    // `isRefreshing` check below is synchronous, which is what makes
+    // concurrent 401s safe: the first one flips the flag before it
+    // yields, so the rest queue instead of each starting their own
+    // token refresh. Awaiting `Blob.text()` here would insert a yield
+    // ahead of that check — and concurrent blob 401s are easy to hit,
+    // since a bug detail panel fires one request per image tile at
+    // once. The cost is that a 401 keeps axios's generic message, which
+    // is no loss: its body says "Not authenticated", and the user is
+    // being refreshed or redirected rather than shown the text.
+    if (error.response?.status !== 401) {
+      await parseBlobErrorBody(error)
+    }
 
     // Redirect to change-password on 403 "Password change required"
     const responseData = error.response?.data as Record<string, unknown> | undefined

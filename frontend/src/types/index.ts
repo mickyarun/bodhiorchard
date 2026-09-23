@@ -787,6 +787,37 @@ export interface BugListItem {
   updatedAt: string
 }
 
+/**
+ * A file attached to a bug report.
+ *
+ * `mimeType` is the canonical type the backend derived from the
+ * filename extension at upload time — not whatever the browser sent —
+ * so it is safe to switch rendering on.
+ */
+export interface BugAttachment {
+  id: string
+  filename: string
+  mimeType: string
+  sizeBytes: number
+  uploadedBy: string | null
+  createdAt: string
+}
+
+/**
+ * The org's attachment limits, returned with every attachment list so
+ * the picker can validate before uploading without a settings fetch.
+ */
+export interface BugAttachmentLimits {
+  maxFileMb: number
+  maxFilesPerBug: number
+  acceptedExtensions: string[]
+}
+
+export interface BugAttachmentListResponse {
+  items: BugAttachment[]
+  limits: BugAttachmentLimits
+}
+
 export interface BugRead {
   id: string
   bugNumber: number

@@ -183,6 +183,14 @@
 
     <v-divider class="mb-4" />
 
+    <BugAttachments
+      :bug-id="bugsStore.currentBug.id"
+      :readonly="!canAttachToBugs"
+      class="mb-4"
+    />
+
+    <v-divider class="mb-4" />
+
     <BugComments :bug-id="bugsStore.currentBug.id" />
   </v-card>
 </template>
@@ -195,6 +203,7 @@ import { useMembersStore } from '@/stores/members'
 import { usePermissions } from '@/composables/usePermissions'
 import { BUG_SEVERITY_COLORS, type BugStatusValue } from '@/types'
 import { formatDateTime } from '@/utils/date'
+import BugAttachments from './BugAttachments.vue'
 import BugComments from './BugComments.vue'
 
 defineEmits<{ (e: 'close'): void }>()
@@ -202,7 +211,11 @@ defineEmits<{ (e: 'close'): void }>()
 const bugsStore = useBugsStore()
 const featuresStore = useFeaturesStore()
 const membersStore = useMembersStore()
-const { canEditBugs, canAssignBugs } = usePermissions()
+const { canEditBugs, canAssignBugs, canReportBugs } = usePermissions()
+
+// Reporters attach evidence too, not just editors — the backend gates
+// the upload route on the same trio.
+const canAttachToBugs = computed(() => canReportBugs.value || canEditBugs.value)
 
 const statusOptions: { title: string; value: BugStatusValue }[] = [
   { title: 'Open', value: 'open' },

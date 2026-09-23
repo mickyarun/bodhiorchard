@@ -170,6 +170,53 @@
             />
           </div>
         </v-card>
+
+        <!-- ─── BUG ATTACHMENTS CARD ─────────────────────────── -->
+        <v-card class="pa-6 mb-6" color="surface" border>
+          <div class="d-flex align-center ga-3 mb-4">
+            <v-avatar size="36" color="surface-variant" rounded="lg">
+              <v-icon icon="mdi-paperclip" size="22" />
+            </v-avatar>
+            <div>
+              <div class="text-body-1 font-weight-medium">Bug Attachments</div>
+              <div class="text-caption text-medium-emphasis">
+                Limits on the files reporters can attach to a bug
+              </div>
+            </div>
+          </div>
+
+          <AppCallout variant="info" icon="mdi-file-check-outline" class="mb-4">
+            Reporters can attach screenshots (JPG, PNG), PDFs and spreadsheets
+            (XLS, XLSX). The accepted formats are fixed; only the limits below
+            are yours to set. Both are enforced on the server, so lowering them
+            does not remove files already attached.
+          </AppCallout>
+
+          <div class="d-flex flex-wrap ga-3">
+            <v-text-field
+              v-model.number="bugAttachments.maxFileMb"
+              type="number"
+              label="Max size per file (MB)"
+              variant="outlined"
+              density="compact"
+              :min="1"
+              :max="MAX_ATTACHMENT_MB"
+              :rules="maxFileMbRules"
+              style="max-width: 220px"
+            />
+            <v-text-field
+              v-model.number="bugAttachments.maxFilesPerBug"
+              type="number"
+              label="Max files per bug"
+              variant="outlined"
+              density="compact"
+              :min="1"
+              :max="MAX_ATTACHMENTS_PER_BUG"
+              :rules="maxFilesRules"
+              style="max-width: 200px"
+            />
+          </div>
+        </v-card>
   </SettingsPageShell>
 </template>
 
@@ -189,6 +236,31 @@ const COMPLEXITY_LEVELS = [1, 2, 3, 4, 5] as const
 // these writes back through the store and is persisted by saveConnections().
 const qa = computed(() => settingsStore.connections.qaAutomation)
 const budStages = computed(() => settingsStore.connections.budStages)
+const bugAttachments = computed(() => settingsStore.connections.bugAttachments)
+
+// Upper bound on the per-file limit. Mirrors
+// MAX_CONFIGURABLE_ATTACHMENT_MB in backend/app/schemas/settings.py,
+// which is itself bounded by the edge proxy's client_max_body_size —
+// a larger value here would be rejected by the PATCH with a 422, and
+// would fail at the proxy even if it weren't.
+const MAX_ATTACHMENT_MB = 25
+
+// Mirrors MAX_CONFIGURABLE_ATTACHMENTS_PER_BUG in
+// backend/app/schemas/settings.py — a usability bound, not an
+// infrastructure one: past a few dozen the strip stops being scannable.
+const MAX_ATTACHMENTS_PER_BUG = 50
+
+const maxFileMbRules = [
+  (v: number) =>
+    (Number.isInteger(v) && v >= 1 && v <= MAX_ATTACHMENT_MB) ||
+    `Must be a whole number between 1 and ${MAX_ATTACHMENT_MB}`,
+]
+
+const maxFilesRules = [
+  (v: number) =>
+    (Number.isInteger(v) && v >= 1 && v <= MAX_ATTACHMENTS_PER_BUG)
+    || `Must be a whole number between 1 and ${MAX_ATTACHMENTS_PER_BUG}`,
+]
 
 // Built-in framework list. "custom" opens a free-text field constrained to
 // the same regex the backend uses in QAAutomationSettings — keeps UX and
@@ -261,10 +333,20 @@ watch(customFramework, (value) => {
 // Save is disabled when custom framework input is invalid — prevents the
 // PATCH from being rejected with a 422 the user can't easily debug.
 const isValid = computed(() => {
-  if (frameworkChoice.value === 'custom') {
-    return FRAMEWORK_REGEX.test(customFramework.value)
+  if (frameworkChoice.value === 'custom' && !FRAMEWORK_REGEX.test(customFramework.value)) {
+    return false
   }
-  return true
+  // Out-of-range attachment limits would come back as a 422 the user
+  // can't easily decode, so block the save the same way.
+  const { maxFileMb, maxFilesPerBug } = bugAttachments.value
+  return (
+    Number.isInteger(maxFileMb) &&
+    maxFileMb >= 1 &&
+    maxFileMb <= MAX_ATTACHMENT_MB &&
+    Number.isInteger(maxFilesPerBug) &&
+    maxFilesPerBug >= 1 &&
+    maxFilesPerBug <= MAX_ATTACHMENTS_PER_BUG
+  )
 })
 
 async function save(): Promise<void> {

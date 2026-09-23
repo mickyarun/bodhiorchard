@@ -74,6 +74,15 @@ export interface ConnectionsState {
   budStages: {
     uatEnabled: boolean
   }
+  // Per-org limits on files attached to a bug report. Mirrors the backend
+  // BugAttachmentSettings Pydantic model. Accepted file types are fixed
+  // server-side (see app/services/upload_policy.py) — only these two
+  // limits are tunable, and maxFileMb is capped by the edge proxy's
+  // client_max_body_size.
+  bugAttachments: {
+    maxFileMb: number
+    maxFilesPerBug: number
+  }
   // Per-org presence / auto-mode settings. Mirrors the backend
   // PresenceSettings Pydantic model (by_alias=True envelope). The
   // `timezone: null` sentinel means "use server local time" which
@@ -125,6 +134,11 @@ function emptyState(): ConnectionsState {
     },
     budStages: {
       uatEnabled: true,
+    },
+    // Mirrors backend BugAttachmentSettings defaults.
+    bugAttachments: {
+      maxFileMb: 10,
+      maxFilesPerBug: 10,
     },
     // Defaults mirror backend PresenceSettings defaults — Mon-Fri, 08:00-18:00,
     // timezone null (= use server time). These are overwritten by the first

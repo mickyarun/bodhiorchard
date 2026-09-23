@@ -17,7 +17,8 @@
 Settings that change BUD lifecycle behaviour (QA automation framework,
 UAT stage on/off) and presence-inference behaviour (working days, hours,
 timezone, auto-mode toggle) live in the ``organizations.config`` JSONB
-column under the ``qa``, ``bud_stages``, and ``presence`` keys. This
+column under the ``qa``, ``bud_stages``, ``bug_attachments``, and
+``presence`` keys. This
 module is the ONLY place in the backend that reads those keys — every
 service needing them must go through ``get_qa_settings`` /
 ``get_bud_stage_settings`` / ``get_phase_order`` / ``get_presence_settings``
@@ -38,6 +39,7 @@ import structlog
 
 from app.schemas.settings import (
     BUDStageSettings,
+    BugAttachmentSettings,
     JiraSettings,
     PresenceSettings,
     QAAutomationSettings,
@@ -52,6 +54,7 @@ logger = structlog.get_logger(__name__)
 # Pydantic construction cost on every request.
 DEFAULT_PRESENCE_SETTINGS: PresenceSettings = PresenceSettings()
 DEFAULT_QUIZ_SETTINGS: QuizGameSettings = QuizGameSettings()
+DEFAULT_BUG_ATTACHMENT_SETTINGS: BugAttachmentSettings = BugAttachmentSettings()
 
 
 def get_qa_settings(org_config: dict[str, Any] | None) -> QAAutomationSettings:
@@ -186,6 +189,41 @@ def get_bug_threshold(org_config: dict[str, Any] | None, complexity: int | None)
         if candidate in table:
             return table[candidate]
     return min(table.values())
+
+
+def get_bug_attachment_settings(
+    org_config: dict[str, Any] | None,
+) -> BugAttachmentSettings:
+    """Resolve per-org bug-attachment limits from an organization config dict.
+
+    The ONLY reader of the ``org.config["bug_attachments"]`` key. Accepts
+    ``None`` / missing / partial sections and fills in the shipped
+    defaults, so an org that never opened the settings page behaves
+    exactly like one that saved the defaults.
+
+    **Defensive:** a corrupt stored section (e.g. a size written before
+    the schema gained its upper bound, or a hand-edited JSONB) returns
+    the defaults rather than raising. An attachment upload failing with
+    a 500 because of an unrelated settings typo would be a far worse
+    outcome than quietly applying the shipped limits.
+
+    Args:
+        org_config: The raw ``organization.config`` JSONB dict, or None.
+
+    Returns:
+        A ``BugAttachmentSettings`` with all fields populated.
+    """
+    raw = (org_config or {}).get("bug_attachments") or {}
+    try:
+        return BugAttachmentSettings(**raw)
+    except Exception as exc:
+        logger.error(
+            "bug_attachment_settings_invalid",
+            raw_keys=list(raw.keys()),
+            error=str(exc),
+            action="falling back to defaults — fix this org's config JSONB",
+        )
+        return DEFAULT_BUG_ATTACHMENT_SETTINGS
 
 
 def get_phase_order(org_config: dict[str, Any] | None) -> list[str]:
