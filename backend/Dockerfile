@@ -74,12 +74,19 @@ RUN python -c "from fastembed import TextEmbedding; TextEmbedding('${EMBEDDING_M
 
 COPY . .
 
-# Create persistent storage roots for cloned repos and the SSH deploy
-# key. These get mounted as named volumes in docker-compose; creating
-# them here seeds the initial ownership on first volume creation (Docker
-# picks up ownership from the image's existing directory only when the
-# path exists at build time).
-RUN mkdir -p /data/repos /data/ssh && \
+# Create persistent storage roots for cloned repos, the SSH deploy key,
+# and user uploads. These get mounted as named volumes in
+# docker-compose; creating them here seeds the initial ownership on
+# first volume creation (Docker picks up ownership from the image's
+# existing directory only when the path exists at build time).
+#
+# ``/app/data/uploads`` is where the local-disk storage backend writes
+# QA evidence and bug attachments — WORKDIR is /app and
+# FILE_STORAGE_LOCAL_DIR defaults to the relative ``data/uploads``.
+# Leave it out and Docker creates the mountpoint itself as root:root
+# mode 755 while this image runs as ``appuser``, so every upload fails
+# with PermissionError and surfaces as a 500 in the UI.
+RUN mkdir -p /data/repos /data/ssh /app/data/uploads && \
     chmod +x /app/entrypoint.sh && \
     chown -R appuser:appuser /app /data
 USER appuser

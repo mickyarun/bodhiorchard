@@ -67,6 +67,23 @@ services:
       GITHUB_PAT: ${GITHUB_PAT:-}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      # File storage. Without these the container never sees the
+      # operator's choice: pydantic-settings reads the process
+      # environment, and compose passes through only what is listed
+      # here — so FILE_STORAGE_S3=true in the host .env silently had no
+      # effect and uploads went to the local volume instead of S3.
+      # Unset leaves the shipped defaults (local disk under
+      # FILE_STORAGE_LOCAL_DIR), which the uploads_data volume backs.
+      FILE_STORAGE_S3: ${FILE_STORAGE_S3:-false}
+      FILE_STORAGE_S3_BUCKET: ${FILE_STORAGE_S3_BUCKET:-}
+      FILE_STORAGE_LOCAL_DIR: ${FILE_STORAGE_LOCAL_DIR:-data/uploads}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      # Leave both blank to use the instance role / IAM task role, which
+      # is what boto3's default chain picks up when no explicit pair is
+      # set. Setting only one of them is treated as "no explicit creds".
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
