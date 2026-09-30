@@ -1,6 +1,12 @@
 fastapi[standard]>=0.104.0
 uvicorn[standard]>=0.24.0
-sqlalchemy[asyncio]>=2.0.23
+# Upper bound is deliberate. SQLAlchemy 2.1 reworked Select's generics
+# (PEP 646 variadic), which does not type-check against how this
+# codebase declares them: 2.1.1 + mypy 2.3.1 produces 268 errors across
+# 38 files on an unchanged tree. Both were unbounded, so CI silently
+# picked them up and turned red with no code change. Lift these only as
+# part of an intentional migration, not by accident.
+sqlalchemy[asyncio]>=2.0.23,<2.1
 asyncpg>=0.29.0
 alembic>=1.13.0
 pydantic>=2.5.0
