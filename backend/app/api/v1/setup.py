@@ -130,37 +130,6 @@ def picker_roots() -> tuple[Path, ...]:
     return (Path.home(),)
 
 
-def _resolve_within_roots(candidate: Path) -> Path:
-    """Resolve ``candidate`` and refuse anything outside :func:`picker_roots`.
-
-    ``realpath`` collapses ``..`` and follows symlinks to their target, and
-    ``commonpath`` then confirms the result is still nested under a root —
-    so neither ``../../etc`` nor a symlink pointing out of home escapes.
-
-    Written out here rather than delegating to ``core.paths.safe_join``,
-    which does the same two steps: CodeQL's ``py/path-injection`` does not
-    follow the barrier through that helper (the alerts it raised on
-    ``file_storage.py``, which *does* use it, had to be dismissed as false
-    positives). Inline, the check is both real and recognised.
-
-    Raises:
-        HTTPException: 403 when the path resolves outside every root.
-    """
-    resolved = os.path.realpath(str(candidate))
-    for root in picker_roots():
-        base = os.path.realpath(str(root))
-        try:
-            if os.path.commonpath([base, resolved]) == base:
-                return Path(resolved)
-        except ValueError:
-            # Different drives / unrelated roots — not contained.
-            continue
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Path is outside the directories the setup picker may browse.",
-    )
-
-
 @router.get("/browse-directories", response_model=BrowseDirectoriesResponse)
 async def browse_directories(
     path: str = Query(default="", description="Directory path to list. Defaults to home."),
@@ -181,7 +150,31 @@ async def browse_directories(
     open is a picker over the home directory rather than over the host.
     """
     await _require_setup_incomplete(db)
-    target = _resolve_within_roots(Path(path).expanduser() if path else Path.home())
+    # Containment check, inline and on the raw string. Two things matter
+    # here and both are the result of CodeQL rejecting the tidier forms:
+    # it runs before any pathlib call touches the filesystem (it flagged
+    # `Path(path).expanduser()` as the sink), and it sits in the same
+    # function as the sinks below, because the barrier is not carried
+    # across a call — which is why `core.paths.safe_join`, doing exactly
+    # this, does not satisfy the query in `file_storage.py` either.
+    # `realpath` collapses `..` and resolves symlinks; `commonpath` then
+    # confirms the result is still nested under a permitted root.
+    candidate = os.path.realpath(os.path.expanduser(path or str(Path.home())))
+    within = False
+    for root in picker_roots():
+        base = os.path.realpath(str(root))
+        try:
+            within = os.path.commonpath([base, candidate]) == base
+        except ValueError:
+            within = False  # unrelated roots / different drives
+        if within:
+            break
+    if not within:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Path is outside the directories the setup picker may browse.",
+        )
+    target = Path(candidate)
 
     if not target.exists():
         raise HTTPException(
@@ -233,7 +226,31 @@ async def get_repo_branches(
         Dict with branches list and auto-detected main/develop.
     """
     await _require_setup_incomplete(db)
-    repo_path = _resolve_within_roots(Path(path))
+    # Containment check, inline and on the raw string. Two things matter
+    # here and both are the result of CodeQL rejecting the tidier forms:
+    # it runs before any pathlib call touches the filesystem (it flagged
+    # `Path(path).expanduser()` as the sink), and it sits in the same
+    # function as the sinks below, because the barrier is not carried
+    # across a call — which is why `core.paths.safe_join`, doing exactly
+    # this, does not satisfy the query in `file_storage.py` either.
+    # `realpath` collapses `..` and resolves symlinks; `commonpath` then
+    # confirms the result is still nested under a permitted root.
+    candidate = os.path.realpath(os.path.expanduser(path))
+    within = False
+    for root in picker_roots():
+        base = os.path.realpath(str(root))
+        try:
+            within = os.path.commonpath([base, candidate]) == base
+        except ValueError:
+            within = False  # unrelated roots / different drives
+        if within:
+            break
+    if not within:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Path is outside the directories the setup picker may browse.",
+        )
+    repo_path = Path(candidate)
     if not repo_path.exists() or not (repo_path / ".git").exists():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
