@@ -65,6 +65,17 @@ services:
       # http://localhost:2567 which resolves to the backend container
       # itself, silently dropping every agent_activity fan-out POST.
       COLYSEUS_URL: http://multiplayer:2567
+      # File storage. Compose passes through only what is listed here, so
+      # without these the container never sees FILE_STORAGE_S3 from the
+      # root .env and always falls back to local disk. Defaults keep Full
+      # Docker on the local backend, which the uploads_data volume backs.
+      FILE_STORAGE_S3: ${FILE_STORAGE_S3:-false}
+      FILE_STORAGE_S3_BUCKET: ${FILE_STORAGE_S3_BUCKET:-}
+      FILE_STORAGE_LOCAL_DIR: ${FILE_STORAGE_LOCAL_DIR:-data/uploads}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
     ports:
       - "8000:8000"
     volumes:

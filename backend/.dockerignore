@@ -1,0 +1,37 @@
+# Build context exclusions for the backend image.
+#
+# The backend builds with `context: ./backend` (see docker-compose.yml),
+# so the repo-root .dockerignore does NOT apply here — that one only
+# covers the frontend and multiplayer images, which build from `.`.
+# Without this file every path below lands in the image via `COPY . .`.
+
+# Secrets. A developer's real .env — database URL, SECRET_KEY,
+# ENCRYPTION_KEY, cloud credentials — otherwise ships inside any image
+# built from a configured checkout, readable by anyone who can pull it.
+# The container gets its configuration from the environment at runtime.
+.env
+.env.*
+!.env.example
+
+# Runtime-written user uploads (QA evidence, bug attachments) under the
+# local-disk storage backend. Shipping one developer's uploads to every
+# deployment is wrong on its own, and their presence in the context
+# also masks a real bug: it makes /app/data/uploads exist at build time
+# by accident, so the missing-mountpoint permission failure reproduces
+# on a clean build but not on the machine that last ran the app.
+data/
+
+# Local virtualenv and tooling caches — rebuilt in the image, and on a
+# host with a different platform the venv's binaries are unusable.
+.venv/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editor and OS noise.
+.DS_Store
+*.log
