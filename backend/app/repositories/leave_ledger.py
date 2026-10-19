@@ -93,6 +93,27 @@ class LeaveLedgerRepository(BaseRepository[LeaveLedgerEntry]):
             out[key] = (allocation, adjustments)
         return out
 
+    async def frozen_allocation(
+        self, user_id: uuid.UUID, leave_type_id: uuid.UUID, leave_year: int
+    ) -> tuple[Decimal | None, Decimal]:
+        """``(allocation or None, sum of corrections)`` for one type and year."""
+        stmt = self._scoped(
+            select(LeaveLedgerEntry.entry_type, func.sum(LeaveLedgerEntry.days))
+            .where(
+                LeaveLedgerEntry.user_id == user_id,
+                LeaveLedgerEntry.leave_type_id == leave_type_id,
+                LeaveLedgerEntry.leave_year == leave_year,
+                LeaveLedgerEntry.entry_type.in_(
+                    (LedgerEntryType.ALLOCATION, LedgerEntryType.CORRECTION)
+                ),
+            )
+            .group_by(LeaveLedgerEntry.entry_type)
+        )
+        sums = dict((await self._db.execute(stmt)).tuples().all())
+        return sums.get(LedgerEntryType.ALLOCATION), sums.get(
+            LedgerEntryType.CORRECTION, Decimal("0")
+        )
+
     async def ensure_allocation(
         self, user_id: uuid.UUID, leave_type_id: uuid.UUID, leave_year: int, days: Decimal
     ) -> None:

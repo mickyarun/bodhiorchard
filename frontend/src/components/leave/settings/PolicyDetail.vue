@@ -34,6 +34,7 @@
       <v-tab value="joiners">New joiners</v-tab>
       <v-tab value="general">General</v-tab>
       <v-tab value="employees">Employees</v-tab>
+      <v-tab value="history">History</v-tab>
     </v-tabs>
     <v-card color="surface" rounded="lg" class="pa-6">
       <v-tabs-window v-model="tab">
@@ -55,6 +56,9 @@
         <v-tabs-window-item value="employees">
           <EmployeesTab :policy-id="policy.id" />
         </v-tabs-window-item>
+        <v-tabs-window-item value="history">
+          <PolicyHistoryTab :policy-id="policy.id" :active="tab === 'history'" />
+        </v-tabs-window-item>
       </v-tabs-window>
     </v-card>
   </section>
@@ -67,6 +71,7 @@ import GeneralTab from '@/components/leave/settings/GeneralTab.vue'
 import HolidaysTab from '@/components/leave/settings/HolidaysTab.vue'
 import LeaveTypesTab from '@/components/leave/settings/LeaveTypesTab.vue'
 import NewJoinersTab from '@/components/leave/settings/NewJoinersTab.vue'
+import PolicyHistoryTab from '@/components/leave/settings/PolicyHistoryTab.vue'
 import WfhTab from '@/components/leave/settings/WfhTab.vue'
 import type { PolicyRead } from '@/types/leavePolicy'
 

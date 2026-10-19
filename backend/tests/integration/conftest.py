@@ -40,6 +40,8 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from alembic.config import Config
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -48,6 +50,10 @@ from sqlalchemy.ext.asyncio import (
 from testcontainers.postgres import PostgresContainer
 
 from alembic import command
+from app.api.router import api_router
+from app.api.v1._leave_errors import register_leave_errors
+from app.core.deps import get_db
+from app.services.permission_seeder import seed_permissions
 
 
 @pytest.fixture(scope="session")
@@ -133,3 +139,29 @@ async def pg_session_factory(
         yield factory
     finally:
         await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def client(
+    pg_session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[AsyncClient]:
+    """The real API router on the test database."""
+    async with pg_session_factory() as db:
+        await seed_permissions(db)
+        await db.commit()
+    app = FastAPI()
+    app.include_router(api_router)
+    register_leave_errors(app)
+
+    async def _db() -> AsyncIterator[AsyncSession]:
+        async with pg_session_factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
+    app.dependency_overrides[get_db] = _db
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        yield http

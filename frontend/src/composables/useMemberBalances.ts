@@ -20,7 +20,12 @@
 import { ref } from 'vue'
 
 import api from '@/services/api'
-import type { BalanceAdjust, MemberBalances } from '@/types/leavePolicy'
+import type {
+  BalanceAdjust,
+  MemberBalances,
+  Recalculate,
+  RecalculateResult,
+} from '@/types/leavePolicy'
 import { extractApiError } from '@/utils/errors'
 
 export function useMemberBalances() {
@@ -56,5 +61,21 @@ export function useMemberBalances() {
     }
   }
 
-  return { data, loading, error, load, adjust }
+  /** Re-run a frozen year's allocation; resolves to the result or an error message. */
+  async function recalculate(
+    userId: string,
+    body: Recalculate,
+  ): Promise<RecalculateResult | string> {
+    try {
+      const result = (
+        await api.post<RecalculateResult>(`/v1/leave/balances/${userId}/recalculate`, body)
+      ).data
+      data.value = result.balances
+      return result
+    } catch (err) {
+      return extractApiError(err, "Couldn't recalculate the allocation. Reload and try again.")
+    }
+  }
+
+  return { data, loading, error, load, adjust, recalculate }
 }

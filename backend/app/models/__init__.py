@@ -61,6 +61,7 @@ from app.models.feature_qa_session import FeatureQASession, FeatureQAStatus
 from app.models.feature_to_repo import FeatureToRepo, FeatureToRepoRole
 from app.models.jira_import import ImportStatus, JiraImportSession, JiraIssueBudMap, MapStatus
 from app.models.jwt_token import JWTToken
+from app.models.leave_config_event import LeaveConfigEvent
 from app.models.leave_ledger import LeaveLedgerEntry
 from app.models.leave_policy import LeavePolicy
 from app.models.leave_request import LeaveRequest
@@ -151,6 +152,7 @@ __all__ = [
     "BugAttachment",
     "EmployeeProfile",
     "EmployeeReportingManager",
+    "LeaveConfigEvent",
     "LeaveLedgerEntry",
     "LeavePolicy",
     "LeaveRequest",

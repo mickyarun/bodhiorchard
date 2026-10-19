@@ -16,15 +16,17 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1._leave_admin import CONFIGURE, conflict, load_policy
+from app.api.v1._leave_admin import CONFIGURE, load_policy
 from app.core.deps import get_db, require_permissions
 from app.models.leave_type import LeaveType
 from app.models.user import User
 from app.repositories.leave_type import LeaveTypeRepository
 from app.schemas.leave_policy import LeaveTypeRead, LeaveTypeWrite
+from app.services.leave import type_admin
+from app.services.leave.errors import LeaveNotFoundError
 
 router = APIRouter(tags=["leave-admin"])
 
@@ -67,13 +69,7 @@ async def create_type(
 ) -> LeaveTypeRead:
     """Add a leave type to a policy."""
     policy = await load_policy(db, current_user.org_id, policy_id)
-    repo = LeaveTypeRepository(db, org_id=current_user.org_id)
-    if await repo.code_taken(policy.id, body.code, exclude=None):
-        raise conflict(f"The code {body.code} is already used on this policy.")
-    created = await repo.create(
-        LeaveType(org_id=current_user.org_id, policy_id=policy.id, **body.model_dump())
-    )
-    return _read(created)
+    return _read(await type_admin.create_type(db, policy, current_user.id, body))
 
 
 @router.put("/types/{type_id}", response_model=LeaveTypeRead)
@@ -84,13 +80,8 @@ async def update_type(
     db: AsyncSession = Depends(get_db),
 ) -> LeaveTypeRead:
     """Edit a type. Quota changes apply to years not yet allocated."""
-    repo = LeaveTypeRepository(db, org_id=current_user.org_id)
-    leave_type = await repo.get_by_id(type_id)
+    leave_type = await LeaveTypeRepository(db, org_id=current_user.org_id).get_by_id(type_id)
     if leave_type is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave type not found.")
-    if await repo.code_taken(leave_type.policy_id, body.code, exclude=leave_type.id):
-        raise conflict(f"The code {body.code} is already used on this policy.")
-    for field, value in body.model_dump().items():
-        setattr(leave_type, field, value)
-    await db.flush()
+        raise LeaveNotFoundError("Leave type not found.")
+    await type_admin.update_type(db, leave_type, current_user.id, body)
     return _read(leave_type)

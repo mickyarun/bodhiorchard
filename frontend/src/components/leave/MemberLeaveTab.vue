@@ -15,7 +15,8 @@
  -->
 
 <!-- Profile Leave tab: one member's balances and ledger for the current
-     leave year. HR (leave:configure) can adjust balances. -->
+     leave year. HR (leave:configure) can adjust balances and recalculate
+     a frozen allocation. -->
 <template>
   <section>
     <v-progress-linear v-if="balances.loading.value" indeterminate color="primary" class="mb-4" />
@@ -25,15 +26,14 @@
         <div class="text-body-2 text-medium-emphasis">
           {{ data.policy_name }} · Leave year {{ formatLeaveYear(data.leave_year) }}
         </div>
-        <v-btn
-          v-if="canConfigureLeave && data.balances.length"
-          variant="tonal"
-          size="small"
-          prepend-icon="mdi-plus-minus-variant"
-          @click="adjusting = true"
-        >
-          Adjust balance
-        </v-btn>
+        <div v-if="canConfigureLeave && data.balances.length" class="d-flex ga-2">
+          <v-btn variant="text" size="small" prepend-icon="mdi-calculator-variant" @click="recalculating = true">
+            Recalculate
+          </v-btn>
+          <v-btn variant="tonal" size="small" prepend-icon="mdi-plus-minus-variant" @click="adjusting = true">
+            Adjust balance
+          </v-btn>
+        </div>
       </div>
       <p v-if="!data.balances.length" class="text-body-2 text-medium-emphasis mb-4">
         This policy has no leave types yet.
@@ -47,6 +47,12 @@
         :leave-year="data.leave_year.label"
         :save="body => balances.adjust(userId, body)"
       />
+      <RecalculateDialog
+        v-model="recalculating"
+        :balances="data.balances"
+        :leave-year="data.leave_year.label"
+        :recalculate="body => balances.recalculate(userId, body)"
+      />
     </template>
   </section>
 </template>
@@ -57,6 +63,7 @@ import AppCallout from '@/components/common/AppCallout.vue'
 import AdjustBalanceDialog from '@/components/leave/AdjustBalanceDialog.vue'
 import BalanceGrid from '@/components/leave/BalanceGrid.vue'
 import LedgerTable from '@/components/leave/LedgerTable.vue'
+import RecalculateDialog from '@/components/leave/RecalculateDialog.vue'
 import { useMemberBalances } from '@/composables/useMemberBalances'
 import { usePermissions } from '@/composables/usePermissions'
 import { formatLeaveYear } from '@/utils/leaveDates'
@@ -67,6 +74,7 @@ const { canConfigureLeave } = usePermissions()
 const balances = useMemberBalances()
 const data = computed(() => balances.data.value)
 const adjusting = ref(false)
+const recalculating = ref(false)
 
 watch(() => props.userId, id => void balances.load(id), { immediate: true })
 </script>

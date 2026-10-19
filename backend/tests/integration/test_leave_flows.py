@@ -22,8 +22,8 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-from fastapi import HTTPException
 
+from app.api.v1._leave_errors import status_for
 from app.models.leave_policy import ProrationMethod, WfhApproval
 from app.models.leave_request import LeaveKind, LeaveStatus
 from app.models.organization import Organization
@@ -36,6 +36,7 @@ from app.repositories.user import UserRepository
 from app.schemas.leave import LeaveRequestCreate
 from app.services.leave.calendar_view import calendar_view
 from app.services.leave.cancellation import cancel
+from app.services.leave.errors import LeaveError
 from app.services.leave.evaluation import evaluate
 from app.services.leave.holidays import recount_requests
 from app.services.leave.lifecycle import decide, submit
@@ -73,7 +74,7 @@ async def test_pending_counts_against_balance_and_first_decision_wins(
             db, org_id=org, actor=m2, perms=NOBODY, request_id=request.id, approve=True, note=None
         )
         await db.commit()
-        with pytest.raises(HTTPException) as excinfo:
+        with pytest.raises(LeaveError) as excinfo:
             await decide(
                 db,
                 org_id=org,
@@ -83,7 +84,7 @@ async def test_pending_counts_against_balance_and_first_decision_wins(
                 approve=False,
                 note="x",
             )
-        assert excinfo.value.status_code == 409
+        assert status_for(excinfo.value) == 409
 
 
 async def test_insufficient_balance_and_overlap_are_refused(pg_session_factory: Factory) -> None:
@@ -98,7 +99,7 @@ async def test_insufficient_balance_and_overlap_are_refused(pg_session_factory: 
         assert [p.code for p in too_long.problems] == ["insufficient_balance"]
         await submit(db, org, emp, leave_body(casual, mon, mon))
         await db.commit()
-        with pytest.raises(HTTPException, match="already have a pending request"):
+        with pytest.raises(LeaveError, match="already have a pending request"):
             await submit(
                 db, org, emp, LeaveRequestCreate(kind=LeaveKind.WFH, start_date=mon, end_date=mon)
             )
@@ -113,12 +114,12 @@ async def test_nobody_decides_their_own_and_rejection_needs_a_note(
     async with pg_session_factory() as db:
         request, _ = await submit(db, org, emp, leave_body(casual, mon, mon))
         await db.commit()
-        with pytest.raises(HTTPException) as own:
+        with pytest.raises(LeaveError) as own:
             await decide(
                 db, org_id=org, actor=emp, perms=HR, request_id=request.id, approve=True, note=None
             )
-        assert own.value.status_code == 403
-        with pytest.raises(HTTPException) as no_note:
+        assert status_for(own.value) == 403
+        with pytest.raises(LeaveError) as no_note:
             await decide(
                 db,
                 org_id=org,
@@ -128,7 +129,7 @@ async def test_nobody_decides_their_own_and_rejection_needs_a_note(
                 approve=False,
                 note=" ",
             )
-        assert no_note.value.status_code == 422
+        assert status_for(no_note.value) == 422
 
 
 async def test_without_a_manager_hr_decides_and_peers_cannot(pg_session_factory: Factory) -> None:
@@ -139,7 +140,7 @@ async def test_without_a_manager_hr_decides_and_peers_cannot(pg_session_factory:
         request, result = await submit(db, org, emp, leave_body(casual, mon, mon))
         await db.commit()
         assert result.approvers.routes_to_hr
-        with pytest.raises(HTTPException) as peer_try:
+        with pytest.raises(LeaveError) as peer_try:
             await decide(
                 db,
                 org_id=org,
@@ -149,7 +150,7 @@ async def test_without_a_manager_hr_decides_and_peers_cannot(pg_session_factory:
                 approve=True,
                 note=None,
             )
-        assert peer_try.value.status_code == 403
+        assert status_for(peer_try.value) == 403
         decided = await decide(
             db, org_id=org, actor=hr, perms=HR, request_id=request.id, approve=True, note=None
         )
@@ -222,7 +223,7 @@ async def test_optional_holiday_quota(pg_session_factory: Factory) -> None:
         )
         await db.commit()
         assert taken.days == Decimal("1")
-        with pytest.raises(HTTPException, match="optional holidays"):
+        with pytest.raises(LeaveError, match="optional holidays"):
             await submit(
                 db,
                 org,

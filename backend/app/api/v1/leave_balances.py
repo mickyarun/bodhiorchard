@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""A member's balances and ledger; HR adjustments."""
+"""A member's balances and ledger; HR adjustments and recalculation."""
 
 import uuid
 
@@ -20,84 +20,28 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1._leave_admin import CONFIGURE
-from app.core.deps import PermissionSet, get_current_user, get_db, get_permission_set
-from app.models.leave_ledger import LeaveLedgerEntry, LedgerEntryType
+from app.core.deps import (
+    PermissionSet,
+    get_current_user,
+    get_db,
+    get_permission_set,
+    require_permissions,
+)
 from app.models.user import User
-from app.repositories.leave_ledger import LeaveLedgerRepository
-from app.repositories.leave_type import LeaveTypeRepository
-from app.repositories.user import UserRepository
-from app.schemas.leave import PersonRef
-from app.schemas.leave_policy import BalanceAdjust, LedgerEntryRead, MemberBalances
-from app.services.leave.approvers import APPROVE, reports_of
-from app.services.leave.balances import balances_for
-from app.services.leave.calendar_math import leave_year_bounds, leave_year_by_label
-from app.services.leave.policies import resolve_member_policy, today_for
-from app.services.leave.summary import balance_schema, year_schema
+from app.schemas.leave_config import Recalculate, RecalculateResult
+from app.schemas.leave_policy import BalanceAdjust, MemberBalances
+from app.services.leave import adjustments
+from app.services.leave.member_balances import (
+    may_view_balances,
+    member_balances,
+    require_member,
+)
 
 router = APIRouter(tags=["leave"])
 
 
-async def _require_member(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> None:
-    """404 unless ``user_id`` is a member of this org (never touch other orgs)."""
-    if not await UserRepository(db).is_member_of_org(user_id, org_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found.")
-
-
-async def _may_view(
-    db: AsyncSession, current_user: User, perms: PermissionSet, user_id: uuid.UUID
-) -> bool:
-    """Self, their managers and HR (leave:approve).
-
-    Not leave:configure on its own: per-type used/pending days next to the
-    calendar's "on leave" would tell a policy admin who is off sick.
-    """
-    if user_id == current_user.id or perms.has(APPROVE):
-        return True
-    return user_id in await reports_of(db, current_user.org_id, current_user.id)
-
-
-async def _balances(
-    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, year_label: int | None
-) -> MemberBalances:
-    member = await resolve_member_policy(db, org_id, user_id)
-    policy = member.policy
-    year = (
-        leave_year_by_label(year_label, policy.year_start_month)
-        if year_label
-        else leave_year_bounds(today_for(policy), policy.year_start_month)
-    )
-    lines = await balances_for(
-        db, policy=policy, profile=member.profile, user_id=user_id, year=year
-    )
-    entries = await LeaveLedgerRepository(db, org_id=org_id).list_for(user_id, year.label)
-    names = await UserRepository(db).get_names_by_ids(
-        {user_id} | {e.created_by for e in entries if e.created_by}
-    )
-    return MemberBalances(
-        user=PersonRef(user_id=user_id, name=names.get(user_id, "Unknown")),
-        policy_name=policy.name,
-        leave_year=year_schema(year),
-        balances=[balance_schema(line) for line in lines],
-        ledger=[
-            LedgerEntryRead(
-                id=e.id,
-                leave_type_id=e.leave_type_id,
-                leave_year=e.leave_year,
-                entry_type=e.entry_type.value,
-                days=e.days,
-                note=e.note,
-                created_by=PersonRef(user_id=e.created_by, name=names.get(e.created_by, "Unknown"))
-                if e.created_by
-                else None,
-                created_at=e.created_at.date(),
-            )
-            for e in entries
-        ],
-    )
-
-
 @router.get("/balances/{user_id}", response_model=MemberBalances)
-async def member_balances(
+async def get_member_balances(
     user_id: uuid.UUID,
     year: int | None = Query(None, ge=2000, le=2100),
     current_user: User = Depends(get_current_user),
@@ -105,51 +49,59 @@ async def member_balances(
     db: AsyncSession = Depends(get_db),
 ) -> MemberBalances:
     """Balances and ledger: for the member, their managers, and HR."""
-    await _require_member(db, current_user.org_id, user_id)
-    if not await _may_view(db, current_user, perms, user_id):
+    await require_member(db, current_user.org_id, user_id)
+    if not await may_view_balances(db, current_user, perms, user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="You can't see this person's balances."
         )
-    return await _balances(db, current_user.org_id, user_id, year)
+    return await member_balances(db, current_user.org_id, user_id, year)
+
+
+def _change(
+    current_user: User,
+    perms: PermissionSet,
+    user_id: uuid.UUID,
+    type_id: uuid.UUID,
+    year: int | None,
+) -> adjustments.BalanceChange:
+    return adjustments.BalanceChange(
+        org_id=current_user.org_id,
+        actor_id=current_user.id,
+        actor_is_owner=perms.is_owner,
+        user_id=user_id,
+        leave_type_id=type_id,
+        leave_year=year,
+    )
 
 
 @router.post("/balances/{user_id}/adjust", response_model=MemberBalances)
 async def adjust_balance(
     user_id: uuid.UUID,
     body: BalanceAdjust,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permissions(CONFIGURE)),
     perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> MemberBalances:
     """Add or remove days, with a note (HR; not on your own balance)."""
-    if not perms.has(CONFIGURE) or (user_id == current_user.id and not perms.is_owner):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Ask another HR member to adjust your own balance.",
-        )
-    org_id = current_user.org_id
-    await _require_member(db, org_id, user_id)
-    member = await resolve_member_policy(db, org_id, user_id)
-    leave_type = await LeaveTypeRepository(db, org_id=org_id).get_by_id(body.leave_type_id)
-    if leave_type is None or leave_type.policy_id != member.policy.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="That leave type isn't on this person's policy.",
-        )
-    label = (
-        body.leave_year
-        or leave_year_bounds(today_for(member.policy), member.policy.year_start_month).label
+    change = _change(current_user, perms, user_id, body.leave_type_id, body.leave_year)
+    label = await adjustments.adjust(db, change, body.days, body.note)
+    return await member_balances(db, current_user.org_id, user_id, label)
+
+
+@router.post("/balances/{user_id}/recalculate", response_model=RecalculateResult)
+async def recalculate_allocation(
+    user_id: uuid.UUID,
+    body: Recalculate,
+    current_user: User = Depends(require_permissions(CONFIGURE)),
+    perms: PermissionSet = Depends(get_permission_set),
+    db: AsyncSession = Depends(get_db),
+) -> RecalculateResult:
+    """Re-run a frozen year's allocation and book any difference (HR)."""
+    change = _change(current_user, perms, user_id, body.leave_type_id, body.leave_year)
+    result = await adjustments.recalculate(db, change)
+    return RecalculateResult(
+        frozen=result.frozen,
+        recalculated=result.recalculated,
+        correction=result.correction,
+        balances=await member_balances(db, current_user.org_id, user_id, result.leave_year),
     )
-    await LeaveLedgerRepository(db, org_id=org_id).create(
-        LeaveLedgerEntry(
-            org_id=org_id,
-            user_id=user_id,
-            leave_type_id=leave_type.id,
-            leave_year=label,
-            entry_type=LedgerEntryType.ADJUSTMENT,
-            days=body.days,
-            note=body.note.strip(),
-            created_by=current_user.id,
-        )
-    )
-    return await _balances(db, org_id, user_id, label)

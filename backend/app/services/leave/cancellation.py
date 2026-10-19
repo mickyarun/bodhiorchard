@@ -23,13 +23,13 @@ row lock with a conditional status update.
 import uuid
 from datetime import timedelta
 
-from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.leave_request import LeaveRequest, LeaveStatus
 from app.repositories.leave_request import LeaveRequestRepository
 from app.services.leave.calendar_math import count_days
-from app.services.leave.lifecycle import conflict, load_request
+from app.services.leave.errors import LeaveConflictError, LeaveForbiddenError
+from app.services.leave.lifecycle import load_request
 from app.services.leave.policies import mandatory_holidays, policy_for_request, today_for
 
 
@@ -39,9 +39,7 @@ async def cancel(
     """Cancel a request; leave already under way keeps the days already taken."""
     request = await load_request(db, org_id, request_id)
     if request.user_id != actor:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="You can only cancel your own requests."
-        )
+        raise LeaveForbiddenError("You can only cancel your own requests.")
     repo = LeaveRequestRepository(db, org_id=org_id)
     await repo.lock_member(actor)
     # Re-read under the lock: a manager may have decided it meanwhile.
@@ -78,8 +76,8 @@ async def cancel(
             request.id, [LeaveStatus.APPROVED], status=LeaveStatus.CANCELLED
         )
     else:
-        raise conflict("This request can't be cancelled any more.")
+        raise LeaveConflictError("This request can't be cancelled any more.")
     if not changed:
-        raise conflict("This request changed in the meantime. Refresh and try again.")
+        raise LeaveConflictError("This request changed in the meantime. Refresh and try again.")
     await db.refresh(request)
     return request

@@ -23,34 +23,55 @@ at once, the second gets "already decided" instead of a double decision.
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permission_deps import PermissionSet
 from app.models.leave_request import ApprovalMode, LeaveRequest, LeaveStatus
 from app.repositories.leave_request import LeaveRequestRepository
 from app.schemas.leave import LeaveRequestCreate
+from app.services.fixed_window import seconds_until_allowed
 from app.services.leave.approvers import approvers_for, route_for
+from app.services.leave.errors import (
+    LeaveConflictError,
+    LeaveForbiddenError,
+    LeaveInvalidError,
+    LeaveNotFoundError,
+    LeaveRateLimitedError,
+)
 from app.services.leave.evaluation import evaluate
 from app.services.leave.evaluation_steps import Evaluation, apply_balance
 from app.services.leave.policies import policy_for_request, resolve_member_policy
 
-
-def conflict(detail: str) -> HTTPException:
-    """A 409 with a reason the requester or approver can act on."""
-    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+# Far above anyone's real use; low enough that approvers can't be spammed.
+SUBMITS_PER_WINDOW = 20
+SUBMIT_WINDOW_SECONDS = 3600
 
 
 async def submit(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, body: LeaveRequestCreate
 ) -> tuple[LeaveRequest, Evaluation]:
-    """Create a request after re-checking every rule under the member's lock."""
+    """Create a request after re-checking every rule under the member's lock.
+
+    Throttled per member: each request notifies approvers (on Slack too),
+    so a submit/cancel loop mustn't be able to flood them. Every attempt
+    counts, including refused ones.
+    """
+    wait = await seconds_until_allowed(
+        f"leave_submit:{org_id}:{user_id}",
+        limit=SUBMITS_PER_WINDOW,
+        window_seconds=SUBMIT_WINDOW_SECONDS,
+    )
+    if wait:
+        raise LeaveRateLimitedError(
+            "You've sent a lot of requests in the last hour. Try again a little later.",
+            retry_after_seconds=wait,
+        )
     repo = LeaveRequestRepository(db, org_id=org_id)
     await repo.lock_member(user_id)
     member = await resolve_member_policy(db, org_id, user_id)
     result = await evaluate(db, member=member, user_id=user_id, body=body, persist=True)
     if result.problems:
-        raise conflict(result.problems[0].message)
+        raise LeaveConflictError(result.problems[0].message)
     auto = result.auto_approved
     request = await repo.create(
         LeaveRequest(
@@ -77,7 +98,7 @@ async def load_request(db: AsyncSession, org_id: uuid.UUID, request_id: uuid.UUI
     """A request in this org, or 404."""
     request = await LeaveRequestRepository(db, org_id=org_id).get_by_id(request_id)
     if request is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found.")
+        raise LeaveNotFoundError("Request not found.")
     return request
 
 
@@ -100,12 +121,9 @@ async def decide(
             if actor == request.user_id
             else "Only this person's managers or HR can decide this request."
         )
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+        raise LeaveForbiddenError(detail)
     if not approve and not (note or "").strip():
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Add a note so they know why it was rejected.",
-        )
+        raise LeaveInvalidError("Add a note so they know why it was rejected.")
     repo = LeaveRequestRepository(db, org_id=org_id)
     await repo.lock_member(request.user_id)
     # Re-read under the lock: the status loaded above may already be stale.
@@ -121,7 +139,7 @@ async def decide(
         decision_note=(note or "").strip() or None,
     )
     if not changed:
-        raise conflict("This request was already decided or cancelled.")
+        raise LeaveConflictError("This request was already decided or cancelled.")
     await db.refresh(request)
     return request
 
@@ -142,7 +160,7 @@ async def _check_still_affordable(
     result = Evaluation(start=request.start_date, end=request.end_date, days=request.days)
     await apply_balance(db, member, request.user_id, request.leave_type_id, result, persist=True)
     if result.balance_before is not None and result.balance_before < 0:
-        raise conflict(
+        raise LeaveConflictError(
             f"Not enough balance: approving needs {request.days} days and only "
             f"{result.balance_before + request.days} are left. Reject, or ask HR to adjust it."
         )

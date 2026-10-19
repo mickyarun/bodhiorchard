@@ -14,7 +14,7 @@
  * limitations under the License.
  -->
 
-<!-- Allocations and adjustments behind a member's balances. -->
+<!-- Allocations, adjustments and corrections behind a member's balances. -->
 <template>
   <p v-if="!entries.length" class="text-body-2 text-medium-emphasis">
     No allocations or adjustments this leave year.

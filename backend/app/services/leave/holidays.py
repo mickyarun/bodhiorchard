@@ -35,12 +35,13 @@ from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.policy_holiday import PolicyHolidayRepository
 from app.schemas.leave_policy import HolidayCountry, Subdivision
 from app.services.leave.calendar_math import count_days, leave_year_by_label
+from app.services.leave.errors import LeaveInvalidError
 from app.services.leave.policies import mandatory_holidays, today_for
 
 logger = structlog.get_logger(__name__)
 
 
-class HolidayImportError(ValueError):
+class HolidayImportError(LeaveInvalidError):
     """The policy has no country set, or python-holidays doesn't know it."""
 
 

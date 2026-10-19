@@ -16,19 +16,20 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1._leave_admin import CONFIGURE, conflict, load_policy, policy_read
+from app.api.v1._leave_admin import CONFIGURE, load_policy, policy_read
 from app.core.deps import PermissionSet, get_db, get_permission_set, require_permissions
-from app.models.leave_policy import LeavePolicy
 from app.models.user import User
 from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.leave_policy_members import LeavePolicyMemberRepository
 from app.schemas.leave import PersonRef
+from app.schemas.leave_config import ConfigEventRead
 from app.schemas.leave_policy import PolicyAssign, PolicyRead, PolicyWrite
-from app.services.leave.holidays import recount_requests
-from app.services.leave.policies import ensure_default_policy, today_for
+from app.services.leave import policy_admin
+from app.services.leave.config_history import config_history
+from app.services.leave.policies import ensure_default_policy
 
 router = APIRouter(tags=["leave-admin"])
 
@@ -51,10 +52,7 @@ async def create_policy(
     db: AsyncSession = Depends(get_db),
 ) -> PolicyRead:
     """Add a policy, e.g. one per country."""
-    repo = LeavePolicyRepository(db, org_id=current_user.org_id)
-    if await repo.name_taken(body.name, exclude=None):
-        raise conflict(f"A policy called {body.name} already exists.")
-    policy = await repo.create(LeavePolicy(org_id=current_user.org_id, **body.model_dump()))
+    policy = await policy_admin.create_policy(db, current_user.org_id, current_user.id, body)
     return await policy_read(db, policy)
 
 
@@ -66,22 +64,8 @@ async def update_policy(
     db: AsyncSession = Depends(get_db),
 ) -> PolicyRead:
     """Change a policy. The leave-year start is fixed once requests exist."""
-    repo = LeavePolicyRepository(db, org_id=current_user.org_id)
     policy = await load_policy(db, current_user.org_id, policy_id)
-    if await repo.name_taken(body.name, exclude=policy.id):
-        raise conflict(f"A policy called {body.name} already exists.")
-    if body.year_start_month != policy.year_start_month and await repo.has_requests(policy.id):
-        raise conflict("The leave year can't move once requests exist: every balance would shift.")
-    calendar_changed = (
-        sorted(body.working_days) != sorted(policy.working_days)
-        or body.timezone != policy.timezone
-    )
-    for field, value in body.model_dump().items():
-        setattr(policy, field, value)
-    await db.flush()
-    if calendar_changed:
-        # Stored day counts depend on working days; keep them honest.
-        await recount_requests(db, policy, today_for(policy))
+    await policy_admin.update_policy(db, policy, current_user.id, body)
     return await policy_read(db, policy)
 
 
@@ -93,9 +77,7 @@ async def make_default(
 ) -> PolicyRead:
     """Make this the policy for everyone without one of their own."""
     policy = await load_policy(db, current_user.org_id, policy_id)
-    await LeavePolicyRepository(db, org_id=current_user.org_id).clear_default()
-    policy.is_default = True
-    await db.flush()
+    await policy_admin.make_default(db, policy, current_user.id)
     return await policy_read(db, policy)
 
 
@@ -106,13 +88,8 @@ async def delete_policy(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Delete an unused, non-default policy."""
-    repo = LeavePolicyRepository(db, org_id=current_user.org_id)
     policy = await load_policy(db, current_user.org_id, policy_id)
-    if policy.is_default:
-        raise conflict("Make another policy the default before deleting this one.")
-    if await repo.in_use(policy.id):
-        raise conflict("This policy has employees, leave types or requests, so it stays.")
-    await repo.delete(policy)
+    await policy_admin.delete_policy(db, policy, current_user.id)
 
 
 @router.get("/policies/{policy_id}/employees", response_model=list[PersonRef])
@@ -135,20 +112,20 @@ async def assign_policy(
     perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, int]:
-    """Move employees onto this policy from today; their old balances stay.
-
-    Nobody but the owner moves themself: a policy with bigger quotas would
-    otherwise be a way round "no adjusting your own balance". Quota edits
-    and changing the default policy still affect the editor's own leave;
-    their requests still need a manager or HR to approve.
-    """
-    if current_user.id in body.user_ids and not perms.is_owner:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Ask another admin to change your own leave policy.",
-        )
+    """Move employees onto this policy from today (never yourself, unless owner)."""
     policy = await load_policy(db, current_user.org_id, policy_id)
-    assigned = await LeavePolicyMemberRepository(db, org_id=current_user.org_id).assign_employees(
-        policy, body.user_ids, today_for(policy)
+    assigned = await policy_admin.assign_employees(
+        db, policy, current_user.id, body.user_ids, actor_is_owner=perms.is_owner
     )
     return {"assigned": assigned}
+
+
+@router.get("/policies/{policy_id}/history", response_model=list[ConfigEventRead])
+async def policy_history(
+    policy_id: uuid.UUID,
+    current_user: User = Depends(require_permissions(CONFIGURE)),
+    db: AsyncSession = Depends(get_db),
+) -> list[ConfigEventRead]:
+    """Who changed this policy and its leave types, newest first."""
+    policy = await load_policy(db, current_user.org_id, policy_id)
+    return await config_history(db, policy)

@@ -16,11 +16,11 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1._leave_admin import CONFIGURE, conflict, load_policy
+from app.api.v1._leave_admin import CONFIGURE, load_policy
 from app.core.deps import get_db, require_permissions
 from app.models.policy_holiday import HolidaySource, PolicyHoliday
 from app.models.user import User
@@ -33,8 +33,8 @@ from app.schemas.leave_policy import (
     HolidayWrite,
 )
 from app.services.leave.calendar_math import leave_year_by_label
+from app.services.leave.errors import LeaveConflictError, LeaveNotFoundError
 from app.services.leave.holidays import (
-    HolidayImportError,
     holiday_countries,
     import_public_holidays,
     recount_requests,
@@ -52,7 +52,7 @@ def _read(h: PolicyHoliday) -> HolidayAdminRead:
 async def _load(db: AsyncSession, org_id: uuid.UUID, holiday_id: uuid.UUID) -> PolicyHoliday:
     holiday = await PolicyHolidayRepository(db, org_id=org_id).get_by_id(holiday_id)
     if holiday is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Holiday not found.")
+        raise LeaveNotFoundError("Holiday not found.")
     return holiday
 
 
@@ -103,7 +103,7 @@ async def add_holiday(
             )
         )
     except IntegrityError as exc:
-        raise conflict(DUPLICATE) from exc
+        raise LeaveConflictError(DUPLICATE) from exc
     await recount_requests(db, policy, holiday.date)
     return _read(holiday)
 
@@ -123,7 +123,7 @@ async def update_holiday(
     try:
         await db.flush()
     except IntegrityError as exc:
-        raise conflict(DUPLICATE) from exc
+        raise LeaveConflictError(DUPLICATE) from exc
     policy = await load_policy(db, current_user.org_id, holiday.policy_id)
     await recount_requests(db, policy, earliest)
     return _read(holiday)
@@ -152,8 +152,5 @@ async def import_holidays(
 ) -> HolidayImportResult:
     """Pre-fill a year's public holidays for the policy's country and region."""
     policy = await load_policy(db, current_user.org_id, policy_id)
-    try:
-        added, skipped = await import_public_holidays(db, policy, body.year)
-    except HolidayImportError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    added, skipped = await import_public_holidays(db, policy, body.year)
     return HolidayImportResult(added=added, skipped=skipped)

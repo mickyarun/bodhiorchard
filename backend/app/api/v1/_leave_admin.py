@@ -16,13 +16,13 @@
 
 import uuid
 
-from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.leave_policy import LeavePolicy
 from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.leave_policy_members import LeavePolicyMemberRepository
 from app.schemas.leave_policy import PolicyRead
+from app.services.leave.errors import LeaveNotFoundError
 
 CONFIGURE = "leave:configure"
 
@@ -31,7 +31,7 @@ async def load_policy(db: AsyncSession, org_id: uuid.UUID, policy_id: uuid.UUID)
     """A policy in this org, or 404."""
     policy = await LeavePolicyRepository(db, org_id=org_id).get_by_id(policy_id)
     if policy is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Policy not found.")
+        raise LeaveNotFoundError("Policy not found.")
     return policy
 
 
@@ -59,8 +59,3 @@ async def policy_read(db: AsyncSession, policy: LeavePolicy) -> PolicyRead:
         ),
         has_requests=await repo.has_requests(policy.id),
     )
-
-
-def conflict(detail: str) -> HTTPException:
-    """A 409 with a user-facing reason."""
-    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)

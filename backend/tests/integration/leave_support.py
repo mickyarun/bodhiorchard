@@ -28,6 +28,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.deps import PermissionSet
+from app.core.security import create_access_token
 from app.models.employee_profile import EmployeeProfile
 from app.models.leave_request import LeaveKind
 from app.models.leave_type import LeaveType
@@ -124,3 +125,9 @@ def leave_body(type_id: uuid.UUID, start: date, end: date, **kw: object) -> Leav
     return LeaveRequestCreate(
         kind=LeaveKind.LEAVE, leave_type_id=type_id, start_date=start, end_date=end, **kw
     )  # type: ignore[arg-type]
+
+
+def as_user(user: uuid.UUID, org: uuid.UUID) -> dict[str, str]:
+    """Auth headers for ``user`` signed in to ``org``."""
+    token = create_access_token({"sub": str(user), "org_id": str(org)})
+    return {"Authorization": f"Bearer {token}"}

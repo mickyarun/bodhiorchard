@@ -127,3 +127,33 @@ export interface MemberBalances {
   balances: Balance[]
   ledger: LedgerEntryRead[]
 }
+
+export interface Recalculate {
+  leave_type_id: string
+  leave_year: number | null
+}
+
+export interface RecalculateResult {
+  frozen: Decimalish
+  recalculated: Decimalish
+  correction: Decimalish
+  balances: MemberBalances
+}
+
+export type ConfigAction =
+  | 'policy_created'
+  | 'policy_updated'
+  | 'policy_made_default'
+  | 'policy_deleted'
+  | 'type_created'
+  | 'type_updated'
+  | 'employees_assigned'
+
+/** One change to a policy or its leave types; `changes` is {field: [old, new]}. */
+export interface ConfigEventRead {
+  id: string
+  action: ConfigAction
+  actor: PersonRef
+  at: string
+  changes: Record<string, unknown>
+}

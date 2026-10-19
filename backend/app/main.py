@@ -28,6 +28,7 @@ from sqlalchemy import select
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from app.api.router import api_router
+from app.api.v1._leave_errors import register_leave_errors
 from app.core.event_loop import configure_event_loop_policy
 from app.core.logging import setup_logging
 from app.core.middleware import RequestLoggingMiddleware
@@ -387,6 +388,7 @@ async def _block_cors_on_mcp(request: Request, call_next: RequestResponseEndpoin
 app.add_middleware(BaseHTTPMiddleware, dispatch=_block_cors_on_mcp)
 
 app.include_router(api_router)
+register_leave_errors(app)
 
 
 @app.get("/")

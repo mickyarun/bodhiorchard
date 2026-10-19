@@ -26,13 +26,14 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
-from fastapi import HTTPException
 
+from app.api.v1._leave_errors import status_for
 from app.models.leave_ledger import LeaveLedgerEntry, LedgerEntryType
 from app.models.leave_request import LeaveRequest, LeaveStatus
 from app.schemas.leave import LeaveRequestCreate
 from app.services.leave import cancellation
 from app.services.leave.cancellation import cancel
+from app.services.leave.errors import LeaveError
 from app.services.leave.lifecycle import decide, submit
 from app.services.leave.summary import build_summary
 from tests.integration.leave_support import (
@@ -55,9 +56,9 @@ async def _try_submit(
             await submit(db, org, user, body)
             await db.commit()
             return 201
-        except HTTPException as exc:
+        except LeaveError as exc:
             await db.rollback()
-            return exc.status_code
+            return status_for(exc)
 
 
 async def _try_decide(
@@ -76,9 +77,9 @@ async def _try_decide(
             )
             await db.commit()
             return 200
-        except HTTPException as exc:
+        except LeaveError as exc:
             await db.rollback()
-            return exc.status_code
+            return status_for(exc)
 
 
 async def _available(factory: Factory, org: uuid.UUID, user: uuid.UUID) -> Decimal | None:
@@ -180,9 +181,9 @@ async def test_finished_leave_cannot_be_cancelled(
         await db.commit()
     monkeypatch.setattr(cancellation, "today_for", lambda _policy: mon + timedelta(days=3))
     async with pg_session_factory() as db:
-        with pytest.raises(HTTPException) as excinfo:
+        with pytest.raises(LeaveError) as excinfo:
             await cancel(db, org, emp, request.id)
-    assert excinfo.value.status_code == 409
+    assert status_for(excinfo.value) == 409
 
 
 async def test_an_aged_request_is_still_balance_checked_on_approval(

@@ -33,10 +33,14 @@ from app.models.base import BaseModel
 
 
 class LedgerEntryType(StrEnum):
-    """Allocation (one per user, type and year) or a manual adjustment."""
+    """Allocation (one per user, type and year), a manual adjustment, or a
+    correction made by recalculating a frozen allocation."""
 
     ALLOCATION = "allocation"
     ADJUSTMENT = "adjustment"
+    # Written by "recalculate allocation": the gap between the frozen
+    # allocation (plus earlier corrections) and what it should be now.
+    CORRECTION = "correction"
 
 
 class LeaveLedgerEntry(BaseModel):
