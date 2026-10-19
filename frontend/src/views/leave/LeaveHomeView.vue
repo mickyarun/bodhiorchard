@@ -25,9 +25,9 @@
         Request leave and work from home, and see who's out.
       </p>
     </div>
-    <AppCallout variant="info" eyebrow="Not set up yet" icon="mdi-beach">
-      Leave and work-from-home requests aren't switched on for your organization yet. Your
-      notification settings are available from the menu in the bottom left.
+    <AppCallout variant="info" eyebrow="Coming soon" icon="mdi-beach">
+      Requesting leave and work from home, approvals, and the team calendar arrive in the next
+      update. There's nothing to set up yet.
     </AppCallout>
   </div>
 </template>
