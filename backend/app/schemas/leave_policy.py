@@ -165,7 +165,7 @@ class BalanceAdjust(BaseModel):
     leave_type_id: uuid.UUID
     days: Decimal = Field(..., ge=-365, le=365, decimal_places=1)
     note: str = Field(..., min_length=3, max_length=500)
-    leave_year: int | None = None
+    leave_year: int | None = Field(None, ge=2000, le=2100)
 
 
 class MemberBalances(BaseModel):

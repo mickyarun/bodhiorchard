@@ -16,14 +16,15 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1._leave_admin import CONFIGURE, conflict, load_policy, policy_read
-from app.core.deps import get_db, require_permissions
+from app.core.deps import PermissionSet, get_db, get_permission_set, require_permissions
 from app.models.leave_policy import LeavePolicy
 from app.models.user import User
 from app.repositories.leave_policy import LeavePolicyRepository
+from app.repositories.leave_policy_members import LeavePolicyMemberRepository
 from app.schemas.leave import PersonRef
 from app.schemas.leave_policy import PolicyAssign, PolicyRead, PolicyWrite
 from app.services.leave.holidays import recount_requests
@@ -122,7 +123,7 @@ async def policy_employees(
 ) -> list[PersonRef]:
     """Employees following the policy (the default includes the unassigned)."""
     policy = await load_policy(db, current_user.org_id, policy_id)
-    rows = await LeavePolicyRepository(db, org_id=current_user.org_id).list_employees(policy)
+    rows = await LeavePolicyMemberRepository(db, org_id=current_user.org_id).list_employees(policy)
     return [PersonRef(user_id=uid, name=name) for uid, name in rows]
 
 
@@ -131,11 +132,23 @@ async def assign_policy(
     policy_id: uuid.UUID,
     body: PolicyAssign,
     current_user: User = Depends(require_permissions(CONFIGURE)),
+    perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, int]:
-    """Move employees onto this policy from today; their old balances stay."""
+    """Move employees onto this policy from today; their old balances stay.
+
+    Nobody but the owner moves themself: a policy with bigger quotas would
+    otherwise be a way round "no adjusting your own balance". Quota edits
+    and changing the default policy still affect the editor's own leave;
+    their requests still need a manager or HR to approve.
+    """
+    if current_user.id in body.user_ids and not perms.is_owner:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Ask another admin to change your own leave policy.",
+        )
     policy = await load_policy(db, current_user.org_id, policy_id)
-    assigned = await LeavePolicyRepository(db, org_id=current_user.org_id).assign_employees(
+    assigned = await LeavePolicyMemberRepository(db, org_id=current_user.org_id).assign_employees(
         policy, body.user_ids, today_for(policy)
     )
     return {"assigned": assigned}

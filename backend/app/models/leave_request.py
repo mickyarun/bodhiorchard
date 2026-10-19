@@ -24,7 +24,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Index, Numeric, Text
+from sqlalchemy import CheckConstraint, Date, DateTime, Enum, ForeignKey, Index, Numeric, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -80,6 +80,10 @@ class LeaveRequest(BaseModel):
             "user_id",
             postgresql_where="status = 'pending'",
         ),
+        # Holiday recounts and "is this policy in use" look requests up by policy.
+        Index("ix_leave_requests_policy", "org_id", "policy_id"),
+        CheckConstraint("end_date >= start_date", name="ck_leave_requests_date_order"),
+        CheckConstraint("days >= 0", name="ck_leave_requests_days_not_negative"),
     )
 
     org_id: Mapped[uuid.UUID] = mapped_column(

@@ -37,9 +37,10 @@ from app.schemas.leave import (
 )
 from app.schemas.leave_summary import LeaveSummary
 from app.services.leave.approvers import notify_targets
+from app.services.leave.cancellation import cancel
 from app.services.leave.evaluation import evaluate
-from app.services.leave.lifecycle import cancel, submit
-from app.services.leave.notify import notify_new_request
+from app.services.leave.lifecycle import submit
+from app.services.leave.notify import stage_new_request
 from app.services.leave.policies import resolve_member_policy, today_for
 from app.services.leave.summary import build_summary
 from app.services.leave.views import request_reads
@@ -116,10 +117,7 @@ async def create_request(
         if auto
         else await notify_targets(db, org_id, result.approvers, current_user.id)
     )
-    # Commit before telling anyone: a DM about a request that then rolls
-    # back would send people to something that doesn't exist.
-    await db.commit()
-    notify_new_request(
+    notice = stage_new_request(
         db,
         org_id=org_id,
         request=request,
@@ -127,6 +125,9 @@ async def create_request(
         targets=targets,
         auto_approved=auto,
     )
+    # Commit, then tell people: nobody hears about a request that rolled back.
+    await db.commit()
+    notice.send()
     reads = await request_reads(
         db,
         org_id,

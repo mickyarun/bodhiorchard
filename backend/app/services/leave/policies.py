@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.employee_profile import EmployeeProfile
 from app.models.leave_policy import LeavePolicy
+from app.models.leave_request import LeaveRequest
 from app.models.policy_holiday import HolidayKind
 from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.leave_policy import LeavePolicyRepository
@@ -74,6 +75,22 @@ async def resolve_member_policy(
         if policy is not None:
             return MemberPolicy(policy=policy, profile=profile)
     return MemberPolicy(policy=await ensure_default_policy(db, org_id), profile=profile)
+
+
+async def policy_for_request(
+    db: AsyncSession, org_id: uuid.UUID, request: LeaveRequest
+) -> MemberPolicy:
+    """The policy a request was made under, with the member's profile.
+
+    Approving or cancelling it later prices and counts it on that policy,
+    even if the member has moved policy since (their old leave type isn't
+    on the new one). Falls back to the current policy if it was deleted.
+    """
+    current = await resolve_member_policy(db, org_id, request.user_id)
+    if request.policy_id == current.policy.id:
+        return current
+    policy = await LeavePolicyRepository(db, org_id=org_id).get_by_id(request.policy_id)
+    return MemberPolicy(policy=policy or current.policy, profile=current.profile)
 
 
 def today_for(policy: LeavePolicy) -> date:

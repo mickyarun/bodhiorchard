@@ -46,7 +46,12 @@ async def _require_member(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUI
 async def _may_view(
     db: AsyncSession, current_user: User, perms: PermissionSet, user_id: uuid.UUID
 ) -> bool:
-    if user_id == current_user.id or perms.has_any((CONFIGURE, APPROVE)):
+    """Self, their managers and HR (leave:approve).
+
+    Not leave:configure on its own: per-type used/pending days next to the
+    calendar's "on leave" would tell a policy admin who is off sick.
+    """
+    if user_id == current_user.id or perms.has(APPROVE):
         return True
     return user_id in await reports_of(db, current_user.org_id, current_user.id)
 

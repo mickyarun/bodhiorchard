@@ -15,9 +15,10 @@
 """Append-only leave balance ledger.
 
 A balance is never stored: it's the year's allocation plus adjustments,
-minus approved and pending request days. The allocation row is written
-once, the first time a year's balance is read, which freezes it — a later
-quota change can't rewrite a past year.
+minus approved and pending request days. A type's allocation row is
+written once, on the member's first submit or approval spending it that
+year, which freezes it — a later quota or proration change can't rewrite
+a year already in use. Until then it's worked out live.
 """
 
 import uuid

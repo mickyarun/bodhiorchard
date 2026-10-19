@@ -87,6 +87,7 @@ from app.api.v1.ws import router as ws_router
 from app.api.v1.xp import router as xp_router
 from app.api.v1.yield_offers import router as yield_offers_router
 from app.core.deps import require_permissions
+from app.core.http_cache import no_store
 from app.core.permissions import WORKSPACE_ENGINEERING
 from app.mcp.server import router as mcp_router
 from app.mcp.streamable import router as mcp_remote_router
@@ -105,9 +106,13 @@ api_router.include_router(notifications_router, prefix="/api/v1/notifications")
 api_router.include_router(ws_router, prefix="/api/v1")
 api_router.include_router(public_router, prefix="/api/v1/public")
 # People workspace: open to every member; each route checks its own
-# employees:* permission or "own record".
-api_router.include_router(employees_router, prefix="/api/v1/employees")
-api_router.include_router(employee_updates_router, prefix="/api/v1/employees")
+# employees:* / leave:* permission or "own record". Nothing here may be
+# cached: it carries leave reasons, balances and personal details.
+PEOPLE_NO_STORE = [Depends(no_store)]
+for employee_part in (employees_router, employee_updates_router):
+    api_router.include_router(
+        employee_part, prefix="/api/v1/employees", dependencies=PEOPLE_NO_STORE
+    )
 for leave_part in (
     leave_router,
     leave_approvals_router,
@@ -117,7 +122,7 @@ for leave_part in (
     leave_types_router,
     leave_holidays_router,
 ):
-    api_router.include_router(leave_part, prefix="/api/v1/leave")
+    api_router.include_router(leave_part, prefix="/api/v1/leave", dependencies=PEOPLE_NO_STORE)
 # Org-level settings routes; each is gated by its own org/integration
 # permission. The engineering-only settings sub-routers are mounted below.
 api_router.include_router(settings_router, prefix="/api/v1/settings")

@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Submit, approve, reject and cancel requests.
+"""Submit, approve and reject requests (cancelling lives in
+:mod:`app.services.leave.cancellation`).
 
 Every change takes the requester's row lock first and re-checks the
 rules, and status changes are conditional updates: if two managers click
@@ -20,28 +21,23 @@ at once, the second gets "already decided" instead of a double decision.
 """
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permission_deps import PermissionSet
 from app.models.leave_request import ApprovalMode, LeaveRequest, LeaveStatus
-from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.leave_request import LeaveRequestRepository
 from app.schemas.leave import LeaveRequestCreate
 from app.services.leave.approvers import approvers_for, route_for
-from app.services.leave.calendar_math import count_days
-from app.services.leave.evaluation import Evaluation, evaluate
-from app.services.leave.policies import (
-    MemberPolicy,
-    mandatory_holidays,
-    resolve_member_policy,
-    today_for,
-)
+from app.services.leave.evaluation import evaluate
+from app.services.leave.evaluation_steps import Evaluation, apply_balance
+from app.services.leave.policies import policy_for_request, resolve_member_policy
 
 
-def _conflict(detail: str) -> HTTPException:
+def conflict(detail: str) -> HTTPException:
+    """A 409 with a reason the requester or approver can act on."""
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
 
@@ -54,7 +50,7 @@ async def submit(
     member = await resolve_member_policy(db, org_id, user_id)
     result = await evaluate(db, member=member, user_id=user_id, body=body, persist=True)
     if result.problems:
-        raise _conflict(result.problems[0].message)
+        raise conflict(result.problems[0].message)
     auto = result.auto_approved
     request = await repo.create(
         LeaveRequest(
@@ -125,7 +121,7 @@ async def decide(
         decision_note=(note or "").strip() or None,
     )
     if not changed:
-        raise _conflict("This request was already decided or cancelled.")
+        raise conflict("This request was already decided or cancelled.")
     await db.refresh(request)
     return request
 
@@ -136,82 +132,17 @@ async def _check_still_affordable(
     """Refuse to approve if the balance went negative since it was requested.
 
     Pending days already count against the balance, so this only trips when
-    HR cut the balance or quota after the request was made.
+    HR cut the balance or quota after the request was made. Only the balance
+    is re-checked: date rules like the backdating limit applied when it was
+    sent, and a request waiting in the queue mustn't dodge this by aging.
     """
     if request.leave_type_id is None:
         return
-    # Price it on the policy it was requested under, even if the member has
-    # moved policy since (their old leave type isn't on the new one).
-    current = await resolve_member_policy(db, org_id, request.user_id)
-    policy = await LeavePolicyRepository(db, org_id=org_id).get_by_id(request.policy_id)
-    member = MemberPolicy(policy=policy or current.policy, profile=current.profile)
-    result = await evaluate(
-        db,
-        member=member,
-        user_id=request.user_id,
-        body=LeaveRequestCreate(
-            kind=request.kind,
-            leave_type_id=request.leave_type_id,
-            start_date=request.start_date,
-            end_date=request.end_date,
-            half_day=request.half_day,
-        ),
-        exclude_request=request.id,
-        persist=True,
-    )
+    member = await policy_for_request(db, org_id, request)
+    result = Evaluation(start=request.start_date, end=request.end_date, days=request.days)
+    await apply_balance(db, member, request.user_id, request.leave_type_id, result, persist=True)
     if result.balance_before is not None and result.balance_before < 0:
-        raise _conflict(
+        raise conflict(
             f"Not enough balance: approving needs {request.days} days and only "
             f"{result.balance_before + request.days} are left. Reject, or ask HR to adjust it."
         )
-
-
-async def cancel(
-    db: AsyncSession, org_id: uuid.UUID, actor: uuid.UUID, request_id: uuid.UUID
-) -> LeaveRequest:
-    """Cancel a request; leave already under way keeps the days already taken."""
-    request = await load_request(db, org_id, request_id)
-    if request.user_id != actor:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="You can only cancel your own requests."
-        )
-    repo = LeaveRequestRepository(db, org_id=org_id)
-    await repo.lock_member(actor)
-    # Re-read under the lock: a manager may have decided it meanwhile.
-    await db.refresh(request)
-    member = await resolve_member_policy(db, org_id, actor)
-    today = today_for(member.policy)
-    if request.status == LeaveStatus.APPROVED and request.start_date < today <= request.end_date:
-        # Under way: keep the days already taken, cancel the rest.
-        yesterday = today - timedelta(days=1)
-        holidays = await mandatory_holidays(db, member.policy, request.start_date, yesterday)
-        taken = count_days(
-            request.start_date,
-            yesterday,
-            request.half_day,
-            working_days=member.policy.working_days,
-            holidays=holidays,
-        )
-        if taken.days == 0:
-            # Only non-working days have passed: nothing was taken yet.
-            changed = await repo.transition(
-                request.id, [LeaveStatus.APPROVED], status=LeaveStatus.CANCELLED
-            )
-        else:
-            changed = await repo.transition(
-                request.id, [LeaveStatus.APPROVED], end_date=yesterday, days=taken.days
-            )
-    elif request.status == LeaveStatus.PENDING:
-        changed = await repo.transition(
-            request.id, [LeaveStatus.PENDING], status=LeaveStatus.CANCELLED
-        )
-    elif request.status == LeaveStatus.APPROVED and request.start_date >= today:
-        changed = await repo.transition(
-            request.id, [LeaveStatus.APPROVED], status=LeaveStatus.CANCELLED
-        )
-    else:
-        raise _conflict("This request can't be cancelled any more.")
-    if not changed:
-        raise _conflict("This request changed in the meantime. Refresh and try again.")
-    await db.refresh(request)
-    return request

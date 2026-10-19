@@ -14,7 +14,8 @@
 
 /**
  * One member's balances and ledger for the profile Leave tab. Visible to
- * HR, the member's managers and the member; adjusting needs leave:configure.
+ * HR (leave:approve), the member's managers and the member; adjusting also
+ * needs leave:configure.
  */
 import { ref } from 'vue'
 

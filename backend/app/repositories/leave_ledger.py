@@ -15,6 +15,7 @@
 """Data access for the leave balance ledger."""
 
 import uuid
+from collections.abc import Collection
 from decimal import Decimal
 
 from sqlalchemy import func, select, text
@@ -54,6 +55,42 @@ class LeaveLedgerRepository(BaseRepository[LeaveLedgerEntry]):
             else:
                 adjustments += days
             out[type_id] = (allocation, adjustments)
+        return out
+
+    async def type_totals(
+        self, user_ids: Collection[uuid.UUID], type_ids: Collection[uuid.UUID]
+    ) -> dict[tuple[uuid.UUID, uuid.UUID, int], tuple[Decimal | None, Decimal]]:
+        """``{(user, type, leave_year): (allocation or None, adjustments)}``."""
+        if not user_ids or not type_ids:
+            return {}
+        stmt = self._scoped(
+            select(
+                LeaveLedgerEntry.user_id,
+                LeaveLedgerEntry.leave_type_id,
+                LeaveLedgerEntry.leave_year,
+                LeaveLedgerEntry.entry_type,
+                func.sum(LeaveLedgerEntry.days),
+            )
+            .where(
+                LeaveLedgerEntry.user_id.in_(user_ids),
+                LeaveLedgerEntry.leave_type_id.in_(type_ids),
+            )
+            .group_by(
+                LeaveLedgerEntry.user_id,
+                LeaveLedgerEntry.leave_type_id,
+                LeaveLedgerEntry.leave_year,
+                LeaveLedgerEntry.entry_type,
+            )
+        )
+        out: dict[tuple[uuid.UUID, uuid.UUID, int], tuple[Decimal | None, Decimal]] = {}
+        for user_id, type_id, year, entry_type, days in (await self._db.execute(stmt)).all():
+            key = (user_id, type_id, year)
+            allocation, adjustments = out.get(key, (None, Decimal("0")))
+            if entry_type == LedgerEntryType.ALLOCATION:
+                allocation = days
+            else:
+                adjustments += days
+            out[key] = (allocation, adjustments)
         return out
 
     async def ensure_allocation(

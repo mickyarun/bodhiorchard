@@ -60,7 +60,6 @@ async def calendar_view(
     )
     entries = []
     for r in requests:
-        policy = policies.get(r.policy_id)
         private = hr or r.user_id == viewer or r.user_id in reports
         leave_type = types.get(r.leave_type_id) if private and r.leave_type_id else None
         entries.append(
@@ -82,7 +81,7 @@ async def calendar_view(
                 if leave_type
                 else None,
                 reason=r.reason if private else None,
-                working_days=list(policy.working_days) if policy else [0, 1, 2, 3, 4],
+                working_days=list(policies[r.policy_id].working_days),
             )
         )
     member = await resolve_member_policy(db, org_id, viewer)

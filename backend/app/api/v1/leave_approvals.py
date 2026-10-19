@@ -27,7 +27,7 @@ from app.schemas.leave import LeaveRequestRead
 from app.schemas.leave_views import ApprovalCount, ApprovalItem, DecisionBody
 from app.services.leave.approvals_view import approval_count, approval_items
 from app.services.leave.lifecycle import decide
-from app.services.leave.notify import notify_decision
+from app.services.leave.notify import stage_decision
 from app.services.leave.views import request_reads
 
 router = APIRouter(tags=["leave"])
@@ -72,9 +72,10 @@ async def _decide(
         approve=approve,
         note=body.note,
     )
-    # Commit before telling the requester (see create_request).
+    notice = stage_decision(db, org_id=org_id, request=request, decider_name=current_user.name)
+    # Commit, then tell the requester (see create_request).
     await db.commit()
-    notify_decision(db, org_id=org_id, request=request, decider_name=current_user.name)
+    notice.send()
     reads = await request_reads(
         db,
         org_id,

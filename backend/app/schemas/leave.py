@@ -55,6 +55,11 @@ class PersonRef(BaseModel):
     name: str
 
 
+# A request can't cross a leave year, so nothing valid is longer than this.
+# Checked up front so a huge range never reaches the day-by-day counting.
+MAX_REQUEST_SPAN_DAYS = 366
+
+
 class LeaveRequestCreate(BaseModel):
     """Request leave, WFH or an optional holiday."""
 
@@ -70,6 +75,8 @@ class LeaveRequestCreate(BaseModel):
     def _shape(self) -> "LeaveRequestCreate":
         if self.end_date < self.start_date:
             raise ValueError("The end date must be on or after the start date.")
+        if (self.end_date - self.start_date).days >= MAX_REQUEST_SPAN_DAYS:
+            raise ValueError("A request can cover at most one leave year.")
         if self.half_day != HalfDay.NONE and self.start_date != self.end_date:
             raise ValueError("A half day can only be requested for a single day.")
         if self.kind == LeaveKind.LEAVE and self.leave_type_id is None:

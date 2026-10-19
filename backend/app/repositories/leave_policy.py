@@ -15,10 +15,9 @@
 """Data access for leave policies."""
 
 import uuid
-from collections.abc import Collection, Sequence
-from datetime import date
+from collections.abc import Collection
 
-from sqlalchemy import ColumnElement, exists, func, or_, select
+from sqlalchemy import exists, select
 from sqlalchemy import update as sql_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,8 +26,7 @@ from app.models.employee_profile import EmployeeProfile
 from app.models.leave_policy import LeavePolicy
 from app.models.leave_request import LeaveRequest
 from app.models.leave_type import LeaveType
-from app.models.user import User
-from app.repositories.base import BaseRepository, rowcount
+from app.repositories.base import BaseRepository
 
 
 class LeavePolicyRepository(BaseRepository[LeavePolicy]):
@@ -97,69 +95,19 @@ class LeavePolicyRepository(BaseRepository[LeavePolicy]):
 
     async def has_requests(self, policy_id: uuid.UUID) -> bool:
         """True once any request was made under the policy."""
-        stmt = select(exists().where(LeaveRequest.policy_id == policy_id))
+        stmt = select(
+            exists().where(LeaveRequest.org_id == self._org, LeaveRequest.policy_id == policy_id)
+        )
         return bool((await self._db.execute(stmt)).scalar())
-
-    def _follows(self, policy: LeavePolicy) -> ColumnElement[bool]:
-        """Profiles on ``policy`` — explicitly, or by default."""
-        if policy.is_default:
-            return or_(
-                EmployeeProfile.leave_policy_id == policy.id,
-                EmployeeProfile.leave_policy_id.is_(None),
-            )
-        return EmployeeProfile.leave_policy_id == policy.id
-
-    async def count_employees(self, policy: LeavePolicy) -> int:
-        """Employees following ``policy``."""
-        stmt = select(func.count(EmployeeProfile.id)).where(
-            EmployeeProfile.org_id == self._org, self._follows(policy)
-        )
-        return int((await self._db.execute(stmt)).scalar() or 0)
-
-    async def list_employees(self, policy: LeavePolicy) -> list[tuple[uuid.UUID, str]]:
-        """``(user_id, name)`` of employees following ``policy``."""
-        stmt = (
-            select(User.id, User.name)
-            .join(EmployeeProfile, EmployeeProfile.user_id == User.id)
-            .where(EmployeeProfile.org_id == self._org, self._follows(policy))
-            .order_by(User.name)
-        )
-        return [(row[0], row[1]) for row in (await self._db.execute(stmt)).all()]
-
-    async def assign_employees(
-        self, policy: LeavePolicy, user_ids: Sequence[uuid.UUID], on: date
-    ) -> int:
-        """Move employees' profiles onto ``policy`` from ``on``.
-
-        People already on it — explicitly, or by default when it is the
-        default policy — are left alone, so their start date (which drives
-        allocation) isn't reset.
-        """
-        not_already = (
-            EmployeeProfile.leave_policy_id != policy.id
-            if policy.is_default
-            else or_(
-                EmployeeProfile.leave_policy_id.is_(None),
-                EmployeeProfile.leave_policy_id != policy.id,
-            )
-        )
-        result = await self._db.execute(
-            sql_update(EmployeeProfile)
-            .where(
-                EmployeeProfile.org_id == self._org,
-                EmployeeProfile.user_id.in_(user_ids),
-                not_already,
-            )
-            .values(leave_policy_id=policy.id, leave_policy_assigned_on=on)
-        )
-        return rowcount(result) or 0
 
     async def in_use(self, policy_id: uuid.UUID) -> bool:
         """True if employees, types or requests reference the policy."""
         checks = (
-            exists().where(EmployeeProfile.leave_policy_id == policy_id),
-            exists().where(LeaveType.policy_id == policy_id),
-            exists().where(LeaveRequest.policy_id == policy_id),
+            exists().where(
+                EmployeeProfile.org_id == self._org, EmployeeProfile.leave_policy_id == policy_id
+            ),
+            exists().where(LeaveType.org_id == self._org, LeaveType.policy_id == policy_id),
+            exists().where(LeaveRequest.org_id == self._org, LeaveRequest.policy_id == policy_id),
         )
         for check in checks:
             if (await self._db.execute(select(check))).scalar():

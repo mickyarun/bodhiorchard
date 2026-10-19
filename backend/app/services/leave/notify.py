@@ -14,15 +14,21 @@
 
 """Tell approvers about new requests and requesters about decisions.
 
-In-app notifications are written in the caller's transaction. Slack DMs
-go out in the background on their own session, best effort. Messages
-never include the leave type or reason: sick leave stays private even in
-a manager's DMs.
+Two steps, around the caller's commit: ``stage_*`` adds the in-app rows
+to the caller's transaction and returns a :class:`Notice`; the caller
+commits, then calls :meth:`Notice.send` to push them over the websocket
+and DM on Slack. Nobody hears about a request that rolled back, and a
+pushed notification id always exists in the database.
+
+Messages never include the leave type or reason: sick leave stays private
+even in a manager's DMs.
 """
 
 import asyncio
 import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,20 +51,41 @@ logger = structlog.get_logger(__name__)
 _tasks: set[asyncio.Task[None]] = set()
 
 
-def _notify_in_app(
+@dataclass
+class Notice:
+    """Notifications staged in a transaction, to send once it commits."""
+
+    org_id: uuid.UUID
+    user_ids: set[uuid.UUID]
+    category: NotificationCategory
+    slack_text: str
+    events: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+
+    def send(self) -> None:
+        """Push the in-app rows and start the Slack DMs. Call after commit."""
+        for topic, payload in self.events:
+            publish(topic, payload)
+        if self.user_ids:
+            task = asyncio.create_task(
+                _dm(self.org_id, self.user_ids, self.category, self.slack_text)
+            )
+            _tasks.add(task)
+            task.add_done_callback(_tasks.discard)
+
+
+def _stage(
     db: AsyncSession,
+    notice: Notice,
     *,
-    org_id: uuid.UUID,
-    user_ids: set[uuid.UUID],
     kind: NotificationType,
     title: str,
     message: str,
     link: str,
-) -> None:
-    for user_id in user_ids:
+) -> Notice:
+    for user_id in notice.user_ids:
         note = Notification(
             id=uuid.uuid4(),
-            org_id=org_id,
+            org_id=notice.org_id,
             user_id=user_id,
             type=kind,
             title=title,
@@ -66,19 +93,22 @@ def _notify_in_app(
             deep_link=link,
         )
         db.add(note)
-        publish(
-            f"notifications:{user_id}",
-            {
-                "id": str(note.id),
-                "type": kind.value,
-                "title": title,
-                "message": message,
-                "deepLink": link,
-                "isRead": False,
-                "isDismissed": False,
-                "createdAt": datetime.now(UTC).isoformat(),
-            },
+        notice.events.append(
+            (
+                f"notifications:{user_id}",
+                {
+                    "id": str(note.id),
+                    "type": kind.value,
+                    "title": title,
+                    "message": message,
+                    "deepLink": link,
+                    "isRead": False,
+                    "isDismissed": False,
+                    "createdAt": datetime.now(UTC).isoformat(),
+                },
+            )
         )
+    return notice
 
 
 async def _dm(
@@ -104,17 +134,7 @@ async def _dm(
             logger.warning("leave_slack_dm_failed", org_id=str(org_id), exc_info=True)
 
 
-def _send_dm(
-    org_id: uuid.UUID, user_ids: set[uuid.UUID], category: NotificationCategory, text: str
-) -> None:
-    if not user_ids:
-        return
-    task = asyncio.create_task(_dm(org_id, user_ids, category, text))
-    _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
-
-
-def notify_new_request(
+def stage_new_request(
     db: AsyncSession,
     *,
     org_id: uuid.UUID,
@@ -122,44 +142,42 @@ def notify_new_request(
     requester_name: str,
     targets: set[uuid.UUID],
     auto_approved: bool,
-) -> None:
-    """Tell approvers (or HR) about a request; an FYI if it was auto-approved."""
+) -> Notice:
+    """Approvers (or HR) hear about a request; an FYI if it was auto-approved."""
     message = compose_request_message(requester_name, request, auto_approved=auto_approved)
     link = "/leave/team" if auto_approved else "/leave/approvals"
-    _notify_in_app(
-        db,
+    notice = Notice(
         org_id=org_id,
-        user_ids=targets,
+        user_ids=set(targets),
+        category=NotificationCategory.LEAVE_APPROVALS,
+        slack_text=f"{message} <{settings.frontend_url}{link}|Open in Bodhiorchard>",
+    )
+    return _stage(
+        db,
+        notice,
         kind=NotificationType.LEAVE_REQUESTED,
         title="Work from home" if auto_approved else "Request to review",
         message=message,
         link=link,
     )
-    _send_dm(
-        org_id,
-        targets,
-        NotificationCategory.LEAVE_APPROVALS,
-        f"{message} <{settings.frontend_url}{link}|Open in Bodhiorchard>",
-    )
 
 
-def notify_decision(
+def stage_decision(
     db: AsyncSession, *, org_id: uuid.UUID, request: LeaveRequest, decider_name: str
-) -> None:
-    """Tell the requester their request was approved or rejected."""
+) -> Notice:
+    """The requester hears their request was approved or rejected."""
     message = compose_decision_message(request, decider_name)
-    _notify_in_app(
-        db,
+    notice = Notice(
         org_id=org_id,
         user_ids={request.user_id},
+        category=NotificationCategory.LEAVE_UPDATES,
+        slack_text=f"{message} <{settings.frontend_url}/leave|See details>",
+    )
+    return _stage(
+        db,
+        notice,
         kind=NotificationType.LEAVE_DECIDED,
         title="Request approved" if request.status == LeaveStatus.APPROVED else "Request rejected",
         message=message,
         link="/leave",
-    )
-    _send_dm(
-        org_id,
-        {request.user_id},
-        NotificationCategory.LEAVE_UPDATES,
-        f"{message} <{settings.frontend_url}/leave|See details>",
     )

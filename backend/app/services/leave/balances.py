@@ -30,13 +30,22 @@ from app.models.employee_profile import EmployeeProfile
 from app.models.leave_policy import LeavePolicy
 from app.models.leave_type import LeaveType
 from app.repositories.leave_ledger import LeaveLedgerRepository
-from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.leave_type import LeaveTypeRepository
+from app.repositories.leave_usage import LeaveUsageRepository
 from app.services.leave.allocation import ProrationRule, allocation_for_year
 from app.services.leave.calendar_math import LeaveYearBounds
 from app.services.leave.policies import effective_from
 
 ZERO = Decimal("0")
+
+
+def proration_rule(policy: LeavePolicy) -> ProrationRule:
+    """The policy's settings for prorating a part-year allocation."""
+    return ProrationRule(
+        method=policy.proration_method,
+        cutoff_day=policy.proration_cutoff_day,
+        rounding=policy.allocation_rounding,
+    )
 
 
 @dataclass(frozen=True)
@@ -64,14 +73,15 @@ async def balances_for(
     profile: EmployeeProfile | None,
     user_id: uuid.UUID,
     year: LeaveYearBounds,
-    persist: bool = False,
+    persist_type_id: uuid.UUID | None = None,
 ) -> list[BalanceLine]:
     """Balances for every active leave type on ``policy``.
 
-    A year with no allocation yet gets one computed from the current quota.
-    Only ``persist=True`` (a real submit or approval) writes it to the
-    ledger and so freezes it; plain reads — the Leave page, a preview, the
-    approvals queue — never lock in a year early.
+    A year with no allocation yet gets one computed from the current quota
+    and proration rule. Only ``persist_type_id`` (the type a real submit or
+    approval is spending) is written to the ledger and so frozen; other
+    types, and plain reads — the Leave page, a preview, the approvals
+    queue — never lock in a year early.
     """
     org_id = policy.org_id
     types = await LeaveTypeRepository(db, org_id=org_id).list_for_policy(
@@ -79,23 +89,18 @@ async def balances_for(
     )
     ledger = LeaveLedgerRepository(db, org_id=org_id)
     totals = await ledger.totals(user_id, year.label)
-    rule = ProrationRule(
-        method=policy.proration_method,
-        cutoff_day=policy.proration_cutoff_day,
-        rounding=policy.allocation_rounding,
-    )
+    rule = proration_rule(policy)
     for leave_type in types:
         quota = leave_type.annual_quota_days
         stored, adjustments = totals.get(leave_type.id, (None, ZERO))
         if quota is not None and stored is None:
             joined = effective_from(profile)
             days = allocation_for_year(quota, joined, year.start, year.end, rule)
-            if persist:
+            if leave_type.id == persist_type_id:
+                # Callers hold the member's lock, so nobody else writes it meanwhile.
                 await ledger.ensure_allocation(user_id, leave_type.id, year.label, days)
             totals[leave_type.id] = (days, adjustments)
-    if persist:
-        totals = await ledger.totals(user_id, year.label)
-    usage = await LeaveRequestRepository(db, org_id=org_id).leave_day_totals(
+    usage = await LeaveUsageRepository(db, org_id=org_id).leave_day_totals(
         user_id, year.start, year.end
     )
     lines = []

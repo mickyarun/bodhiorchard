@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.leave_policy import LeavePolicy
 from app.repositories.leave_policy import LeavePolicyRepository
+from app.repositories.leave_policy_members import LeavePolicyMemberRepository
 from app.schemas.leave_policy import PolicyRead
 
 CONFIGURE = "leave:configure"
@@ -53,7 +54,9 @@ async def policy_read(db: AsyncSession, policy: LeavePolicy) -> PolicyRead:
         proration_cutoff_day=policy.proration_cutoff_day,
         allocation_rounding=policy.allocation_rounding,
         is_default=policy.is_default,
-        employee_count=await repo.count_employees(policy),
+        employee_count=await LeavePolicyMemberRepository(db, org_id=policy.org_id).count_employees(
+            policy
+        ),
         has_requests=await repo.has_requests(policy.id),
     )
 

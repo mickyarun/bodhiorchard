@@ -23,106 +23,47 @@ from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.deps import PermissionSet
-from app.models.employee_profile import EmployeeProfile
 from app.models.leave_policy import ProrationMethod, WfhApproval
 from app.models.leave_request import LeaveKind, LeaveStatus
-from app.models.leave_type import LeaveType
 from app.models.organization import Organization
 from app.models.policy_holiday import HolidayKind, PolicyHoliday
-from app.models.user import OrgToUser, User
 from app.repositories.employee_profile import EmployeeProfileRepository
-from app.repositories.employee_reporting_manager import EmployeeReportingManagerRepository
 from app.repositories.leave_ledger import LeaveLedgerRepository
-from app.repositories.leave_policy import LeavePolicyRepository
-from app.repositories.leave_type import LeaveTypeRepository
+from app.repositories.leave_policy_members import LeavePolicyMemberRepository
 from app.repositories.policy_holiday import PolicyHolidayRepository
-from app.repositories.role import RoleRepository
 from app.repositories.user import UserRepository
 from app.schemas.leave import LeaveRequestCreate
 from app.services.leave.calendar_view import calendar_view
+from app.services.leave.cancellation import cancel
 from app.services.leave.evaluation import evaluate
 from app.services.leave.holidays import recount_requests
-from app.services.leave.lifecycle import cancel, decide, submit
+from app.services.leave.lifecycle import decide, submit
 from app.services.leave.policies import ensure_default_policy, resolve_member_policy, today_for
 from app.services.leave.summary import build_summary
+from tests.integration.leave_support import (
+    HR,
+    NOBODY,
+    Factory,
+    future_monday,
+    give_role,
+    leave_body,
+    month_mondays,
+    report_to,
+    setup_org,
+)
 
 pytestmark = pytest.mark.integration
-
-Factory = async_sessionmaker[AsyncSession]
-NOBODY = PermissionSet(ids=frozenset(), is_owner=False)
-HR = PermissionSet(ids=frozenset({"leave:approve"}), is_owner=False)
-
-
-def _future_monday(weeks: int = 2) -> date:
-    today = date.today()
-    return today + timedelta(days=(7 - today.weekday()) % 7 + 7 * weeks)
-
-
-def _month_mondays(months_ahead: int = 2) -> list[date]:
-    first = (date.today().replace(day=1) + timedelta(days=32 * months_ahead)).replace(day=1)
-    day = first + timedelta(days=(7 - first.weekday()) % 7)
-    return [day + timedelta(weeks=n) for n in range(3)]
-
-
-async def _setup(factory: Factory, *names: str) -> tuple[uuid.UUID, list[uuid.UUID], uuid.UUID]:
-    """Org with members (each with a profile), a default policy and a 5-day type."""
-    async with factory() as db:
-        org = Organization(name=f"Leave {uuid.uuid4()}", slug=f"leave-{uuid.uuid4().hex[:8]}")
-        db.add(org)
-        await db.flush()
-        ids = []
-        for name in names:
-            user = User(
-                email=f"{name}-{uuid.uuid4().hex[:6]}@acme.dev", name=name, password_hash="x"
-            )
-            db.add(user)
-            await db.flush()
-            db.add(OrgToUser(user_id=user.id, org_id=org.id))
-            db.add(EmployeeProfile(org_id=org.id, user_id=user.id))
-            ids.append(user.id)
-        policy = await ensure_default_policy(db, org.id)
-        leave_type = await LeaveTypeRepository(db, org_id=org.id).create(
-            LeaveType(
-                org_id=org.id,
-                policy_id=policy.id,
-                name="Casual",
-                code="CL",
-                annual_quota_days=Decimal("5"),
-            )
-        )
-        await db.commit()
-        return org.id, ids, leave_type.id
-
-
-async def _report_to(
-    factory: Factory, org: uuid.UUID, employee: uuid.UUID, *managers: uuid.UUID
-) -> None:
-    async with factory() as db:
-        profile = await EmployeeProfileRepository(db, org_id=org).get_by_user(employee)
-        assert profile is not None
-        await EmployeeReportingManagerRepository(db, org_id=org).replace_for_profile(
-            profile.id, [(m, i == 0) for i, m in enumerate(managers)]
-        )
-        await db.commit()
-
-
-def _leave(type_id: uuid.UUID, start: date, end: date, **kw: object) -> LeaveRequestCreate:
-    return LeaveRequestCreate(
-        kind=LeaveKind.LEAVE, leave_type_id=type_id, start_date=start, end_date=end, **kw
-    )  # type: ignore[arg-type]
 
 
 async def test_pending_counts_against_balance_and_first_decision_wins(
     pg_session_factory: Factory,
 ) -> None:
-    org, (emp, m1, m2), casual = await _setup(pg_session_factory, "Emp", "M1", "M2")
-    await _report_to(pg_session_factory, org, emp, m1, m2)
-    mon = _future_monday()
+    org, (emp, m1, m2), casual = await setup_org(pg_session_factory, "Emp", "M1", "M2")
+    await report_to(pg_session_factory, org, emp, m1, m2)
+    mon = future_monday()
     async with pg_session_factory() as db:
-        request, _ = await submit(db, org, emp, _leave(casual, mon, mon + timedelta(days=2)))
+        request, _ = await submit(db, org, emp, leave_body(casual, mon, mon + timedelta(days=2)))
         await db.commit()
         assert request.status == LeaveStatus.PENDING and request.days == Decimal("3")
         summary = await build_summary(db, org, emp, None)
@@ -146,18 +87,18 @@ async def test_pending_counts_against_balance_and_first_decision_wins(
 
 
 async def test_insufficient_balance_and_overlap_are_refused(pg_session_factory: Factory) -> None:
-    org, (emp, mgr), casual = await _setup(pg_session_factory, "Emp", "Mgr")
-    await _report_to(pg_session_factory, org, emp, mgr)
-    mon = _future_monday()
+    org, (emp, mgr), casual = await setup_org(pg_session_factory, "Emp", "Mgr")
+    await report_to(pg_session_factory, org, emp, mgr)
+    mon = future_monday()
     async with pg_session_factory() as db:
         member = await resolve_member_policy(db, org, emp)
         too_long = await evaluate(
-            db, member=member, user_id=emp, body=_leave(casual, mon, mon + timedelta(days=7))
+            db, member=member, user_id=emp, body=leave_body(casual, mon, mon + timedelta(days=7))
         )
         assert [p.code for p in too_long.problems] == ["insufficient_balance"]
-        await submit(db, org, emp, _leave(casual, mon, mon))
+        await submit(db, org, emp, leave_body(casual, mon, mon))
         await db.commit()
-        with pytest.raises(HTTPException, match="409"):
+        with pytest.raises(HTTPException, match="already have a pending request"):
             await submit(
                 db, org, emp, LeaveRequestCreate(kind=LeaveKind.WFH, start_date=mon, end_date=mon)
             )
@@ -166,11 +107,11 @@ async def test_insufficient_balance_and_overlap_are_refused(pg_session_factory: 
 async def test_nobody_decides_their_own_and_rejection_needs_a_note(
     pg_session_factory: Factory,
 ) -> None:
-    org, (emp, mgr), casual = await _setup(pg_session_factory, "Emp", "Mgr")
-    await _report_to(pg_session_factory, org, emp, mgr)
-    mon = _future_monday()
+    org, (emp, mgr), casual = await setup_org(pg_session_factory, "Emp", "Mgr")
+    await report_to(pg_session_factory, org, emp, mgr)
+    mon = future_monday()
     async with pg_session_factory() as db:
-        request, _ = await submit(db, org, emp, _leave(casual, mon, mon))
+        request, _ = await submit(db, org, emp, leave_body(casual, mon, mon))
         await db.commit()
         with pytest.raises(HTTPException) as own:
             await decide(
@@ -190,22 +131,12 @@ async def test_nobody_decides_their_own_and_rejection_needs_a_note(
         assert no_note.value.status_code == 422
 
 
-async def _give_role(factory: Factory, org: uuid.UUID, user: uuid.UUID, role_name: str) -> None:
-    async with factory() as db:
-        role = await RoleRepository(db).get_by_name_system(role_name)
-        assert role is not None
-        membership = await UserRepository(db).get_membership(user, org)
-        assert membership is not None
-        membership.role_id = role.id
-        await db.commit()
-
-
 async def test_without_a_manager_hr_decides_and_peers_cannot(pg_session_factory: Factory) -> None:
-    org, (emp, hr, peer), casual = await _setup(pg_session_factory, "Emp", "Hr", "Peer")
-    await _give_role(pg_session_factory, org, hr, "hr")
-    mon = _future_monday()
+    org, (emp, hr, peer), casual = await setup_org(pg_session_factory, "Emp", "Hr", "Peer")
+    await give_role(pg_session_factory, org, hr, "hr")
+    mon = future_monday()
     async with pg_session_factory() as db:
-        request, result = await submit(db, org, emp, _leave(casual, mon, mon))
+        request, result = await submit(db, org, emp, leave_body(casual, mon, mon))
         await db.commit()
         assert result.approvers.routes_to_hr
         with pytest.raises(HTTPException) as peer_try:
@@ -226,14 +157,14 @@ async def test_without_a_manager_hr_decides_and_peers_cannot(pg_session_factory:
 
 
 async def test_wfh_auto_approved_within_monthly_allowance(pg_session_factory: Factory) -> None:
-    org, (emp, mgr), _ = await _setup(pg_session_factory, "Emp", "Mgr")
-    await _report_to(pg_session_factory, org, emp, mgr)
+    org, (emp, mgr), _ = await setup_org(pg_session_factory, "Emp", "Mgr")
+    await report_to(pg_session_factory, org, emp, mgr)
     async with pg_session_factory() as db:
         policy = (await resolve_member_policy(db, org, emp)).policy
         policy.wfh_approval = WfhApproval.AUTO_WITHIN_ALLOWANCE
         policy.wfh_monthly_auto_days = 2
         await db.commit()
-        week1, week2, _ = _month_mondays()
+        week1, week2, _ = month_mondays()
         first, _ = await submit(
             db,
             org,
@@ -252,9 +183,9 @@ async def test_wfh_auto_approved_within_monthly_allowance(pg_session_factory: Fa
 
 
 async def test_optional_holiday_quota(pg_session_factory: Factory) -> None:
-    org, (emp, mgr), _ = await _setup(pg_session_factory, "Emp", "Mgr")
-    await _report_to(pg_session_factory, org, emp, mgr)
-    monday = _month_mondays()[0]
+    org, (emp, mgr), _ = await setup_org(pg_session_factory, "Emp", "Mgr")
+    await report_to(pg_session_factory, org, emp, mgr)
+    monday = month_mondays()[0]
     async with pg_session_factory() as db:
         policy = (await resolve_member_policy(db, org, emp)).policy
         policy.optional_holiday_quota = 1
@@ -306,11 +237,11 @@ async def test_optional_holiday_quota(pg_session_factory: Factory) -> None:
 
 
 async def test_cancel_pending_frees_the_balance(pg_session_factory: Factory) -> None:
-    org, (emp, mgr), casual = await _setup(pg_session_factory, "Emp", "Mgr")
-    await _report_to(pg_session_factory, org, emp, mgr)
-    mon = _future_monday()
+    org, (emp, mgr), casual = await setup_org(pg_session_factory, "Emp", "Mgr")
+    await report_to(pg_session_factory, org, emp, mgr)
+    mon = future_monday()
     async with pg_session_factory() as db:
-        request, _ = await submit(db, org, emp, _leave(casual, mon, mon + timedelta(days=4)))
+        request, _ = await submit(db, org, emp, leave_body(casual, mon, mon + timedelta(days=4)))
         await db.commit()
         cancelled = await cancel(db, org, emp, request.id)
         await db.commit()
@@ -319,11 +250,11 @@ async def test_cancel_pending_frees_the_balance(pg_session_factory: Factory) -> 
 
 
 async def test_calendar_hides_leave_type_from_peers(pg_session_factory: Factory) -> None:
-    org, (emp, mgr, peer), casual = await _setup(pg_session_factory, "Emp", "Mgr", "Peer")
-    await _report_to(pg_session_factory, org, emp, mgr)
-    mon = _future_monday()
+    org, (emp, mgr, peer), casual = await setup_org(pg_session_factory, "Emp", "Mgr", "Peer")
+    await report_to(pg_session_factory, org, emp, mgr)
+    mon = future_monday()
     async with pg_session_factory() as db:
-        request, _ = await submit(db, org, emp, _leave(casual, mon, mon, reason="Fever"))
+        request, _ = await submit(db, org, emp, leave_body(casual, mon, mon, reason="Fever"))
         await decide(
             db, org_id=org, actor=mgr, perms=NOBODY, request_id=request.id, approve=True, note=None
         )
@@ -335,11 +266,11 @@ async def test_calendar_hides_leave_type_from_peers(pg_session_factory: Factory)
 
 
 async def test_new_holiday_recounts_pending_days(pg_session_factory: Factory) -> None:
-    org, (emp, mgr), casual = await _setup(pg_session_factory, "Emp", "Mgr")
-    await _report_to(pg_session_factory, org, emp, mgr)
-    mon = _future_monday()
+    org, (emp, mgr), casual = await setup_org(pg_session_factory, "Emp", "Mgr")
+    await report_to(pg_session_factory, org, emp, mgr)
+    mon = future_monday()
     async with pg_session_factory() as db:
-        request, _ = await submit(db, org, emp, _leave(casual, mon, mon + timedelta(days=2)))
+        request, _ = await submit(db, org, emp, leave_body(casual, mon, mon + timedelta(days=2)))
         await db.commit()
         policy = (await resolve_member_policy(db, org, emp)).policy
         await PolicyHolidayRepository(db, org_id=org).create(
@@ -372,27 +303,28 @@ async def test_default_policy_creation_survives_a_race(pg_session_factory: Facto
 
 
 async def test_reads_never_freeze_allocations_but_submit_does(pg_session_factory: Factory) -> None:
-    org, (emp, mgr), casual = await _setup(pg_session_factory, "Emp", "Mgr")
-    await _report_to(pg_session_factory, org, emp, mgr)
+    org, (emp, mgr), casual = await setup_org(pg_session_factory, "Emp", "Mgr")
+    await report_to(pg_session_factory, org, emp, mgr)
     async with pg_session_factory() as db:
-        await build_summary(db, org, emp, None)
-        await build_summary(db, org, emp, date.today().year + 1)
-        await db.commit()
         policy = (await resolve_member_policy(db, org, emp)).policy
-        label = date.today().year if policy.year_start_month == 1 else None
-        assert label is not None
-        assert await LeaveLedgerRepository(db, org_id=org).list_for(emp, label) == []
-        mon = _future_monday()
-        await submit(db, org, emp, _leave(casual, mon, mon))
+        this_year = today_for(policy).year  # the default policy's year starts in January
+        await build_summary(db, org, emp, None)
+        await build_summary(db, org, emp, this_year + 1)
+        await db.commit()
+        ledger = LeaveLedgerRepository(db, org_id=org)
+        assert await ledger.list_for(emp, this_year) == []
+        assert await ledger.list_for(emp, this_year + 1) == []
+        mon = future_monday()
+        await submit(db, org, emp, leave_body(casual, mon, mon))
         await db.commit()
         entries = await LeaveLedgerRepository(db, org_id=org).list_for(emp, mon.year)
         assert [e.entry_type.value for e in entries] == ["allocation"]
 
 
 async def test_manager_who_left_the_org_no_longer_approves(pg_session_factory: Factory) -> None:
-    org, (emp, mgr, hr), casual = await _setup(pg_session_factory, "Emp", "Mgr", "Hr")
-    await _report_to(pg_session_factory, org, emp, mgr)
-    await _give_role(pg_session_factory, org, hr, "hr")
+    org, (emp, mgr, hr), casual = await setup_org(pg_session_factory, "Emp", "Mgr", "Hr")
+    await report_to(pg_session_factory, org, emp, mgr)
+    await give_role(pg_session_factory, org, hr, "hr")
     async with pg_session_factory() as db:
         user = await UserRepository(db).get_by_id(mgr)
         assert user is not None
@@ -405,19 +337,19 @@ async def test_manager_who_left_the_org_no_longer_approves(pg_session_factory: F
 async def test_assigning_the_default_policy_keeps_implicit_followers(
     pg_session_factory: Factory,
 ) -> None:
-    org, (emp,), _ = await _setup(pg_session_factory, "Emp")
+    org, (emp,), _ = await setup_org(pg_session_factory, "Emp")
     async with pg_session_factory() as db:
         policy = await ensure_default_policy(db, org)
-        assigned = await LeavePolicyRepository(db, org_id=org).assign_employees(
+        assigned = await LeavePolicyMemberRepository(db, org_id=org).assign_employees(
             policy, [emp], date.today()
         )
         assert assigned == 0
 
 
 async def test_wfh_request_never_carries_a_leave_type(pg_session_factory: Factory) -> None:
-    org, (emp, mgr), casual = await _setup(pg_session_factory, "Emp", "Mgr")
-    await _report_to(pg_session_factory, org, emp, mgr)
-    mon = _future_monday()
+    org, (emp, mgr), casual = await setup_org(pg_session_factory, "Emp", "Mgr")
+    await report_to(pg_session_factory, org, emp, mgr)
+    mon = future_monday()
     async with pg_session_factory() as db:
         request, _ = await submit(
             db,
@@ -431,30 +363,30 @@ async def test_wfh_request_never_carries_a_leave_type(pg_session_factory: Factor
 
 
 async def test_request_with_nobody_to_approve_is_refused(pg_session_factory: Factory) -> None:
-    org, (emp,), casual = await _setup(pg_session_factory, "Emp")
-    mon = _future_monday()
+    org, (emp,), casual = await setup_org(pg_session_factory, "Emp")
+    mon = future_monday()
     async with pg_session_factory() as db:
         member = await resolve_member_policy(db, org, emp)
-        result = await evaluate(db, member=member, user_id=emp, body=_leave(casual, mon, mon))
+        result = await evaluate(db, member=member, user_id=emp, body=leave_body(casual, mon, mon))
         assert [p.code for p in result.problems] == ["no_approver"]
 
 
 async def test_request_beyond_next_leave_year_is_refused(pg_session_factory: Factory) -> None:
-    org, (emp, mgr), casual = await _setup(pg_session_factory, "Emp", "Mgr")
-    await _report_to(pg_session_factory, org, emp, mgr)
+    org, (emp, mgr), casual = await setup_org(pg_session_factory, "Emp", "Mgr")
+    await report_to(pg_session_factory, org, emp, mgr)
     far = date(date.today().year + 3, 3, 2)
     async with pg_session_factory() as db:
         member = await resolve_member_policy(db, org, emp)
-        result = await evaluate(db, member=member, user_id=emp, body=_leave(casual, far, far))
+        result = await evaluate(db, member=member, user_id=emp, body=leave_body(casual, far, far))
         assert [p.code for p in result.problems] == ["too_far_ahead"]
 
 
 async def test_cancelling_an_approved_future_request(pg_session_factory: Factory) -> None:
-    org, (emp, mgr), casual = await _setup(pg_session_factory, "Emp", "Mgr")
-    await _report_to(pg_session_factory, org, emp, mgr)
-    mon = _future_monday()
+    org, (emp, mgr), casual = await setup_org(pg_session_factory, "Emp", "Mgr")
+    await report_to(pg_session_factory, org, emp, mgr)
+    mon = future_monday()
     async with pg_session_factory() as db:
-        request, _ = await submit(db, org, emp, _leave(casual, mon, mon))
+        request, _ = await submit(db, org, emp, leave_body(casual, mon, mon))
         await decide(
             db, org_id=org, actor=mgr, perms=NOBODY, request_id=request.id, approve=True, note=None
         )
@@ -464,7 +396,7 @@ async def test_cancelling_an_approved_future_request(pg_session_factory: Factory
 
 
 async def test_mid_year_joiner_gets_a_prorated_allocation(pg_session_factory: Factory) -> None:
-    org, (emp,), _ = await _setup(pg_session_factory, "Emp")
+    org, (emp,), _ = await setup_org(pg_session_factory, "Emp")
     year = date.today().year
     async with pg_session_factory() as db:
         policy = (await resolve_member_policy(db, org, emp)).policy

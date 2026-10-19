@@ -35,7 +35,7 @@ from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.policy_holiday import PolicyHolidayRepository
 from app.schemas.leave_policy import HolidayCountry, Subdivision
 from app.services.leave.calendar_math import count_days, leave_year_by_label
-from app.services.leave.policies import mandatory_holidays
+from app.services.leave.policies import mandatory_holidays, today_for
 
 logger = structlog.get_logger(__name__)
 
@@ -121,23 +121,37 @@ async def import_public_holidays(
 
 
 async def recount_requests(db: AsyncSession, policy: LeavePolicy, start: date) -> int:
-    """Recount days on pending and upcoming requests after a holiday change."""
-    requests = await LeaveRequestRepository(db, org_id=policy.org_id).pending_for_policy_from(
-        policy.id, start
+    """Re-price open requests after a holiday or working-day change.
+
+    Takes the affected members' locks so a submit can't check a balance
+    against stale day counts meanwhile. A pending request that no longer
+    fits its balance is refused when someone tries to approve it.
+    """
+    repo = LeaveRequestRepository(db, org_id=policy.org_id)
+    today = today_for(policy)
+    found = await repo.open_for_policy_from(policy.id, start, today)
+    if not found:
+        return 0
+    await repo.lock_members({r.user_id for r in found})
+    # Re-read under the locks: a request may have been decided or cancelled.
+    requests = [
+        r
+        for r in await repo.open_for_policy_from(policy.id, start, today)
+        if r.kind != LeaveKind.OPTIONAL_HOLIDAY
+    ]
+    if not requests:
+        return 0
+    holidays = await mandatory_holidays(
+        db, policy, min(r.start_date for r in requests), max(r.end_date for r in requests)
     )
     changed = 0
     for request in requests:
-        if request.kind == LeaveKind.OPTIONAL_HOLIDAY:
-            continue
-        holidays_in_range = await mandatory_holidays(
-            db, policy, request.start_date, request.end_date
-        )
         days = count_days(
             request.start_date,
             request.end_date,
             request.half_day,
             working_days=policy.working_days,
-            holidays=holidays_in_range,
+            holidays=holidays,
         ).days
         if days != request.days:
             request.days = days

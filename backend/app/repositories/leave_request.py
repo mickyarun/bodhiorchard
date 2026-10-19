@@ -17,10 +17,9 @@
 import uuid
 from collections.abc import Collection
 from datetime import date, datetime
-from decimal import Decimal
 from typing import Any, Literal
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,6 +56,18 @@ class LeaveRequestRepository(BaseRepository[LeaveRequest]):
             .with_for_update()
         )
 
+    async def lock_members(self, user_ids: Collection[uuid.UUID]) -> None:
+        """:meth:`lock_member` for several members, in a fixed order so two
+        bulk changes can't deadlock each other."""
+        if not user_ids:
+            return
+        await self._db.execute(
+            select(OrgToUser.id)
+            .where(OrgToUser.org_id == self._org, OrgToUser.user_id.in_(user_ids))
+            .order_by(OrgToUser.user_id)
+            .with_for_update()
+        )
+
     async def list_for_user(
         self, user_id: uuid.UUID, scope: Scope, today: date
     ) -> list[LeaveRequest]:
@@ -78,7 +89,6 @@ class LeaveRequestRepository(BaseRepository[LeaveRequest]):
         end: date,
         *,
         kinds: Collection[LeaveKind] | None = None,
-        exclude: uuid.UUID | None = None,
     ) -> list[LeaveRequest]:
         """Pending or approved requests overlapping ``start..end``."""
         stmt = self._scoped(
@@ -92,35 +102,8 @@ class LeaveRequestRepository(BaseRepository[LeaveRequest]):
             stmt = stmt.where(LeaveRequest.user_id.in_(user_ids))
         if kinds is not None:
             stmt = stmt.where(LeaveRequest.kind.in_(kinds))
-        if exclude is not None:
-            stmt = stmt.where(LeaveRequest.id != exclude)
         result = await self._db.execute(stmt.order_by(LeaveRequest.start_date))
         return list(result.scalars().all())
-
-    async def leave_day_totals(
-        self, user_id: uuid.UUID, start: date, end: date
-    ) -> dict[uuid.UUID, tuple[Decimal, Decimal]]:
-        """``{leave_type_id: (approved_days, pending_days)}`` for a leave year."""
-        stmt = self._scoped(
-            select(LeaveRequest.leave_type_id, LeaveRequest.status, func.sum(LeaveRequest.days))
-            .where(
-                LeaveRequest.user_id == user_id,
-                LeaveRequest.kind == LeaveKind.LEAVE,
-                LeaveRequest.status.in_(ACTIVE),
-                LeaveRequest.start_date >= start,
-                LeaveRequest.start_date <= end,
-            )
-            .group_by(LeaveRequest.leave_type_id, LeaveRequest.status)
-        )
-        totals: dict[uuid.UUID, tuple[Decimal, Decimal]] = {}
-        for type_id, status, days in (await self._db.execute(stmt)).all():
-            approved, pending = totals.get(type_id, (Decimal("0"), Decimal("0")))
-            if status == LeaveStatus.APPROVED:
-                approved += days
-            else:
-                pending += days
-            totals[type_id] = (approved, pending)
-        return totals
 
     async def list_pending(self, user_ids: Collection[uuid.UUID] | None) -> list[LeaveRequest]:
         """Pending requests, oldest first; ``None`` = every member."""
@@ -180,15 +163,30 @@ class LeaveRequestRepository(BaseRepository[LeaveRequest]):
         )
         return result.first() is not None
 
-    async def pending_for_policy_from(
-        self, policy_id: uuid.UUID, start: date
+    async def open_for_policy_from(
+        self, policy_id: uuid.UUID, start: date, today: date
     ) -> list[LeaveRequest]:
-        """Pending and future approved requests on a policy (holiday changes)."""
+        """Requests a holiday change on or after ``start`` can still re-price.
+
+        Pending requests reaching ``start``, and approved ones that haven't
+        begun yet; approved leave already under way stays as it was taken.
+        Always re-reads the rows, so calling it again after taking locks
+        sees their current state.
+        """
         stmt = self._scoped(
             select(LeaveRequest).where(
                 LeaveRequest.policy_id == policy_id,
-                LeaveRequest.status.in_(ACTIVE),
-                LeaveRequest.end_date >= start,
+                or_(
+                    and_(
+                        LeaveRequest.status == LeaveStatus.PENDING,
+                        LeaveRequest.end_date >= start,
+                    ),
+                    and_(
+                        LeaveRequest.status == LeaveStatus.APPROVED,
+                        LeaveRequest.end_date >= start,
+                        LeaveRequest.start_date >= today,
+                    ),
+                ),
             )
-        )
+        ).execution_options(populate_existing=True)
         return list((await self._db.execute(stmt)).scalars().all())
