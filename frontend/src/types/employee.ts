@@ -16,6 +16,8 @@
 
 export type EmploymentType = 'full_time' | 'part_time' | 'contract' | 'intern'
 export type EmployeeStatus = 'active' | 'on_notice' | 'exited'
+/** Remote people have no office and don't request WFH. */
+export type WorkArrangement = 'office' | 'hybrid' | 'remote'
 export type Gender = 'female' | 'male' | 'non_binary' | 'prefer_not_to_say'
 export type BloodGroup =
   | 'a_positive'
@@ -36,7 +38,14 @@ export interface EmployeeWork {
   date_of_joining: string | null
   date_of_exit: string | null
   country_code: string | null
-  work_location: string | null
+  work_arrangement: WorkArrangement
+  /** Always null when remote. */
+  office_id: string | null
+}
+
+export interface OfficeRef {
+  id: string
+  name: string
 }
 
 export interface EmployeeContact {
@@ -76,6 +85,7 @@ export interface EmployeeRecord {
   email: string
   is_active: boolean
   work: EmployeeWork
+  office: OfficeRef | null
   /** Null only before the org has a default policy. */
   leave_policy: EmployeeLeavePolicy | null
   managers: ManagerRef[]
@@ -95,6 +105,8 @@ export interface DirectoryEntry {
   designation: string | null
   department: string | null
   status: EmployeeStatus
+  work_arrangement: WorkArrangement
+  office: OfficeRef | null
   primary_manager: ManagerRef | null
   manager_count: number
 }

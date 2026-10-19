@@ -53,7 +53,7 @@
           v-bind="field"
         />
         <v-text-field v-model="draft.country_code" label="Country (2 letters)" maxlength="2" v-bind="field" />
-        <v-text-field v-model="draft.work_location" label="Work location" v-bind="field" />
+        <WorkplaceFields v-model:arrangement="draft.work_arrangement" v-model:office-id="draft.office_id" />
       </div>
       <p v-if="draft.status === 'exited' && record.work.status !== 'exited'" class="text-caption mt-2">
         Marking someone exited also deactivates their account, if your role allows it.
@@ -82,12 +82,14 @@ import AppCallout from '@/components/common/AppCallout.vue'
 import ChangePolicyDialog from '@/components/people/ChangePolicyDialog.vue'
 import FieldGrid, { type GridField } from '@/components/people/FieldGrid.vue'
 import ManagersEditor from '@/components/people/ManagersEditor.vue'
+import WorkplaceFields from '@/components/people/WorkplaceFields.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useAuthStore } from '@/stores/auth'
 import { useEmployeesStore } from '@/stores/employees'
 import type { EmployeeRecord, EmployeeWork } from '@/types/employee'
 import type { AssignResult } from '@/types/leavePolicy'
 import {
+  ARRANGEMENT_LABELS,
   blankToNull,
   EMPLOYMENT_TYPE_LABELS,
   formatDateOnly,
@@ -125,7 +127,8 @@ const fields = computed<GridField[]>(() => {
     { label: 'Date of joining', value: formatDateOnly(w.date_of_joining), locked },
     { label: 'Date of exit', value: w.date_of_exit ? formatDateOnly(w.date_of_exit) : null, locked },
     { label: 'Country', value: w.country_code, locked },
-    { label: 'Work location', value: w.work_location, locked },
+    { label: 'Work arrangement', value: ARRANGEMENT_LABELS[w.work_arrangement], locked },
+    { label: 'Office', value: props.record.office?.name ?? null, locked },
     leavePolicyField.value,
   ]
 })

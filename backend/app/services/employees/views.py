@@ -36,6 +36,7 @@ from app.schemas.employee import (
     ManagerRef,
 )
 from app.services.employees.access import EmployeeAccess
+from app.services.employees.offices import office_refs
 
 
 def _manager_ref(link: ManagerLink) -> ManagerRef:
@@ -75,6 +76,7 @@ async def employee_read(
     links = await EmployeeReportingManagerRepository(db, org_id=org_id).list_for_profiles(
         [profile.id]
     )
+    offices = await office_refs(db, org_id, {profile.office_id} if profile.office_id else set())
     return EmployeeRead(
         user_id=user.id,
         profile_id=profile.id,
@@ -83,6 +85,7 @@ async def employee_read(
         is_active=user.is_active,
         work=EmployeeWork.model_validate(profile),
         leave_policy=await _leave_policy(db, org_id, profile),
+        office=offices.get(profile.office_id) if profile.office_id else None,
         managers=[_manager_ref(link) for link in links.get(profile.id, [])],
         personal=EmployeePersonal.model_validate(profile) if access.view_personal else None,
         access=EmployeeAccessRead(
@@ -101,6 +104,9 @@ async def directory_entries(
     links = await EmployeeReportingManagerRepository(db, org_id=org_id).list_for_profiles(
         [row.profile.id for row in rows]
     )
+    offices = await office_refs(
+        db, org_id, {row.profile.office_id for row in rows if row.profile.office_id}
+    )
     entries = []
     for row in rows:
         managers = links.get(row.profile.id, [])
@@ -117,6 +123,8 @@ async def directory_entries(
                 status=row.profile.status,
                 primary_manager=_manager_ref(primary) if primary else None,
                 manager_count=len(managers),
+                work_arrangement=row.profile.work_arrangement,
+                office=offices.get(row.profile.office_id) if row.profile.office_id else None,
             )
         )
     return entries

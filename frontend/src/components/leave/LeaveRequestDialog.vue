@@ -29,7 +29,7 @@
         <v-btn icon="mdi-close" variant="text" size="small" aria-label="Close" @click="close" />
       </div>
       <v-form class="px-6 d-flex flex-column ga-4" @submit.prevent="submit">
-        <AppPillToggle v-model="form.kind.value" :options="kindOptions" class="align-self-start" />
+        <AppPillToggle v-if="kindOptions.length > 1" v-model="form.kind.value" :options="kindOptions" class="align-self-start" />
         <v-select
           v-if="form.kind.value === 'leave'"
           v-model="form.leaveTypeId.value"
@@ -121,7 +121,8 @@ const error = ref('')
 const summary = computed(() => store.summary)
 
 const kindOptions = computed(() => {
-  const kinds: LeaveKind[] = ['leave', 'wfh']
+  // Remote people work from home every day: there's nothing to request.
+  const kinds: LeaveKind[] = summary.value?.work_arrangement === 'remote' ? ['leave'] : ['leave', 'wfh']
   if ((summary.value?.optional_holidays.quota ?? 0) > 0) kinds.push('optional_holiday')
   return kinds.map(value => ({ label: KIND_LABELS[value], value }))
 })

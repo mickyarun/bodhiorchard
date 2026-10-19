@@ -25,6 +25,7 @@ import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.deps import PermissionSet
@@ -33,6 +34,8 @@ from app.models.employee_profile import EmployeeProfile
 from app.models.leave_request import LeaveKind
 from app.models.leave_type import LeaveType
 from app.models.organization import Organization
+from app.models.permission import Permission
+from app.models.role import Role, RolePermission, RoleScopeType
 from app.models.user import OrgToUser, User
 from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.employee_reporting_manager import EmployeeReportingManagerRepository
@@ -114,6 +117,24 @@ async def give_role(factory: Factory, org: uuid.UUID, user: uuid.UUID, role_name
     async with factory() as db:
         role = await RoleRepository(db).get_by_name_system(role_name)
         assert role is not None
+        membership = await UserRepository(db).get_membership(user, org)
+        assert membership is not None
+        membership.role_id = role.id
+        await db.commit()
+
+
+async def give_custom_role(
+    factory: Factory, org: uuid.UUID, user: uuid.UUID, *permissions: str
+) -> None:
+    """Give ``user`` a custom role in ``org`` holding exactly ``permissions``."""
+    async with factory() as db:
+        role = Role(
+            name=f"custom-{uuid.uuid4().hex[:8]}", org_id=org, scope_type=RoleScopeType.CUSTOM
+        )
+        db.add(role)
+        await db.flush()
+        rows = await db.scalars(select(Permission).where(Permission.resource_id.in_(permissions)))
+        db.add_all(RolePermission(role_id=role.id, permission_id=p.id) for p in rows)
         membership = await UserRepository(db).get_membership(user, org)
         assert membership is not None
         membership.role_id = role.id

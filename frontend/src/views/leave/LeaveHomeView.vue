@@ -27,7 +27,13 @@
         <v-btn color="primary" prepend-icon="mdi-plus" :disabled="!summary" @click="open('leave')">
           Request leave
         </v-btn>
-        <v-btn variant="tonal" prepend-icon="mdi-home-outline" :disabled="!summary" @click="open('wfh')">
+        <v-btn
+          v-if="summary?.work_arrangement !== 'remote'"
+          variant="tonal"
+          prepend-icon="mdi-home-outline"
+          :disabled="!summary"
+          @click="open('wfh')"
+        >
           Work from home
         </v-btn>
         <v-btn variant="text" prepend-icon="mdi-calendar-month-outline" :to="{ name: 'leave-team' }">
@@ -49,7 +55,7 @@
         </template>
       </AppCallout>
       <AppCallout v-else-if="!summary.balances.length" variant="info" class="mb-6">
-        HR hasn't added leave types yet. You can still request work from home.
+        {{ noTypesText }}
       </AppCallout>
       <BalanceGrid
         v-else
@@ -86,6 +92,12 @@ const dialogOpen = ref(false)
 const preset = ref<LeaveKind>('leave')
 const snackbar = ref(false)
 const snackbarText = ref('')
+
+const noTypesText = computed(() =>
+  summary.value?.work_arrangement === 'remote'
+    ? "HR hasn't added leave types yet, so there's nothing to request."
+    : "HR hasn't added leave types yet. You can still request work from home.",
+)
 
 const subtitle = computed(() => {
   if (!summary.value) return 'Request leave and work from home, and see who’s out.'

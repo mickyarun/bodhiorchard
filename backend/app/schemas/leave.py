@@ -112,6 +112,7 @@ ProblemCode = Literal[
     "optional_quota_used",
     "too_far_ahead",
     "no_approver",
+    "remote_no_wfh",
 ]
 
 

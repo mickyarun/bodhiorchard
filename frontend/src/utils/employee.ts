@@ -19,6 +19,8 @@ import type {
   EmploymentType,
   Gender,
   ManagerInput,
+  OfficeRef,
+  WorkArrangement,
 } from '@/types/employee'
 
 export const EMPLOYMENT_TYPE_LABELS: Record<EmploymentType, string> = {
@@ -50,6 +52,19 @@ export const BLOOD_GROUP_LABELS: Record<BloodGroup, string> = {
   ab_negative: 'AB−',
   o_positive: 'O+',
   o_negative: 'O−',
+}
+
+export const ARRANGEMENT_LABELS: Record<WorkArrangement, string> = {
+  office: 'Office',
+  hybrid: 'Hybrid',
+  remote: 'Remote',
+}
+
+/** Where someone works, in a word or two: "Remote", "London", "London · Hybrid". */
+export function workplaceLabel(arrangement: WorkArrangement, office: OfficeRef | null): string | null {
+  if (arrangement === 'remote') return ARRANGEMENT_LABELS.remote
+  if (!office) return arrangement === 'hybrid' ? ARRANGEMENT_LABELS.hybrid : null
+  return arrangement === 'hybrid' ? `${office.name} · ${ARRANGEMENT_LABELS.hybrid}` : office.name
 }
 
 /** `{ title, value }` items for a v-select from a label map. */

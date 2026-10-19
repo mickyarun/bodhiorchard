@@ -24,7 +24,7 @@ import uuid
 from datetime import date
 from enum import StrEnum
 
-from sqlalchemy import Date, Enum, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import CheckConstraint, Date, Enum, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -42,6 +42,16 @@ class EmploymentType(StrEnum):
     PART_TIME = "part_time"
     CONTRACT = "contract"
     INTERN = "intern"
+
+
+class WorkArrangement(StrEnum):
+    """Where someone usually works."""
+
+    OFFICE = "office"
+    # Some days at home: they request WFH for those days as usual.
+    HYBRID = "hybrid"
+    # Always at home: no WFH requests, and never shown as WFH.
+    REMOTE = "remote"
 
 
 class EmployeeStatus(StrEnum):
@@ -80,6 +90,11 @@ class EmployeeProfile(BaseModel):
     __tablename__ = "employee_profiles"
     __table_args__ = (
         UniqueConstraint("org_id", "user_id", name="uq_employee_profiles_org_user"),
+        # Remote people have no office.
+        CheckConstraint(
+            "work_arrangement <> 'remote' OR office_id IS NULL",
+            name="ck_employee_profiles_remote_no_office",
+        ),
         # Codes are optional, but unique within an org once assigned.
         Index(
             "uq_employee_profiles_org_code",
@@ -116,7 +131,19 @@ class EmployeeProfile(BaseModel):
     date_of_exit: Mapped[date | None] = mapped_column(Date, nullable=True)
     # ISO 3166-1 alpha-2; picks the default leave policy later.
     country_code: Mapped[str | None] = mapped_column(String(2), nullable=True)
-    work_location: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    work_arrangement: Mapped[WorkArrangement] = mapped_column(
+        Enum(WorkArrangement, name="work_arrangement", values_callable=_values),
+        nullable=False,
+        default=WorkArrangement.OFFICE,
+        server_default=WorkArrangement.OFFICE.value,
+    )
+    # The office they work from; none for remote people.
+    office_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("office_locations.id", ondelete="RESTRICT", name="fk_employee_profiles_office"),
+        nullable=True,
+        index=True,
+    )
     # NULL = the org's default leave policy.
     leave_policy_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),

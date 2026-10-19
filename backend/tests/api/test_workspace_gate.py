@@ -49,6 +49,7 @@ SHARED_MODULES = frozenset(
         "app.api.v1.internal_colyseus",
         "app.api.v1.members",
         "app.api.v1.me",
+        "app.api.v1.offices",
         "app.api.v1.notifications",
         "app.api.v1.organizations",
         "app.api.v1.public",

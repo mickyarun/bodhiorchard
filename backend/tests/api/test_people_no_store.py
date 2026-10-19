@@ -26,7 +26,7 @@ from fastapi.routing import APIRoute
 from app.api.router import api_router
 from app.core.http_cache import no_store
 
-PEOPLE_PREFIXES = ("/api/v1/leave", "/api/v1/employees")
+PEOPLE_PREFIXES = ("/api/v1/leave", "/api/v1/employees", "/api/v1/offices")
 
 
 def _people_routes() -> list[APIRoute]:

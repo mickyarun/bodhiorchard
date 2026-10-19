@@ -74,6 +74,7 @@ from app.models.leave_type import LeaveType
 from app.models.mcp_audit_log import MCPAuditLogEntry
 from app.models.minigame import MinigameScore, MinigameSession
 from app.models.notification import Notification, NotificationType
+from app.models.office_location import OfficeLocation
 from app.models.organization import Organization
 from app.models.permission import Permission, PermissionCategory
 from app.models.policy_holiday import PolicyHoliday
@@ -190,6 +191,7 @@ __all__ = [
     "MapStatus",
     "Notification",
     "NotificationType",
+    "OfficeLocation",
     "Organization",
     "OrgToUser",
     "Permission",

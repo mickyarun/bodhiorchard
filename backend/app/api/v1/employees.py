@@ -45,6 +45,7 @@ from app.schemas.employee import (
     MemberCandidate,
 )
 from app.services.employees.access import MANAGE, VIEW, access_for
+from app.services.employees.offices import check_office, follow_office_policy
 from app.services.employees.views import directory_entries, employee_read
 
 router = APIRouter(tags=["employees"])
@@ -113,6 +114,7 @@ async def create_employee(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=f"Employee code {code} is already used."
         )
+    office = await check_office(db, org_id, body.work.office_id)
     try:
         profile = await repo.create(
             EmployeeProfile(org_id=org_id, user_id=body.user_id, **body.work.model_dump())
@@ -123,6 +125,14 @@ async def create_employee(
             status_code=status.HTTP_409_CONFLICT,
             detail="This member or employee code already has a record.",
         ) from exc
+    await follow_office_policy(
+        db,
+        profile=profile,
+        office=office,
+        previous_office_id=None,
+        actor_id=current_user.id,
+        actor_is_owner=perms.is_owner,
+    )
     return await employee_read(db, org_id=org_id, profile=profile, user=member, access=access)
 
 

@@ -61,6 +61,7 @@
             <th>Code</th>
             <th>Designation</th>
             <th>Department</th>
+            <th>Works from</th>
             <th>Manager</th>
             <th />
           </tr>
@@ -80,11 +81,12 @@
             <td class="bo-mono">{{ row.employee_code || '—' }}</td>
             <td>{{ row.designation || '—' }}</td>
             <td>{{ row.department || '—' }}</td>
+            <td>{{ workplaceLabel(row.work_arrangement, row.office) || '—' }}</td>
             <td>{{ managerLabel(row) }}</td>
             <td><EmployeeStatusChip :status="row.status" /></td>
           </tr>
           <tr v-if="!store.loading && store.directory.length === 0">
-            <td colspan="6" class="text-center text-medium-emphasis pa-8">{{ emptyLabel }}</td>
+            <td colspan="7" class="text-center text-medium-emphasis pa-8">{{ emptyLabel }}</td>
           </tr>
         </tbody>
       </v-table>
@@ -103,7 +105,7 @@ import EmployeeStatusChip from '@/components/people/EmployeeStatusChip.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useEmployeesStore } from '@/stores/employees'
 import type { DirectoryEntry, EmployeeStatus } from '@/types/employee'
-import { selectItems, STATUS_LABELS } from '@/utils/employee'
+import { selectItems, STATUS_LABELS, workplaceLabel } from '@/utils/employee'
 
 const store = useEmployeesStore()
 const router = useRouter()

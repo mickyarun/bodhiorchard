@@ -25,7 +25,14 @@ from datetime import date
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
-from app.models.employee_profile import BloodGroup, EmployeeStatus, EmploymentType, Gender
+from app.models.employee_profile import (
+    BloodGroup,
+    EmployeeStatus,
+    EmploymentType,
+    Gender,
+    WorkArrangement,
+)
+from app.schemas.country import CountryCode
 
 
 class EmployeeWork(BaseModel):
@@ -40,25 +47,20 @@ class EmployeeWork(BaseModel):
     status: EmployeeStatus = EmployeeStatus.ACTIVE
     date_of_joining: date | None = None
     date_of_exit: date | None = None
-    country_code: str | None = Field(None, min_length=2, max_length=2)
-    work_location: str | None = Field(None, max_length=150)
+    country_code: CountryCode | None = None
+    work_arrangement: WorkArrangement = WorkArrangement.OFFICE
+    office_id: uuid.UUID | None = None
 
-    @field_validator("country_code")
-    @classmethod
-    def _upper_country(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        if not value.isalpha():
-            raise ValueError("Use a two-letter country code, e.g. IN or GB.")
-        return value.upper()
-
-    @field_validator("employee_code", "designation", "department", "work_location")
+    @field_validator("employee_code", "designation", "department")
     @classmethod
     def _blank_to_none(cls, value: str | None) -> str | None:
         return value.strip() or None if value is not None else None
 
     @model_validator(mode="after")
     def _exit_date_matches_status(self) -> "EmployeeWork":
+        # Remote people don't work from an office.
+        if self.work_arrangement == WorkArrangement.REMOTE:
+            self.office_id = None
         # An active employee has no exit date (e.g. after being re-hired).
         if self.status == EmployeeStatus.ACTIVE:
             self.date_of_exit = None
@@ -112,6 +114,13 @@ class EmployeeLeavePolicy(BaseModel):
     explicit: bool
 
 
+class OfficeRef(BaseModel):
+    """An office by id and name."""
+
+    id: uuid.UUID
+    name: str
+
+
 class EmployeeAccessRead(BaseModel):
     """What the caller may change on this record (drives the UI)."""
 
@@ -132,6 +141,7 @@ class EmployeeRead(BaseModel):
     # Read-only alongside the work details; null only before the org has a
     # default policy. Changed through the leave policy assign route.
     leave_policy: EmployeeLeavePolicy | None = None
+    office: OfficeRef | None = None
     managers: list[ManagerRef]
     personal: EmployeePersonal | None
     access: EmployeeAccessRead
@@ -153,6 +163,8 @@ class DirectoryEntry(BaseModel):
     status: EmployeeStatus
     primary_manager: ManagerRef | None
     manager_count: int
+    work_arrangement: WorkArrangement
+    office: OfficeRef | None
 
 
 class MemberCandidate(BaseModel):

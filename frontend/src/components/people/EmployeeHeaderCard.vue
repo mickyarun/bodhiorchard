@@ -15,7 +15,7 @@
  -->
 
 <!-- Top of an employee profile: who they are, their role, and where
-     they sit (code, managers, joining date, location). -->
+     they sit (code, managers, joining date, office or remote). -->
 <template>
   <v-card color="surface" class="pa-6 mb-4" rounded="lg">
     <div class="d-flex ga-4 align-start flex-wrap">
@@ -45,7 +45,7 @@
 import { computed } from 'vue'
 import EmployeeStatusChip from '@/components/people/EmployeeStatusChip.vue'
 import type { EmployeeRecord } from '@/types/employee'
-import { EMPLOYMENT_TYPE_LABELS, formatDateOnly } from '@/utils/employee'
+import { EMPLOYMENT_TYPE_LABELS, formatDateOnly, workplaceLabel } from '@/utils/employee'
 
 const props = defineProps<{ record: EmployeeRecord }>()
 
@@ -72,7 +72,7 @@ const metaLine = computed(() => {
     work.employee_code,
     primary ? `Reports to ${primary.name}${extra}` : 'No manager set',
     work.date_of_joining ? `Joined ${formatDateOnly(work.date_of_joining)}` : null,
-    work.work_location,
+    workplaceLabel(work.work_arrangement, props.record.office),
   ]
     .filter(Boolean)
     .join(' · ')

@@ -43,6 +43,12 @@ export const peopleRoutes: RouteRecordRaw[] = [
     component: () => import('@/views/settings/SettingsLeave.vue'),
   },
   {
+    path: 'settings/offices',
+    name: 'settings-offices',
+    meta: { permission: 'employees:manage' },
+    component: () => import('@/views/settings/SettingsOffices.vue'),
+  },
+  {
     path: 'people',
     name: 'employees',
     meta: { permission: 'employees:view' },

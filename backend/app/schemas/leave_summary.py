@@ -19,6 +19,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel
 
+from app.models.employee_profile import WorkArrangement
 from app.models.leave_policy import WfhApproval
 from app.schemas.leave import HolidayRead, LeaveTypeBrief, PersonRef
 
@@ -78,3 +79,5 @@ class LeaveSummary(BaseModel):
     approvers: list[PersonRef]
     # True when no active manager is set: requests go to HR.
     routes_to_hr: bool
+    # Remote people don't request WFH, so the page hides it for them.
+    work_arrangement: WorkArrangement

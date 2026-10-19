@@ -20,6 +20,8 @@
  * them through `toNumber()` in utils/leave.ts. Dates are 'YYYY-MM-DD'.
  */
 
+import type { WorkArrangement } from '@/types/employee'
+
 export type Decimalish = number | string
 
 export type LeaveKind = 'leave' | 'wfh' | 'optional_holiday'
@@ -97,6 +99,8 @@ export interface LeaveSummary {
   wfh_auto_days_left_this_month: number | null
   approvers: PersonRef[]
   routes_to_hr: boolean
+  /** Remote people have no WFH option. */
+  work_arrangement: WorkArrangement
 }
 
 export interface LeaveRequestCreate {

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { describe, expect, it } from 'vitest'
-import { formatDateOnly, normalizeManagers, setPrimary } from './employee'
+import { formatDateOnly, normalizeManagers, setPrimary, workplaceLabel } from './employee'
 
 describe('formatDateOnly', () => {
   it('formats a date-only string without shifting the day', () => {
@@ -50,5 +50,23 @@ describe('setPrimary', () => {
   it('moves the primary flag', () => {
     expect(setPrimary([{ user_id: 'a', is_primary: true }, { user_id: 'b', is_primary: false }], 'b'))
       .toEqual([{ user_id: 'a', is_primary: false }, { user_id: 'b', is_primary: true }])
+  })
+})
+
+describe('workplaceLabel', () => {
+  const london = { id: 'o1', name: 'London' }
+
+  it('says remote whatever the office', () => {
+    expect(workplaceLabel('remote', london)).toBe('Remote')
+  })
+
+  it('names the office, noting hybrid', () => {
+    expect(workplaceLabel('office', london)).toBe('London')
+    expect(workplaceLabel('hybrid', london)).toBe('London · Hybrid')
+  })
+
+  it('has nothing to say for an office worker with no office set', () => {
+    expect(workplaceLabel('office', null)).toBeNull()
+    expect(workplaceLabel('hybrid', null)).toBe('Hybrid')
   })
 })

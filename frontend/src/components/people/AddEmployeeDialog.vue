@@ -44,6 +44,7 @@
           <v-text-field v-model="work.department" label="Department" v-bind="field" />
           <v-text-field v-model="work.date_of_joining" label="Date of joining" type="date" v-bind="field" />
           <v-select v-model="work.employment_type" :items="TYPES" label="Employment type" v-bind="field" />
+          <WorkplaceFields v-model:arrangement="work.work_arrangement" v-model:office-id="work.office_id" />
         </div>
         <AppCallout v-if="error" variant="error" class="mt-3">{{ error }}</AppCallout>
       </v-form>
@@ -59,6 +60,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AppCallout from '@/components/common/AppCallout.vue'
+import WorkplaceFields from '@/components/people/WorkplaceFields.vue'
 import { useEmployeesStore } from '@/stores/employees'
 import type { EmployeeWork } from '@/types/employee'
 import { blankToNull, EMPLOYMENT_TYPE_LABELS, selectItems } from '@/utils/employee'
@@ -80,7 +82,8 @@ const EMPTY: EmployeeWork = {
   date_of_joining: null,
   date_of_exit: null,
   country_code: null,
-  work_location: null,
+  work_arrangement: 'office',
+  office_id: null,
 }
 const candidatesHint = computed(() => {
   if (store.candidatesState === 'error') return "Couldn't load members. Close and try again."

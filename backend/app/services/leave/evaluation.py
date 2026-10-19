@@ -25,6 +25,7 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.employee_profile import WorkArrangement
 from app.models.leave_request import LeaveKind
 from app.schemas.leave import LeaveRequestCreate
 from app.services.leave.approvers import approvers_for, notify_targets
@@ -57,6 +58,15 @@ async def evaluate(
     """
     policy = member.policy
     result = Evaluation(start=body.start_date, end=body.end_date)
+    profile = member.profile
+    if (
+        body.kind == LeaveKind.WFH
+        and profile
+        and profile.work_arrangement == WorkArrangement.REMOTE
+    ):
+        # Home is their normal place of work: nothing to request.
+        result.problem("remote_no_wfh", "You work remotely, so there's no need to request WFH.")
+        return result
     if body.kind == LeaveKind.OPTIONAL_HOLIDAY:
         await apply_optional_holiday(db, member.policy, user_id, body, result)
     problems = date_problems(

@@ -19,6 +19,7 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.employee_profile import WorkArrangement
 from app.models.leave_policy import LeavePolicy
 from app.models.policy_holiday import PolicyHoliday
 from app.schemas.leave import HolidayRead, LeaveTypeBrief, PersonRef
@@ -117,4 +118,7 @@ async def build_summary(
         ),
         approvers=[PersonRef(user_id=uid, name=name) for uid, name in approvers.managers],
         routes_to_hr=approvers.routes_to_hr,
+        work_arrangement=member.profile.work_arrangement
+        if member.profile
+        else WorkArrangement.OFFICE,
     )

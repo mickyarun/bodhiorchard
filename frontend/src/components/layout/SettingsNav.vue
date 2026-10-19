@@ -17,7 +17,7 @@
 <!-- Settings group at the foot of the sidebar. Each entry mirrors its
      route's permission so visibility tracks what the user can open. -->
 <template>
-  <v-list-group v-if="canViewSettings || canConfigureLeave" value="settings">
+  <v-list-group v-if="canViewSettings || canConfigureLeave || canManageEmployees" value="settings">
     <template #activator="{ props }">
       <v-list-item
         v-bind="props"
@@ -96,6 +96,13 @@
       rounded="lg"
       class="pl-10"
     />
+    <v-list-item
+      v-if="canManageEmployees"
+      title="Offices"
+      to="/settings/offices"
+      rounded="lg"
+      class="pl-10"
+    />
     <!-- MCP Connect is self-service for anyone in the engineering
          workspace (mint / revoke their own tokens). -->
     <v-list-item
@@ -123,5 +130,6 @@ const {
   canViewJiraImport,
   canManageQuiz,
   canConfigureLeave,
+  canManageEmployees,
 } = usePermissions()
 </script>

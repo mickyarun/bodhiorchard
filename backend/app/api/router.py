@@ -66,6 +66,7 @@ from app.api.v1.me import router as me_router
 from app.api.v1.members import router as members_router
 from app.api.v1.minigames import router as minigames_router
 from app.api.v1.notifications import router as notifications_router
+from app.api.v1.offices import router as offices_router
 from app.api.v1.organizations import router as orgs_router
 from app.api.v1.public import router as public_router
 from app.api.v1.quiz import router as quiz_router
@@ -122,6 +123,7 @@ for employee_part in (
     api_router.include_router(
         employee_part, prefix="/api/v1/employees", dependencies=PEOPLE_NO_STORE
     )
+api_router.include_router(offices_router, prefix="/api/v1/offices", dependencies=PEOPLE_NO_STORE)
 for leave_part in (
     leave_router,
     leave_approvals_router,

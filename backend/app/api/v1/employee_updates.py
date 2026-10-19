@@ -33,6 +33,7 @@ from app.services.employees.managers import (
     ManagerValidationError,
     validate_managers,
 )
+from app.services.employees.offices import check_office, follow_office_policy
 from app.services.employees.views import employee_read
 
 router = APIRouter(tags=["employees"])
@@ -60,7 +61,8 @@ async def update_work(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=f"Employee code {code} is already used."
         )
-    previous_status = profile.status
+    office = await check_office(db, org_id, body.office_id)
+    previous_status, previous_office_id = profile.status, profile.office_id
     for field, value in body.model_dump().items():
         setattr(profile, field, value)
     revoked = await apply_exit(
@@ -78,6 +80,14 @@ async def update_work(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=f"Employee code {code} is already used."
         ) from exc
+    await follow_office_policy(
+        db,
+        profile=profile,
+        office=office,
+        previous_office_id=previous_office_id,
+        actor_id=current_user.id,
+        actor_is_owner=perms.is_owner,
+    )
     return await employee_read(
         db, org_id=org_id, profile=profile, user=user, access=access, access_revoked=revoked
     )
