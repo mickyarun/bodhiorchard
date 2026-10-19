@@ -37,6 +37,7 @@ Two responsibilities:
 
 from __future__ import annotations
 
+import secrets
 import uuid
 from typing import Any
 
@@ -97,7 +98,9 @@ async def phase_e_skills(
             new_user = User(
                 email=entry.email,
                 name=entry.author_name,
-                password_hash=hash_password("changeme123"),
+                # Random and never shown: scan-created contributors can't sign
+                # in until an admin sets a password or merges them.
+                password_hash=hash_password(secrets.token_urlsafe(24)),
                 is_active=True,
             )
             db.add(new_user)

@@ -21,7 +21,7 @@ permissions exceed their own, or changing their own role.
 
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -29,7 +29,12 @@ from fastapi import HTTPException
 from app.core.deps import PermissionSet
 from app.models.role import RoleScopeType
 from app.services import role_grants
-from app.services.role_grants import assert_can_assign_role, assert_can_grant, ungrantable
+from app.services.role_grants import (
+    assert_can_assign_role,
+    assert_can_grant,
+    assert_can_manage_member,
+    ungrantable,
+)
 
 MANAGER = PermissionSet(
     ids=frozenset({"team:assign_roles", "buds:view", "workspace:engineering"}),
@@ -43,12 +48,16 @@ def _role(name: str, scope: RoleScopeType = RoleScopeType.SYSTEM) -> SimpleNames
 
 
 def _patch_role_perms(monkeypatch: pytest.MonkeyPatch, perms: set[str]) -> None:
-    repo = MagicMock(get_user_permission_ids=AsyncMock(return_value=perms))
-    monkeypatch.setattr(role_grants, "PermissionRepository", MagicMock(return_value=repo))
+    monkeypatch.setattr(role_grants, "permissions_for_role", AsyncMock(return_value=perms))
 
 
 def test_ungrantable_lists_permissions_the_actor_lacks() -> None:
     assert ungrantable(MANAGER, {"buds:view", "employees:documents"}) == {"employees:documents"}
+
+
+def test_routine_permissions_are_freely_grantable() -> None:
+    # Only escalation-grade permissions are policed.
+    assert ungrantable(MANAGER, {"knowledge:contribute", "buds:test"}) == set()
 
 
 def test_owner_can_grant_anything() -> None:
@@ -127,3 +136,36 @@ async def test_can_assign_role_within_own_permissions(monkeypatch: pytest.Monkey
         role=_role("viewer"),
     )
     assert granted == {"buds:view"}
+
+
+def _member(role_name: str, scope: RoleScopeType = RoleScopeType.SYSTEM) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        role_id=uuid.uuid4(),
+        role_ref=SimpleNamespace(name=role_name, scope_type=scope),
+    )
+
+
+async def test_non_owner_cannot_manage_the_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_role_perms(monkeypatch, set())
+    with pytest.raises(HTTPException) as excinfo:
+        await assert_can_manage_member(AsyncMock(), actor=MANAGER, target=_member("org_owner"))
+    assert excinfo.value.status_code == 403
+
+
+async def test_cannot_manage_member_with_more_access(monkeypatch: pytest.MonkeyPatch) -> None:
+    # e.g. a manager resetting the HR user's password to sign in as HR.
+    _patch_role_perms(monkeypatch, {"employees:documents", "leave:approve"})
+    with pytest.raises(HTTPException) as excinfo:
+        await assert_can_manage_member(AsyncMock(), actor=MANAGER, target=_member("hr"))
+    assert excinfo.value.status_code == 403
+
+
+async def test_can_manage_member_with_less_access(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_role_perms(monkeypatch, {"buds:view", "workspace:engineering"})
+    await assert_can_manage_member(AsyncMock(), actor=MANAGER, target=_member("developer"))
+
+
+async def test_owner_manages_anyone(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_role_perms(monkeypatch, {"employees:documents"})
+    await assert_can_manage_member(AsyncMock(), actor=OWNER, target=_member("hr"))

@@ -20,7 +20,11 @@ from unittest.mock import AsyncMock
 
 from app.core.deps import PermissionSet, is_org_owner
 from app.core.permissions import SENSITIVE_PERMISSION_IDS, WORKSPACE_ENGINEERING
-from app.core.role_defs import DEFAULT_SYSTEM_ROLES, RESERVED_ROLE_NAMES
+from app.core.role_defs import (
+    DEFAULT_SYSTEM_ROLES,
+    RESERVED_ROLE_NAMES,
+    UNASSIGNED_MEMBER_PERMISSIONS,
+)
 from app.models.role import RoleScopeType
 
 ROLES = {r.name: set(r.permission_ids) for r in DEFAULT_SYSTEM_ROLES}
@@ -79,3 +83,9 @@ def test_sensitive_permission_holders() -> None:
 
 def test_system_role_names_are_reserved() -> None:
     assert {"org_owner", "hr", "sales"} <= RESERVED_ROLE_NAMES
+
+
+def test_unassigned_members_resolve_like_developers() -> None:
+    # Role-less memberships (Slack import, GitHub stubs) keep today's access,
+    # and every resolver reads this one set.
+    assert ROLES["developer"] == UNASSIGNED_MEMBER_PERMISSIONS

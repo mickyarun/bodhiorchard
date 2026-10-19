@@ -49,7 +49,11 @@ from app.schemas.members import (
     SetPasswordResponse,
     UpdateCharacterRequest,
 )
-from app.services.role_grants import assert_can_assign_role, log_sensitive_grant
+from app.services.role_grants import (
+    assert_can_assign_role,
+    assert_can_manage_member,
+    log_sensitive_grant,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -116,16 +120,16 @@ async def add_member(
             detail="Email already registered in this organization.",
         )
 
-    granted: set[str] = set()
+    role = None
     if body.role_id:
-        role_repo = RoleRepository(db, org_id=org.id)
-        role = await role_repo.get_by_id(body.role_id)
+        role = await RoleRepository(db, org_id=org.id).get_by_id(body.role_id)
         if role is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found.")
-        # Inviting someone with a role is a grant: same ceiling as assigning.
-        granted = await assert_can_assign_role(
-            db, actor_id=current_user.id, actor=perms, target_user_id=None, role=role
-        )
+    # Inviting is a grant — even without a role, since a role-less member
+    # gets the unassigned-member permissions (engineering included).
+    granted = await assert_can_assign_role(
+        db, actor_id=current_user.id, actor=perms, target_user_id=None, role=role
+    )
 
     new_user = User(
         email=body.email,
@@ -262,6 +266,7 @@ async def assign_role(
     role = await role_repo.get_by_id(body.role_id)
     if role is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found.")
+    await assert_can_manage_member(db, actor=perms, target=user)
     granted = await assert_can_assign_role(
         db, actor_id=current_user.id, actor=perms, target_user_id=user_id, role=role
     )
@@ -299,6 +304,7 @@ async def assign_role(
 async def toggle_member_status(
     user_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
+    perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> MemberRead:
     """Toggle a member's active status (soft delete / reactivate).
@@ -323,6 +329,7 @@ async def toggle_member_status(
     user = await user_repo.get_by_id_with_membership(user_id, org.id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    await assert_can_manage_member(db, actor=perms, target=user)
 
     new_state = not user.is_active
     user.is_active = new_state
@@ -383,6 +390,7 @@ async def set_member_password(
     user_id: uuid.UUID,
     body: SetPasswordRequest | None = None,
     current_user: User = Depends(get_current_user),
+    perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> SetPasswordResponse:
     """Generate and set a temporary password for a member.
@@ -406,15 +414,9 @@ async def set_member_password(
     user = await user_repo.get_by_id_with_membership(user_id, org.id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-
-    # Prevent privilege escalation: non-owners cannot reset an owner's password
-    caller_role = getattr(current_user, "role", None)
-    target_role = getattr(user, "role", None)
-    if target_role == UserRole.ORG_OWNER and caller_role != UserRole.ORG_OWNER:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the org owner can reset another org owner's password.",
-        )
+    # A temporary password lets the caller sign in as the target, so it
+    # needs the same ceiling as changing their role.
+    await assert_can_manage_member(db, actor=perms, target=user)
 
     password = _generate_password()
     user.password_hash = hash_password(password)
@@ -587,6 +589,7 @@ async def merge_members(
     target_id: uuid.UUID,
     body: MergeMembersRequest,
     current_user: User = Depends(get_current_user),
+    perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> MemberRead:
     """Merge source member into target member.
@@ -620,6 +623,10 @@ async def merge_members(
     source = await user_repo.get_by_id_with_membership(body.source_id, org.id)
     if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source user not found.")
+    # Merging deactivates the source and hands its history to the target,
+    # so the caller must be able to manage both accounts.
+    await assert_can_manage_member(db, actor=perms, target=source)
+    await assert_can_manage_member(db, actor=perms, target=target)
 
     # 1. Transfer skill profiles: re-point source's profiles to target
     sp_repo = SkillProfileRepository(db, org_id=org.id)
@@ -705,6 +712,7 @@ async def unlink_alias(
     user_id: uuid.UUID,
     email: str,
     current_user: User = Depends(get_current_user),
+    perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> MemberRead:
     """Detach an email alias from a member.
@@ -724,6 +732,7 @@ async def unlink_alias(
     user = await user_repo.get_by_id_with_membership(user_id, org.id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found.")
+    await assert_can_manage_member(db, actor=perms, target=user)
 
     removed = await user_repo.delete_alias(org.id, user_id, email)
     if not removed:

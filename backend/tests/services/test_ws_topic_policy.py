@@ -16,7 +16,7 @@
 
 import pytest
 
-from app.services.ws_topic_policy import Subscriber, may_subscribe
+from app.services.ws_topic_policy import Subscriber, bud_id_of, may_subscribe
 
 ENGINEER = Subscriber(user_id="u1", org_id="o1", has_engineering=True)
 SALES = Subscriber(user_id="u2", org_id="o1", has_engineering=False)
@@ -50,3 +50,10 @@ def test_people_only_member_keeps_notifications() -> None:
 @pytest.mark.parametrize("topic", ["agent_activity:o1", "quiz:o1", "job:abc", "bud:b1:activity"])
 def test_people_only_member_denied_engineering_topics(topic: str) -> None:
     assert not may_subscribe(topic, SALES)
+
+
+def test_bud_topics_name_the_bud_for_the_ownership_check() -> None:
+    assert bud_id_of("bud:b1:activity") == "b1"
+    assert bud_id_of("todo:b1") == "b1"
+    assert bud_id_of("job:abc") is None
+    assert bud_id_of("quiz:o1") is None

@@ -27,7 +27,12 @@ import { onSocketReconnect } from '@/services/wsReconnect'
 import { useYieldOfferStore } from '@/stores/yieldOffers'
 import type { YieldOfferSocketEvent } from '@/types'
 
-export function useYieldOfferSocket(userId: string): void {
+/**
+ * ``enabled`` is read at each refetch, not once: yield offers belong to the
+ * engineering workspace, and permissions may hydrate after the caller
+ * mounts. People-only roles would otherwise get a 403 on every reconnect.
+ */
+export function useYieldOfferSocket(userId: string, enabled: () => boolean = () => true): void {
   const store = useYieldOfferStore()
   const topic = `yield_offer:${userId}`
 
@@ -35,13 +40,15 @@ export function useYieldOfferSocket(userId: string): void {
     store.applySocketEvent(data as YieldOfferSocketEvent)
   }
 
+  const refetch = () => {
+    if (enabled()) void store.fetchPending()
+  }
+
   subscribe(topic, handler)
-  const unregisterReconnect = onSocketReconnect(() => store.fetchPending())
+  const unregisterReconnect = onSocketReconnect(refetch)
 
   const onVisibility = () => {
-    if (document.visibilityState === 'visible') {
-      store.fetchPending()
-    }
+    if (document.visibilityState === 'visible') refetch()
   }
 
   onMounted(() => {

@@ -43,9 +43,10 @@ from app.core.deps import member_has_permission
 from app.core.permissions import WORKSPACE_ENGINEERING
 from app.core.security import verify_token
 from app.database import AsyncSessionLocal
+from app.repositories.bud import BUDRepository
 from app.repositories.user import UserRepository
 from app.services.event_bus import subscribe, unsubscribe
-from app.services.ws_topic_policy import Subscriber, may_subscribe
+from app.services.ws_topic_policy import Subscriber, bud_id_of, may_subscribe
 
 logger = structlog.get_logger(__name__)
 
@@ -72,6 +73,19 @@ async def _resolve_subscriber(payload: dict[str, Any]) -> Subscriber | None:
             return None
         has_engineering = await member_has_permission(db, user_id, org_id, WORKSPACE_ENGINEERING)
     return Subscriber(user_id=str(user_id), org_id=str(org_id), has_engineering=has_engineering)
+
+
+async def _owns_topic_bud(topic: str, who: Subscriber) -> bool:
+    """For BUD-scoped topics, confirm the BUD belongs to the caller's org."""
+    raw = bud_id_of(topic)
+    if raw is None:
+        return True
+    try:
+        bud_id = uuid.UUID(raw)
+    except ValueError:
+        return False
+    async with AsyncSessionLocal() as db:
+        return await BUDRepository(db, org_id=uuid.UUID(who.org_id)).exists(bud_id)
 
 
 @router.websocket("/ws")
@@ -134,7 +148,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 topic = msg.get("topic", "")
 
                 if action == "subscribe" and topic:
-                    if not may_subscribe(topic, who):
+                    if not may_subscribe(topic, who) or not await _owns_topic_bud(topic, who):
                         await websocket.send_json({"error": "forbidden", "topic": topic})
                         continue
 

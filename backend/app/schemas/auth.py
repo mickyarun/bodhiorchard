@@ -25,16 +25,6 @@ class LoginRequest(BaseModel):
     org_slug: str = Field(..., min_length=1)
 
 
-class RegisterRequest(BaseModel):
-    """Schema for user registration."""
-
-    email: EmailStr
-    name: str = Field(..., min_length=1, max_length=255)
-    password: str = Field(..., min_length=8, max_length=128)
-    org_slug: str = Field(..., min_length=1, max_length=100)
-    org_name: str | None = None
-
-
 class TokenResponse(BaseModel):
     """Schema for JWT token response."""
 

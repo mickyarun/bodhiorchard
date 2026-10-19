@@ -196,3 +196,12 @@ DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
 # and several UI checks key off role names, so a custom ``org_owner`` or
 # ``hr`` would be confusing at best and an escalation path at worst.
 RESERVED_ROLE_NAMES: frozenset[str] = frozenset(r.name for r in DEFAULT_SYSTEM_ROLES)
+
+# Permissions of a member whose membership has no role yet (Slack import,
+# GitHub stubs, an invite sent without a role). They are treated as
+# developers until an admin picks a role; every resolver (HTTP, MCP,
+# websocket, Slack recipients) reads this one definition.
+UNASSIGNED_ROLE_NAME = "developer"
+UNASSIGNED_MEMBER_PERMISSIONS: frozenset[str] = frozenset(
+    next(r.permission_ids for r in DEFAULT_SYSTEM_ROLES if r.name == UNASSIGNED_ROLE_NAME)
+)

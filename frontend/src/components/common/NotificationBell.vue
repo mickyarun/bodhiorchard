@@ -306,7 +306,7 @@ const { busy, onAccept, askReject, askReassign } = useYieldOfferActions()
 // live WS push. See ``useNotificationSocket.ts`` for the full
 // rationale.
 useNotificationSocket(() => props.userId)
-useYieldOfferSocket(props.userId)
+useYieldOfferSocket(props.userId, () => canAccessEngineering.value)
 
 function loadMembersIfAdmin(): void {
   // Admins need the member list to translate target IDs to names on

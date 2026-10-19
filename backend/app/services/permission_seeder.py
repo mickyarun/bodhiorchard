@@ -113,6 +113,7 @@ async def seed_permissions(db: AsyncSession) -> None:
         await db.flush()
 
     await _warn_on_orphan_custom_roles(role_repo)
+    await _warn_on_owner_based_custom_roles(role_repo)
 
     logger.info("permission_seed_complete")
 
@@ -157,5 +158,24 @@ async def _warn_on_orphan_custom_roles(role_repo: RoleRepository) -> None:
             remediation=(
                 "Set base_role_id via MembersView so phase auto-assignment "
                 "picks up members of this role."
+            ),
+        )
+
+
+async def _warn_on_owner_based_custom_roles(role_repo: RoleRepository) -> None:
+    """Log one warning per CUSTOM role still based on ``org_owner``.
+
+    Such roles no longer confer the owner bypass. Members keep only the
+    permissions ticked on the custom role, which may be less than they had.
+    """
+    for role_id, name, org_id in await role_repo.list_owner_based_custom_roles():
+        logger.warning(
+            "custom_role_based_on_org_owner",
+            role_id=str(role_id),
+            role_name=name,
+            org_id=str(org_id) if org_id else None,
+            remediation=(
+                "Re-base this role on another system role in MembersView, or "
+                "assign its members the org_owner system role directly."
             ),
         )

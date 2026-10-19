@@ -47,11 +47,25 @@ from app.schemas.role import RoleCreate, RoleRead, RoleUpdate
 _OWNER = PermissionSet(ids=frozenset(), is_owner=True)
 
 
+@pytest.fixture
+def fake_user() -> SimpleNamespace:
+    """Caller holding some other role, so the own-role edit guard doesn't fire."""
+    return SimpleNamespace(
+        id=uuid.uuid4(), org_id=uuid.uuid4(), name="Tester", role_id=uuid.uuid4()
+    )
+
+
 @pytest.fixture(autouse=True)
 def _skip_grant_ceiling_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         role_handlers, "assert_can_grant_permission_ids", AsyncMock(return_value=set())
     )
+    monkeypatch.setattr(
+        role_handlers,
+        "with_inherited_workspace",
+        AsyncMock(side_effect=lambda _db, _base, ids: ids),
+    )
+    monkeypatch.setattr(role_handlers, "permissions_for_role", AsyncMock(return_value=set()))
 
 
 def _patch_role_repo(

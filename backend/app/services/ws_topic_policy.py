@@ -19,8 +19,11 @@ prefix declares who may read it:
 
 * ``user`` — the second segment must be the caller's own user id.
 * ``org`` — the second segment must be the caller's own org id.
-* ``id`` — addressed by an opaque UUID (a job, scan or BUD). Ownership
-  isn't checked per subscription; the UUID is the capability.
+* ``bud`` — the second segment is a BUD id, which must belong to the
+  caller's org. BUD ids appear in URLs and Slack links, so they are not a
+  secret; the WebSocket handler checks ownership via :func:`bud_id_of`.
+* ``id`` — addressed by a server-minted UUID (a job or scan) that is only
+  ever handed to the requester. The UUID is the capability.
 
 ``engineering`` marks topics that carry engineering-workspace data and so
 need ``workspace:engineering``. Adding a new publisher means adding its
@@ -30,7 +33,7 @@ prefix here, or no client will ever receive it.
 from dataclasses import dataclass
 from typing import Literal
 
-Scope = Literal["user", "org", "id"]
+Scope = Literal["user", "org", "bud", "id"]
 
 
 @dataclass(frozen=True)
@@ -51,8 +54,8 @@ TOPIC_RULES: dict[str, TopicRule] = {
     "job": TopicRule(scope="id", engineering=True),
     "scan": TopicRule(scope="id", engineering=True),
     "scan_synthesis_tool": TopicRule(scope="id", engineering=True),
-    "todo": TopicRule(scope="id", engineering=True),
-    "bud": TopicRule(scope="id", engineering=True),
+    "todo": TopicRule(scope="bud", engineering=True),
+    "bud": TopicRule(scope="bud", engineering=True),
 }
 
 
@@ -79,3 +82,12 @@ def may_subscribe(topic: str, who: Subscriber) -> bool:
     if rule.scope == "org":
         return owner == who.org_id
     return True
+
+
+def bud_id_of(topic: str) -> str | None:
+    """The BUD id a ``bud``-scoped topic names, for the ownership check."""
+    prefix, _, rest = topic.partition(":")
+    rule = TOPIC_RULES.get(prefix)
+    if rule is None or rule.scope != "bud" or not rest:
+        return None
+    return rest.split(":", 1)[0]

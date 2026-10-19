@@ -170,6 +170,7 @@ ALL_PERMISSION_IDS: set[str] = {
 
 __all__ = [
     "ALL_PERMISSION_IDS",
+    "ESCALATION_PERMISSION_IDS",
     "PERMISSION_CATEGORIES",
     "SENSITIVE_PERMISSION_IDS",
     "WORKSPACE_ENGINEERING",
@@ -181,6 +182,21 @@ __all__ = [
 SENSITIVE_PERMISSION_IDS: frozenset[str] = frozenset(
     p.resource_id for cat in PERMISSION_CATEGORIES for p in cat.permissions if p.sensitive
 )
+
+# Permissions that confer control over access itself: people data, member
+# administration, org/integration configuration, and entry to the
+# engineering workspace. The grant ceiling only polices these — routine
+# feature permissions (``knowledge:contribute``, ``buds:test``) can be
+# handed out by any role admin, so a manager can still staff a developer.
+ESCALATION_PERMISSION_IDS: frozenset[str] = SENSITIVE_PERMISSION_IDS | {
+    WORKSPACE_ENGINEERING,
+    "team:invite",
+    "team:remove",
+    "team:assign_roles",
+    "team:manage",
+    "org:edit_settings",
+    "integrations:configure",
+}
 
 
 def expand_permission_specs(*specs: str) -> list[str]:

@@ -94,6 +94,13 @@ class BUDRepository(BaseRepository[BUDDocument]):
         """
         super().__init__(BUDDocument, db, org_id=org_id)
 
+    async def exists(self, bud_id: uuid.UUID) -> bool:
+        """True if ``bud_id`` is a BUD in this repository's org (id-only query)."""
+        result = await self._db.execute(
+            self._scoped(select(BUDDocument.id).where(BUDDocument.id == bud_id))
+        )
+        return result.scalar_one_or_none() is not None
+
     async def get_by_id_for_update(self, entity_id: uuid.UUID) -> BUDDocument | None:
         """Fetch a BUD with a row-level lock (SELECT ... FOR UPDATE).
 

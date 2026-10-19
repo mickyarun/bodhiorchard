@@ -95,6 +95,26 @@ class RoleRepository(BaseRepository[Role]):
         )
         return result.scalar_one_or_none() is not None
 
+    async def list_owner_based_custom_roles(self) -> list[OrphanCustomRoleRow]:
+        """CUSTOM roles whose base is ``org_owner`` (legacy; no longer allowed).
+
+        Their members used to inherit the owner bypass through the base
+        role. They now hold only their explicit permissions, so the seeder
+        surfaces them for an admin to re-base or replace.
+        """
+        base = aliased(Role)
+        stmt = (
+            select(Role.id, Role.name, Role.org_id)
+            .join(base, base.id == Role.base_role_id)
+            .where(
+                Role.scope_type == RoleScopeType.CUSTOM,
+                base.scope_type == RoleScopeType.SYSTEM,
+                base.name == ORG_OWNER_ROLE_NAME,
+            )
+        )
+        result = await self._db.execute(stmt)
+        return [(row[0], row[1], row[2]) for row in result.all()]
+
     async def list_custom_role_ids(self) -> list[uuid.UUID]:
         """Return every CUSTOM role id, active or not, across all orgs.
 

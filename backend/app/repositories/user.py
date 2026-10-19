@@ -17,13 +17,14 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import Select, and_, case, func, null, or_, select, true
+from sqlalchemy import Select, and_, case, false, func, null, or_, select, true
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import update as sql_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.role_defs import UNASSIGNED_MEMBER_PERMISSIONS
 from app.models.developer_xp import DeveloperXP
 from app.models.permission import Permission
 from app.models.role import Role, RolePermission, RoleScopeType
@@ -84,7 +85,13 @@ def _membership_holds(permission: str) -> Any:
         )
         .exists()
     )
-    return or_(holds, is_owner)
+    # Role-less memberships resolve to the unassigned-member set, the same
+    # rule ``permission_deps.permissions_for_role`` applies in Python.
+    unassigned = and_(
+        OrgToUser.role_id.is_(None),
+        true() if permission in UNASSIGNED_MEMBER_PERMISSIONS else false(),
+    )
+    return or_(holds, is_owner, unassigned)
 
 
 def _role_from_name(name: str | None) -> UserRole | None:

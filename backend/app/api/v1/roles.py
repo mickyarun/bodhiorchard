@@ -20,17 +20,23 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import PermissionSet, get_db, get_permission_set, require_permissions
+from app.core.permission_deps import permissions_for_role
 from app.models.role import Role, RoleScopeType
 from app.models.user import User
 from app.repositories.permission import PermissionRepository
 from app.repositories.role import RoleRepository
 from app.schemas.permission import PermissionCategoryRead, PermissionRead
 from app.schemas.role import RoleCreate, RoleRead, RoleUpdate
-from app.services.role_grants import assert_can_grant_permission_ids, log_sensitive_grant
+from app.services.role_grants import (
+    assert_can_grant,
+    assert_can_grant_permission_ids,
+    log_sensitive_grant,
+)
 from app.services.role_validation import (
     assert_custom_role_name_allowed,
     assert_valid_base_role,
     read_or_404,
+    with_inherited_workspace,
 )
 
 router = APIRouter(tags=["roles"])
@@ -98,11 +104,16 @@ async def create_role(
     ``org_owner`` — the inheritance contract for phase auto-assignment.
     Anything else (custom role, inactive, missing, owner) is rejected with
     400. The caller can only include permissions they hold themselves.
+
+    A role based on an engineering role inherits ``workspace:engineering``
+    automatically, so a cloned "Senior Developer" isn't locked out of the
+    platform because nobody ticked the workspace box.
     """
     role_repo = RoleRepository(db, org_id=current_user.org_id)
     assert_custom_role_name_allowed(body.name)
     await assert_valid_base_role(role_repo, body.base_role_id)
-    granted = await assert_can_grant_permission_ids(db, perms, body.permission_ids)
+    permission_ids = await with_inherited_workspace(db, body.base_role_id, body.permission_ids)
+    granted = await assert_can_grant_permission_ids(db, perms, permission_ids)
     role = Role(
         name=body.name,
         description=body.description,
@@ -113,7 +124,7 @@ async def create_role(
     )
     await role_repo.create(role)
     try:
-        await role_repo.replace_permissions(role.id, body.permission_ids)
+        await role_repo.replace_permissions(role.id, permission_ids)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -151,6 +162,11 @@ async def update_role(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="System roles cannot be modified",
         )
+    if role.id == current_user.role_id and not perms.is_owner:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can't edit the role you hold. Ask another admin or the org owner.",
+        )
 
     if body.name is not None:
         assert_custom_role_name_allowed(body.name)
@@ -159,6 +175,9 @@ async def update_role(
         role.description = body.description
     if body.base_role_id is not None:
         await assert_valid_base_role(role_repo, body.base_role_id)
+        # The base role decides the member's effective role (and with it
+        # role-name checks like tech-arch approval), so re-basing is a grant.
+        assert_can_grant(perms, await permissions_for_role(db, body.base_role_id))
         role.base_role_id = body.base_role_id
 
     if body.permission_ids is not None:

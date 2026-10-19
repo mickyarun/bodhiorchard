@@ -47,6 +47,7 @@ class AuthConfig(BaseSettings):
         alias="ENCRYPTION_KEY",
         description="Key used to encrypt secrets (PATs, tokens) at rest in the database.",
     )
+    environment: str = Field(default="dev", alias="ENV")
     access_token_expire_minutes: int = Field(default=60, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
     refresh_token_expire_days: int = Field(default=7, alias="REFRESH_TOKEN_EXPIRE_DAYS")
     algorithm: str = "HS256"
@@ -60,7 +61,8 @@ class AuthConfig(BaseSettings):
         secrets are readable by anyone with the source. Compose passes
         ``${SECRET_KEY}`` through, so a missing env entry arrives as ``""``.
         """
-        if os.environ.get("ENV", "dev").lower() != "production":
+        # Read through the settings field so ``ENV`` set in ``.env`` counts.
+        if self.environment.lower() != "production":
             return self
         weak = [
             name

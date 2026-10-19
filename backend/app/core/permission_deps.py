@@ -31,7 +31,7 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_user, get_db
-from app.core.role_defs import DEFAULT_SYSTEM_ROLES
+from app.core.role_defs import UNASSIGNED_MEMBER_PERMISSIONS
 from app.models.role import Role, RoleScopeType
 from app.models.user import User
 from app.repositories.permission import PermissionRepository
@@ -104,38 +104,24 @@ async def member_has_permission(
     membership, _effective = pair
     if _is_owner_role(membership.role_ref):
         return True
-    if membership.role_id is None:
-        return False
-    return permission in await PermissionRepository(db).get_user_permission_ids(membership.role_id)
+    return permission in await permissions_for_role(db, membership.role_id)
+
+
+async def permissions_for_role(db: AsyncSession, role_id: uuid.UUID | None) -> set[str]:
+    """Resolve a membership's role to permission ids — the single resolver.
+
+    A membership with no role gets :data:`UNASSIGNED_MEMBER_PERMISSIONS`
+    on every path, so HTTP, MCP tokens, websockets and Slack recipient
+    filters always agree about what a role-less member can do.
+    """
+    if role_id is None:
+        return set(UNASSIGNED_MEMBER_PERMISSIONS)
+    return await PermissionRepository(db).get_user_permission_ids(role_id)
 
 
 async def get_user_permissions(user: User, db: AsyncSession) -> set[str]:
-    """Return the set of permission resource_id strings for a user's role.
-
-    Resolves permissions through ``role_id``.  Defence-in-depth: if the
-    membership has no ``role_id`` (post-migration this should not happen),
-    falls back to the default permission set for the canonical
-    :class:`UserRole` carried on ``user.role``.
-    """
-    role_id = getattr(user, "role_id", None)
-    if role_id is not None:
-        perm_repo = PermissionRepository(db)
-        return await perm_repo.get_user_permission_ids(role_id)
-
-    role_enum = getattr(user, "role", None)
-    if role_enum is not None:
-        role_name = str(role_enum)
-        for role_def in DEFAULT_SYSTEM_ROLES:
-            if role_def.name == role_name:
-                logger.info(
-                    "permissions_from_default_role_set",
-                    user_id=str(user.id),
-                    role=role_name,
-                )
-                return set(role_def.permission_ids)
-
-    logger.warning("no_permissions_resolved", user_id=str(user.id))
-    return set()
+    """Return the set of permission resource_id strings for a user's role."""
+    return await permissions_for_role(db, getattr(user, "role_id", None))
 
 
 async def get_permission_set(
