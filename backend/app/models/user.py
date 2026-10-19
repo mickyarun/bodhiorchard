@@ -41,6 +41,10 @@ class UserRole(StrEnum):
     MANAGER = "manager"
     SUPPORT = "support"
     VIEWER = "viewer"
+    # People-workspace roles. Not in any ``PHASE_ROLE_CHAIN``, so the BUD
+    # auto-assigner never picks them.
+    HR = "hr"
+    SALES = "sales"
 
 
 class User(BaseModel):

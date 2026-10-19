@@ -65,6 +65,19 @@ class PermissionRepository(BaseRepository[Permission]):
         )
         return set(result.scalars().all())
 
+    async def resource_ids_for(self, permission_ids: list[uuid.UUID]) -> set[str]:
+        """Map permission UUIDs to their resource_id strings.
+
+        Unknown UUIDs are silently absent from the result; callers that
+        need strict validation compare lengths or use ``replace_permissions``.
+        """
+        if not permission_ids:
+            return set()
+        result = await self._db.execute(
+            select(Permission.resource_id).where(Permission.id.in_(permission_ids))
+        )
+        return set(result.scalars().all())
+
     async def list_categories_ordered(self) -> list[PermissionCategory]:
         """List all permission categories ordered by display_order.
 

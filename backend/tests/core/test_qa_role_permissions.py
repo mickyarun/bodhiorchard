@@ -21,19 +21,13 @@ NOT granted to QA — only the narrower test/evidence permission is.
 
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException
 
-from app.core import deps
-from app.core.deps import require_permissions
-from app.core.permissions import (
-    ALL_PERMISSION_IDS,
-    DEFAULT_SYSTEM_ROLES,
-    PERMISSION_CATEGORIES,
-    RoleDef,
-)
+from app.core.deps import PermissionSet, require_permissions
+from app.core.permissions import ALL_PERMISSION_IDS, PERMISSION_CATEGORIES
+from app.core.role_defs import DEFAULT_SYSTEM_ROLES, RoleDef
 
 
 def _role(name: str) -> RoleDef:
@@ -92,15 +86,8 @@ def _fake_user() -> SimpleNamespace:
 async def _run_dep(user_perms: set[str], *required: str, mode: str = "any") -> None:
     """Invoke the inner ``_check`` of ``require_permissions`` with a fake user."""
     dep = require_permissions(*required, mode=mode)  # type: ignore[arg-type]
-    # ``RoleRepository.get_role_name`` is consulted only for the
-    # org_owner short-circuit — return ``"qa"`` so we exercise the
-    # perm-check branch instead.
-    with (
-        patch.object(deps, "get_user_permissions", new=AsyncMock(return_value=user_perms)),
-        patch.object(deps, "RoleRepository") as role_repo_cls,
-    ):
-        role_repo_cls.return_value = SimpleNamespace(get_role_name=AsyncMock(return_value="qa"))
-        await dep(current_user=_fake_user(), db=AsyncMock())
+    perms = PermissionSet(ids=frozenset(user_perms), is_owner=False)
+    await dep(current_user=_fake_user(), perms=perms)
 
 
 async def test_qa_perms_pass_upload_evidence_gate() -> None:

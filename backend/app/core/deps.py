@@ -12,262 +12,35 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""FastAPI dependency injection providers."""
+"""FastAPI dependency injection providers — the stable import surface.
 
-import uuid
-from collections.abc import AsyncGenerator, Callable
-from typing import Any, Literal
+Identity resolution lives in :mod:`app.core.auth_deps`; permission
+resolution and checks live in :mod:`app.core.permission_deps`. Handlers
+keep importing from here.
+"""
 
-import structlog
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.auth_deps import (
+    get_current_user,
+    get_current_user_pending_password,
+    get_db,
+    oauth2_scheme,
+)
+from app.core.permission_deps import (
+    PermissionSet,
+    get_permission_set,
+    get_user_permissions,
+    is_org_owner,
+    require_permissions,
+)
 
-from app.core.security import verify_token
-from app.database import AsyncSessionLocal
-from app.models.user import User, UserRole
-from app.repositories.permission import PermissionRepository
-from app.repositories.role import RoleRepository
-from app.repositories.user import UserRepository
-
-logger = structlog.get_logger(__name__)
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
-
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Yield an async database session scoped to a single request.
-
-    Commits on success, rolls back on exception, and always closes.
-    """
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
-
-
-async def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    """Resolve the current authenticated user from the JWT bearer token.
-
-    Extracts user_id and org_id from the JWT, validates OrgToUser membership,
-    and sets transient org_id/role/role_id attributes on the User instance.
-
-    Args:
-        token: The JWT bearer token extracted from the Authorization header.
-        db: The async database session.
-
-    Returns:
-        The authenticated User ORM instance with org context set.
-
-    Raises:
-        HTTPException: If the token is invalid, user does not exist,
-            or user is not a member of the org in the token.
-    """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-    payload = verify_token(token)
-    if payload is None:
-        raise credentials_exception
-
-    user_id_str: str | None = payload.get("sub")
-    org_id_str: str | None = payload.get("org_id")
-    if user_id_str is None or org_id_str is None:
-        raise credentials_exception
-
-    try:
-        user_id = uuid.UUID(user_id_str)
-        org_id = uuid.UUID(org_id_str)
-    except ValueError:
-        raise credentials_exception from None
-
-    user_repo = UserRepository(db)
-    user = await user_repo.get_by_id(user_id)
-
-    if user is None:
-        raise credentials_exception
-
-    # Validate org membership + resolve canonical role in one query
-    pair = await user_repo.get_membership_with_role(user_id, org_id)
-    if pair is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not a member of this organization",
-        )
-    membership, effective_role = pair
-
-    # Set transient org context on the user instance
-    user.org_id = membership.org_id
-    user.role = effective_role or UserRole.DEVELOPER
-    user.role_id = membership.role_id
-    user.role_ref = membership.role_ref
-
-    # Block API access when password change is required
-    if user.must_change_password:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Password change required",
-        )
-
-    return user
-
-
-async def get_current_user_pending_password(
-    token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    """Like get_current_user but allows users with must_change_password=True.
-
-    Used exclusively by the change-password endpoint.
-    """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-    payload = verify_token(token)
-    if payload is None:
-        raise credentials_exception
-
-    user_id_str: str | None = payload.get("sub")
-    org_id_str: str | None = payload.get("org_id")
-    if user_id_str is None or org_id_str is None:
-        raise credentials_exception
-
-    try:
-        user_id = uuid.UUID(user_id_str)
-        org_id = uuid.UUID(org_id_str)
-    except ValueError:
-        raise credentials_exception from None
-
-    user_repo = UserRepository(db)
-    user = await user_repo.get_by_id(user_id)
-
-    if user is None:
-        raise credentials_exception
-
-    pair = await user_repo.get_membership_with_role(user_id, org_id)
-    if pair is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not a member of this organization",
-        )
-    membership, effective_role = pair
-
-    user.org_id = membership.org_id
-    user.role = effective_role or UserRole.DEVELOPER
-    user.role_id = membership.role_id
-    user.role_ref = membership.role_ref
-
-    return user
-
-
-async def get_user_permissions(user: User, db: AsyncSession) -> set[str]:
-    """Return the set of permission resource_id strings for a user's role.
-
-    Resolves permissions through ``role_id``.  Defence-in-depth: if the
-    membership has no ``role_id`` (post-migration this should not happen),
-    falls back to the default permission set for the canonical
-    :class:`UserRole` carried on ``user.role``.
-    """
-    role_id = getattr(user, "role_id", None)
-    if role_id is not None:
-        perm_repo = PermissionRepository(db)
-        return await perm_repo.get_user_permission_ids(role_id)
-
-    role_enum = getattr(user, "role", None)
-    if role_enum is not None:
-        from app.core.permissions import DEFAULT_SYSTEM_ROLES
-
-        role_name = str(role_enum)
-        for role_def in DEFAULT_SYSTEM_ROLES:
-            if role_def.name == role_name:
-                logger.info(
-                    "permissions_from_default_role_set",
-                    user_id=str(user.id),
-                    role=role_name,
-                )
-                return set(role_def.permission_ids)
-
-    logger.warning("no_permissions_resolved", user_id=str(user.id))
-    return set()
-
-
-def require_permissions(
-    *permissions: str,
-    mode: Literal["all", "any"] = "all",
-) -> Callable[..., Any]:
-    """FastAPI dependency factory that enforces permission checks.
-
-    Usage::
-
-        @router.get("/", dependencies=[Depends(require_permissions("backlog:view"))])
-        @router.post("/approve", dependencies=[Depends(require_permissions("backlog:approve"))])
-
-    Args:
-        permissions: One or more permission resource_ids to require.
-        mode: "all" requires every listed permission; "any" requires at least one.
-
-    Returns:
-        A FastAPI-compatible async dependency function.
-    """
-
-    async def _check(
-        current_user: User = Depends(get_current_user),
-        db: AsyncSession = Depends(get_db),
-    ) -> User:
-        # org_owner bypasses all permission checks — first the canonical
-        # role on the user instance, then a DB lookup through role_id as
-        # defence-in-depth.
-        if getattr(current_user, "role", None) == UserRole.ORG_OWNER:
-            return current_user
-
-        role_id = getattr(current_user, "role_id", None)
-        if role_id is not None:
-            role_repo = RoleRepository(db)
-            role_name = await role_repo.get_role_name(role_id)
-            if role_name == "org_owner":
-                return current_user
-
-        user_perms = await get_user_permissions(current_user, db)
-        required = set(permissions)
-
-        if mode == "all":
-            if not required.issubset(user_perms):
-                missing = required - user_perms
-                logger.warning(
-                    "permission_denied",
-                    user_id=str(current_user.id),
-                    missing=sorted(missing),
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Insufficient permissions.",
-                )
-        else:  # mode == "any"
-            if not required.intersection(user_perms):
-                logger.warning(
-                    "permission_denied",
-                    user_id=str(current_user.id),
-                    required=sorted(required),
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Insufficient permissions.",
-                )
-
-        return current_user
-
-    return _check
+__all__ = [
+    "PermissionSet",
+    "get_current_user",
+    "get_current_user_pending_password",
+    "get_db",
+    "get_permission_set",
+    "get_user_permissions",
+    "is_org_owner",
+    "oauth2_scheme",
+    "require_permissions",
+]

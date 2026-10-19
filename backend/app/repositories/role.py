@@ -15,8 +15,9 @@
 """Role and RolePermission data access repository."""
 
 import uuid
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import Select, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
@@ -30,26 +31,78 @@ from app.schemas.role import RoleRead
 # callers don't need to load the full ORM object just to log a warning.
 OrphanCustomRoleRow = tuple[uuid.UUID, str, uuid.UUID | None]
 
+# Name of the seeded system role that bypasses permission checks.
+ORG_OWNER_ROLE_NAME = "org_owner"
+
 
 class RoleRepository(BaseRepository[Role]):
-    """Repository for Role queries and role-permission management."""
+    """Repository for Role queries and role-permission management.
 
-    def __init__(self, db: AsyncSession) -> None:
+    Roles are a mixed-tenancy table: SYSTEM roles have ``org_id IS NULL``
+    and are shared, CUSTOM roles belong to one org. When constructed with
+    ``org_id`` every lookup is limited to rows that org may see (system
+    roles plus its own custom roles), so a handler can never read, edit
+    or assign another org's custom role. ``org_id=None`` is for
+    org-agnostic callers only (the startup seeder, setup bootstrap).
+    """
+
+    def __init__(self, db: AsyncSession, *, org_id: uuid.UUID | None = None) -> None:
         """Initialize the repository.
 
         Args:
             db: Async SQLAlchemy session.
+            org_id: Tenant whose visible roles this repository exposes.
         """
+        # Deliberately not forwarded to ``BaseRepository``: its
+        # ``org_id ==`` filter would hide the shared system roles.
         super().__init__(Role, db)
+        self._visible_org_id = org_id
+
+    def _visible(self, stmt: Select[Any]) -> Select[Any]:
+        """Limit ``stmt`` to system roles plus the tenant's own custom roles."""
+        if self._visible_org_id is None:
+            return stmt
+        return stmt.where(or_(Role.org_id.is_(None), Role.org_id == self._visible_org_id))
+
+    async def get_by_id(self, entity_id: uuid.UUID) -> Role | None:
+        """Fetch a role by id, honouring tenant visibility."""
+        result = await self._db.execute(self._visible(select(Role).where(Role.id == entity_id)))
+        return result.scalar_one_or_none()
 
     async def list_active(self) -> list[Role]:
-        """List all active roles ordered by name.
+        """List all active roles visible to the tenant, ordered by name.
 
         Returns:
             List of active Role instances sorted alphabetically by name.
         """
         result = await self._db.execute(
-            select(Role).where(Role.is_active.is_(True)).order_by(Role.name)
+            self._visible(select(Role).where(Role.is_active.is_(True)).order_by(Role.name))
+        )
+        return list(result.scalars().all())
+
+    async def is_system_owner(self, role_id: uuid.UUID) -> bool:
+        """Return True iff ``role_id`` is the seeded SYSTEM ``org_owner`` role.
+
+        Matching on the name alone would let a custom role called
+        ``org_owner`` inherit the permission bypass.
+        """
+        result = await self._db.execute(
+            select(Role.id).where(
+                Role.id == role_id,
+                Role.name == ORG_OWNER_ROLE_NAME,
+                Role.scope_type == RoleScopeType.SYSTEM,
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def list_custom_role_ids(self) -> list[uuid.UUID]:
+        """Return every CUSTOM role id, active or not, across all orgs.
+
+        Used by the permission seeder to backfill a newly introduced
+        permission onto pre-existing custom roles.
+        """
+        result = await self._db.execute(
+            select(Role.id).where(Role.scope_type == RoleScopeType.CUSTOM)
         )
         return list(result.scalars().all())
 
@@ -67,17 +120,9 @@ class RoleRepository(BaseRepository[Role]):
         )
         return result.scalar_one_or_none()
 
-    async def get_role_name(self, role_id: uuid.UUID) -> str | None:
-        """Fetch just the role name by ID (for permission bypass checks).
-
-        Args:
-            role_id: The role UUID.
-
-        Returns:
-            The role name string or None if not found.
-        """
-        result = await self._db.execute(select(Role.name).where(Role.id == role_id))
-        return result.scalar_one_or_none()
+    def add_permission(self, role_id: uuid.UUID, permission_id: uuid.UUID) -> None:
+        """Stage a single role→permission mapping (caller flushes)."""
+        self._db.add(RolePermission(role_id=role_id, permission_id=permission_id))
 
     async def replace_permissions(
         self,
@@ -133,7 +178,7 @@ class RoleRepository(BaseRepository[Role]):
             .outerjoin(base, base.id == Role.base_role_id)
             .where(Role.id == role_id)
         )
-        row = (await self._db.execute(stmt)).one_or_none()
+        row = (await self._db.execute(self._visible(stmt))).one_or_none()
         if row is None:
             return None
         role, base_name = row
@@ -171,7 +216,7 @@ class RoleRepository(BaseRepository[Role]):
     async def read_active(self) -> list[RoleRead]:
         """All active roles as :class:`RoleRead` DTOs, ordered by name."""
         result = await self._db.execute(
-            select(Role.id).where(Role.is_active.is_(True)).order_by(Role.name)
+            self._visible(select(Role.id).where(Role.is_active.is_(True)).order_by(Role.name))
         )
         ids = list(result.scalars().all())
         out: list[RoleRead] = []

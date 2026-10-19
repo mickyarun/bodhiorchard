@@ -17,7 +17,8 @@
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.permissions import DEFAULT_SYSTEM_ROLES, PERMISSION_CATEGORIES
+from app.core.permissions import PERMISSION_CATEGORIES
+from app.core.role_defs import DEFAULT_SYSTEM_ROLES
 from app.models.permission import Permission, PermissionCategory
 from app.models.role import Role, RolePermission, RoleScopeType
 from app.repositories.permission import PermissionRepository
@@ -71,6 +72,8 @@ async def seed_permissions(db: AsyncSession) -> None:
                 db.add(perm)
                 await db.flush()
                 logger.info("seeded_permission", resource_id=perm_def.resource_id)
+                if perm_def.backfill_custom_roles:
+                    await _backfill_custom_roles(role_repo, perm)
             permission_map[perm_def.resource_id] = perm
 
     # 3. Seed system roles and role-permission mappings.
@@ -112,6 +115,26 @@ async def seed_permissions(db: AsyncSession) -> None:
     await _warn_on_orphan_custom_roles(role_repo)
 
     logger.info("permission_seed_complete")
+
+
+async def _backfill_custom_roles(role_repo: RoleRepository, perm: Permission) -> None:
+    """Grant a just-inserted permission to every existing custom role.
+
+    Only runs on the insert that creates the permission row, so a role
+    created later (for example a sales role that should *not* have
+    engineering access) is never touched. Under a concurrent multi-instance
+    boot the loser's insert fails on the unique ``resource_id`` and its
+    whole seed transaction — backfill included — rolls back.
+    """
+    role_ids = await role_repo.list_custom_role_ids()
+    for role_id in role_ids:
+        role_repo.add_permission(role_id, perm.id)
+    await role_repo.flush()
+    logger.info(
+        "backfilled_permission_to_custom_roles",
+        resource_id=perm.resource_id,
+        role_ids=[str(r) for r in role_ids],
+    )
 
 
 async def _warn_on_orphan_custom_roles(role_repo: RoleRepository) -> None:

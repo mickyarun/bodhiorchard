@@ -15,7 +15,7 @@
 """JWT token creation/validation and password hashing utilities."""
 
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -28,6 +28,8 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Truncate at the UTF-8 byte boundary on both hash AND verify so existing
 # hashes — created when bcrypt silently truncated — continue to validate.
 BCRYPT_MAX_BYTES = 72
+
+TokenType = Literal["access", "refresh"]
 
 
 def _normalize_for_bcrypt(secret: str) -> str:
@@ -61,7 +63,7 @@ def create_access_token(
     expire = datetime.now(UTC) + (
         expires_delta or timedelta(minutes=settings.auth.access_token_expire_minutes)
     )
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "type": "access"})
     return cast(
         str,
         jwt.encode(
@@ -94,14 +96,22 @@ def create_refresh_token(data: dict[str, Any]) -> str:
     )
 
 
-def verify_token(token: str) -> dict[str, Any] | None:
-    """Decode and validate a JWT access token.
+def verify_token(token: str, *, expected_type: TokenType = "access") -> dict[str, Any] | None:
+    """Decode and validate a JWT, rejecting tokens of the wrong type.
+
+    Access tokens minted before the ``type`` claim existed carry no
+    ``type``; they are treated as access tokens so a deploy doesn't log
+    everyone out. A refresh token is never accepted where an access
+    token is expected (and vice versa) — otherwise the 7-day refresh
+    token doubles as a long-lived bearer credential.
 
     Args:
         token: The encoded JWT string.
+        expected_type: The token type the caller requires.
 
     Returns:
-        The decoded payload dict, or None if the token is invalid.
+        The decoded payload dict, or None if the token is invalid or of
+        the wrong type.
     """
     try:
         payload = jwt.decode(
@@ -109,6 +119,8 @@ def verify_token(token: str) -> dict[str, Any] | None:
             settings.auth.secret_key,
             algorithms=[settings.auth.algorithm],
         )
-        return cast("dict[str, Any]", payload)
     except JWTError:
         return None
+    if payload.get("type", "access") != expected_type:
+        return None
+    return cast("dict[str, Any]", payload)

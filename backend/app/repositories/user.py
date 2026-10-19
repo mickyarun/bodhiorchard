@@ -17,7 +17,7 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import Select, and_, case, func, or_, select, true
+from sqlalchemy import Select, and_, case, func, null, or_, select, true
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import update as sql_update
 from sqlalchemy.exc import IntegrityError
@@ -44,6 +44,16 @@ def _effective_role_case(base_role_alias: Any) -> Any:
     ``.outerjoin(base_role_alias, base_role_alias.id == Role.base_role_id)``.
     """
     return case(
+        # A custom role can never *become* the owner: legacy rows created
+        # before ``org_owner`` was barred as a base role resolve to NULL
+        # rather than inheriting the owner's identity.
+        (
+            and_(
+                Role.scope_type == RoleScopeType.CUSTOM,
+                base_role_alias.name == UserRole.ORG_OWNER.value,
+            ),
+            null(),
+        ),
         (Role.scope_type == RoleScopeType.CUSTOM, base_role_alias.name),
         else_=Role.name,
     )

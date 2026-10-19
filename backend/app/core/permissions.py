@@ -12,40 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Permission definitions and default role mappings — the source of truth for Bodhiorchard RBAC.
+"""Permission definitions — the source of truth for Bodhiorchard RBAC.
 
-This module defines every permission category, permission, and the default
-system-role-to-permission mapping.  The seeder reads this config to populate the
-database on first setup.
+This module defines every permission category and permission. The default
+system-role-to-permission mapping lives in :mod:`app.core.role_defs`. The
+seeder reads both to populate the database on startup.
 """
 
-from dataclasses import dataclass, field
-
-
-@dataclass(frozen=True)
-class PermissionDef:
-    """A single permission definition."""
-
-    resource_id: str
-    name: str
-    description: str = ""
-
-
-@dataclass(frozen=True)
-class CategoryDef:
-    """A permission category with its child permissions."""
-
-    key: str
-    name: str
-    description: str = ""
-    permissions: list[PermissionDef] = field(default_factory=list)
-
+from app.core.permission_types import CategoryDef, PermissionDef
+from app.core.permissions_people import PEOPLE_PERMISSION_CATEGORIES, WORKSPACE_ENGINEERING
 
 # ---------------------------------------------------------------------------
 # Permission categories and their permissions
 # ---------------------------------------------------------------------------
 
-PERMISSION_CATEGORIES: list[CategoryDef] = [
+_ENGINEERING_CATEGORIES: list[CategoryDef] = [
     CategoryDef(
         key="BACKLOG",
         name="Backlog Management",
@@ -175,13 +156,34 @@ PERMISSION_CATEGORIES: list[CategoryDef] = [
     ),
 ]
 
+# People categories go last: ``display_order`` is only written when a row is
+# first inserted, so inserting mid-list would leave existing rows out of order.
+PERMISSION_CATEGORIES: list[CategoryDef] = [
+    *_ENGINEERING_CATEGORIES,
+    *PEOPLE_PERMISSION_CATEGORIES,
+]
+
 # Convenience: flat set of every resource_id
 ALL_PERMISSION_IDS: set[str] = {
     p.resource_id for cat in PERMISSION_CATEGORIES for p in cat.permissions
 }
 
+__all__ = [
+    "ALL_PERMISSION_IDS",
+    "PERMISSION_CATEGORIES",
+    "SENSITIVE_PERMISSION_IDS",
+    "WORKSPACE_ENGINEERING",
+    "CategoryDef",
+    "PermissionDef",
+    "expand_permission_specs",
+]
 
-def _expand(*specs: str) -> list[str]:
+SENSITIVE_PERMISSION_IDS: frozenset[str] = frozenset(
+    p.resource_id for cat in PERMISSION_CATEGORIES for p in cat.permissions if p.sensitive
+)
+
+
+def expand_permission_specs(*specs: str) -> list[str]:
     """Expand shorthand permission specs into a flat list of resource_ids.
 
     Supports:
@@ -203,155 +205,3 @@ def _expand(*specs: str) -> list[str]:
         else:
             result.append(spec)
     return result
-
-
-# ---------------------------------------------------------------------------
-# Default system roles and their permission sets
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class RoleDef:
-    """A system role definition with its description and permission specs."""
-
-    name: str
-    description: str
-    permission_specs: list[str] = field(default_factory=list)
-
-    @property
-    def permission_ids(self) -> list[str]:
-        """Expanded list of resource_id strings."""
-        return _expand(*self.permission_specs)
-
-
-DEFAULT_SYSTEM_ROLES: list[RoleDef] = [
-    RoleDef(
-        name="org_owner",
-        description="Organization owner with full access",
-        permission_specs=["*"],
-    ),
-    RoleDef(
-        name="quiz_master",
-        description="Runs the Company Quiz (configure + approve questions); assign to "
-        "a non-competing member so admins can play fairly",
-        permission_specs=["quiz:configure"],
-    ),
-    RoleDef(
-        name="admin",
-        description="Administrator with nearly full access",
-        permission_specs=[
-            "backlog:*",
-            "agents:*",
-            "nodes:*",
-            "buds:*",
-            "bugs:*",
-            "team:*",
-            "org:*",
-            "settings:*",
-            "integrations:*",
-            "knowledge:*",
-            "reports:*",
-        ],
-    ),
-    RoleDef(
-        name="pm",
-        description="Project manager",
-        permission_specs=[
-            "backlog:*",
-            "buds:*",
-            "bugs:*",
-            "agents:view/trigger",
-            "team:view",
-            "settings:view",
-            "knowledge:*",
-            "reports:*",
-        ],
-    ),
-    RoleDef(
-        name="tech_lead",
-        description="Technical lead",
-        permission_specs=[
-            "backlog:view/edit/approve",
-            "agents:*",
-            "nodes:*",
-            "buds:view/approve",
-            "bugs:view/edit/comment",
-            "team:view",
-            "settings:*",
-            "knowledge:*",
-            "reports:*",
-        ],
-    ),
-    RoleDef(
-        name="manager",
-        description="Engineering manager",
-        permission_specs=[
-            "backlog:view/edit/approve",
-            "buds:view/create/edit/approve",
-            "bugs:*",
-            "team:view/manage/assign_roles",
-            "settings:view",
-            "knowledge:view",
-            "reports:*",
-        ],
-    ),
-    RoleDef(
-        name="developer",
-        description="Software developer",
-        permission_specs=[
-            "backlog:view",
-            "buds:view/edit",
-            "bugs:view/report/edit/comment",
-            "settings:view",
-            "knowledge:view/contribute",
-            "reports:view",
-        ],
-    ),
-    RoleDef(
-        name="designer",
-        description="Product designer",
-        permission_specs=[
-            "backlog:view",
-            "buds:view",
-            "bugs:view/comment",
-            "settings:view",
-            "knowledge:view/contribute",
-        ],
-    ),
-    RoleDef(
-        name="qa",
-        description="Quality assurance engineer",
-        permission_specs=[
-            "backlog:view/edit",
-            "buds:view/test",
-            # ``bugs:edit`` lets QA transition resolved → closed when
-            # they validate the fix, per the methodology's quality-loop
-            # description. Filing, commenting and closing are the QA
-            # touchpoints on the production bug board.
-            "bugs:view/report/edit/comment",
-            "settings:view",
-            "knowledge:view/contribute",
-            "reports:view",
-        ],
-    ),
-    RoleDef(
-        name="support",
-        description="Support team member",
-        permission_specs=[
-            "backlog:view/create",
-            "bugs:view/report/comment",
-            "knowledge:view",
-        ],
-    ),
-    RoleDef(
-        name="viewer",
-        description="Read-only access",
-        permission_specs=[
-            "backlog:view",
-            "buds:view",
-            "bugs:view",
-            "knowledge:view",
-            "reports:view",
-        ],
-    ),
-]

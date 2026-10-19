@@ -79,7 +79,13 @@ async def login(
     # Resolve user
     user_repo = UserRepository(db)
     user = await user_repo.get_by_email_in_org(org.id, body.email)
-    if user is None or not verify_password(body.password, user.password_hash):
+    # Deactivated accounts get the same generic error as a bad password so
+    # the response doesn't confirm which emails exist.
+    if (
+        user is None
+        or not user.is_active
+        or not verify_password(body.password, user.password_hash)
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
@@ -135,8 +141,8 @@ async def refresh(
     Raises:
         HTTPException: If the refresh token is invalid or expired.
     """
-    payload = verify_token(body.refresh_token)
-    if payload is None or payload.get("type") != "refresh":
+    payload = verify_token(body.refresh_token, expected_type="refresh")
+    if payload is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",
@@ -152,7 +158,7 @@ async def refresh(
     # Verify user still exists and is active
     user_repo = UserRepository(db)
     user = await user_repo.get_by_id(uuid.UUID(user_id))
-    if user is None:
+    if user is None or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
@@ -167,15 +173,7 @@ async def refresh(
         )
 
     # Validate membership still exists
-    from sqlalchemy import select as sa_select
-
-    membership = await db.execute(
-        sa_select(OrgToUser).where(
-            OrgToUser.user_id == user.id,
-            OrgToUser.org_id == uuid.UUID(org_id),
-        )
-    )
-    if membership.scalar_one_or_none() is None:
+    if await user_repo.get_membership(user.id, uuid.UUID(org_id)) is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User is no longer a member of this organization",

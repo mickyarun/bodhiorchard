@@ -24,11 +24,13 @@ from types import SimpleNamespace
 import pytest
 
 from app.models.role import RoleScopeType
-from app.services.role_validation import is_valid_base_role
+from app.services.role_validation import is_reserved_role_name, is_valid_base_role
 
 
-def _role(scope_type: RoleScopeType, *, is_active: bool = True) -> SimpleNamespace:
-    return SimpleNamespace(scope_type=scope_type, is_active=is_active)
+def _role(
+    scope_type: RoleScopeType, *, is_active: bool = True, name: str = "pm"
+) -> SimpleNamespace:
+    return SimpleNamespace(scope_type=scope_type, is_active=is_active, name=name)
 
 
 @pytest.mark.parametrize(
@@ -39,8 +41,20 @@ def _role(scope_type: RoleScopeType, *, is_active: bool = True) -> SimpleNamespa
         (_role(RoleScopeType.SYSTEM, is_active=False), False),
         (_role(RoleScopeType.CUSTOM, is_active=True), False),
         (_role(RoleScopeType.CUSTOM, is_active=False), False),
+        # Inheriting from the owner would hand out the owner's bypass.
+        (_role(RoleScopeType.SYSTEM, name="org_owner"), False),
     ],
 )
 def test_is_valid_base_role(role: SimpleNamespace | None, expected: bool) -> None:
-    """Only active SYSTEM roles are valid inheritance targets."""
+    """Only active SYSTEM roles other than org_owner are valid inheritance targets."""
     assert is_valid_base_role(role) is expected
+
+
+@pytest.mark.parametrize("name", ["org_owner", "HR", " sales ", "admin"])
+def test_reserved_role_names_rejected(name: str) -> None:
+    """Custom roles can't shadow a system role name (case/space-insensitive)."""
+    assert is_reserved_role_name(name) is True
+
+
+def test_ordinary_role_name_allowed() -> None:
+    assert is_reserved_role_name("Senior PM") is False

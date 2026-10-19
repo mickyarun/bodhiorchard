@@ -29,9 +29,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db, get_user_permissions, require_permissions
-from app.models.user import User, UserRole
-from app.repositories.role import RoleRepository
+from app.core.deps import (
+    get_current_user,
+    get_db,
+    get_user_permissions,
+    is_org_owner,
+    require_permissions,
+)
+from app.models.user import User
 from app.schemas.yield_offer import YieldOfferRead
 from app.services.yield_offer_service import (
     accept_offer,
@@ -52,13 +57,8 @@ async def _has_admin_scope(user: User, db: AsyncSession) -> bool:
     org_owner always passes; otherwise the effective permission set
     must include ``team:manage``.
     """
-    if getattr(user, "role", None) == UserRole.ORG_OWNER:
+    if await is_org_owner(user, db):
         return True
-    role_id = getattr(user, "role_id", None)
-    if role_id is not None:
-        role_name = await RoleRepository(db).get_role_name(role_id)
-        if role_name == "org_owner":
-            return True
     perms = await get_user_permissions(user, db)
     return "team:manage" in perms
 

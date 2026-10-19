@@ -32,20 +32,50 @@ class DatabaseConfig(BaseSettings):
     )
 
 
+_DEV_SECRET_KEY = "change-me-in-production"
+_DEV_ENCRYPTION_KEY = "change-me-encryption-key"
+
+
 class AuthConfig(BaseSettings):
     """Authentication and JWT configuration."""
 
     model_config = SettingsConfigDict(env_prefix="", env_file=".env", extra="ignore")
 
-    secret_key: str = Field(default="change-me-in-production", alias="SECRET_KEY")
+    secret_key: str = Field(default=_DEV_SECRET_KEY, alias="SECRET_KEY")
     encryption_key: str = Field(
-        default="change-me-encryption-key",
+        default=_DEV_ENCRYPTION_KEY,
         alias="ENCRYPTION_KEY",
         description="Key used to encrypt secrets (PATs, tokens) at rest in the database.",
     )
     access_token_expire_minutes: int = Field(default=60, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
     refresh_token_expire_days: int = Field(default=7, alias="REFRESH_TOKEN_EXPIRE_DAYS")
     algorithm: str = "HS256"
+
+    @model_validator(mode="after")
+    def _reject_dev_secrets_in_prod(self) -> "AuthConfig":
+        """Refuse to run with empty or dev-default secrets when ENV=production.
+
+        An empty or well-known ``SECRET_KEY`` makes every JWT forgeable, and
+        a default ``ENCRYPTION_KEY`` means the "encrypted" integration
+        secrets are readable by anyone with the source. Compose passes
+        ``${SECRET_KEY}`` through, so a missing env entry arrives as ``""``.
+        """
+        if os.environ.get("ENV", "dev").lower() != "production":
+            return self
+        weak = [
+            name
+            for name, value, default in (
+                ("SECRET_KEY", self.secret_key, _DEV_SECRET_KEY),
+                ("ENCRYPTION_KEY", self.encryption_key, _DEV_ENCRYPTION_KEY),
+            )
+            if not value.strip() or value == default
+        ]
+        if weak:
+            raise ValueError(
+                f"{', '.join(weak)} must be set to a non-default value when "
+                "ENV=production. Refusing to start.",
+            )
+        return self
 
 
 class LLMConfig(BaseSettings):

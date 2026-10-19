@@ -101,13 +101,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.database import AsyncSessionLocal
     from app.services.permission_seeder import seed_permissions
 
+    # Fatal on failure: every route behind the workspace gate depends on the
+    # seeded ``workspace:engineering`` grants, so booting without them would
+    # lock out every non-owner with a silent 403.
     try:
         async with AsyncSessionLocal() as session:
             await seed_permissions(session)
             await session.commit()
         logger.info("permission_seed_synced")
     except Exception:
-        logger.warning("permission_seed_failed_at_startup")
+        logger.exception("permission_seed_failed_at_startup")
+        raise
 
     # 4b. Reconcile orphan scans. Any scan still in a non-terminal
     # status with no running task (i.e. updated_at older than 60s at

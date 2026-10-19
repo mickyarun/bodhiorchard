@@ -23,7 +23,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db, require_permissions
+from app.core.deps import (
+    PermissionSet,
+    get_current_user,
+    get_db,
+    get_permission_set,
+    require_permissions,
+)
 from app.core.security import hash_password
 from app.models.organization import Organization
 from app.models.user import OrgToUser, User, UserRole
@@ -43,6 +49,7 @@ from app.schemas.members import (
     SetPasswordResponse,
     UpdateCharacterRequest,
 )
+from app.services.role_grants import assert_can_assign_role, log_sensitive_grant
 
 logger = structlog.get_logger(__name__)
 
@@ -85,6 +92,7 @@ def _user_to_member(user: User, aliases: list[str] | None = None) -> MemberRead:
 async def add_member(
     body: AddMemberRequest,
     current_user: User = Depends(get_current_user),
+    perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> MemberRead:
     """Add a new member to the current user's organization.
@@ -108,11 +116,16 @@ async def add_member(
             detail="Email already registered in this organization.",
         )
 
+    granted: set[str] = set()
     if body.role_id:
-        role_repo = RoleRepository(db)
+        role_repo = RoleRepository(db, org_id=org.id)
         role = await role_repo.get_by_id(body.role_id)
         if role is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found.")
+        # Inviting someone with a role is a grant: same ceiling as assigning.
+        granted = await assert_can_assign_role(
+            db, actor_id=current_user.id, actor=perms, target_user_id=None, role=role
+        )
 
     new_user = User(
         email=body.email,
@@ -131,6 +144,10 @@ async def add_member(
     )
     db.add(membership)
     await db.flush()
+
+    log_sensitive_grant(
+        actor_id=current_user.id, org_id=org.id, granted=granted, target=f"user:{created.id}"
+    )
 
     # Re-fetch with canonical-role resolution so _user_to_member sees the
     # CUSTOM → base_role projection (a manual attr set would miss it).
@@ -220,6 +237,7 @@ async def assign_role(
     user_id: uuid.UUID,
     body: AssignRoleRequest,
     current_user: User = Depends(get_current_user),
+    perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> MemberRead:
     """Assign an RBAC role to a user.
@@ -240,10 +258,13 @@ async def assign_role(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
-    role_repo = RoleRepository(db)
+    role_repo = RoleRepository(db, org_id=org.id)
     role = await role_repo.get_by_id(body.role_id)
     if role is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found.")
+    granted = await assert_can_assign_role(
+        db, actor_id=current_user.id, actor=perms, target_user_id=user_id, role=role
+    )
 
     # Update role on the OrgToUser membership
     membership = await user_repo.get_membership(user_id, org.id)
@@ -251,6 +272,9 @@ async def assign_role(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membership not found.")
     membership.role_id = body.role_id
     await db.flush()
+    log_sensitive_grant(
+        actor_id=current_user.id, org_id=org.id, granted=granted, target=f"user:{user_id}"
+    )
 
     # Re-fetch with the canonical-role join so _user_to_member sees the
     # CUSTOM → base_role projection on the freshly-assigned role.
