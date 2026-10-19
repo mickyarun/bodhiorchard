@@ -14,7 +14,8 @@
  * limitations under the License.
  -->
 
-<!-- Working days, Monday to Sunday (0–6). At least one stays selected. -->
+<!-- Working days, Monday to Sunday (0–6). At least one stays selected.
+     Wraps rather than scrolls, so all seven days are always visible. -->
 <template>
   <div>
     <div v-if="!hideLabel" class="text-caption text-medium-emphasis mb-1">Working days</div>
@@ -22,6 +23,7 @@
       :model-value="modelValue"
       multiple
       mandatory
+      column
       selected-class="text-primary"
       :disabled="disabled"
       aria-label="Working days"
