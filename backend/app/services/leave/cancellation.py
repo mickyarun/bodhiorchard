@@ -30,6 +30,7 @@ from app.repositories.leave_request import LeaveRequestRepository
 from app.services.leave.calendar_math import count_days
 from app.services.leave.errors import LeaveConflictError, LeaveForbiddenError
 from app.services.leave.lifecycle import load_request
+from app.services.leave.loss_of_pay import give_back
 from app.services.leave.policies import mandatory_holidays, policy_for_request, today_for
 
 
@@ -65,7 +66,12 @@ async def cancel(
             )
         else:
             changed = await repo.transition(
-                request.id, [LeaveStatus.APPROVED], end_date=yesterday, days=taken.days
+                request.id,
+                [LeaveStatus.APPROVED],
+                end_date=yesterday,
+                days=taken.days,
+                # Fewer days now: loss-of-pay days are given back first.
+                lop_days=min(request.lop_days, taken.days),
             )
     elif request.status == LeaveStatus.PENDING:
         changed = await repo.transition(
@@ -80,4 +86,7 @@ async def cancel(
     if not changed:
         raise LeaveConflictError("This request changed in the meantime. Refresh and try again.")
     await db.refresh(request)
+    if request.leave_type_id is not None:
+        # Its paid days are free again: they may cover loss of pay elsewhere.
+        await give_back(db, member, actor, request.leave_type_id, request.start_date)
     return request

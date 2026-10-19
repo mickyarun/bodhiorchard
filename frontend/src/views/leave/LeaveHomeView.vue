@@ -61,6 +61,7 @@
         v-else
         :balances="summary.balances"
         :optional="summary.optional_holidays"
+        :lop-days="summary.lop_days"
         class="mb-8"
       />
     </template>

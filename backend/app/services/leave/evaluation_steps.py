@@ -33,6 +33,7 @@ from app.schemas.leave import LeaveProblem, LeaveRequestCreate, ProblemCode
 from app.services.leave.approvers import Approvers
 from app.services.leave.balances import balances_for, find_line
 from app.services.leave.calendar_math import leave_year_bounds
+from app.services.leave.loss_of_pay import split_paid
 from app.services.leave.optional_holidays import pick_optional_holiday
 from app.services.leave.policies import MemberPolicy
 
@@ -48,6 +49,8 @@ class Evaluation:
     days: Decimal = ZERO
     excluded: list[tuple[date, str]] = field(default_factory=list)
     balance_before: Decimal | None = None
+    # Days the balance doesn't cover; they're taken as loss of pay.
+    lop_days: Decimal = ZERO
     holiday: PolicyHoliday | None = None
     auto_approved: bool = False
     approvers: Approvers = field(default_factory=lambda: Approvers(managers=[]))
@@ -56,7 +59,9 @@ class Evaluation:
     @property
     def balance_after(self) -> Decimal | None:
         """Balance once this request is counted."""
-        return None if self.balance_before is None else self.balance_before - self.days
+        if self.balance_before is None:
+            return None
+        return self.balance_before - (self.days - self.lop_days)
 
     def problem(self, code: ProblemCode, message: str) -> None:
         """Record a reason the request can't be sent."""
@@ -113,7 +118,10 @@ async def apply_balance(
     result: Evaluation,
     persist: bool,
 ) -> None:
-    """Price a leave request against the type's balance for its leave year."""
+    """Price a leave request against the type's balance for its leave year.
+
+    Days past the balance aren't refused: they're loss of pay.
+    """
     policy = member.policy
     leave_type = await LeaveTypeRepository(db, org_id=policy.org_id).get_by_id(leave_type_id)
     if leave_type is None or leave_type.policy_id != policy.id or not leave_type.is_active:
@@ -130,9 +138,4 @@ async def apply_balance(
     )
     line = find_line(lines, leave_type_id)
     result.balance_before = line.available if line else None
-    if result.balance_after is not None and result.balance_after < ZERO:
-        result.problem(
-            "insufficient_balance",
-            f"Not enough {leave_type.name}: this needs {result.days} days and you have "
-            f"{result.balance_before} left.",
-        )
+    _paid, result.lop_days = split_paid(result.days, result.balance_before)

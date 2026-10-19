@@ -85,18 +85,14 @@ async def test_pending_counts_against_balance_and_first_decision_wins(
                 note="x",
             )
         assert status_for(excinfo.value) == 409
+        assert str(excinfo.value) == "M2 already approved this request."
 
 
-async def test_insufficient_balance_and_overlap_are_refused(pg_session_factory: Factory) -> None:
+async def test_overlap_is_refused(pg_session_factory: Factory) -> None:
     org, (emp, mgr), casual = await setup_org(pg_session_factory, "Emp", "Mgr")
     await report_to(pg_session_factory, org, emp, mgr)
     mon = future_monday()
     async with pg_session_factory() as db:
-        member = await resolve_member_policy(db, org, emp)
-        too_long = await evaluate(
-            db, member=member, user_id=emp, body=leave_body(casual, mon, mon + timedelta(days=7))
-        )
-        assert [p.code for p in too_long.problems] == ["insufficient_balance"]
         await submit(db, org, emp, leave_body(casual, mon, mon))
         await db.commit()
         with pytest.raises(LeaveError, match="already have a pending request"):

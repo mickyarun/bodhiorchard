@@ -88,18 +88,29 @@ async def _available(factory: Factory, org: uuid.UUID, user: uuid.UUID) -> Decim
         return summary.balances[0].available
 
 
+async def _lop_days(factory: Factory, request_id: uuid.UUID) -> Decimal:
+    async with factory() as db:
+        request = await db.get(LeaveRequest, request_id)
+        assert request is not None
+        return request.lop_days
+
+
 async def test_parallel_submits_cannot_overspend(pg_session_factory: Factory) -> None:
     org, (emp, mgr), casual = await setup_org(pg_session_factory, "Emp", "Mgr")
     await report_to(pg_session_factory, org, emp, mgr)
     week1 = future_monday()
     week2 = week1 + timedelta(weeks=1)
-    # 3 + 3 days against a quota of 5: only one can fit.
+    # 3 + 3 days against a quota of 5: whichever is priced second takes
+    # one day as loss of pay, never both paid in full.
     results = await asyncio.gather(
         _try_submit(pg_session_factory, org, emp, leave_body(casual, week1, week1 + timedelta(2))),
         _try_submit(pg_session_factory, org, emp, leave_body(casual, week2, week2 + timedelta(2))),
     )
-    assert sorted(results) == [201, 409]
-    assert await _available(pg_session_factory, org, emp) == Decimal("2")
+    assert results == [201, 201]
+    assert await _available(pg_session_factory, org, emp) == Decimal("0")
+    async with pg_session_factory() as db:
+        summary = await build_summary(db, org, emp, None)
+    assert summary.lop_days == Decimal("1")
 
 
 async def test_two_managers_deciding_at_once_make_one_decision(
@@ -118,7 +129,7 @@ async def test_two_managers_deciding_at_once_make_one_decision(
     assert sorted(results) == [200, 409]
 
 
-async def test_approval_is_refused_once_hr_cut_the_balance(pg_session_factory: Factory) -> None:
+async def test_approval_reprices_once_hr_cut_the_balance(pg_session_factory: Factory) -> None:
     org, (emp, mgr), casual = await setup_org(pg_session_factory, "Emp", "Mgr")
     await report_to(pg_session_factory, org, emp, mgr)
     mon = future_monday()
@@ -136,10 +147,9 @@ async def test_approval_is_refused_once_hr_cut_the_balance(pg_session_factory: F
             )
         )
         await db.commit()
-    assert await _try_decide(pg_session_factory, org, mgr, request.id, True) == 409
-    async with pg_session_factory() as db:
-        still = await db.get(LeaveRequest, request.id)
-        assert still is not None and still.status == LeaveStatus.PENDING
+    # 2 days are left for a 3-day request: the third is loss of pay.
+    assert await _try_decide(pg_session_factory, org, mgr, request.id, True) == 200
+    assert await _lop_days(pg_session_factory, request.id) == Decimal("1")
 
 
 async def test_cancelling_leave_under_way_keeps_the_days_taken(
@@ -186,7 +196,7 @@ async def test_finished_leave_cannot_be_cancelled(
     assert status_for(excinfo.value) == 409
 
 
-async def test_an_aged_request_is_still_balance_checked_on_approval(
+async def test_an_aged_request_is_still_repriced_on_approval(
     pg_session_factory: Factory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     org, (emp, mgr), casual = await setup_org(pg_session_factory, "Emp", "Mgr")
@@ -210,4 +220,5 @@ async def test_an_aged_request_is_still_balance_checked_on_approval(
     monkeypatch.setattr(
         "app.services.leave.evaluation.today_for", lambda _p: mon + timedelta(days=30)
     )
-    assert await _try_decide(pg_session_factory, org, mgr, request.id, True) == 409
+    assert await _try_decide(pg_session_factory, org, mgr, request.id, True) == 200
+    assert await _lop_days(pg_session_factory, request.id) == Decimal("1")

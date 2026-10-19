@@ -25,7 +25,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import BalanceCard from '@/components/leave/BalanceCard.vue'
-import type { Balance, OptionalHolidayBalance } from '@/types/leave'
+import type { Balance, Decimalish, OptionalHolidayBalance } from '@/types/leave'
 import {
   balanceCaption,
   formatDays,
@@ -38,6 +38,8 @@ import {
 const props = defineProps<{
   balances: Balance[]
   optional?: OptionalHolidayBalance | null
+  /** Loss-of-pay days this leave year; a card shows when there are any. */
+  lopDays?: Decimalish | null
 }>()
 
 function leaveCard(balance: Balance) {
@@ -77,9 +79,26 @@ function optionalCard(optional: OptionalHolidayBalance) {
   }
 }
 
+function lopCard(days: number) {
+  return {
+    key: 'loss-of-pay',
+    props: {
+      title: 'Loss of pay',
+      color: 'warning',
+      value: formatDays(days),
+      unit: days === 1 ? 'day' : 'days',
+      meter: null,
+      caption: 'Leave past your balance this year',
+      tag: 'Unpaid',
+    },
+  }
+}
+
 const cards = computed(() => {
   const list = props.balances.map(leaveCard)
   if (props.optional && props.optional.quota > 0) list.push(optionalCard(props.optional))
+  const lop = toNumber(props.lopDays)
+  if (lop > 0) list.push(lopCard(lop))
   return list
 })
 </script>

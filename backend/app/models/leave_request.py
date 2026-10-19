@@ -84,6 +84,9 @@ class LeaveRequest(BaseModel):
         Index("ix_leave_requests_policy", "org_id", "policy_id"),
         CheckConstraint("end_date >= start_date", name="ck_leave_requests_date_order"),
         CheckConstraint("days >= 0", name="ck_leave_requests_days_not_negative"),
+        CheckConstraint(
+            "lop_days >= 0 AND lop_days <= days", name="ck_leave_requests_lop_within_days"
+        ),
     )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
@@ -113,6 +116,10 @@ class LeaveRequest(BaseModel):
         default=HalfDay.NONE,
     )
     days: Mapped[Decimal] = mapped_column(Numeric(5, 1), nullable=False)
+    # Of ``days``, those the balance didn't cover (loss of pay). Only leave has any.
+    lop_days: Mapped[Decimal] = mapped_column(
+        Numeric(5, 1), nullable=False, default=Decimal("0"), server_default="0"
+    )
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[LeaveStatus] = mapped_column(
         Enum(LeaveStatus, name="leave_status", values_callable=_values),

@@ -14,6 +14,8 @@
 
 """Leave days used and pending, summed for balances.
 
+Balances count paid days only: a request's loss-of-pay days are left out.
+
 Kept apart from :mod:`app.repositories.leave_request` (which reads and
 transitions single requests) so the aggregates for balances live together.
 """
@@ -31,6 +33,7 @@ from app.repositories.base import BaseRepository
 from app.repositories.leave_request import ACTIVE
 
 ZERO = Decimal("0")
+PAID_DAYS = LeaveRequest.days - LeaveRequest.lop_days
 UsageRow = tuple[uuid.UUID, uuid.UUID, LeaveStatus, date, Decimal]
 
 
@@ -46,7 +49,7 @@ class LeaveUsageRepository(BaseRepository[LeaveRequest]):
     ) -> dict[uuid.UUID, tuple[Decimal, Decimal]]:
         """``{leave_type_id: (approved_days, pending_days)}`` for a leave year."""
         stmt = self._scoped(
-            select(LeaveRequest.leave_type_id, LeaveRequest.status, func.sum(LeaveRequest.days))
+            select(LeaveRequest.leave_type_id, LeaveRequest.status, func.sum(PAID_DAYS))
             .where(
                 LeaveRequest.user_id == user_id,
                 LeaveRequest.kind == LeaveKind.LEAVE,
@@ -65,6 +68,40 @@ class LeaveUsageRepository(BaseRepository[LeaveRequest]):
                 pending += days
             totals[type_id] = (approved, pending)
         return totals
+
+    async def lop_total(self, user_id: uuid.UUID, start: date, end: date) -> Decimal:
+        """Loss-of-pay days on approved and pending leave starting in a leave year."""
+        stmt = self._scoped(
+            select(func.coalesce(func.sum(LeaveRequest.lop_days), ZERO)).where(
+                LeaveRequest.user_id == user_id,
+                LeaveRequest.kind == LeaveKind.LEAVE,
+                LeaveRequest.status.in_(ACTIVE),
+                LeaveRequest.start_date >= start,
+                LeaveRequest.start_date <= end,
+            )
+        )
+        return Decimal((await self._db.execute(stmt)).scalar_one())
+
+    async def open_with_lop(
+        self, user_id: uuid.UUID, leave_type_id: uuid.UUID, start: date, end: date
+    ) -> list[LeaveRequest]:
+        """Approved and pending leave of one type in a leave year that has loss of pay.
+
+        Oldest first, so days freed up go to the earliest leave.
+        """
+        stmt = self._scoped(
+            select(LeaveRequest)
+            .where(
+                LeaveRequest.user_id == user_id,
+                LeaveRequest.leave_type_id == leave_type_id,
+                LeaveRequest.status.in_(ACTIVE),
+                LeaveRequest.lop_days > 0,
+                LeaveRequest.start_date >= start,
+                LeaveRequest.start_date <= end,
+            )
+            .order_by(LeaveRequest.start_date, LeaveRequest.created_at)
+        )
+        return list((await self._db.scalars(stmt)).all())
 
     async def leave_days_by_start(
         self,
@@ -86,7 +123,7 @@ class LeaveUsageRepository(BaseRepository[LeaveRequest]):
                 LeaveRequest.leave_type_id,
                 LeaveRequest.status,
                 LeaveRequest.start_date,
-                func.sum(LeaveRequest.days),
+                func.sum(PAID_DAYS),
             )
             .where(
                 LeaveRequest.user_id.in_(user_ids),

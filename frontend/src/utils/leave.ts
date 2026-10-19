@@ -102,6 +102,12 @@ export function pluralDays(value: number): string {
   return `${formatDays(value)} ${value === 1 ? 'day' : 'days'}`
 }
 
+/** "2 days loss of pay", or '' when there are none. */
+export function lopLabel(value: Decimalish | null | undefined): string {
+  const days = toNumber(value)
+  return days > 0 ? `${pluralDays(days)} loss of pay` : ''
+}
+
 /** "+2", "−1.5" (a real minus sign). */
 export function formatSignedDays(value: number): string {
   if (value < 0) return `−${formatDays(-value)}`

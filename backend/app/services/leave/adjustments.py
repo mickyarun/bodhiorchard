@@ -42,6 +42,7 @@ from app.services.leave.errors import (
     LeaveForbiddenError,
     LeaveInvalidError,
 )
+from app.services.leave.loss_of_pay import give_back
 from app.services.leave.member_balances import require_member
 from app.services.leave.policies import (
     MemberPolicy,
@@ -88,6 +89,8 @@ async def adjust(db: AsyncSession, change: BalanceChange, days: Decimal, note: s
             created_by=change.actor_id,
         )
     )
+    if days > 0:
+        await give_back(db, member, change.user_id, leave_type.id, year.start)
     return year.label
 
 
@@ -134,6 +137,8 @@ async def recalculate(db: AsyncSession, change: BalanceChange) -> Recalculation:
                 created_by=change.actor_id,
             )
         )
+        if correction > 0:
+            await give_back(db, member, change.user_id, leave_type.id, year.start)
     return Recalculation(year.label, frozen, recalculated, correction)
 
 

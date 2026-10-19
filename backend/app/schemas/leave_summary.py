@@ -76,6 +76,8 @@ class LeaveSummary(BaseModel):
     balances: list[Balance]
     optional_holidays: OptionalHolidayBalance
     wfh_auto_days_left_this_month: int | None
+    # Leave days this leave year (approved or pending) past the balance.
+    lop_days: Decimal
     approvers: list[PersonRef]
     # True when no active manager is set: requests go to HR.
     routes_to_hr: bool

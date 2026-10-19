@@ -23,6 +23,7 @@ import {
   formatDays,
   formatSignedDays,
   joinWithAnd,
+  lopLabel,
   meterPercents,
   requestTypeLabel,
   swatchColor,
@@ -168,5 +169,14 @@ describe('entriesOnDay', () => {
     expect(entriesOnDay([...entries, sixDay], '2026-10-24').map(e => e.user.name)).toEqual([
       'Ravi',
     ])
+  })
+})
+
+describe('lopLabel', () => {
+  it('names loss-of-pay days and stays quiet when there are none', () => {
+    expect(lopLabel('2.5')).toBe('2.5 days loss of pay')
+    expect(lopLabel(1)).toBe('1 day loss of pay')
+    expect(lopLabel('0')).toBe('')
+    expect(lopLabel(null)).toBe('')
   })
 })

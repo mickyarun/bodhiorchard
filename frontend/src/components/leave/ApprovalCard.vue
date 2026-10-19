@@ -92,6 +92,7 @@ import {
   firstName,
   formatDays,
   HALF_DAY_LABELS,
+  lopLabel,
   pluralDays,
   requestTypeLabel,
   ROUTE_TAGS,
@@ -115,6 +116,8 @@ const role = computed(() =>
 
 const strip = computed(() => {
   const lines: string[] = []
+  const lop = lopLabel(props.item.request.lop_days)
+  if (lop) lines.push(`${lop[0].toUpperCase()}${lop.slice(1)}`)
   const after = toNumberOrNull(props.item.balance_after)
   if (after !== null) lines.push(`Balance after: ${formatDays(after)}`)
   if (props.item.also_out.length) {

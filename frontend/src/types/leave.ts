@@ -97,6 +97,8 @@ export interface LeaveSummary {
   balances: Balance[]
   optional_holidays: OptionalHolidayBalance
   wfh_auto_days_left_this_month: number | null
+  /** Loss-of-pay days this leave year (approved or pending). */
+  lop_days: Decimalish
   approvers: PersonRef[]
   routes_to_hr: boolean
   /** Remote people have no WFH option. */
@@ -125,6 +127,8 @@ export interface LeaveProblem {
 
 export interface LeavePreview {
   days: Decimalish
+  /** Days past the balance: taken as loss of pay. */
+  lop_days: Decimalish
   excluded: ExcludedDate[]
   balance_before: Decimalish | null
   balance_after: Decimalish | null
@@ -144,6 +148,7 @@ export interface LeaveRequestRead {
   end_date: string
   half_day: HalfDay
   days: Decimalish
+  lop_days: Decimalish
   reason: string | null
   status: LeaveStatus
   approval_mode: ApprovalMode

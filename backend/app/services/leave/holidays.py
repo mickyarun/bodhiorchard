@@ -20,6 +20,7 @@ and upcoming requests on it are recounted so their day totals stay right.
 """
 
 import re
+import uuid
 from datetime import date
 from functools import lru_cache
 
@@ -34,9 +35,10 @@ from app.models.policy_holiday import HolidayKind, HolidaySource, PolicyHoliday
 from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.policy_holiday import PolicyHolidayRepository
 from app.schemas.leave_policy import HolidayCountry, Subdivision
-from app.services.leave.calendar_math import count_days, leave_year_by_label
+from app.services.leave.calendar_math import count_days, leave_year_bounds, leave_year_by_label
 from app.services.leave.errors import LeaveInvalidError
-from app.services.leave.policies import mandatory_holidays, today_for
+from app.services.leave.loss_of_pay import give_back, reprice
+from app.services.leave.policies import mandatory_holidays, policy_for_request, today_for
 
 logger = structlog.get_logger(__name__)
 
@@ -125,8 +127,8 @@ async def recount_requests(db: AsyncSession, policy: LeavePolicy, start: date) -
     """Re-price open requests after a holiday or working-day change.
 
     Takes the affected members' locks so a submit can't check a balance
-    against stale day counts meanwhile. A pending request that no longer
-    fits its balance is refused when someone tries to approve it.
+    against stale day counts meanwhile. Each changed request is split
+    into paid and loss-of-pay days again.
     """
     repo = LeaveRequestRepository(db, org_id=policy.org_id)
     today = today_for(policy)
@@ -155,8 +157,22 @@ async def recount_requests(db: AsyncSession, policy: LeavePolicy, start: date) -
             holidays=holidays,
         ).days
         if days != request.days:
-            request.days = days
+            # Set together: any query below flushes, and loss of pay can't
+            # exceed the days (it's given back first).
+            request.days, request.lop_days = days, min(request.lop_days, days)
+            # Loss of pay follows the new count (and is given back first).
+            await reprice(db, await policy_for_request(db, policy.org_id, request), request)
             changed += 1
+    # Shorter requests free balance that earlier loss of pay can now use.
+    seen: set[tuple[uuid.UUID, uuid.UUID, int]] = set()
+    for request in requests:
+        member = await policy_for_request(db, policy.org_id, request)
+        year = leave_year_bounds(request.start_date, member.policy.year_start_month).label
+        key = (request.user_id, request.leave_type_id, year) if request.leave_type_id else None
+        if key is None or key in seen:
+            continue
+        seen.add(key)
+        await give_back(db, member, request.user_id, key[1], request.start_date)
     await db.flush()
     if changed:
         logger.info(

@@ -22,11 +22,12 @@
     caption="Work from home doesn't use any leave allowance."
   >
     <LeaveFormGrid>
-      <v-select v-model="approval" :items="MODES" label="Approval" v-bind="FIELD_PROPS" />
+      <!-- The options are full sentences: give them the whole row. -->
+      <v-select v-model="approval" :items="MODES" label="Approval" class="span-2" v-bind="FIELD_PROPS" />
       <v-text-field
         v-if="approval === 'auto_within_allowance'"
         v-model.number="monthlyAutoDays"
-        label="Approved automatically each month"
+        label="Automatic days a month"
         type="number"
         min="0"
         max="31"

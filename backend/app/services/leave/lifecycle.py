@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.permission_deps import PermissionSet
 from app.models.leave_request import ApprovalMode, LeaveRequest, LeaveStatus
 from app.repositories.leave_request import LeaveRequestRepository
+from app.repositories.user import UserRepository
 from app.schemas.leave import LeaveRequestCreate
 from app.services.fixed_window import seconds_until_allowed
 from app.services.leave.approvers import approvers_for, route_for
@@ -39,7 +40,9 @@ from app.services.leave.errors import (
     LeaveRateLimitedError,
 )
 from app.services.leave.evaluation import evaluate
-from app.services.leave.evaluation_steps import Evaluation, apply_balance
+from app.services.leave.evaluation_steps import Evaluation
+from app.services.leave.loss_of_pay import give_back, reprice
+from app.services.leave.messages import already_decided_message
 from app.services.leave.policies import policy_for_request, resolve_member_policy
 
 # Far above anyone's real use; low enough that approvers can't be spammed.
@@ -85,6 +88,7 @@ async def submit(
             end_date=result.end,
             half_day=body.half_day,
             days=result.days,
+            lop_days=result.lop_days,
             reason=(body.reason or "").strip() or None,
             status=LeaveStatus.APPROVED if auto else LeaveStatus.PENDING,
             approval_mode=ApprovalMode.AUTO_POLICY if auto else ApprovalMode.MANUAL,
@@ -129,7 +133,9 @@ async def decide(
     # Re-read under the lock: the status loaded above may already be stale.
     await db.refresh(request)
     if approve and request.status == LeaveStatus.PENDING:
-        await _check_still_affordable(db, org_id, request)
+        # The balance may have moved since it was sent (an adjustment, another
+        # approval): price it again so loss of pay is right when it's approved.
+        await reprice(db, await policy_for_request(db, org_id, request), request)
     changed = await repo.transition(
         request.id,
         [LeaveStatus.PENDING],
@@ -139,28 +145,20 @@ async def decide(
         decision_note=(note or "").strip() or None,
     )
     if not changed:
-        raise LeaveConflictError("This request was already decided or cancelled.")
+        raise LeaveConflictError(await already_decided(db, org_id, request))
     await db.refresh(request)
+    if not approve and request.leave_type_id is not None:
+        # The rejected request's paid days are free again.
+        member = await policy_for_request(db, org_id, request)
+        await give_back(db, member, request.user_id, request.leave_type_id, request.start_date)
     return request
 
 
-async def _check_still_affordable(
-    db: AsyncSession, org_id: uuid.UUID, request: LeaveRequest
-) -> None:
-    """Refuse to approve if the balance went negative since it was requested.
-
-    Pending days already count against the balance, so this only trips when
-    HR cut the balance or quota after the request was made. Only the balance
-    is re-checked: date rules like the backdating limit applied when it was
-    sent, and a request waiting in the queue mustn't dodge this by aging.
-    """
-    if request.leave_type_id is None:
-        return
-    member = await policy_for_request(db, org_id, request)
-    result = Evaluation(start=request.start_date, end=request.end_date, days=request.days)
-    await apply_balance(db, member, request.user_id, request.leave_type_id, result, persist=True)
-    if result.balance_before is not None and result.balance_before < 0:
-        raise LeaveConflictError(
-            f"Not enough balance: approving needs {request.days} days and only "
-            f"{result.balance_before + request.days} are left. Reject, or ask HR to adjust it."
-        )
+async def already_decided(db: AsyncSession, org_id: uuid.UUID, request: LeaveRequest) -> str:
+    """What a second approver is told: who decided first, or that it was cancelled."""
+    await db.refresh(request)
+    decider = None
+    if request.decided_by is not None:
+        names = await UserRepository(db, org_id=org_id).get_names_by_ids({request.decided_by})
+        decider = names.get(request.decided_by)
+    return already_decided_message(request, decider)

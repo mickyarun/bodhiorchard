@@ -60,6 +60,7 @@
       </v-radio-group>
       <v-autocomplete
         v-model="adding"
+        v-model:search="search"
         :items="addable"
         item-title="name"
         item-value="id"
@@ -84,7 +85,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import { useMemberDirectory } from '@/composables/useMemberDirectory'
 import { useEmployeesStore } from '@/stores/employees'
@@ -106,6 +107,7 @@ const saving = ref(false)
 const error = ref('')
 const draft = ref<ManagerInput[]>([])
 const adding = ref<string | null>(null)
+const search = ref('')
 
 const primaryId = computed({
   get: () => draft.value.find(m => m.is_primary)?.user_id ?? null,
@@ -138,7 +140,12 @@ async function startEdit(): Promise<void> {
 function add(userId: string | null): void {
   if (!userId) return
   draft.value = normalizeManagers([...draft.value, { user_id: userId, is_primary: false }])
-  adding.value = null
+  // Clear the picker once its own update has finished, or it keeps the
+  // last name (and its search text) and the next pick misfires.
+  void nextTick(() => {
+    adding.value = null
+    search.value = ''
+  })
 }
 
 function remove(userId: string): void {

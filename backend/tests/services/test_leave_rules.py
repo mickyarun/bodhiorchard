@@ -27,6 +27,7 @@ from app.services.leave.calendar_math import (
     leave_year_bounds,
     same_leave_year,
 )
+from app.services.leave.loss_of_pay import split_paid
 from app.services.leave.wfh_policy import auto_days_left, needs_approval
 
 MON_FRI = {0, 1, 2, 3, 4}
@@ -130,3 +131,10 @@ def test_auto_days_left() -> None:
     assert auto_days_left(WfhApproval.AUTO_WITHIN_ALLOWANCE, 3, Decimal("1")) == 2
     assert auto_days_left(WfhApproval.AUTO_WITHIN_ALLOWANCE, 3, Decimal("5")) == 0
     assert auto_days_left(WfhApproval.REQUIRED, 3, Decimal("0")) is None
+
+
+def test_split_paid_covers_what_the_balance_can() -> None:
+    assert split_paid(Decimal("3"), Decimal("5")) == (Decimal("3"), Decimal("0"))
+    assert split_paid(Decimal("3"), Decimal("1.5")) == (Decimal("1.5"), Decimal("1.5"))
+    assert split_paid(Decimal("2"), Decimal("-1")) == (Decimal("0"), Decimal("2"))
+    assert split_paid(Decimal("4"), None) == (Decimal("4"), Decimal("0"))

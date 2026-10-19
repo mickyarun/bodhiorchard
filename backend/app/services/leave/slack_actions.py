@@ -37,7 +37,7 @@ from app.repositories.user import UserRepository
 from app.services.background import spawn
 from app.services.leave.approvers import approvers_for, route_for
 from app.services.leave.errors import LeaveError
-from app.services.leave.lifecycle import decide, load_request
+from app.services.leave.lifecycle import already_decided, decide, load_request
 from app.services.leave.messages import compose_request_message
 from app.services.leave.notify import stage_decision
 from app.services.leave.slack_blocks import (
@@ -184,7 +184,7 @@ async def _check_may_decide(
         return "Only this person's managers or HR can decide this request."
     if request.status != LeaveStatus.PENDING:
         spawn(refresh_prompts(org_id, request_id))
-        return "This request was already decided or cancelled."
+        return await already_decided(db, org_id, request)
     return ""
 
 

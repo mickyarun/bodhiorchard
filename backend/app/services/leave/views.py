@@ -82,6 +82,7 @@ async def request_reads(
                 end_date=r.end_date,
                 half_day=r.half_day,
                 days=r.days,
+                lop_days=r.lop_days,
                 reason=r.reason if private else None,
                 status=r.status,
                 approval_mode=r.approval_mode,

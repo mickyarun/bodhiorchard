@@ -30,6 +30,7 @@
 
     <v-progress-linear v-if="store.loading" indeterminate color="primary" class="mb-4" />
     <AppCallout v-if="store.error" variant="error" class="mb-4">{{ store.error }}</AppCallout>
+    <AppCallout v-if="store.notice" variant="info" class="mb-4">{{ store.notice }}</AppCallout>
 
     <div v-if="!store.loading && !store.error && !store.items.length" class="empty">
       <v-icon icon="mdi-check-all" size="32" color="success" />

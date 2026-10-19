@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.employee_profile import WorkArrangement
 from app.models.leave_policy import LeavePolicy
 from app.models.policy_holiday import PolicyHoliday
+from app.repositories.leave_usage import LeaveUsageRepository
 from app.schemas.leave import HolidayRead, LeaveTypeBrief, PersonRef
 from app.schemas.leave_summary import (
     Balance,
@@ -102,6 +103,7 @@ async def build_summary(
         (today.year, today.month)
     )
     approvers = await approvers_for(db, org_id, user_id)
+    lop = await LeaveUsageRepository(db, org_id=org_id).lop_total(user_id, year.start, year.end)
     return LeaveSummary(
         policy=policy_brief(policy),
         leave_year=year_schema(year),
@@ -116,6 +118,7 @@ async def build_summary(
         wfh_auto_days_left_this_month=auto_days_left(
             policy.wfh_approval, policy.wfh_monthly_auto_days, used_now or Decimal("0")
         ),
+        lop_days=lop,
         approvers=[PersonRef(user_id=uid, name=name) for uid, name in approvers.managers],
         routes_to_hr=approvers.routes_to_hr,
         work_arrangement=member.profile.work_arrangement

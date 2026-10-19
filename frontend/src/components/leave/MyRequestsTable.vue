@@ -49,7 +49,10 @@
               </div>
             </td>
             <td>{{ requestTypeLabel(row) }}</td>
-            <td>{{ formatDays(toNumber(row.days)) }}</td>
+            <td>
+              <div>{{ formatDays(toNumber(row.days)) }}</div>
+              <div v-if="lopLabel(row.lop_days)" class="text-caption text-warning">{{ lopLabel(row.lop_days) }}</div>
+            </td>
             <td><LeaveStatusChip :status="row.status" /></td>
             <td>
               <div>{{ approverLabel(row) }}</div>
@@ -85,7 +88,7 @@ import LeaveStatusChip from '@/components/leave/LeaveStatusChip.vue'
 import ConfirmDialog from '@/components/settings/code/ConfirmDialog.vue'
 import { useLeaveStore } from '@/stores/leave'
 import type { LeaveRequestRead, RequestScope } from '@/types/leave'
-import { formatDays, HALF_DAY_LABELS, requestTypeLabel, toNumber } from '@/utils/leave'
+import { formatDays, HALF_DAY_LABELS, lopLabel, requestTypeLabel, toNumber } from '@/utils/leave'
 import { formatDayRange } from '@/utils/leaveDates'
 
 const props = defineProps<{ pendingWith: string }>()

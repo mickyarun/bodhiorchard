@@ -32,10 +32,13 @@ export const useLeaveApprovalsStore = defineStore('leaveApprovals', () => {
   const status = ref<ApprovalTab>('pending')
   const loading = ref(false)
   const error = ref('')
+  /** Why a card vanished: someone else decided it first. Cleared on a tab switch or the next decision. */
+  const notice = ref('')
   let call = 0
 
   async function fetch(next: ApprovalTab = status.value): Promise<void> {
     const current = ++call
+    if (next !== status.value) notice.value = ''
     status.value = next
     loading.value = true
     error.value = ''
@@ -63,10 +66,15 @@ export const useLeaveApprovalsStore = defineStore('leaveApprovals', () => {
     } catch (err) {
       const message = extractApiError(err, `Couldn't ${action} this request. Reload and try again.`)
       // 409: another approver decided first, or the request was cancelled.
-      if (isAxiosError(err) && err.response?.status === 409) void refresh()
+      // The refresh drops the card, so say why at the top of the queue.
+      if (isAxiosError(err) && err.response?.status === 409) {
+        notice.value = message
+        void refresh()
+      }
       return message
     }
     // A decided request leaves the pending queue.
+    notice.value = ''
     items.value = items.value.filter(item => item.request.id !== id)
     void useLeaveStore().fetchApprovalCount()
     return null
@@ -85,5 +93,5 @@ export const useLeaveApprovalsStore = defineStore('leaveApprovals', () => {
     return decide(id, 'reject', note.trim())
   }
 
-  return { items, status, loading, error, fetch, approve, reject }
+  return { items, status, loading, error, notice, fetch, approve, reject }
 })

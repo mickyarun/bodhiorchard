@@ -52,6 +52,16 @@ def compose_request_message(name: str, request: LeaveRequest, *, auto_approved: 
     return f"{name} requested {what} {when}."
 
 
+def already_decided_message(request: LeaveRequest, decider: str | None) -> str:
+    """Why a second approver can't decide: who got there first, or that it was cancelled."""
+    if request.status == LeaveStatus.CANCELLED:
+        return "This request was cancelled."
+    verb = {LeaveStatus.APPROVED: "approved", LeaveStatus.REJECTED: "rejected"}.get(request.status)
+    if verb is None:
+        return "This request changed in the meantime. Refresh and try again."
+    return f"{decider} already {verb} this request." if decider else f"Already {verb}."
+
+
 def compose_decision_message(request: LeaveRequest, decider: str) -> str:
     """Requester-facing text for a decision."""
     verb = "approved" if request.status == LeaveStatus.APPROVED else "rejected"

@@ -28,6 +28,7 @@
         {{ daysLine }}<span v-if="skips" class="text-medium-emphasis font-weight-regular"> · {{ skips }}</span>
       </div>
       <div v-if="balanceLine" class="text-body-2 mt-1">{{ balanceLine }}</div>
+      <AppCallout v-if="lopLine" variant="warning" class="mt-2">{{ lopLine }}</AppCallout>
       <div v-if="approval" class="text-body-2 text-medium-emphasis mt-1">{{ approval }}</div>
       <AppCallout v-if="preview.problems.length" variant="error" class="mt-3">
         <div v-for="problem in preview.problems" :key="problem.code">{{ problem.message }}</div>
@@ -45,6 +46,7 @@ import {
   approvalLine,
   excludedSummary,
   formatDays,
+  lopLabel,
   toNumber,
   toNumberOrNull,
 } from '@/utils/leave'
@@ -68,6 +70,12 @@ const daysLine = computed(() => {
 const skips = computed(() =>
   props.preview ? excludedSummary(props.preview.excluded, props.policy?.working_days ?? []) : '',
 )
+
+// Days past the balance aren't refused: they're unpaid.
+const lopLine = computed(() => {
+  const lop = lopLabel(props.preview?.lop_days)
+  return lop ? `${lop}: these days are past your ${props.typeName ?? 'leave'} balance, so they're unpaid.` : ''
+})
 
 const balanceLine = computed(() => {
   if (props.kind !== 'leave' || !props.preview) return ''

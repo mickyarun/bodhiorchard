@@ -103,7 +103,6 @@ class ExcludedDate(BaseModel):
 
 ProblemCode = Literal[
     "no_working_days",
-    "insufficient_balance",
     "overlap",
     "crosses_leave_year",
     "too_far_back",
@@ -127,6 +126,8 @@ class LeavePreview(BaseModel):
     """What a request would cost, before sending it."""
 
     days: Decimal
+    # Of ``days``, those past the balance: taken as loss of pay.
+    lop_days: Decimal
     excluded: list[ExcludedDate]
     balance_before: Decimal | None
     balance_after: Decimal | None
@@ -148,6 +149,7 @@ class LeaveRequestRead(BaseModel):
     end_date: date
     half_day: HalfDay
     days: Decimal
+    lop_days: Decimal
     reason: str | None
     status: LeaveStatus
     approval_mode: ApprovalMode

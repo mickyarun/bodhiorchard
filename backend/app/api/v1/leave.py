@@ -92,6 +92,7 @@ async def preview_request(
     result = await evaluate(db, member=member, user_id=current_user.id, body=body)
     return LeavePreview(
         days=result.days,
+        lop_days=result.lop_days,
         excluded=[ExcludedDate(date=d, reason=r) for d, r in result.excluded],
         balance_before=result.balance_before,
         balance_after=result.balance_after,
