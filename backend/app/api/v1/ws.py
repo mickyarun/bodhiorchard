@@ -32,18 +32,46 @@ Protocol:
 
 import asyncio
 import json
+import uuid
 from typing import Any
 
 import structlog
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.config import settings
+from app.core.deps import member_has_permission
+from app.core.permissions import WORKSPACE_ENGINEERING
 from app.core.security import verify_token
+from app.database import AsyncSessionLocal
+from app.repositories.user import UserRepository
 from app.services.event_bus import subscribe, unsubscribe
+from app.services.ws_topic_policy import Subscriber, may_subscribe
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+
+async def _resolve_subscriber(payload: dict[str, Any]) -> Subscriber | None:
+    """Resolve the JWT to an active org member, or None to reject the socket.
+
+    Membership and engineering access are read once at connect; a role
+    change takes effect on the client's next reconnect.
+    """
+    try:
+        user_id = uuid.UUID(str(payload.get("sub")))
+        org_id = uuid.UUID(str(payload.get("org_id")))
+    except ValueError:
+        return None
+    async with AsyncSessionLocal() as db:
+        repo = UserRepository(db)
+        user = await repo.get_by_id(user_id)
+        if user is None or not user.is_active:
+            return None
+        if not await repo.is_member_of_org(user_id, org_id):
+            return None
+        has_engineering = await member_has_permission(db, user_id, org_id, WORKSPACE_ENGINEERING)
+    return Subscriber(user_id=str(user_id), org_id=str(org_id), has_engineering=has_engineering)
 
 
 @router.websocket("/ws")
@@ -61,16 +89,16 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         return
 
     payload = verify_token(token)
-    if payload is None:
+    who = await _resolve_subscriber(payload) if payload is not None else None
+    if who is None:
         await websocket.accept()
         await websocket.send_json({"error": "unauthorized"})
         await websocket.close(code=4001)
         return
 
     await websocket.accept()
-    user_id = payload.get("sub", "unknown")
-    org_id = payload.get("org_id")
-    logger.debug("ws_connected", user_id=user_id, org_id=org_id)
+    user_id = who.user_id
+    logger.debug("ws_connected", user_id=user_id, org_id=who.org_id)
 
     # ── State per connection ──────────────────────────────
     # topic → (event_bus queue, reader task)
@@ -106,23 +134,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 topic = msg.get("topic", "")
 
                 if action == "subscribe" and topic:
-                    # Topic authorization: user-scoped topics restricted to own user
-                    if topic.startswith("notifications:") and topic != f"notifications:{user_id}":
+                    if not may_subscribe(topic, who):
                         await websocket.send_json({"error": "forbidden", "topic": topic})
                         continue
-                    if topic.startswith("xp:") and topic != f"xp:{user_id}":
-                        await websocket.send_json({"error": "forbidden", "topic": topic})
-                        continue
-                    if topic.startswith("yield_offer:") and topic != f"yield_offer:{user_id}":
-                        await websocket.send_json({"error": "forbidden", "topic": topic})
-                        continue
-                    # Org-scoped topics: ``org:{org_id}:{channel}`` — the
-                    # second segment must match the JWT's ``org_id`` claim.
-                    if topic.startswith("org:"):
-                        parts = topic.split(":", 2)
-                        if len(parts) < 3 or not org_id or parts[1] != org_id:
-                            await websocket.send_json({"error": "forbidden", "topic": topic})
-                            continue
 
                     if topic not in subscriptions:
                         bus_queue = subscribe(topic)

@@ -126,6 +126,7 @@ async def test_verify_mcp_token_accepts_active_user(monkeypatch: Any) -> None:
         return True
 
     monkeypatch.setattr("app.repositories.user.UserRepository.is_member_of_org", _is_member)
+    monkeypatch.setattr("app.mcp.auth.member_has_permission", AsyncMock(return_value=True))
 
     db = MagicMock()
     result = await verify_mcp_token(db=db, authorization="Bearer fake-token-string")
@@ -160,3 +161,24 @@ async def test_verify_mcp_token_rejects_when_user_not_org_member(monkeypatch: An
         await verify_mcp_token(db=db, authorization="Bearer fake-token-string")
     assert exc.value.status_code == 401
     assert "member" in exc.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_verify_mcp_token_rejects_user_without_engineering_access(monkeypatch: Any) -> None:
+    """A token stops working once its owner moves to a people-only role."""
+    active_token = _fake_token_row(is_active=True)
+
+    async def _list_by_prefix(self: Any, prefix: str) -> list[Any]:
+        return [active_token]
+
+    async def _is_member(self, user_id, org_id):  # type: ignore[no-untyped-def]
+        return True
+
+    monkeypatch.setattr(UserMCPTokenRepository, "list_by_prefix_with_relations", _list_by_prefix)
+    monkeypatch.setattr("app.mcp.auth.verify_password", lambda token, hash_: True)
+    monkeypatch.setattr("app.repositories.user.UserRepository.is_member_of_org", _is_member)
+    monkeypatch.setattr("app.mcp.auth.member_has_permission", AsyncMock(return_value=False))
+
+    with pytest.raises(HTTPException) as exc:
+        await verify_mcp_token(db=MagicMock(), authorization="Bearer fake-token-string")
+    assert exc.value.status_code == 403

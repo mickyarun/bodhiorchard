@@ -21,6 +21,7 @@ route-level ``require_permissions`` share one lookup instead of each
 querying the role tables.
 """
 
+import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -31,10 +32,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_user, get_db
 from app.core.role_defs import DEFAULT_SYSTEM_ROLES
-from app.models.role import RoleScopeType
+from app.models.role import Role, RoleScopeType
 from app.models.user import User
 from app.repositories.permission import PermissionRepository
 from app.repositories.role import ORG_OWNER_ROLE_NAME, RoleRepository
+from app.repositories.user import UserRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -63,6 +65,14 @@ class PermissionSet:
         return self.is_owner or bool(self.ids.intersection(permissions))
 
 
+def _is_owner_role(role: Role | None) -> bool:
+    return bool(
+        role is not None
+        and role.scope_type == RoleScopeType.SYSTEM
+        and role.name == ORG_OWNER_ROLE_NAME
+    )
+
+
 async def is_org_owner(user: User, db: AsyncSession) -> bool:
     """Return True iff ``user``'s membership role is the SYSTEM ``org_owner``.
 
@@ -72,13 +82,31 @@ async def is_org_owner(user: User, db: AsyncSession) -> bool:
     """
     role_ref = getattr(user, "role_ref", None)
     if role_ref is not None:
-        return bool(
-            role_ref.scope_type == RoleScopeType.SYSTEM and role_ref.name == ORG_OWNER_ROLE_NAME
-        )
+        return _is_owner_role(role_ref)
     role_id = getattr(user, "role_id", None)
     if role_id is None:
         return False
     return await RoleRepository(db).is_system_owner(role_id)
+
+
+async def member_has_permission(
+    db: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID, permission: str
+) -> bool:
+    """Check a permission for a member outside a JWT request.
+
+    For transports that authenticate with their own credential (MCP
+    bearer tokens, the Colyseus bridge) and so never run
+    :func:`get_permission_set`. Non-members hold nothing.
+    """
+    pair = await UserRepository(db).get_membership_with_role(user_id, org_id)
+    if pair is None:
+        return False
+    membership, _effective = pair
+    if _is_owner_role(membership.role_ref):
+        return True
+    if membership.role_id is None:
+        return False
+    return permission in await PermissionRepository(db).get_user_permission_ids(membership.role_id)
 
 
 async def get_user_permissions(user: User, db: AsyncSession) -> set[str]:
@@ -159,4 +187,6 @@ def require_permissions(
             )
         return current_user
 
+    # Introspection hook for tests that audit which routes are gated.
+    _check.required_permissions = required  # type: ignore[attr-defined]
     return _check

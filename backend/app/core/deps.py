@@ -30,6 +30,7 @@ from app.core.permission_deps import (
     get_permission_set,
     get_user_permissions,
     is_org_owner,
+    member_has_permission,
     require_permissions,
 )
 
@@ -41,6 +42,7 @@ __all__ = [
     "get_permission_set",
     "get_user_permissions",
     "is_org_owner",
+    "member_has_permission",
     "oauth2_scheme",
     "require_permissions",
 ]

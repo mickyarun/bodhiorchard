@@ -26,7 +26,10 @@ To add a future notification type:
 1. Add a member to :class:`NotificationCategory`.
 2. Add one :class:`CategoryDef` to :data:`NOTIFICATION_CATEGORIES`.
 3. Have the sender resolve recipients via
-   ``UserRepository.list_slack_recipients(org_id, category=...)``.
+   ``UserRepository.list_slack_recipients(org_id, category=..., permission=...)``,
+   passing :func:`category_permission` so members whose role can't open
+   the feature (for example a sales role and the engineering quiz) are
+   skipped.
 
 That is the entire wiring — the profile UI, the API, and the SQL filter
 all read this registry, so nothing else changes.
@@ -36,6 +39,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+
+from app.core.permissions import WORKSPACE_ENGINEERING
 
 
 class NotificationCategory(StrEnum):
@@ -59,6 +64,8 @@ class CategoryDef:
         description: One line explaining what muting this stops.
         group: Heading the profile UI buckets related categories under.
         default_enabled: Whether members receive it before touching settings.
+        required_permission: Only members holding this permission receive
+            it; ``None`` means every member.
     """
 
     category: NotificationCategory
@@ -66,6 +73,7 @@ class CategoryDef:
     description: str
     group: str
     default_enabled: bool = True
+    required_permission: str | None = None
 
 
 # Ordered registry — drives the profile UI listing order. "Games & fun" groups
@@ -77,12 +85,14 @@ NOTIFICATION_CATEGORIES: tuple[CategoryDef, ...] = (
         label="Mini-game updates",
         description="New garden-game high scores and daily streak nudges.",
         group="Games & fun",
+        required_permission=WORKSPACE_ENGINEERING,
     ),
     CategoryDef(
         category=NotificationCategory.QUIZ,
         label="Company quiz",
         description="Daily quiz-open and answer-reveal reminders.",
         group="Games & fun",
+        required_permission=WORKSPACE_ENGINEERING,
     ),
 )
 
@@ -109,6 +119,12 @@ def category_default(category: NotificationCategory) -> bool:
     """
     definition = _BY_KEY.get(category.value)
     return definition.default_enabled if definition else True
+
+
+def category_permission(category: NotificationCategory) -> str | None:
+    """The permission a member needs to receive ``category`` (``None`` = anyone)."""
+    definition = _BY_KEY.get(category.value)
+    return definition.required_permission if definition else None
 
 
 def is_category_enabled(prefs: dict[str, bool] | None, category: NotificationCategory) -> bool:

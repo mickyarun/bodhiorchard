@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_current_user, get_db, require_permissions
 from app.core.encryption import decrypt_secret
 from app.core.security import hash_password
 from app.models.user import OrgToUser, User
@@ -31,7 +31,12 @@ from app.repositories.user import UserRepository
 
 logger = structlog.get_logger(__name__)
 
-router = APIRouter(tags=["settings-slack"])
+# Linking a Slack ID decides where a user's DMs go, including password
+# resets, so every route here is an integration-admin action.
+router = APIRouter(
+    tags=["settings-slack"],
+    dependencies=[Depends(require_permissions("integrations:configure"))],
+)
 
 
 class SlackMemberPreview(BaseModel):
@@ -209,7 +214,9 @@ async def link_slack_members(
         except ValueError:
             continue
 
-        user = await user_repo.get_by_id(uid)
+        # ``User`` has no org column, so look the target up through its
+        # membership — otherwise any user id in any org could be relinked.
+        user = await user_repo.get_by_id_with_membership(uid, org.id)
         if user:
             user.slack_id = slack_id
             linked += 1

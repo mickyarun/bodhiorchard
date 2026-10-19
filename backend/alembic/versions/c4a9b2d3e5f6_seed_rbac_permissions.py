@@ -26,7 +26,8 @@ from uuid import uuid4
 import sqlalchemy as sa
 
 from alembic import op
-from app.core.permissions import DEFAULT_SYSTEM_ROLES, PERMISSION_CATEGORIES
+from app.core.permissions import PERMISSION_CATEGORIES
+from app.core.role_defs import DEFAULT_SYSTEM_ROLES
 
 # revision identifiers, used by Alembic.
 revision: str = "c4a9b2d3e5f6"

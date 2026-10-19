@@ -54,7 +54,11 @@ from app.repositories.minigame import LeaderboardRow, MinigameRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.user import UserRepository
 from app.services.minigame_service import GAMES
-from app.services.notifications import NotificationCategory, category_default
+from app.services.notifications import (
+    NotificationCategory,
+    category_default,
+    category_permission,
+)
 from app.services.org_settings import get_presence_settings
 from app.services.slack_client import chat_post_message, conversations_open
 
@@ -145,6 +149,7 @@ async def send_org_nudges(org_id: uuid.UUID) -> int:
             org_id,
             category=NotificationCategory.MINIGAMES,
             default_enabled=category_default(NotificationCategory.MINIGAMES),
+            permission=category_permission(NotificationCategory.MINIGAMES),
         )
         if not pairs:
             return 0

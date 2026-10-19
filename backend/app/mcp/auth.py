@@ -25,7 +25,8 @@ import structlog
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_db
+from app.core.deps import get_db, member_has_permission
+from app.core.permissions import WORKSPACE_ENGINEERING
 from app.core.security import hash_password, verify_password
 from app.database import AsyncSessionLocal
 from app.models.organization import Organization
@@ -252,6 +253,20 @@ async def verify_mcp_token(
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User is not a member of the token's organization",
+            )
+        # MCP tools read and write BUDs, so a per-user token is only as
+        # good as its owner's engineering access. Checked on every call so
+        # moving someone to a people-only role cuts off existing tokens.
+        if not await member_has_permission(db, ut.user_id, ut.org_id, WORKSPACE_ENGINEERING):
+            logger.warning(
+                "mcp_auth_user_token_no_engineering_access",
+                token_id=str(ut.id),
+                org_id=str(ut.org_id),
+                user_id=str(ut.user_id),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your role doesn't include engineering workspace access",
             )
         _schedule_last_used(ut.id, ut.org_id, ut.user_id)
         logger.debug(

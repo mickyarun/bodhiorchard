@@ -36,7 +36,11 @@ from app.database import AsyncSessionLocal
 from app.repositories.minigame import LeaderboardRow
 from app.repositories.organization import OrganizationRepository
 from app.repositories.user import UserRepository
-from app.services.notifications import NotificationCategory, category_default
+from app.services.notifications import (
+    NotificationCategory,
+    category_default,
+    category_permission,
+)
 from app.services.slack_client import chat_post_message, conversations_open
 
 logger = structlog.get_logger(__name__)
@@ -101,6 +105,7 @@ async def broadcast_high_score(
             org_id,
             category=NotificationCategory.MINIGAMES,
             default_enabled=category_default(NotificationCategory.MINIGAMES),
+            permission=category_permission(NotificationCategory.MINIGAMES),
         )
 
     if not pairs:

@@ -36,7 +36,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.deps import get_db
+from app.core.deps import get_db, member_has_permission
+from app.core.permissions import WORKSPACE_ENGINEERING
 from app.core.security import verify_token
 from app.repositories.minigame import MinigameRepository
 from app.repositories.organization import OrganizationRepository
@@ -211,6 +212,7 @@ async def _collect_org_members(
 async def verify_user_token(
     payload: dict[str, Any],
     _: None = Depends(_verify_bridge_secret),
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Verify a user JWT token.
 
@@ -255,12 +257,35 @@ async def verify_user_token(
         )
         return {"valid": False}
 
+    # The garden is part of the engineering workspace: people-only roles
+    # (and deactivated users with a still-valid JWT) don't join the room.
+    if not await _may_join_org_room(db, jwt_payload.get("sub"), token_org_id):
+        logger.warning(
+            "colyseus_verify_token_no_engineering_access",
+            user_id=jwt_payload.get("sub", ""),
+            org_id=str(token_org_id),
+        )
+        return {"valid": False}
+
     return {
         "valid": True,
         "user_id": jwt_payload.get("sub", ""),
         "org_id": str(token_org_id) if token_org_id else "",
         "name": jwt_payload.get("name", ""),
     }
+
+
+async def _may_join_org_room(db: AsyncSession, sub: Any, org_id: Any) -> bool:
+    """True if the JWT subject is an active member with engineering access."""
+    try:
+        user_id = uuid.UUID(str(sub))
+        org_uuid = uuid.UUID(str(org_id))
+    except ValueError:
+        return False
+    user = await UserRepository(db).get_by_id(user_id)
+    if user is None or not user.is_active:
+        return False
+    return await member_has_permission(db, user_id, org_uuid, WORKSPACE_ENGINEERING)
 
 
 class RaceInviteRequest(BaseModel):

@@ -49,7 +49,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_current_user, get_db, require_permissions
+from app.core.permissions import WORKSPACE_ENGINEERING
 from app.core.security import hash_password
 from app.mcp.auth import compute_token_prefix
 from app.models.user import User
@@ -70,6 +71,10 @@ from app.services.notifications import (
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/me", tags=["me"])
+
+# MCP tokens let an AI client read and write BUDs, so minting or listing
+# them needs engineering access; notification preferences stay open to all.
+_ENGINEERING_ONLY = [Depends(require_permissions(WORKSPACE_ENGINEERING))]
 
 # Caps for token TTL. Default 90 days matches GitHub's PAT default; the
 # 365-day max prevents long-tail "I forgot this token existed" leaks.
@@ -123,7 +128,7 @@ def _resolve_expiry(expires_in_days: int | None) -> datetime | None:
     return datetime.now(UTC) + timedelta(days=expires_in_days)
 
 
-@router.post("/mcp-token", response_model=MCPTokenResponse)
+@router.post("/mcp-token", response_model=MCPTokenResponse, dependencies=_ENGINEERING_ONLY)
 async def regenerate_my_default_mcp_token(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -165,7 +170,7 @@ async def regenerate_my_default_mcp_token(
     return MCPTokenResponse(mcp_token=mcp_token, name=DEFAULT_TOKEN_NAME)
 
 
-@router.get("/mcp-token/status", response_model=MCPTokenStatus)
+@router.get("/mcp-token/status", response_model=MCPTokenStatus, dependencies=_ENGINEERING_ONLY)
 async def my_default_mcp_token_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -181,6 +186,7 @@ async def my_default_mcp_token_status(
     "/mcp-tokens",
     response_model=MCPTokenResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=_ENGINEERING_ONLY,
 )
 async def create_my_mcp_token(
     body: MCPTokenCreate,
@@ -250,7 +256,7 @@ async def create_my_mcp_token(
     return MCPTokenResponse(mcp_token=mcp_token, name=body.name)
 
 
-@router.get("/mcp-tokens", response_model=list[MCPTokenRead])
+@router.get("/mcp-tokens", response_model=list[MCPTokenRead], dependencies=_ENGINEERING_ONLY)
 async def list_my_mcp_tokens(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -260,7 +266,11 @@ async def list_my_mcp_tokens(
     return [MCPTokenRead.model_validate(r) for r in rows]
 
 
-@router.delete("/mcp-tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/mcp-tokens/{token_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_ENGINEERING_ONLY,
+)
 async def revoke_my_mcp_token(
     token_id: uuid.UUID,
     current_user: User = Depends(get_current_user),

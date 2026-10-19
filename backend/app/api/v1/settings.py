@@ -28,14 +28,9 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.api.v1.ai_settings import router as ai_settings_router
-from app.api.v1.settings_claude import router as claude_router
-from app.api.v1.settings_github_members import router as gh_members_router
-from app.api.v1.settings_mcp_tokens import router as mcp_tokens_router
-from app.api.v1.settings_repos import router as repos_router
-from app.api.v1.settings_slack import router as slack_router
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.core.encryption import decrypt_secret, encrypt_secret
+from app.core.permissions import WORKSPACE_ENGINEERING
 from app.core.security import hash_password
 from app.mcp.auth import compute_token_prefix
 from app.models.organization import Organization
@@ -85,13 +80,10 @@ GITHUB_APP_INSTALL_URL_TEMPLATE = _APP_INSTALL_URL_TEMPLATE
 
 logger = structlog.get_logger(__name__)
 
+# The engineering settings sub-routers (repos, Slack, Claude, AI, GitHub
+# members, MCP tokens) are mounted from ``app/api/router.py`` behind the
+# engineering workspace gate, not here.
 router = APIRouter(tags=["settings"])
-router.include_router(repos_router)
-router.include_router(slack_router)
-router.include_router(claude_router)
-router.include_router(ai_settings_router)
-router.include_router(gh_members_router)
-router.include_router(mcp_tokens_router)
 
 
 @router.get(
@@ -357,7 +349,7 @@ async def update_connections(
 @router.get(
     "/quiz",
     response_model=QuizGameSettings,
-    dependencies=[Depends(require_permissions("quiz:configure"))],
+    dependencies=[Depends(require_permissions("quiz:configure", WORKSPACE_ENGINEERING))],
 )
 async def get_quiz_game_settings(
     current_user: User = Depends(get_current_user),
@@ -375,7 +367,7 @@ async def get_quiz_game_settings(
 @router.patch(
     "/quiz",
     response_model=QuizGameSettings,
-    dependencies=[Depends(require_permissions("quiz:configure"))],
+    dependencies=[Depends(require_permissions("quiz:configure", WORKSPACE_ENGINEERING))],
 )
 async def update_quiz_game_settings(
     body: QuizGameSettings,
@@ -409,7 +401,7 @@ class MCPTokenResponse(BaseModel):
 @router.post(
     "/mcp-token",
     response_model=MCPTokenResponse,
-    dependencies=[Depends(require_permissions("org:edit_settings"))],
+    dependencies=[Depends(require_permissions("org:edit_settings", WORKSPACE_ENGINEERING))],
 )
 async def regenerate_mcp_token(
     current_user: User = Depends(get_current_user),
@@ -475,7 +467,7 @@ async def regenerate_mcp_token(
 
 @router.get(
     "/mcp-token/status",
-    dependencies=[Depends(require_permissions("org:view_settings"))],
+    dependencies=[Depends(require_permissions("org:view_settings", WORKSPACE_ENGINEERING))],
 )
 async def mcp_token_status(
     current_user: User = Depends(get_current_user),

@@ -12,12 +12,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Main API router that aggregates all sub-routers."""
+"""Main API router that aggregates all sub-routers.
 
-from fastapi import APIRouter
+Routers are split into two groups:
+
+* **Shared** — reachable by every authenticated member regardless of
+  workspace: auth, setup, membership, notifications, and transports that
+  authenticate themselves (webhooks, MCP tokens, the Colyseus bridge).
+* **Engineering** — everything else, mounted under one parent router that
+  requires ``workspace:engineering``. A people-only role such as ``sales``
+  gets 403 on all of it.
+
+The split is default-deny: a new router belongs in the engineering group
+unless it's deliberately added to the shared list.
+``tests/api/test_workspace_gate.py`` walks every route and fails if one
+is in neither group.
+"""
+
+from fastapi import APIRouter, Depends
 
 from app.api.health import router as health_router
 from app.api.v1.agent_skills import router as agent_skills_router
+from app.api.v1.ai_settings import router as ai_settings_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.backlash import internal_router as backlash_internal_router
 from app.api.v1.backlash import router as backlash_router
@@ -47,6 +63,11 @@ from app.api.v1.races import router as races_router
 from app.api.v1.roles import router as roles_router
 from app.api.v1.scans import router as scans_router
 from app.api.v1.settings import router as settings_router
+from app.api.v1.settings_claude import router as settings_claude_router
+from app.api.v1.settings_github_members import router as settings_gh_members_router
+from app.api.v1.settings_mcp_tokens import router as settings_mcp_tokens_router
+from app.api.v1.settings_repos import router as settings_repos_router
+from app.api.v1.settings_slack import router as settings_slack_router
 from app.api.v1.setup import router as setup_router
 from app.api.v1.skills import router as skills_router
 from app.api.v1.slack import router as slack_router
@@ -56,42 +77,31 @@ from app.api.v1.triage_sessions import router as triage_router
 from app.api.v1.ws import router as ws_router
 from app.api.v1.xp import router as xp_router
 from app.api.v1.yield_offers import router as yield_offers_router
+from app.core.deps import require_permissions
+from app.core.permissions import WORKSPACE_ENGINEERING
 from app.mcp.server import router as mcp_router
 from app.mcp.streamable import router as mcp_remote_router
 
 api_router = APIRouter()
 
+# ── Shared ──────────────────────────────────────────────────────────────
 api_router.include_router(health_router, prefix="/health")
 api_router.include_router(setup_router, prefix="/api/setup")
 api_router.include_router(auth_router, prefix="/api/v1/auth")
-api_router.include_router(claude_router, prefix="/api/v1/claude")
 api_router.include_router(orgs_router, prefix="/api/v1/organizations")
-api_router.include_router(bud_router, prefix="/api/v1/buds")
-api_router.include_router(bugs_router, prefix="/api/v1/bugs")
-api_router.include_router(bug_comments_router, prefix="/api/v1/bugs")
-api_router.include_router(bug_attachments_router, prefix="/api/v1/bugs")
-api_router.include_router(dashboard_router, prefix="/api/v1/dashboard")
-api_router.include_router(design_system_router, prefix="/api/v1/design-systems")
-api_router.include_router(features_router, prefix="/api/v1/features")
 api_router.include_router(roles_router, prefix="/api/v1")
-api_router.include_router(agent_skills_router, prefix="/api/v1/settings/agent-skills")
-api_router.include_router(settings_router, prefix="/api/v1/settings")
-api_router.include_router(skills_router, prefix="/api/v1/skills")
 api_router.include_router(members_router, prefix="/api/v1")
-api_router.include_router(notifications_router, prefix="/api/v1/notifications")
-api_router.include_router(slack_router, prefix="/api/v1/slack")
-api_router.include_router(standups_router, prefix="/api/v1/standups")
-api_router.include_router(teams_router, prefix="/api/v1")
-api_router.include_router(github_webhook_router, prefix="/api/v1/webhooks")
-api_router.include_router(triage_router, prefix="/api/v1/triage-sessions")
-api_router.include_router(jira_router, prefix="/api/v1/jira")
-api_router.include_router(jobs_router, prefix="/api/v1/jobs")
-api_router.include_router(learnings_router, prefix="/api/v1/learnings")
 api_router.include_router(me_router, prefix="/api/v1")
+api_router.include_router(notifications_router, prefix="/api/v1/notifications")
 api_router.include_router(ws_router, prefix="/api/v1")
 api_router.include_router(public_router, prefix="/api/v1/public")
-api_router.include_router(xp_router, prefix="/api/v1")
-api_router.include_router(yield_offers_router, prefix="/api/v1")
+# Org-level settings routes; each is gated by its own org/integration
+# permission. The engineering-only settings sub-routers are mounted below.
+api_router.include_router(settings_router, prefix="/api/v1/settings")
+# Self-authenticating transports: signed webhooks, MCP bearer tokens and the
+# Colyseus bridge secret. They don't use the JWT the gate depends on.
+api_router.include_router(slack_router, prefix="/api/v1/slack")
+api_router.include_router(github_webhook_router, prefix="/api/v1/webhooks")
 api_router.include_router(mcp_router)
 # Remote MCP endpoint for external LLM clients (Claude Desktop / Cursor /
 # Continue). Shares /mcp/ prefix and Bearer auth with the existing tool
@@ -99,11 +109,44 @@ api_router.include_router(mcp_router)
 # transport layer — see app/mcp/streamable.py for the rationale.
 api_router.include_router(mcp_remote_router)
 api_router.include_router(internal_colyseus_router, prefix="/api/v1")
-api_router.include_router(minigames_router, prefix="/api/v1/minigames")
-api_router.include_router(backlash_router, prefix="/api/v1/minigames/backlash")
 api_router.include_router(backlash_internal_router, prefix="/api/v1")
-api_router.include_router(quiz_router, prefix="/api/v1/quiz")
-api_router.include_router(quiz_review_router, prefix="/api/v1/quiz")
-api_router.include_router(races_router, prefix="/api/v1/races")
 api_router.include_router(races_internal_router, prefix="/api/v1")
-api_router.include_router(scans_router, prefix="/api/v1/reposcanv2")
+
+# ── Engineering workspace ───────────────────────────────────────────────
+# Sub-routers must be included into the parent *before* the parent is
+# included into ``api_router``: FastAPI copies routes at include time.
+engineering_router = APIRouter(
+    dependencies=[Depends(require_permissions(WORKSPACE_ENGINEERING))],
+)
+engineering_router.include_router(claude_router, prefix="/api/v1/claude")
+engineering_router.include_router(bud_router, prefix="/api/v1/buds")
+engineering_router.include_router(bugs_router, prefix="/api/v1/bugs")
+engineering_router.include_router(bug_comments_router, prefix="/api/v1/bugs")
+engineering_router.include_router(bug_attachments_router, prefix="/api/v1/bugs")
+engineering_router.include_router(dashboard_router, prefix="/api/v1/dashboard")
+engineering_router.include_router(design_system_router, prefix="/api/v1/design-systems")
+engineering_router.include_router(features_router, prefix="/api/v1/features")
+engineering_router.include_router(agent_skills_router, prefix="/api/v1/settings/agent-skills")
+engineering_router.include_router(settings_repos_router, prefix="/api/v1/settings")
+engineering_router.include_router(settings_slack_router, prefix="/api/v1/settings")
+engineering_router.include_router(settings_claude_router, prefix="/api/v1/settings")
+engineering_router.include_router(ai_settings_router, prefix="/api/v1/settings")
+engineering_router.include_router(settings_gh_members_router, prefix="/api/v1/settings")
+engineering_router.include_router(settings_mcp_tokens_router, prefix="/api/v1/settings")
+engineering_router.include_router(skills_router, prefix="/api/v1/skills")
+engineering_router.include_router(standups_router, prefix="/api/v1/standups")
+engineering_router.include_router(teams_router, prefix="/api/v1")
+engineering_router.include_router(triage_router, prefix="/api/v1/triage-sessions")
+engineering_router.include_router(jira_router, prefix="/api/v1/jira")
+engineering_router.include_router(jobs_router, prefix="/api/v1/jobs")
+engineering_router.include_router(learnings_router, prefix="/api/v1/learnings")
+engineering_router.include_router(xp_router, prefix="/api/v1")
+engineering_router.include_router(yield_offers_router, prefix="/api/v1")
+engineering_router.include_router(minigames_router, prefix="/api/v1/minigames")
+engineering_router.include_router(backlash_router, prefix="/api/v1/minigames/backlash")
+engineering_router.include_router(quiz_router, prefix="/api/v1/quiz")
+engineering_router.include_router(quiz_review_router, prefix="/api/v1/quiz")
+engineering_router.include_router(races_router, prefix="/api/v1/races")
+engineering_router.include_router(scans_router, prefix="/api/v1/reposcanv2")
+
+api_router.include_router(engineering_router)
