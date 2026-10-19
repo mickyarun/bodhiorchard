@@ -28,7 +28,7 @@
         {{ daysLine }}<span v-if="skips" class="text-medium-emphasis font-weight-regular"> · {{ skips }}</span>
       </div>
       <div v-if="balanceLine" class="text-body-2 mt-1">{{ balanceLine }}</div>
-      <div class="text-body-2 text-medium-emphasis mt-1">{{ approval }}</div>
+      <div v-if="approval" class="text-body-2 text-medium-emphasis mt-1">{{ approval }}</div>
       <AppCallout v-if="preview.problems.length" variant="error" class="mt-3">
         <div v-for="problem in preview.problems" :key="problem.code">{{ problem.message }}</div>
       </AppCallout>

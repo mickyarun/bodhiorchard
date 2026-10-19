@@ -20,6 +20,7 @@ import type {
   ExcludedDate,
   HalfDay,
   LeaveKind,
+  LeaveProblem,
   LeaveStatus,
   LeaveTypeBrief,
   PersonRef,
@@ -168,12 +169,19 @@ export function excludedSummary(excluded: ExcludedDate[], workingDays: number[])
   return labels.length ? `skips ${joinWithAnd(labels)}` : ''
 }
 
-/** Who decides, in a sentence, for the request preview. */
+/** Who decides, in a sentence, for the request preview. Empty when nobody
+ *  can: the preview's `no_approver` problem already says so. */
 export function approvalLine(
-  preview: { auto_approved: boolean; routes_to_hr: boolean; approvers: PersonRef[] },
+  preview: {
+    auto_approved: boolean
+    routes_to_hr: boolean
+    approvers: PersonRef[]
+    problems: LeaveProblem[]
+  },
   kind: LeaveKind,
   wfhApproval: WfhApproval | null,
 ): string {
+  if (preview.problems.some(p => p.code === 'no_approver')) return ''
   if (preview.auto_approved) {
     return kind === 'wfh' && wfhApproval === 'auto_within_allowance'
       ? "Approved automatically (within this month's WFH allowance)"

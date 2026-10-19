@@ -111,7 +111,7 @@ describe('labels', () => {
   })
 
   it('says who approves', () => {
-    const base = { auto_approved: false, routes_to_hr: false, approvers: [] }
+    const base = { auto_approved: false, routes_to_hr: false, approvers: [], problems: [] }
     const priya = [{ user_id: 'u1', name: 'Priya Sharma' }]
     expect(approvalLine({ ...base, approvers: priya }, 'leave', null)).toBe(
       'Goes to Priya Sharma for approval',
@@ -122,6 +122,8 @@ describe('labels', () => {
     expect(approvalLine({ ...base, auto_approved: true }, 'wfh', 'auto_within_allowance')).toBe(
       "Approved automatically (within this month's WFH allowance)",
     )
+    const nobody = [{ code: 'no_approver', message: 'Nobody can approve this yet' }]
+    expect(approvalLine({ ...base, routes_to_hr: true, problems: nobody }, 'leave', null)).toBe('')
   })
 
   it('derives a code from a type name', () => {
