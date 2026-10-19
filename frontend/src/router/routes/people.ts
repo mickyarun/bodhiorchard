@@ -25,6 +25,25 @@ export const peopleRoutes: RouteRecordRaw[] = [
     component: () => import('@/views/leave/LeaveHomeView.vue'),
   },
   {
+    path: 'people',
+    name: 'employees',
+    meta: { permission: 'employees:view' },
+    component: () => import('@/views/people/EmployeeDirectoryView.vue'),
+  },
+  {
+    path: 'people/:userId',
+    name: 'employee-profile',
+    // The page itself decides what to show: the API returns 403 unless the
+    // caller holds employees:view or is looking at their own record.
+    component: () => import('@/views/people/EmployeeProfileView.vue'),
+  },
+  {
+    // "My details": the caller's own employee record.
+    path: 'me/profile',
+    name: 'my-details',
+    component: () => import('@/views/people/EmployeeProfileView.vue'),
+  },
+  {
     // Self-service per-user notification opt-outs. No permission gate —
     // any authenticated member manages their own Slack DM preferences
     // via /v1/me/notification-preferences.

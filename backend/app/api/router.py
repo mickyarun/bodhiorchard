@@ -44,6 +44,8 @@ from app.api.v1.bugs import router as bugs_router
 from app.api.v1.claude import router as claude_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.design_system import router as design_system_router
+from app.api.v1.employee_updates import router as employee_updates_router
+from app.api.v1.employees import router as employees_router
 from app.api.v1.features import router as features_router
 from app.api.v1.github_webhook import router as github_webhook_router
 from app.api.v1.internal_colyseus import router as internal_colyseus_router
@@ -95,6 +97,10 @@ api_router.include_router(me_router, prefix="/api/v1")
 api_router.include_router(notifications_router, prefix="/api/v1/notifications")
 api_router.include_router(ws_router, prefix="/api/v1")
 api_router.include_router(public_router, prefix="/api/v1/public")
+# People workspace: open to every member; each route checks its own
+# employees:* permission or "own record".
+api_router.include_router(employees_router, prefix="/api/v1/employees")
+api_router.include_router(employee_updates_router, prefix="/api/v1/employees")
 # Org-level settings routes; each is gated by its own org/integration
 # permission. The engineering-only settings sub-routers are mounted below.
 api_router.include_router(settings_router, prefix="/api/v1/settings")

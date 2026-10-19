@@ -1,0 +1,168 @@
+# Copyright 2025-2026 Arun Rajkumar
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""DTOs for employee records.
+
+Work and personal fields are separate models on purpose: a response is
+assembled from the sections the caller may see, so a view-only reader can
+never receive personal data by way of ``from_attributes`` picking up a
+column it shouldn't.
+"""
+
+import uuid
+from datetime import date
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+
+from app.models.employee_profile import BloodGroup, EmployeeStatus, EmploymentType, Gender
+
+
+class EmployeeWork(BaseModel):
+    """Work details — visible to anyone with ``employees:view``."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    employee_code: str | None = Field(None, max_length=50)
+    designation: str | None = Field(None, max_length=150)
+    department: str | None = Field(None, max_length=150)
+    employment_type: EmploymentType = EmploymentType.FULL_TIME
+    status: EmployeeStatus = EmployeeStatus.ACTIVE
+    date_of_joining: date | None = None
+    date_of_exit: date | None = None
+    country_code: str | None = Field(None, min_length=2, max_length=2)
+    work_location: str | None = Field(None, max_length=150)
+
+    @field_validator("country_code")
+    @classmethod
+    def _upper_country(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not value.isalpha():
+            raise ValueError("Use a two-letter country code, e.g. IN or GB.")
+        return value.upper()
+
+    @field_validator("employee_code", "designation", "department", "work_location")
+    @classmethod
+    def _blank_to_none(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
+    @model_validator(mode="after")
+    def _exit_date_matches_status(self) -> "EmployeeWork":
+        # An active employee has no exit date (e.g. after being re-hired).
+        if self.status == EmployeeStatus.ACTIVE:
+            self.date_of_exit = None
+        if (
+            self.date_of_exit is not None
+            and self.date_of_joining is not None
+            and self.date_of_exit < self.date_of_joining
+        ):
+            raise ValueError("The exit date can't be before the joining date.")
+        return self
+
+
+class EmployeeContact(BaseModel):
+    """The personal fields an employee may edit about themself."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    phone: str | None = Field(None, max_length=40)
+    personal_email: EmailStr | None = None
+    emergency_contact_name: str | None = Field(None, max_length=255)
+    emergency_contact_relation: str | None = Field(None, max_length=100)
+    emergency_contact_phone: str | None = Field(None, max_length=40)
+
+
+class EmployeePersonal(EmployeeContact):
+    """All personal fields — HR, the owner and the employee themself."""
+
+    date_of_birth: date | None = None
+    gender: Gender | None = None
+    blood_group: BloodGroup | None = None
+
+
+class ManagerRef(BaseModel):
+    """A reporting manager as shown on a profile."""
+
+    user_id: uuid.UUID
+    name: str
+    is_primary: bool
+    is_active: bool
+
+
+class EmployeeAccessRead(BaseModel):
+    """What the caller may change on this record (drives the UI)."""
+
+    edit_work: bool
+    edit_personal: bool
+    edit_managers: bool
+
+
+class EmployeeRead(BaseModel):
+    """One employee record, with only the sections the caller may see."""
+
+    user_id: uuid.UUID
+    profile_id: uuid.UUID
+    name: str
+    email: str
+    is_active: bool
+    work: EmployeeWork
+    managers: list[ManagerRef]
+    personal: EmployeePersonal | None
+    access: EmployeeAccessRead
+    # Set only after a status change to "exited": whether the account was
+    # also deactivated, or still needs an admin to do it.
+    access_revoked: bool | None = None
+
+
+class DirectoryEntry(BaseModel):
+    """One row of the employee directory."""
+
+    user_id: uuid.UUID
+    name: str
+    email: str
+    is_active: bool
+    employee_code: str | None
+    designation: str | None
+    department: str | None
+    status: EmployeeStatus
+    primary_manager: ManagerRef | None
+    manager_count: int
+
+
+class MemberCandidate(BaseModel):
+    """A member who doesn't have an employee record yet."""
+
+    user_id: uuid.UUID
+    name: str
+    email: str
+
+
+class EmployeeCreate(BaseModel):
+    """Create the record for an existing member."""
+
+    user_id: uuid.UUID
+    work: EmployeeWork = Field(default_factory=EmployeeWork)
+
+
+class ManagerInput(BaseModel):
+    """One requested reporting manager."""
+
+    user_id: uuid.UUID
+    is_primary: bool = False
+
+
+class ManagersUpdate(BaseModel):
+    """Replace an employee's reporting managers."""
+
+    managers: list[ManagerInput] = Field(default_factory=list, max_length=10)

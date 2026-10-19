@@ -49,6 +49,10 @@ from app.schemas.members import (
     SetPasswordResponse,
     UpdateCharacterRequest,
 )
+from app.services.employees.merge import (
+    EmployeeMergeConflictError,
+    transfer_employee_record,
+)
 from app.services.role_grants import (
     assert_can_assign_role,
     assert_can_manage_member,
@@ -628,6 +632,15 @@ async def merge_members(
     await assert_can_manage_member(db, actor=perms, target=source)
     await assert_can_manage_member(db, actor=perms, target=target)
 
+    # 0. Employee record first: it's the only step that can refuse, so a
+    # conflict leaves nothing half-merged.
+    try:
+        employee = await transfer_employee_record(
+            db, org_id=org.id, source=source.id, target=target.id
+        )
+    except EmployeeMergeConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
     # 1. Transfer skill profiles: re-point source's profiles to target
     sp_repo = SkillProfileRepository(db, org_id=org.id)
     transferred = await sp_repo.transfer_profiles(source.id, target.id)
@@ -694,6 +707,8 @@ async def merge_members(
         github_login_claimed=claimed_login,
         emails_rebound=len(emails_to_rebind),
         mcp_tokens_revoked=revoked_tokens,
+        employee_record_moved=employee.profile_moved,
+        direct_reports_moved=employee.reports_moved,
         had_tokens_to_revoke=bool(revoked_tokens),
         by=current_user.email,
     )

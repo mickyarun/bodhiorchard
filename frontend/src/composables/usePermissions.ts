@@ -40,6 +40,12 @@ export function usePermissions() {
     canOpenWorkspace(authStore.user?.permissions, 'engineering'),
   )
 
+  // People workspace: directory (work details) and HR record management.
+  const canViewEmployees = computed(() =>
+    hasAnyPermission('employees:view', 'employees:manage'),
+  )
+  const canManageEmployees = computed(() => hasPermission('employees:manage'))
+
   // Sidebar visibility
   const canApprove = computed(() => hasPermission('backlog:approve'))
   // Gates the "New BUD" affordance. Mirrors the POST /v1/buds backend
@@ -91,6 +97,8 @@ export function usePermissions() {
     hasAnyPermission,
     isOrgAdmin,
     canAccessEngineering,
+    canViewEmployees,
+    canManageEmployees,
     canApprove,
     canCreateBuds,
     canEditBuds,

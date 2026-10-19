@@ -48,7 +48,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-type Variant = 'info' | 'warning' | 'success'
+type Variant = 'info' | 'warning' | 'success' | 'error'
 
 interface Props {
   variant?: Variant
@@ -73,6 +73,7 @@ const DEFAULT_ICON: Record<Variant, string> = {
   info: 'mdi-information-outline',
   warning: 'mdi-alert-outline',
   success: 'mdi-check-circle-outline',
+  error: 'mdi-alert-circle-outline',
 }
 
 const resolvedIcon = computed<string | null>(() => {
@@ -178,5 +179,16 @@ const resolvedIcon = computed<string | null>(() => {
 }
 .app-callout--success .app-callout__eyebrow {
   color: rgb(var(--v-theme-success));
+}
+.app-callout--error {
+  background: rgba(var(--v-theme-error), 0.04);
+  border-left-color: rgb(var(--v-theme-error));
+}
+.app-callout--error .app-callout__icon {
+  background: rgba(var(--v-theme-error), 0.12);
+  color: rgb(var(--v-theme-error));
+}
+.app-callout--error .app-callout__eyebrow {
+  color: rgb(var(--v-theme-error));
 }
 </style>

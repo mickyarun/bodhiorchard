@@ -28,10 +28,27 @@
     to="/leave"
     rounded="lg"
   />
+  <v-list-item
+    v-if="canViewEmployees"
+    prepend-icon="mdi-card-account-details-outline"
+    title="Employees"
+    to="/people"
+    rounded="lg"
+  />
+  <v-list-item
+    prepend-icon="mdi-account-box-outline"
+    title="My details"
+    to="/me/profile"
+    rounded="lg"
+  />
 </template>
 
 <script setup lang="ts">
+import { usePermissions } from '@/composables/usePermissions'
+
 defineProps<{ rail: boolean; showHeading: boolean }>()
+
+const { canViewEmployees } = usePermissions()
 </script>
 
 <style scoped>
