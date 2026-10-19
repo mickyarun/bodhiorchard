@@ -16,6 +16,7 @@
 
 import asyncio
 import contextlib
+import os
 from pathlib import Path
 from typing import Any
 
@@ -119,6 +120,47 @@ def _list_directory_sync(target: Path) -> list[DirectoryEntry]:
     return entries
 
 
+def picker_roots() -> tuple[Path, ...]:
+    """Directories the setup picker is allowed to walk.
+
+    The home directory, which is where development checkouts live in
+    practice. Kept as a function rather than a constant so tests can
+    point it somewhere hermetic, and so adding a root later is one edit.
+    """
+    return (Path.home(),)
+
+
+def _resolve_within_roots(candidate: Path) -> Path:
+    """Resolve ``candidate`` and refuse anything outside :func:`picker_roots`.
+
+    ``realpath`` collapses ``..`` and follows symlinks to their target, and
+    ``commonpath`` then confirms the result is still nested under a root —
+    so neither ``../../etc`` nor a symlink pointing out of home escapes.
+
+    Written out here rather than delegating to ``core.paths.safe_join``,
+    which does the same two steps: CodeQL's ``py/path-injection`` does not
+    follow the barrier through that helper (the alerts it raised on
+    ``file_storage.py``, which *does* use it, had to be dismissed as false
+    positives). Inline, the check is both real and recognised.
+
+    Raises:
+        HTTPException: 403 when the path resolves outside every root.
+    """
+    resolved = os.path.realpath(str(candidate))
+    for root in picker_roots():
+        base = os.path.realpath(str(root))
+        try:
+            if os.path.commonpath([base, resolved]) == base:
+                return Path(resolved)
+        except ValueError:
+            # Different drives / unrelated roots — not contained.
+            continue
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Path is outside the directories the setup picker may browse.",
+    )
+
+
 @router.get("/browse-directories", response_model=BrowseDirectoriesResponse)
 async def browse_directories(
     path: str = Query(default="", description="Directory path to list. Defaults to home."),
@@ -134,9 +176,12 @@ async def browse_directories(
     incomplete, like every other pre-auth endpoint here. Without that
     gate it stays reachable for the life of the deployment and walks the
     whole filesystem for anyone who can reach the port.
+
+    Confined to :func:`picker_roots` as well, so the window while setup is
+    open is a picker over the home directory rather than over the host.
     """
     await _require_setup_incomplete(db)
-    target = Path(path).expanduser().resolve() if path else Path.home()
+    target = _resolve_within_roots(Path(path).expanduser() if path else Path.home())
 
     if not target.exists():
         raise HTTPException(
@@ -178,6 +223,8 @@ async def get_repo_branches(
     against it, which is a filesystem probe for anything that is not a
     repository.
 
+    Confined to :func:`picker_roots` for the same reason.
+
     Args:
         path: Absolute path to the git repository.
         db: Session used only to check whether setup is still open.
@@ -186,7 +233,7 @@ async def get_repo_branches(
         Dict with branches list and auto-detected main/develop.
     """
     await _require_setup_incomplete(db)
-    repo_path = Path(path).resolve()
+    repo_path = _resolve_within_roots(Path(path))
     if not repo_path.exists() or not (repo_path / ".git").exists():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
