@@ -26,7 +26,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.models.leave_policy import WfhApproval
 from app.models.leave_request import ApprovalMode, HalfDay, LeaveKind, LeaveStatus
 from app.models.policy_holiday import HolidayKind
 
@@ -49,68 +48,11 @@ class HolidayRead(BaseModel):
     kind: HolidayKind
 
 
-class LeaveYear(BaseModel):
-    """A leave year: label is the calendar year it starts in."""
-
-    label: int
-    start: date
-    end: date
-
-
-class PolicyBrief(BaseModel):
-    """The rules a member's requests follow."""
-
-    id: uuid.UUID
-    name: str
-    timezone: str
-    working_days: list[int]
-    year_start_month: int
-    wfh_approval: WfhApproval
-    wfh_monthly_auto_days: int
-    backdate_limit_days: int
-    optional_holiday_quota: int
-
-
-class Balance(BaseModel):
-    """One leave type's balance for one leave year. None = no limit."""
-
-    leave_type: LeaveTypeBrief
-    is_paid: bool
-    allocated: Decimal | None
-    adjustments: Decimal
-    used: Decimal
-    pending: Decimal
-    available: Decimal | None
-
-
-class OptionalHolidayBalance(BaseModel):
-    """Optional holidays: quota, use, and the ones still available to pick."""
-
-    quota: int
-    used: int
-    pending: int
-    remaining: int
-    holidays: list[HolidayRead]
-
-
 class PersonRef(BaseModel):
     """A member by id and name."""
 
     user_id: uuid.UUID
     name: str
-
-
-class LeaveSummary(BaseModel):
-    """Everything the Leave home page needs for the caller."""
-
-    policy: PolicyBrief
-    leave_year: LeaveYear
-    balances: list[Balance]
-    optional_holidays: OptionalHolidayBalance
-    wfh_auto_days_left_this_month: int | None
-    approvers: list[PersonRef]
-    # True when no active manager is set: requests go to HR.
-    routes_to_hr: bool
 
 
 class LeaveRequestCreate(BaseModel):
@@ -134,6 +76,14 @@ class LeaveRequestCreate(BaseModel):
             raise ValueError("Choose a leave type.")
         if self.kind == LeaveKind.OPTIONAL_HOLIDAY and self.holiday_id is None:
             raise ValueError("Choose an optional holiday.")
+        # Fields that don't apply to the kind are dropped, so a WFH request
+        # can't carry (and be labelled with) an arbitrary leave type.
+        if self.kind != LeaveKind.LEAVE:
+            self.leave_type_id = None
+        if self.kind != LeaveKind.OPTIONAL_HOLIDAY:
+            self.holiday_id = None
+        else:
+            self.half_day = HalfDay.NONE
         return self
 
 
@@ -153,6 +103,8 @@ ProblemCode = Literal[
     "inactive_type",
     "holiday_not_optional",
     "optional_quota_used",
+    "too_far_ahead",
+    "no_approver",
 ]
 
 
@@ -196,63 +148,3 @@ class LeaveRequestRead(BaseModel):
     decision_note: str | None
     created_at: datetime
     can_cancel: bool
-
-
-class AlsoOut(BaseModel):
-    """A teammate who is out on one of the requested days (no type)."""
-
-    name: str
-    kind: LeaveKind
-    start_date: date
-    end_date: date
-
-
-class ApprovalItem(BaseModel):
-    """One request in the approvals queue."""
-
-    request: LeaveRequestRead
-    route: Literal["manager", "hr_queue", "hr_override"]
-    designation: str | None
-    department: str | None
-    balance_after: Decimal | None
-    also_out: list[AlsoOut]
-
-
-class DecisionBody(BaseModel):
-    """Approve or reject. A note is required to reject."""
-
-    note: str | None = Field(None, max_length=500)
-
-
-class ApprovalCount(BaseModel):
-    """Pending requests the caller can act on (nav badge)."""
-
-    pending: int
-    # Whether the caller approves anything at all (shows the nav item).
-    is_approver: bool
-
-
-class CalendarEntry(BaseModel):
-    """Someone out on the team calendar.
-
-    ``leave_type`` and ``reason`` are set only for HR, the requester and
-    their managers; everyone else sees "on leave".
-    """
-
-    request_id: uuid.UUID
-    user: PersonRef
-    kind: LeaveKind
-    start_date: date
-    end_date: date
-    half_day: HalfDay
-    status: LeaveStatus
-    is_own: bool
-    leave_type: LeaveTypeBrief | None
-    reason: str | None
-
-
-class CalendarRead(BaseModel):
-    """Entries plus the caller's policy holidays for a date range."""
-
-    entries: list[CalendarEntry]
-    holidays: list[HolidayRead]

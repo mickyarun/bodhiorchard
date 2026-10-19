@@ -37,6 +37,12 @@ from app.services.leave.summary import balance_schema, year_schema
 router = APIRouter(tags=["leave"])
 
 
+async def _require_member(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """404 unless ``user_id`` is a member of this org (never touch other orgs)."""
+    if not await UserRepository(db).is_member_of_org(user_id, org_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found.")
+
+
 async def _may_view(
     db: AsyncSession, current_user: User, perms: PermissionSet, user_id: uuid.UUID
 ) -> bool:
@@ -94,6 +100,7 @@ async def member_balances(
     db: AsyncSession = Depends(get_db),
 ) -> MemberBalances:
     """Balances and ledger: for the member, their managers, and HR."""
+    await _require_member(db, current_user.org_id, user_id)
     if not await _may_view(db, current_user, perms, user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="You can't see this person's balances."
@@ -116,6 +123,7 @@ async def adjust_balance(
             detail="Ask another HR member to adjust your own balance.",
         )
     org_id = current_user.org_id
+    await _require_member(db, org_id, user_id)
     member = await resolve_member_policy(db, org_id, user_id)
     leave_type = await LeaveTypeRepository(db, org_id=org_id).get_by_id(body.leave_type_id)
     if leave_type is None or leave_type.policy_id != member.policy.id:

@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import PermissionSet, get_current_user, get_db, get_permission_set
 from app.models.user import User
-from app.schemas.leave import CalendarRead
+from app.schemas.leave_views import CalendarRead
 from app.services.leave.calendar_view import calendar_view
 
 router = APIRouter(tags=["leave"])

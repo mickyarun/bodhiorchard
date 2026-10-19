@@ -21,14 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.leave_policy import LeavePolicy
 from app.models.policy_holiday import PolicyHoliday
-from app.schemas.leave import (
+from app.schemas.leave import HolidayRead, LeaveTypeBrief, PersonRef
+from app.schemas.leave_summary import (
     Balance,
-    HolidayRead,
     LeaveSummary,
-    LeaveTypeBrief,
     LeaveYear,
     OptionalHolidayBalance,
-    PersonRef,
     PolicyBrief,
 )
 from app.services.leave.approvers import approvers_for

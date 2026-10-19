@@ -23,7 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import PermissionSet, get_current_user, get_db, get_permission_set
 from app.models.user import User
-from app.schemas.leave import ApprovalCount, ApprovalItem, DecisionBody, LeaveRequestRead
+from app.schemas.leave import LeaveRequestRead
+from app.schemas.leave_views import ApprovalCount, ApprovalItem, DecisionBody
 from app.services.leave.approvals_view import approval_count, approval_items
 from app.services.leave.lifecycle import decide
 from app.services.leave.notify import notify_decision
@@ -71,6 +72,8 @@ async def _decide(
         approve=approve,
         note=body.note,
     )
+    # Commit before telling the requester (see create_request).
+    await db.commit()
     notify_decision(db, org_id=org_id, request=request, decider_name=current_user.name)
     reads = await request_reads(
         db,

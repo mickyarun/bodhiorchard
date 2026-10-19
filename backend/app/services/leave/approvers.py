@@ -21,6 +21,7 @@ also act on any request, but nobody decides their own.
 """
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Literal
 
@@ -52,19 +53,34 @@ class Approvers:
         return {user_id for user_id, _ in self.managers}
 
 
+async def approvers_for_many(
+    db: AsyncSession, org_id: uuid.UUID, user_ids: Collection[uuid.UUID]
+) -> dict[uuid.UUID, Approvers]:
+    """Active reporting managers for several members in a few queries.
+
+    "Active" means an active member *of this org*: a manager who left the
+    org, or whose account was deactivated, can't decide, so their reports'
+    requests route to HR instead of waiting forever.
+    """
+    profiles = await EmployeeProfileRepository(db, org_id=org_id).by_users(user_ids)
+    repo = EmployeeReportingManagerRepository(db, org_id=org_id)
+    links = await repo.list_for_profiles([p.id for p in profiles.values()])
+    current = await repo.active_member_ids(
+        list({link.user_id for group in links.values() for link in group})
+    )
+    out: dict[uuid.UUID, Approvers] = {}
+    for user_id in user_ids:
+        profile = profiles.get(user_id)
+        group = links.get(profile.id, []) if profile else []
+        out[user_id] = Approvers(
+            managers=[(link.user_id, link.name) for link in group if link.user_id in current]
+        )
+    return out
+
+
 async def approvers_for(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> Approvers:
     """``user_id``'s active reporting managers."""
-    profile = await EmployeeProfileRepository(db, org_id=org_id).get_by_user(user_id)
-    if profile is None:
-        return Approvers(managers=[])
-    links = await EmployeeReportingManagerRepository(db, org_id=org_id).list_for_profiles(
-        [profile.id]
-    )
-    return Approvers(
-        managers=[
-            (link.user_id, link.name) for link in links.get(profile.id, []) if link.is_active
-        ]
-    )
+    return (await approvers_for_many(db, org_id, [user_id]))[user_id]
 
 
 async def notify_targets(

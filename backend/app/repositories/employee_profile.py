@@ -15,6 +15,7 @@
 """Data access for employee profiles (one per org member)."""
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from sqlalchemy import or_, select
@@ -64,6 +65,15 @@ class EmployeeProfileRepository(BaseRepository[EmployeeProfile]):
             self._scoped(select(EmployeeProfile).where(EmployeeProfile.user_id == user_id))
         )
         return result.scalar_one_or_none()
+
+    async def by_users(self, user_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, EmployeeProfile]:
+        """Profiles for ``user_ids`` in this org, keyed by user id."""
+        if not user_ids:
+            return {}
+        result = await self._db.execute(
+            self._scoped(select(EmployeeProfile).where(EmployeeProfile.user_id.in_(user_ids)))
+        )
+        return {p.user_id: p for p in result.scalars().all()}
 
     async def code_taken(self, code: str, *, exclude_profile: uuid.UUID | None) -> bool:
         """True if another profile in this org already uses ``code``."""

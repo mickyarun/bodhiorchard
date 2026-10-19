@@ -26,6 +26,7 @@ from app.models.user import User
 from app.repositories.leave_policy import LeavePolicyRepository
 from app.schemas.leave import PersonRef
 from app.schemas.leave_policy import PolicyAssign, PolicyRead, PolicyWrite
+from app.services.leave.holidays import recount_requests
 from app.services.leave.policies import ensure_default_policy, today_for
 
 router = APIRouter(tags=["leave-admin"])
@@ -70,9 +71,16 @@ async def update_policy(
         raise conflict(f"A policy called {body.name} already exists.")
     if body.year_start_month != policy.year_start_month and await repo.has_requests(policy.id):
         raise conflict("The leave year can't move once requests exist: every balance would shift.")
+    calendar_changed = (
+        sorted(body.working_days) != sorted(policy.working_days)
+        or body.timezone != policy.timezone
+    )
     for field, value in body.model_dump().items():
         setattr(policy, field, value)
     await db.flush()
+    if calendar_changed:
+        # Stored day counts depend on working days; keep them honest.
+        await recount_requests(db, policy, today_for(policy))
     return await policy_read(db, policy)
 
 
@@ -128,6 +136,6 @@ async def assign_policy(
     """Move employees onto this policy from today; their old balances stay."""
     policy = await load_policy(db, current_user.org_id, policy_id)
     assigned = await LeavePolicyRepository(db, org_id=current_user.org_id).assign_employees(
-        policy.id, body.user_ids, today_for(policy)
+        policy, body.user_ids, today_for(policy)
     )
     return {"assigned": assigned}

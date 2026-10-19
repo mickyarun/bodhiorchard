@@ -53,7 +53,7 @@ async def ensure_default_policy(db: AsyncSession, org_id: uuid.UUID) -> LeavePol
         return existing
     org = await OrganizationRepository(db).get_by_id(org_id)
     presence = get_presence_settings(org.config if org else None)
-    return await repo.create(
+    return await repo.create_default(
         LeavePolicy(
             org_id=org_id,
             name=DEFAULT_POLICY_NAME,

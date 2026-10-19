@@ -24,6 +24,7 @@ from datetime import date
 from functools import lru_cache
 
 import holidays
+import structlog
 from holidays import registry
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,8 +34,10 @@ from app.models.policy_holiday import HolidayKind, HolidaySource, PolicyHoliday
 from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.policy_holiday import PolicyHolidayRepository
 from app.schemas.leave_policy import HolidayCountry, Subdivision
-from app.services.leave.calendar_math import count_days
+from app.services.leave.calendar_math import count_days, leave_year_by_label
 from app.services.leave.policies import mandatory_holidays
+
+logger = structlog.get_logger(__name__)
 
 
 class HolidayImportError(ValueError):
@@ -75,12 +78,27 @@ def public_holidays(country: str, subdivision: str | None, year: int) -> dict[da
 
 
 async def import_public_holidays(
-    db: AsyncSession, policy: LeavePolicy, year: int
+    db: AsyncSession, policy: LeavePolicy, leave_year: int
 ) -> tuple[int, int]:
-    """Add the year's public holidays to a policy; returns ``(added, skipped)``."""
+    """Add one leave year's public holidays; returns ``(added, skipped)``.
+
+    ``leave_year`` is the policy's leave-year label, so a policy whose year
+    runs April–March gets April 2026 to March 2027 for "2026" — the same
+    range the holidays list shows.
+    """
     if not policy.country_code:
         raise HolidayImportError("Set the policy's country before importing holidays.")
-    found = public_holidays(policy.country_code, policy.subdivision_code, year)
+    bounds = leave_year_by_label(leave_year, policy.year_start_month)
+    found = {
+        day: name
+        for year in range(bounds.start.year, bounds.end.year + 1)
+        for day, name in public_holidays(
+            policy.country_code, policy.subdivision_code, year
+        ).items()
+        if bounds.start <= day <= bounds.end
+    }
+    if not found:
+        return 0, 0
     repo = PolicyHolidayRepository(db, org_id=policy.org_id)
     existing = await repo.existing_dates(policy.id, list(found))
     for day, name in found.items():
@@ -125,4 +143,11 @@ async def recount_requests(db: AsyncSession, policy: LeavePolicy, start: date) -
             request.days = days
             changed += 1
     await db.flush()
+    if changed:
+        logger.info(
+            "leave_requests_recounted",
+            policy_id=str(policy.id),
+            from_date=start.isoformat(),
+            changed=changed,
+        )
     return changed

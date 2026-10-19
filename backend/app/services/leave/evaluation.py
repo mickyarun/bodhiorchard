@@ -22,7 +22,7 @@ row lock, so the preview and the real check never disagree.
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,9 +33,10 @@ from app.models.policy_holiday import PolicyHoliday
 from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.leave_type import LeaveTypeRepository
 from app.schemas.leave import LeaveProblem, LeaveRequestCreate, ProblemCode
-from app.services.leave.approvers import Approvers, approvers_for
+from app.services.leave.approvers import Approvers, approvers_for, notify_targets
 from app.services.leave.balances import balances_for, find_line
-from app.services.leave.calendar_math import count_days, leave_year_bounds, same_leave_year
+from app.services.leave.calendar_math import count_days, leave_year_bounds
+from app.services.leave.date_rules import date_problems
 from app.services.leave.optional_holidays import pick_optional_holiday
 from app.services.leave.policies import MemberPolicy, mandatory_holidays, today_for
 from app.services.leave.wfh_usage import wfh_auto_approved
@@ -74,24 +75,28 @@ async def evaluate(
     user_id: uuid.UUID,
     body: LeaveRequestCreate,
     exclude_request: uuid.UUID | None = None,
+    persist: bool = False,
 ) -> Evaluation:
-    """Check every rule for ``body`` and price it."""
+    """Check every rule for ``body`` and price it.
+
+    ``persist`` lets a real submit write the year's allocation to the
+    ledger; a preview only computes it.
+    """
     policy = member.policy
     result = Evaluation(start=body.start_date, end=body.end_date)
     if body.kind == LeaveKind.OPTIONAL_HOLIDAY:
         await _apply_optional_holiday(db, member.policy, user_id, body, result)
-    today = today_for(policy)
-    if result.start < today - timedelta(days=policy.backdate_limit_days):
-        result.problem(
-            "too_far_back",
-            f"Requests can go back at most {policy.backdate_limit_days} days.",
-        )
-    if not same_leave_year(result.start, result.end, policy.year_start_month):
-        year_end = leave_year_bounds(result.start, policy.year_start_month).end
-        result.problem(
-            "crosses_leave_year",
-            f"Requests can't span two leave years. Split it at {year_end:%a %d %b}.",
-        )
+    problems = date_problems(
+        result.start,
+        result.end,
+        today=today_for(policy),
+        backdate_limit_days=policy.backdate_limit_days,
+        year_start_month=policy.year_start_month,
+    )
+    for code, message in problems:
+        result.problem(code, message)
+    if any(code == "too_far_ahead" for code, _ in problems):
+        return result
     if body.kind != LeaveKind.OPTIONAL_HOLIDAY:
         holidays = await mandatory_holidays(db, policy, result.start, result.end)
         counted = count_days(
@@ -106,12 +111,20 @@ async def evaluate(
             result.problem("no_working_days", "These dates are all weekends or holidays.")
     await _check_overlap(db, policy.org_id, user_id, result, exclude_request)
     if body.kind == LeaveKind.LEAVE and body.leave_type_id is not None:
-        await _apply_balance(db, member, user_id, body.leave_type_id, result)
+        await _apply_balance(db, member, user_id, body.leave_type_id, result, persist)
     if body.kind == LeaveKind.WFH:
         result.auto_approved = await wfh_auto_approved(
             db, member.policy, user_id, result.start, result.end, body.half_day
         )
     result.approvers = await approvers_for(db, policy.org_id, user_id)
+    if not result.auto_approved and not await notify_targets(
+        db, policy.org_id, result.approvers, user_id
+    ):
+        result.problem(
+            "no_approver",
+            "Nobody can approve this yet: you have no manager and no one else has the HR role. "
+            "Ask the org owner to set your manager or give someone the HR role.",
+        )
     return result
 
 
@@ -162,6 +175,7 @@ async def _apply_balance(
     user_id: uuid.UUID,
     leave_type_id: uuid.UUID,
     result: Evaluation,
+    persist: bool,
 ) -> None:
     policy = member.policy
     leave_type = await LeaveTypeRepository(db, org_id=policy.org_id).get_by_id(leave_type_id)
@@ -170,7 +184,7 @@ async def _apply_balance(
         return
     year = leave_year_bounds(result.start, policy.year_start_month)
     lines = await balances_for(
-        db, policy=policy, profile=member.profile, user_id=user_id, year=year
+        db, policy=policy, profile=member.profile, user_id=user_id, year=year, persist=persist
     )
     line = find_line(lines, leave_type_id)
     result.balance_before = line.available if line else None

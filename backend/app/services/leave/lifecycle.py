@@ -27,12 +27,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permission_deps import PermissionSet
 from app.models.leave_request import ApprovalMode, LeaveRequest, LeaveStatus
-from app.repositories.leave_request import ACTIVE, LeaveRequestRepository
+from app.repositories.leave_policy import LeavePolicyRepository
+from app.repositories.leave_request import LeaveRequestRepository
 from app.schemas.leave import LeaveRequestCreate
 from app.services.leave.approvers import approvers_for, route_for
 from app.services.leave.calendar_math import count_days
 from app.services.leave.evaluation import Evaluation, evaluate
 from app.services.leave.policies import (
+    MemberPolicy,
     mandatory_holidays,
     resolve_member_policy,
     today_for,
@@ -50,7 +52,7 @@ async def submit(
     repo = LeaveRequestRepository(db, org_id=org_id)
     await repo.lock_member(user_id)
     member = await resolve_member_policy(db, org_id, user_id)
-    result = await evaluate(db, member=member, user_id=user_id, body=body)
+    result = await evaluate(db, member=member, user_id=user_id, body=body, persist=True)
     if result.problems:
         raise _conflict(result.problems[0].message)
     auto = result.auto_approved
@@ -110,6 +112,8 @@ async def decide(
         )
     repo = LeaveRequestRepository(db, org_id=org_id)
     await repo.lock_member(request.user_id)
+    # Re-read under the lock: the status loaded above may already be stale.
+    await db.refresh(request)
     if approve and request.status == LeaveStatus.PENDING:
         await _check_still_affordable(db, org_id, request)
     changed = await repo.transition(
@@ -136,7 +140,11 @@ async def _check_still_affordable(
     """
     if request.leave_type_id is None:
         return
-    member = await resolve_member_policy(db, org_id, request.user_id)
+    # Price it on the policy it was requested under, even if the member has
+    # moved policy since (their old leave type isn't on the new one).
+    current = await resolve_member_policy(db, org_id, request.user_id)
+    policy = await LeavePolicyRepository(db, org_id=org_id).get_by_id(request.policy_id)
+    member = MemberPolicy(policy=policy or current.policy, profile=current.profile)
     result = await evaluate(
         db,
         member=member,
@@ -149,6 +157,7 @@ async def _check_still_affordable(
             half_day=request.half_day,
         ),
         exclude_request=request.id,
+        persist=True,
     )
     if result.balance_before is not None and result.balance_before < 0:
         raise _conflict(
@@ -168,6 +177,8 @@ async def cancel(
         )
     repo = LeaveRequestRepository(db, org_id=org_id)
     await repo.lock_member(actor)
+    # Re-read under the lock: a manager may have decided it meanwhile.
+    await db.refresh(request)
     member = await resolve_member_policy(db, org_id, actor)
     today = today_for(member.policy)
     if request.status == LeaveStatus.APPROVED and request.start_date < today <= request.end_date:
@@ -181,13 +192,23 @@ async def cancel(
             working_days=member.policy.working_days,
             holidays=holidays,
         )
+        if taken.days == 0:
+            # Only non-working days have passed: nothing was taken yet.
+            changed = await repo.transition(
+                request.id, [LeaveStatus.APPROVED], status=LeaveStatus.CANCELLED
+            )
+        else:
+            changed = await repo.transition(
+                request.id, [LeaveStatus.APPROVED], end_date=yesterday, days=taken.days
+            )
+    elif request.status == LeaveStatus.PENDING:
         changed = await repo.transition(
-            request.id, [LeaveStatus.APPROVED], end_date=yesterday, days=taken.days
+            request.id, [LeaveStatus.PENDING], status=LeaveStatus.CANCELLED
         )
-    elif request.status == LeaveStatus.PENDING or (
-        request.status == LeaveStatus.APPROVED and request.start_date >= today
-    ):
-        changed = await repo.transition(request.id, ACTIVE, status=LeaveStatus.CANCELLED)
+    elif request.status == LeaveStatus.APPROVED and request.start_date >= today:
+        changed = await repo.transition(
+            request.id, [LeaveStatus.APPROVED], status=LeaveStatus.CANCELLED
+        )
     else:
         raise _conflict("This request can't be cancelled any more.")
     if not changed:

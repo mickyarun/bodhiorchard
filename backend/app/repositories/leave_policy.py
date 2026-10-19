@@ -15,11 +15,12 @@
 """Data access for leave policies."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import date
 
 from sqlalchemy import ColumnElement, exists, func, or_, select
 from sqlalchemy import update as sql_update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.employee_profile import EmployeeProfile
@@ -58,6 +59,25 @@ class LeavePolicyRepository(BaseRepository[LeavePolicy]):
             self._scoped(select(LeavePolicy).where(LeavePolicy.is_default.is_(True)))
         )
         return result.scalar_one_or_none()
+
+    async def create_default(self, policy: LeavePolicy) -> LeavePolicy:
+        """Insert the org's default policy, or return the one a racer created.
+
+        The Leave page loads several endpoints at once, and each may find no
+        default and try to create it. The insert runs in a savepoint; the
+        loser of the race rolls back just that and reads the winner's row.
+        """
+        try:
+            async with self._db.begin_nested():
+                self._db.add(policy)
+                await self._db.flush()
+        except IntegrityError:
+            existing = await self.get_default()
+            if existing is None:
+                raise
+            return existing
+        await self._db.refresh(policy)
+        return policy
 
     async def clear_default(self) -> None:
         """Unset the default flag (before setting a new default)."""
@@ -107,20 +127,30 @@ class LeavePolicyRepository(BaseRepository[LeavePolicy]):
         return [(row[0], row[1]) for row in (await self._db.execute(stmt)).all()]
 
     async def assign_employees(
-        self, policy_id: uuid.UUID, user_ids: Sequence[uuid.UUID], on: date
+        self, policy: LeavePolicy, user_ids: Sequence[uuid.UUID], on: date
     ) -> int:
-        """Move employees' profiles onto ``policy_id`` from ``on``."""
+        """Move employees' profiles onto ``policy`` from ``on``.
+
+        People already on it — explicitly, or by default when it is the
+        default policy — are left alone, so their start date (which drives
+        allocation) isn't reset.
+        """
+        not_already = (
+            EmployeeProfile.leave_policy_id != policy.id
+            if policy.is_default
+            else or_(
+                EmployeeProfile.leave_policy_id.is_(None),
+                EmployeeProfile.leave_policy_id != policy.id,
+            )
+        )
         result = await self._db.execute(
             sql_update(EmployeeProfile)
             .where(
                 EmployeeProfile.org_id == self._org,
                 EmployeeProfile.user_id.in_(user_ids),
-                or_(
-                    EmployeeProfile.leave_policy_id.is_(None),
-                    EmployeeProfile.leave_policy_id != policy_id,
-                ),
+                not_already,
             )
-            .values(leave_policy_id=policy_id, leave_policy_assigned_on=on)
+            .values(leave_policy_id=policy.id, leave_policy_assigned_on=on)
         )
         return rowcount(result) or 0
 
@@ -135,3 +165,12 @@ class LeavePolicyRepository(BaseRepository[LeavePolicy]):
             if (await self._db.execute(select(check))).scalar():
                 return True
         return False
+
+    async def by_ids(self, ids: Collection[uuid.UUID]) -> dict[uuid.UUID, LeavePolicy]:
+        """Policies for ``ids`` in this org, keyed by id."""
+        if not ids:
+            return {}
+        result = await self._db.execute(
+            self._scoped(select(LeavePolicy).where(LeavePolicy.id.in_(ids)))
+        )
+        return {row.id: row for row in result.scalars().all()}

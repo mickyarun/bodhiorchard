@@ -18,7 +18,7 @@ Open to every member; each person only ever touches their own requests.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import date
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, status
@@ -33,9 +33,9 @@ from app.schemas.leave import (
     LeavePreview,
     LeaveRequestCreate,
     LeaveRequestRead,
-    LeaveSummary,
     PersonRef,
 )
+from app.schemas.leave_summary import LeaveSummary
 from app.services.leave.approvers import notify_targets
 from app.services.leave.evaluation import evaluate
 from app.services.leave.lifecycle import cancel, submit
@@ -45,6 +45,11 @@ from app.services.leave.summary import build_summary
 from app.services.leave.views import request_reads
 
 router = APIRouter(tags=["leave"])
+
+
+async def _today(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> date:
+    """Today in the member's policy timezone (decides "can cancel")."""
+    return today_for((await resolve_member_policy(db, org_id, user_id)).policy)
 
 
 @router.get("/me/summary", response_model=LeaveSummary)
@@ -81,7 +86,7 @@ async def preview_request(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> LeavePreview:
-    """What a request would cost and who'd approve it — nothing is saved."""
+    """What a request would cost and who'd approve it. Doesn't create a request."""
     member = await resolve_member_policy(db, current_user.org_id, current_user.id)
     result = await evaluate(db, member=member, user_id=current_user.id, body=body)
     return LeavePreview(
@@ -111,6 +116,9 @@ async def create_request(
         if auto
         else await notify_targets(db, org_id, result.approvers, current_user.id)
     )
+    # Commit before telling anyone: a DM about a request that then rolls
+    # back would send people to something that doesn't exist.
+    await db.commit()
     notify_new_request(
         db,
         org_id=org_id,
@@ -124,7 +132,7 @@ async def create_request(
         org_id,
         [request],
         viewer=current_user.id,
-        today=datetime.now(UTC).date(),
+        today=await _today(db, org_id, current_user.id),
         private_ok=lambda _r: True,
     )
     return reads[0]
@@ -144,7 +152,7 @@ async def cancel_request(
         org_id,
         [request],
         viewer=current_user.id,
-        today=datetime.now(UTC).date(),
+        today=await _today(db, org_id, current_user.id),
         private_ok=lambda _r: True,
     )
     return reads[0]

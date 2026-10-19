@@ -22,7 +22,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.models.leave_policy import WfhApproval
 from app.models.policy_holiday import HolidayKind, HolidaySource
-from app.schemas.leave import Balance, LeaveYear, PersonRef
+from app.schemas.leave import PersonRef
+from app.schemas.leave_summary import Balance, LeaveYear
 from app.schemas.settings import validate_optional_timezone
 
 

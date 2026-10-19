@@ -63,8 +63,15 @@ async def balances_for(
     profile: EmployeeProfile | None,
     user_id: uuid.UUID,
     year: LeaveYearBounds,
+    persist: bool = False,
 ) -> list[BalanceLine]:
-    """Balances for every active leave type on ``policy``."""
+    """Balances for every active leave type on ``policy``.
+
+    A year with no allocation yet gets one computed from the current quota.
+    Only ``persist=True`` (a real submit or approval) writes it to the
+    ledger and so freezes it; plain reads — the Leave page, a preview, the
+    approvals queue — never lock in a year early.
+    """
     org_id = policy.org_id
     types = await LeaveTypeRepository(db, org_id=org_id).list_for_policy(
         policy.id, active_only=True
@@ -73,10 +80,14 @@ async def balances_for(
     totals = await ledger.totals(user_id, year.label)
     for leave_type in types:
         quota = leave_type.annual_quota_days
-        if quota is not None and totals.get(leave_type.id, (None, ZERO))[0] is None:
+        stored, adjustments = totals.get(leave_type.id, (None, ZERO))
+        if quota is not None and stored is None:
             days = allocation_for_year(quota, effective_from(profile), year.start, year.end)
-            await ledger.ensure_allocation(user_id, leave_type.id, year.label, days)
-    totals = await ledger.totals(user_id, year.label)
+            if persist:
+                await ledger.ensure_allocation(user_id, leave_type.id, year.label, days)
+            totals[leave_type.id] = (days, adjustments)
+    if persist:
+        totals = await ledger.totals(user_id, year.label)
     usage = await LeaveRequestRepository(db, org_id=org_id).leave_day_totals(
         user_id, year.start, year.end
     )
