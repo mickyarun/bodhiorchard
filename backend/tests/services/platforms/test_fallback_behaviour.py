@@ -66,11 +66,12 @@ def test_web_fallback_preserves_vuetify_boilerplate(tmp_path) -> None:  # type: 
     platform = get_platform("web_js")
     md, _ = _fallback_minimal(tmp_path, platform)
     assert "vuetify" in md.lower()
-    # Parse the URLs out and compare hostnames exactly. A substring test
-    # against a URL passes on a lookalike host, and reads as sanitisation
-    # the test is not doing.
+    # Pin the complete set of third-party origins the boilerplate pulls
+    # from, by parsed hostname. Stronger than asking whether one CDN
+    # appears somewhere in the text: a new origin sneaking into the
+    # generated HTML fails this, and a lookalike host cannot satisfy it.
     hosts = {urlsplit(url).hostname for url in re.findall(r"https://[^\s\"')]+", md)}
-    assert "cdn.jsdelivr.net" in hosts
+    assert hosts == {"cdn.jsdelivr.net", "fonts.googleapis.com"}
 
 
 def test_fallback_includes_discovered_files_when_present() -> None:
