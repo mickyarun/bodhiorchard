@@ -24,12 +24,14 @@ import pytest
 
 from app.models.leave_policy import LeavePolicy
 from app.models.leave_request import ApprovalMode, LeaveKind, LeaveRequest, LeaveStatus
+from app.models.leave_type import LeaveType
 from app.models.policy_holiday import HolidayKind, HolidaySource, PolicyHoliday
 from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.leave_policy_members import LeavePolicyMemberRepository
 from app.repositories.policy_holiday import PolicyHolidayRepository
 from app.schemas.leave import LeaveRequestCreate
 from app.services.leave import policy_admin
+from app.services.leave.errors import LeaveConflictError
 from app.services.leave.holidays import (
     HolidayImportError,
     import_public_holidays,
@@ -193,3 +195,28 @@ async def test_moving_someone_reports_requests_pending_on_their_old_policy(
         )
         await db.commit()
     assert (result.assigned, result.pending_elsewhere) == (2, 1)
+
+
+async def test_a_policy_goes_with_its_types_but_not_while_in_use(
+    pg_session_factory: Factory,
+) -> None:
+    org, (emp, hr), _casual = await setup_org(pg_session_factory, "Emp", "Hr")
+    spare = await _policy(pg_session_factory, org, "Spare")
+    async with pg_session_factory() as db:
+        db.add(LeaveType(org_id=org, policy_id=spare.id, name="Casual", code="CL"))
+        await db.commit()
+    async with pg_session_factory() as db:
+        policy = await db.get(LeavePolicy, spare.id)
+        assert policy is not None
+        await LeavePolicyMemberRepository(db, org_id=org).assign_employees(
+            policy, [emp], date.today()
+        )
+        with pytest.raises(LeaveConflictError, match="Move its people"):
+            await policy_admin.delete_policy(db, policy, hr)
+        await db.rollback()
+    async with pg_session_factory() as db:
+        policy = await db.get(LeavePolicy, spare.id)
+        assert policy is not None
+        await policy_admin.delete_policy(db, policy, hr)  # only its own type left: fine
+        await db.commit()
+        assert await db.get(LeavePolicy, spare.id) is None

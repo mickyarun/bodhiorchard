@@ -93,17 +93,25 @@ async def make_default(db: AsyncSession, policy: LeavePolicy, actor_id: uuid.UUI
 
 
 async def delete_policy(db: AsyncSession, policy: LeavePolicy, actor_id: uuid.UUID) -> None:
-    """Delete an unused, non-default policy (its trail keeps the name)."""
+    """Delete a policy, with its own leave types and holidays.
+
+    Refused for the default policy, and while anything outside the policy
+    depends on it: people assigned to it, requests made under it, or
+    balances booked on its leave types (that history must survive). Its
+    trail keeps the name.
+    """
     repo = LeavePolicyRepository(db, org_id=policy.org_id)
     if policy.is_default:
         raise LeaveConflictError("Make another policy the default before deleting this one.")
-    if await repo.in_use(policy.id):
-        raise LeaveConflictError(
-            "This policy has employees, leave types or requests, so it stays."
-        )
+    if await repo.has_people(policy.id):
+        raise LeaveConflictError("Move its people to another policy first.")
+    if await repo.has_requests(policy.id):
+        raise LeaveConflictError("Leave was requested under this policy, so it stays.")
+    if await repo.has_balance_history(policy.id):
+        raise LeaveConflictError("Balances were booked on its leave types, so it stays.")
     _record(db, policy, actor_id, LeaveConfigAction.POLICY_DELETED, {"name": [policy.name, None]})
     await db.flush()
-    await repo.delete(policy)
+    await repo.delete_with_types(policy)
 
 
 @dataclass(frozen=True)

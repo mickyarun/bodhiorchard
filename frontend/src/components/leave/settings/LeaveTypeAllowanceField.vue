@@ -17,22 +17,24 @@
 <!-- A leave type's allowance: a fixed number of days each leave year, or
      unlimited (no balance is kept). -->
 <template>
-  <div class="d-flex flex-column ga-4">
+  <div class="allowance">
     <AppPillToggle v-model="mode" :options="MODES" aria-label="Allowance" />
-    <v-text-field
-      v-if="mode === 'fixed'"
-      v-model.number="days"
-      label="Days per leave year"
-      type="number"
-      min="0"
-      max="365"
-      step="0.5"
-      suffix="days"
-      hint="New joiners get a share, set in Rules → New joiners."
-      persistent-hint
-      class="days"
-      v-bind="FIELD_PROPS"
-    />
+    <template v-if="mode === 'fixed'">
+      <v-text-field
+        v-model.number="days"
+        label="Days per leave year"
+        type="number"
+        min="0"
+        max="365"
+        step="0.5"
+        suffix="days"
+        class="days"
+        v-bind="FIELD_PROPS"
+      />
+      <p class="text-caption text-medium-emphasis">
+        New joiners get a share of this, set in Rules → New joiners.
+      </p>
+    </template>
     <p v-else class="text-caption text-medium-emphasis">
       No balance is tracked. Requests still need approval.
     </p>
@@ -63,7 +65,14 @@ const mode = computed<Mode>({
 </script>
 
 <style scoped>
+.allowance {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start; /* the toggle and field keep their own width */
+  gap: 12px;
+}
 .days {
-  max-width: 200px;
+  width: 200px;
+  flex: none;
 }
 </style>

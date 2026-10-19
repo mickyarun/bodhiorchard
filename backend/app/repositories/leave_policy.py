@@ -17,12 +17,14 @@
 import uuid
 from collections.abc import Collection
 
+from sqlalchemy import delete as sql_delete
 from sqlalchemy import exists, select
 from sqlalchemy import update as sql_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.employee_profile import EmployeeProfile
+from app.models.leave_ledger import LeaveLedgerEntry
 from app.models.leave_policy import LeavePolicy
 from app.models.leave_request import LeaveRequest
 from app.models.leave_type import LeaveType
@@ -100,19 +102,38 @@ class LeavePolicyRepository(BaseRepository[LeavePolicy]):
         )
         return bool((await self._db.execute(stmt)).scalar())
 
-    async def in_use(self, policy_id: uuid.UUID) -> bool:
-        """True if employees, types or requests reference the policy."""
-        checks = (
+    async def has_people(self, policy_id: uuid.UUID) -> bool:
+        """True if any employee is explicitly assigned to the policy."""
+        stmt = select(
             exists().where(
                 EmployeeProfile.org_id == self._org, EmployeeProfile.leave_policy_id == policy_id
-            ),
-            exists().where(LeaveType.org_id == self._org, LeaveType.policy_id == policy_id),
-            exists().where(LeaveRequest.org_id == self._org, LeaveRequest.policy_id == policy_id),
+            )
         )
-        for check in checks:
-            if (await self._db.execute(select(check))).scalar():
-                return True
-        return False
+        return bool((await self._db.execute(stmt)).scalar())
+
+    async def has_balance_history(self, policy_id: uuid.UUID) -> bool:
+        """True if any allocation or adjustment was booked on the policy's types."""
+        stmt = select(
+            exists().where(
+                LeaveLedgerEntry.org_id == self._org,
+                LeaveLedgerEntry.leave_type_id == LeaveType.id,
+                LeaveType.policy_id == policy_id,
+            )
+        )
+        return bool((await self._db.execute(stmt)).scalar())
+
+    async def delete_with_types(self, policy: LeavePolicy) -> None:
+        """Delete a policy and its leave types (its holidays go by cascade).
+
+        Only for a policy with no people, requests or balance history: the
+        caller checks, since those must outlive a policy.
+        """
+        await self._db.execute(
+            sql_delete(LeaveType).where(
+                LeaveType.org_id == self._org, LeaveType.policy_id == policy.id
+            )
+        )
+        await self.delete(policy)
 
     async def by_ids(self, ids: Collection[uuid.UUID]) -> dict[uuid.UUID, LeavePolicy]:
         """Policies for ``ids`` in this org, keyed by id."""

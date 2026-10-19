@@ -30,17 +30,19 @@
         <v-form class="d-flex flex-column" @submit.prevent="submit">
           <div class="group" role="group" :aria-labelledby="ids.basics">
             <div :id="ids.basics" class="group__title text-overline text-medium-emphasis">Basics</div>
-            <v-text-field v-model="draft.name" label="Name" maxlength="100" autofocus v-bind="FIELD_PROPS" @update:model-value="syncCode" />
-            <v-text-field
-              v-model="draft.code"
-              label="Code"
-              maxlength="10"
-              hint="Short ID for reports. Filled in from the name."
-              persistent-hint
-              class="code mt-5"
-              v-bind="FIELD_PROPS"
-              @update:model-value="codeTouched = true"
-            />
+            <div class="name-row">
+              <v-text-field v-model="draft.name" label="Name" maxlength="100" autofocus v-bind="FIELD_PROPS" @update:model-value="syncCode" />
+              <v-text-field
+                v-model="draft.code"
+                label="Code"
+                maxlength="10"
+                v-bind="FIELD_PROPS"
+                @update:model-value="codeTouched = true"
+              />
+            </div>
+            <p class="text-caption text-medium-emphasis mt-2">
+              The code is a short ID for reports, filled in from the name.
+            </p>
           </div>
           <div class="group" role="group" :aria-labelledby="ids.allowance">
             <div :id="ids.allowance" class="group__title text-overline text-medium-emphasis">Allowance</div>
@@ -167,7 +169,15 @@ async function submit(): Promise<void> {
   margin-bottom: 8px;
   line-height: 1.6;
 }
-.code {
-  max-width: 180px;
+.name-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 600px) {
+  .name-row {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
