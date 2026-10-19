@@ -15,14 +15,22 @@
  -->
 
 <!-- Who changed this policy and its leave types, newest first. Read-only:
-     the trail can't be edited or deleted. -->
+     the trail can't be edited or deleted. Loads each time it's shown, so
+     a change made in another section is already here. -->
 <template>
-  <section>
+  <LeaveSectionCard
+    icon="mdi-history"
+    title="History"
+    caption="Every change to this policy and its leave types, and who made it."
+  >
     <v-progress-linear v-if="history.loading.value" indeterminate color="primary" class="mb-4" />
     <AppCallout v-if="history.error.value" variant="error" class="mb-4">{{ history.error.value }}</AppCallout>
-    <p v-else-if="!history.loading.value && !history.events.value.length" class="text-body-2 text-medium-emphasis">
-      No changes recorded yet.
-    </p>
+    <LeaveEmptyState
+      v-else-if="!history.loading.value && !history.events.value.length"
+      icon="mdi-history"
+      title="No changes yet"
+      body="Edits to this policy, its leave types and who follows it show here, with who made them."
+    />
     <ol class="history">
       <li v-for="event in history.events.value" :key="event.id" class="py-3">
         <div class="text-body-2">
@@ -34,28 +42,22 @@
         <div class="text-caption text-medium-emphasis mt-1">{{ formatDateTime(event.at) }}</div>
       </li>
     </ol>
-  </section>
+  </LeaveSectionCard>
 </template>
 
 <script setup lang="ts">
 import { watch } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
+import LeaveEmptyState from '@/components/leave/settings/LeaveEmptyState.vue'
+import LeaveSectionCard from '@/components/leave/settings/LeaveSectionCard.vue'
 import { usePolicyHistory } from '@/composables/usePolicyHistory'
 import { formatDateTime } from '@/utils/date'
 import { changeLines, eventTitle } from '@/utils/leaveConfigHistory'
 
-// Tabs stay mounted once seen, so reload each time History is shown: a
-// change made on another tab should be here when you come back.
-const props = defineProps<{ policyId: string; active: boolean }>()
+const props = defineProps<{ policyId: string }>()
 const history = usePolicyHistory()
 
-watch(
-  () => [props.policyId, props.active] as const,
-  ([id, active]) => {
-    if (active) void history.load(id)
-  },
-  { immediate: true },
-)
+watch(() => props.policyId, id => void history.load(id), { immediate: true })
 </script>
 
 <style scoped>

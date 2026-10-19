@@ -25,9 +25,11 @@ from app.repositories.employee_reporting_manager import (
     EmployeeReportingManagerRepository,
     ManagerLink,
 )
+from app.repositories.leave_policy import LeavePolicyRepository
 from app.schemas.employee import (
     DirectoryEntry,
     EmployeeAccessRead,
+    EmployeeLeavePolicy,
     EmployeePersonal,
     EmployeeRead,
     EmployeeWork,
@@ -39,6 +41,24 @@ from app.services.employees.access import EmployeeAccess
 def _manager_ref(link: ManagerLink) -> ManagerRef:
     return ManagerRef(
         user_id=link.user_id, name=link.name, is_primary=link.is_primary, is_active=link.is_active
+    )
+
+
+async def _leave_policy(
+    db: AsyncSession, org_id: uuid.UUID, profile: EmployeeProfile
+) -> EmployeeLeavePolicy | None:
+    """The policy ``profile`` follows: its own, else the org default (never created here)."""
+    repo = LeavePolicyRepository(db, org_id=org_id)
+    explicit = profile.leave_policy_id is not None
+    policy = (
+        await repo.get_by_id(profile.leave_policy_id)
+        if profile.leave_policy_id is not None
+        else await repo.get_default()
+    )
+    if policy is None:
+        return None
+    return EmployeeLeavePolicy(
+        id=policy.id, name=policy.name, is_default=policy.is_default, explicit=explicit
     )
 
 
@@ -62,6 +82,7 @@ async def employee_read(
         email=user.email,
         is_active=user.is_active,
         work=EmployeeWork.model_validate(profile),
+        leave_policy=await _leave_policy(db, org_id, profile),
         managers=[_manager_ref(link) for link in links.get(profile.id, [])],
         personal=EmployeePersonal.model_validate(profile) if access.view_personal else None,
         access=EmployeeAccessRead(

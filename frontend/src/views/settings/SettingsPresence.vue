@@ -232,6 +232,7 @@
 import { computed, onMounted } from 'vue'
 import SettingsPageShell from '@/components/settings/SettingsPageShell.vue'
 import { useSettingsStore } from '@/stores/settings'
+import { supportedTimezones } from '@/utils/timezones'
 
 type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
 
@@ -299,30 +300,7 @@ const hoursAreOrdered = computed(() => {
 
 // ─── Timezone dropdown ─────────────────────────────────────────────────
 
-const timezoneList = computed<string[]>(() => {
-  // `Intl.supportedValuesOf('timeZone')` is available in Chrome 99+, FF 93+,
-  // Safari 15.4+. Fall back to a short curated list for older browsers.
-  try {
-    const supportedValuesOf = (Intl as unknown as {
-      supportedValuesOf?: (key: string) => string[]
-    }).supportedValuesOf
-    if (typeof supportedValuesOf === 'function') {
-      return supportedValuesOf('timeZone')
-    }
-  } catch (_err) {
-    // fallthrough
-  }
-  return [...FALLBACK_TIMEZONES]
-})
-
-// Hand-picked short list for browsers without `Intl.supportedValuesOf`.
-const FALLBACK_TIMEZONES: readonly string[] = [
-  'UTC',
-  'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
-  'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Madrid',
-  'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Singapore', 'Asia/Kolkata', 'Asia/Dubai',
-  'Australia/Sydney', 'Pacific/Auckland',
-] as const
+const timezoneList = computed<string[]>(() => supportedTimezones())
 
 // v-autocomplete with `clearable` emits `null` on clear, which maps
 // cleanly to the backend `timezone: null` sentinel. We just pass the

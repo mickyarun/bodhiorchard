@@ -31,6 +31,18 @@
       </dt>
       <dd class="field-grid__value" :class="{ 'field-grid__value--empty': !field.value }">
         {{ field.value || '—' }}
+        <v-btn
+          v-if="field.action"
+          variant="text"
+          size="small"
+          density="compact"
+          color="primary"
+          class="ml-2"
+          :aria-label="field.action.ariaLabel"
+          @click="field.action.run"
+        >
+          {{ field.action.label }}
+        </v-btn>
       </dd>
     </template>
   </dl>
@@ -42,6 +54,8 @@ export interface GridField {
   value: string | null | undefined
   /** Shown with a lock: the viewer can see but not change it. */
   locked?: boolean
+  /** A text button beside the value, e.g. "Change". */
+  action?: { label: string; ariaLabel: string; run: () => void }
 }
 
 withDefaults(defineProps<{ fields: GridField[]; lockedHint?: string }>(), {

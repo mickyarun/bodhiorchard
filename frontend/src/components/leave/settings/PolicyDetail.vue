@@ -14,69 +14,89 @@
  * limitations under the License.
  -->
 
-<!-- One policy's settings, split into tabs that each save on their own. -->
+<!-- One policy: its details in the header, and a section at a time
+     (`?section=`) beside the section list. -->
 <template>
-  <section>
-    <div class="d-flex align-center ga-2 mb-4">
-      <v-btn variant="text" size="small" prepend-icon="mdi-arrow-left" @click="emit('back')">
-        All policies
-      </v-btn>
+  <section :aria-label="policy.name">
+    <v-btn variant="text" size="small" prepend-icon="mdi-arrow-left" class="mb-3 ml-n2" @click="emit('back')">
+      All policies
+    </v-btn>
+    <header class="detail-head mb-6">
+      <div class="shrink">
+        <div class="d-flex align-center flex-wrap ga-2">
+          <h2 class="text-h5 font-weight-bold">{{ policy.name }}</h2>
+          <v-chip v-if="policy.is_default" size="small" color="primary" variant="tonal" label>Default</v-chip>
+        </div>
+        <p class="text-body-2 text-medium-emphasis mt-1">{{ region || 'No country set' }} · {{ policy.timezone }}</p>
+      </div>
+      <v-btn variant="tonal" prepend-icon="mdi-pencil-outline" @click="editing = true">Edit details</v-btn>
+    </header>
+
+    <div class="detail-body">
+      <PolicySectionNav v-model="section" :people="policy.employee_count" />
+      <div class="shrink">
+        <LeaveTypesSection v-if="section === 'types'" :policy="policy" />
+        <HolidaysSection v-else-if="section === 'holidays'" :policy="policy" @edit-details="editing = true" />
+        <PolicyRulesSection v-else-if="section === 'rules'" :policy="policy" />
+        <PolicyPeopleSection v-else-if="section === 'people'" :policy="policy" />
+        <PolicyHistorySection v-else :policy-id="policy.id" />
+      </div>
     </div>
-    <div class="d-flex align-center ga-2 mb-1">
-      <h2 class="text-h6 font-weight-bold">{{ policy.name }}</h2>
-      <v-chip v-if="policy.is_default" size="x-small" color="primary" variant="tonal" label>Default</v-chip>
-    </div>
-    <p class="text-body-2 text-medium-emphasis mb-4">{{ region || 'No country set' }}</p>
-    <v-tabs v-model="tab" color="primary" density="compact" slider-color="primary" class="mb-4">
-      <v-tab value="types">Leave types</v-tab>
-      <v-tab value="holidays">Holidays</v-tab>
-      <v-tab value="wfh">Work from home</v-tab>
-      <v-tab value="joiners">New joiners</v-tab>
-      <v-tab value="general">General</v-tab>
-      <v-tab value="employees">Employees</v-tab>
-      <v-tab value="history">History</v-tab>
-    </v-tabs>
-    <v-card color="surface" rounded="lg" class="pa-6">
-      <v-tabs-window v-model="tab">
-        <v-tabs-window-item value="types">
-          <LeaveTypesTab :policy-id="policy.id" />
-        </v-tabs-window-item>
-        <v-tabs-window-item value="holidays">
-          <HolidaysTab :policy="policy" />
-        </v-tabs-window-item>
-        <v-tabs-window-item value="wfh">
-          <WfhTab :policy="policy" />
-        </v-tabs-window-item>
-        <v-tabs-window-item value="joiners">
-          <NewJoinersTab :policy="policy" />
-        </v-tabs-window-item>
-        <v-tabs-window-item value="general">
-          <GeneralTab :policy="policy" />
-        </v-tabs-window-item>
-        <v-tabs-window-item value="employees">
-          <EmployeesTab :policy-id="policy.id" />
-        </v-tabs-window-item>
-        <v-tabs-window-item value="history">
-          <PolicyHistoryTab :policy-id="policy.id" :active="tab === 'history'" />
-        </v-tabs-window-item>
-      </v-tabs-window>
-    </v-card>
+
+    <PolicyDetailsDialog v-model="editing" :policy="policy" @saved="saved = true" />
+    <v-snackbar v-model="saved" :timeout="2500" location="bottom">Saved</v-snackbar>
   </section>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import EmployeesTab from '@/components/leave/settings/EmployeesTab.vue'
-import GeneralTab from '@/components/leave/settings/GeneralTab.vue'
-import HolidaysTab from '@/components/leave/settings/HolidaysTab.vue'
-import LeaveTypesTab from '@/components/leave/settings/LeaveTypesTab.vue'
-import NewJoinersTab from '@/components/leave/settings/NewJoinersTab.vue'
-import PolicyHistoryTab from '@/components/leave/settings/PolicyHistoryTab.vue'
-import WfhTab from '@/components/leave/settings/WfhTab.vue'
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import HolidaysSection from '@/components/leave/settings/HolidaysSection.vue'
+import LeaveTypesSection from '@/components/leave/settings/LeaveTypesSection.vue'
+import PolicyDetailsDialog from '@/components/leave/settings/PolicyDetailsDialog.vue'
+import PolicyHistorySection from '@/components/leave/settings/PolicyHistorySection.vue'
+import PolicyPeopleSection from '@/components/leave/settings/PolicyPeopleSection.vue'
+import PolicyRulesSection from '@/components/leave/settings/PolicyRulesSection.vue'
+import PolicySectionNav from '@/components/leave/settings/PolicySectionNav.vue'
 import type { PolicyRead } from '@/types/leavePolicy'
+import { parseSection, type PolicySection } from '@/utils/leavePolicyDisplay'
 
 defineProps<{ policy: PolicyRead; region: string }>()
 const emit = defineEmits<(e: 'back') => void>()
 
-const tab = ref('types')
+const route = useRoute()
+const router = useRouter()
+const editing = ref(false)
+const saved = ref(false)
+
+const section = computed<PolicySection>({
+  get: () => parseSection(route.query.section),
+  set: value => {
+    void router.replace({ query: { ...route.query, section: value } })
+  },
+})
 </script>
+
+<style scoped>
+.shrink {
+  min-width: 0;
+}
+.detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.detail-body {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 32px;
+}
+@media (max-width: 959px) {
+  .detail-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+}
+</style>

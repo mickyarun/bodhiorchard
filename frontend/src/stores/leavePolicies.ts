@@ -13,29 +13,25 @@
 // limitations under the License.
 
 /**
- * Leave policies (leave:configure): the policy list, holiday countries,
- * and who follows each policy. Types and holidays live in
- * leavePolicyConfig.ts. Actions return `null` or a user-facing error.
+ * Leave policies (leave:configure): the policy list and holiday
+ * countries. Types and holidays live in leavePolicyConfig.ts, who follows
+ * each policy in leaveAssignments.ts. Actions return `null` or a
+ * user-facing error.
  */
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 import api from '@/services/api'
-import type { PersonRef } from '@/types/leave'
-import type {
-  AssignResult,
-  HolidayCountry,
-  PolicyRead,
-  PolicyWrite,
-} from '@/types/leavePolicy'
+import type { HolidayCountry, PolicyRead, PolicyWrite } from '@/types/leavePolicy'
 import { extractApiError } from '@/utils/errors'
 
 export const useLeavePoliciesStore = defineStore('leavePolicies', () => {
   const policies = ref<PolicyRead[]>([])
   const countries = ref<HolidayCountry[]>([])
-  const employees = ref<PersonRef[]>([])
   const loading = ref(false)
   const error = ref('')
+  /** The policy anyone nobody has assigned follows. */
+  const defaultPolicy = computed(() => policies.value.find(p => p.is_default) ?? null)
 
   async function fetchPolicies(): Promise<void> {
     loading.value = true
@@ -103,36 +99,10 @@ export const useLeavePoliciesStore = defineStore('leavePolicies', () => {
     }
   }
 
-  async function fetchEmployees(policyId: string): Promise<string | null> {
-    try {
-      employees.value = (await api.get<PersonRef[]>(`/v1/leave/policies/${policyId}/employees`)).data
-      return null
-    } catch (err) {
-      employees.value = []
-      return extractApiError(err, "Couldn't load this policy's employees. Reload to try again.")
-    }
-  }
-
-  /** Move people onto a policy; resolves to the result, or an error message. */
-  async function assign(policyId: string, userIds: string[]): Promise<AssignResult | string> {
-    let result: AssignResult
-    try {
-      result = (
-        await api.post<AssignResult>(`/v1/leave/policies/${policyId}/assign`, {
-          user_ids: userIds,
-        })
-      ).data
-    } catch (err) {
-      return extractApiError(err, "Couldn't move these employees. Try again.")
-    }
-    await Promise.all([fetchEmployees(policyId), fetchPolicies()])
-    return result
-  }
-
   return {
     policies,
     countries,
-    employees,
+    defaultPolicy,
     loading,
     error,
     fetchPolicies,
@@ -141,7 +111,5 @@ export const useLeavePoliciesStore = defineStore('leavePolicies', () => {
     updatePolicy,
     makeDefault,
     deletePolicy,
-    fetchEmployees,
-    assign,
   }
 })

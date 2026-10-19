@@ -33,6 +33,9 @@ export function usePermissions() {
   const isOrgAdmin = computed(
     () => authStore.user?.role === 'org_owner' || authStore.user?.role === 'admin',
   )
+  // The org owner alone may change HR-held fields on their own record
+  // (e.g. their own leave policy); the API applies the same rule.
+  const isOrgOwner = computed(() => authStore.user?.role === 'org_owner')
 
   // Engineering workspace (BUDs, bugs, repos, garden, games). People-only
   // roles such as sales and HR don't hold it; see utils/workspace.ts.
@@ -101,6 +104,7 @@ export function usePermissions() {
     hasPermission,
     hasAnyPermission,
     isOrgAdmin,
+    isOrgOwner,
     canAccessEngineering,
     canViewEmployees,
     canManageEmployees,

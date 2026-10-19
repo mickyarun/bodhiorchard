@@ -17,16 +17,17 @@
 <!-- Working days, Monday to Sunday (0–6). At least one stays selected. -->
 <template>
   <div>
-    <div class="text-caption text-medium-emphasis mb-1">Working days</div>
+    <div v-if="!hideLabel" class="text-caption text-medium-emphasis mb-1">Working days</div>
     <v-chip-group
       :model-value="modelValue"
       multiple
       mandatory
       selected-class="text-primary"
       :disabled="disabled"
+      aria-label="Working days"
       @update:model-value="update"
     >
-      <v-chip v-for="(label, index) in WEEKDAY_SHORT" :key="label" :value="index" filter variant="outlined" size="small">
+      <v-chip v-for="(label, index) in WEEKDAY_SHORT" :key="label" :value="index" filter variant="outlined">
         {{ label }}
       </v-chip>
     </v-chip-group>
@@ -36,7 +37,7 @@
 <script setup lang="ts">
 import { WEEKDAY_SHORT } from '@/utils/leaveDates'
 
-defineProps<{ modelValue: number[]; disabled?: boolean }>()
+defineProps<{ modelValue: number[]; disabled?: boolean; hideLabel?: boolean }>()
 const emit = defineEmits<(e: 'update:modelValue', value: number[]) => void>()
 
 function update(value: unknown): void {

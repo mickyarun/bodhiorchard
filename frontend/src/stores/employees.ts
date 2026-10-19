@@ -26,6 +26,7 @@ import api from '@/services/api'
 import type {
   DirectoryEntry,
   EmployeeContact,
+  EmployeeLeavePolicy,
   EmployeePersonal,
   EmployeeRecord,
   EmployeeStatus,
@@ -150,6 +151,11 @@ export const useEmployeesStore = defineStore('employees', () => {
     )
   }
 
+  /** Show a leave policy change on the open record without reloading it. */
+  function setLeavePolicy(userId: string, policy: EmployeeLeavePolicy): void {
+    if (record.value?.user_id === userId) record.value = { ...record.value, leave_policy: policy }
+  }
+
   return {
     directory,
     candidates,
@@ -166,5 +172,6 @@ export const useEmployeesStore = defineStore('employees', () => {
     updatePersonal,
     updateMyContact,
     updateManagers,
+    setLeavePolicy,
   }
 })

@@ -62,6 +62,54 @@ export function policyToWrite(policy: PolicyRead): PolicyWrite {
   }
 }
 
+export type PolicyField = keyof PolicyWrite
+
+/** What "Edit details" changes: the policy's name and where it applies. */
+export const DETAIL_FIELDS: readonly PolicyField[] = [
+  'name',
+  'country_code',
+  'subdivision_code',
+  'timezone',
+]
+
+/** What the Rules section changes: work week, leave year, WFH, new joiners. */
+export const RULE_FIELDS: readonly PolicyField[] = [
+  'working_days',
+  'year_start_month',
+  'backdate_limit_days',
+  'optional_holiday_quota',
+  'wfh_approval',
+  'wfh_monthly_auto_days',
+  'proration_method',
+  'proration_cutoff_day',
+  'allocation_rounding',
+]
+
+/** True when `a` and `b` agree on every one of `fields`. */
+export function samePolicyFields(
+  a: PolicyWrite,
+  b: PolicyWrite,
+  fields: readonly PolicyField[],
+): boolean {
+  return fields.every(field => JSON.stringify(a[field]) === JSON.stringify(b[field]))
+}
+
+/** `base` with `fields` taken from `edits`: a full PUT body that only
+ *  changes what this form owns, so it never undoes another form's save. */
+export function mergePolicyFields(
+  base: PolicyWrite,
+  edits: PolicyWrite,
+  fields: readonly PolicyField[],
+): PolicyWrite {
+  const merged: PolicyWrite = { ...base, working_days: [...base.working_days] }
+  const target = merged as unknown as Record<PolicyField, unknown>
+  for (const field of fields) {
+    const value = edits[field]
+    target[field] = Array.isArray(value) ? [...value] : value
+  }
+  return merged
+}
+
 export const PRORATION_LABELS: Record<ProrationMethod, string> = {
   daily: 'By days left in the leave year',
   monthly: 'By whole months left in the leave year',
@@ -99,11 +147,17 @@ export const HOLIDAY_KIND_OPTIONS: { label: string; value: HolidayKind }[] = [
   { label: 'Optional', value: 'optional' },
 ]
 
-/** "Moved 3 people to this policy." plus a note about requests still pending
+/** A move with requests still pending elsewhere needs HR's attention. */
+export function movedVariant(result: AssignResult): 'success' | 'warning' {
+  return result.pending_elsewhere > 0 ? 'warning' : 'success'
+}
+
+/** "Moved 3 people to UK Office." plus a note about requests still pending
  *  under their old policy, which are decided on that policy's rules. */
-export function movedSummary(result: AssignResult): string {
+export function movedSummary(result: AssignResult, policyName = 'this policy'): string {
+  if (!result.assigned) return `Nobody moved: everyone selected already follows ${policyName}.`
   const people = (n: number) => `${n} ${n === 1 ? 'person' : 'people'}`
-  const moved = `Moved ${people(result.assigned)} to this policy.`
+  const moved = `Moved ${people(result.assigned)} to ${policyName}.`
   if (!result.pending_elsewhere) return moved
   const who = result.pending_elsewhere === 1 ? '1 of them has' : `${result.pending_elsewhere} of them have`
   return `${moved} ${who} requests still pending from their old policy; those are decided on that policy's rules and balances.`

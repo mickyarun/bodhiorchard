@@ -17,42 +17,52 @@
 <!-- A policy's holiday calendar for this year or next. Mandatory
      holidays are off for everyone; optional ones are picked. -->
 <template>
-  <section>
-    <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-3">
-      <AppPillToggle v-model="year" :options="yearOptions" size="sm" />
+  <LeaveSectionCard
+    icon="mdi-calendar-star"
+    title="Holidays"
+    caption="Days off for everyone on this policy. Leave isn't counted on them."
+  >
+    <template #actions>
+      <v-btn variant="tonal" prepend-icon="mdi-plus" :disabled="adding" @click="adding = true">Add holiday</v-btn>
       <v-btn
         variant="tonal"
-        size="small"
         prepend-icon="mdi-download-outline"
         :loading="importing"
         :disabled="!policy.country_code"
-        :title="policy.country_code ? '' : 'Set a country on the General tab first.'"
         @click="runImport"
       >
         Import public holidays
       </v-btn>
+    </template>
+
+    <div class="d-flex align-center flex-wrap ga-3 mb-4">
+      <AppPillToggle v-model="year" :options="yearOptions" size="sm" aria-label="Year" />
+      <span class="text-body-2 text-medium-emphasis" aria-live="polite">{{ year }} · {{ summary }}</span>
     </div>
-    <AppCallout v-if="importResult" variant="success" class="mb-3">{{ importResult }}</AppCallout>
-    <AppCallout v-if="store.holidaysError || rowError" variant="error" class="mb-3">
+    <AppCallout v-if="!policy.country_code" variant="info" class="mb-4">
+      Set a country in <strong>Edit details</strong> to import public holidays.
+      <template #actions>
+        <v-btn size="small" variant="text" @click="emit('edit-details')">Edit details</v-btn>
+      </template>
+    </AppCallout>
+    <AppCallout v-if="importResult" variant="success" class="mb-4">{{ importResult }}</AppCallout>
+    <AppCallout v-if="store.holidaysError || rowError" variant="error" class="mb-4">
       {{ rowError || store.holidaysError }}
     </AppCallout>
+    <HolidayAddRow v-if="adding" :policy-id="policy.id" :year="year" class="mb-4" @close="adding = false" />
     <v-progress-linear v-if="store.loading" indeterminate color="primary" />
-    <p v-if="!store.loading && !store.holidays.length" class="text-body-2 text-medium-emphasis mb-3">
-      No holidays for {{ year }} yet. Import your country's public holidays or add them below.
-    </p>
-    <div v-for="holiday in store.holidays" :key="holiday.id" class="holiday-row">
-      <span class="text-body-2">{{ formatDayRange(holiday.date, holiday.date) }}</span>
-      <span class="text-body-2 font-weight-medium text-truncate">{{ holiday.name }}</span>
-      <AppPillToggle
-        :model-value="holiday.kind"
-        :options="HOLIDAY_KIND_OPTIONS"
-        size="sm"
-        @update:model-value="kind => setKind(holiday, kind)"
-      />
-      <v-btn icon="mdi-delete-outline" variant="text" size="small" :aria-label="`Delete ${holiday.name}`" @click="remove(holiday.id)" />
-    </div>
-    <HolidayAddRow :policy-id="policy.id" :year="year" class="mt-4" />
-  </section>
+    <LeaveEmptyState
+      v-else-if="!store.holidays.length && !adding"
+      icon="mdi-calendar-blank-outline"
+      :title="`No holidays for ${year} yet`"
+      body="Import your country's public holidays, or add your own."
+    >
+      <template #actions>
+        <v-btn variant="flat" color="primary" prepend-icon="mdi-plus" @click="adding = true">Add holiday</v-btn>
+      </template>
+    </LeaveEmptyState>
+    <HolidayList v-else :holidays="store.holidays" @set-kind="setKind" @remove="remove" />
+  </LeaveSectionCard>
 </template>
 
 <script setup lang="ts">
@@ -60,25 +70,29 @@ import { computed, ref, watch } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import HolidayAddRow from '@/components/leave/settings/HolidayAddRow.vue'
+import HolidayList from '@/components/leave/settings/HolidayList.vue'
+import LeaveEmptyState from '@/components/leave/settings/LeaveEmptyState.vue'
+import LeaveSectionCard from '@/components/leave/settings/LeaveSectionCard.vue'
 import { useLeavePolicyConfigStore } from '@/stores/leavePolicyConfig'
 import type { HolidayKind } from '@/types/leave'
 import type { HolidayAdminRead, PolicyRead } from '@/types/leavePolicy'
-import { formatDayRange } from '@/utils/leaveDates'
-import { HOLIDAY_KIND_OPTIONS } from '@/utils/leavePolicy'
+import { holidaySummary } from '@/utils/leavePolicyDisplay'
 
 const props = defineProps<{ policy: PolicyRead }>()
+const emit = defineEmits<{ 'edit-details': [] }>()
 
 const store = useLeavePolicyConfigStore()
 const thisYear = new Date().getFullYear()
 const year = ref(thisYear)
 const yearOptions = [thisYear, thisYear + 1].map(value => ({ label: String(value), value }))
+const adding = ref(false)
 const importing = ref(false)
 const importResult = ref('')
 const rowError = ref('')
+const summary = computed(() => holidaySummary(store.holidays))
 
-const key = computed(() => `${props.policy.id}:${year.value}`)
 watch(
-  key,
+  () => `${props.policy.id}:${year.value}`,
   () => {
     importResult.value = ''
     rowError.value = ''
@@ -109,19 +123,3 @@ async function remove(id: string): Promise<void> {
   rowError.value = (await store.deleteHoliday(id)) ?? ''
 }
 </script>
-
-<style scoped>
-.holiday-row {
-  display: grid;
-  grid-template-columns: 120px minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 0;
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-}
-@media (max-width: 600px) {
-  .holiday-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-}
-</style>

@@ -16,7 +16,7 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1._leave_admin import CONFIGURE, load_policy, policy_read
@@ -27,6 +27,7 @@ from app.repositories.leave_policy_members import LeavePolicyMemberRepository
 from app.schemas.leave import PersonRef
 from app.schemas.leave_config import ConfigEventRead
 from app.schemas.leave_policy import PolicyAssign, PolicyRead, PolicyWrite
+from app.schemas.leave_policy_members import PolicyMemberRead
 from app.services.leave import policy_admin
 from app.services.leave.config_history import config_history
 from app.services.leave.policies import ensure_default_policy
@@ -102,6 +103,29 @@ async def policy_employees(
     policy = await load_policy(db, current_user.org_id, policy_id)
     rows = await LeavePolicyMemberRepository(db, org_id=current_user.org_id).list_employees(policy)
     return [PersonRef(user_id=uid, name=name) for uid, name in rows]
+
+
+@router.get("/policy-members", response_model=list[PolicyMemberRead])
+async def policy_members(
+    policy_id: uuid.UUID | None = None,
+    unassigned: bool = False,
+    q: str | None = Query(None, max_length=100),
+    limit: int = Query(500, ge=1, le=500),
+    current_user: User = Depends(require_permissions(CONFIGURE)),
+    db: AsyncSession = Depends(get_db),
+) -> list[PolicyMemberRead]:
+    """Employees and the policy they follow; the unassigned follow the default.
+
+    ``unassigned`` keeps only people nobody has assigned. At most ``limit``
+    rows, by name: a caller that gets a full page should ask the user to search.
+    """
+    default = await ensure_default_policy(db, current_user.org_id)
+    if policy_id is not None:
+        await load_policy(db, current_user.org_id, policy_id)
+    members = await LeavePolicyMemberRepository(db, org_id=current_user.org_id).list_members(
+        default, policy_id=policy_id, unassigned=unassigned, q=q, limit=limit
+    )
+    return [PolicyMemberRead.model_validate(m, from_attributes=True) for m in members]
 
 
 @router.post("/policies/{policy_id}/assign")

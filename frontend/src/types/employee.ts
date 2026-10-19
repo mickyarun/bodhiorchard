@@ -60,6 +60,15 @@ export interface ManagerRef {
   is_active: boolean
 }
 
+/** The leave policy someone follows; `explicit` is false when nobody has
+ *  assigned one, so the default applies. */
+export interface EmployeeLeavePolicy {
+  id: string
+  name: string
+  is_default: boolean
+  explicit: boolean
+}
+
 export interface EmployeeRecord {
   user_id: string
   profile_id: string
@@ -67,6 +76,8 @@ export interface EmployeeRecord {
   email: string
   is_active: boolean
   work: EmployeeWork
+  /** Null only before the org has a default policy. */
+  leave_policy: EmployeeLeavePolicy | null
   managers: ManagerRef[]
   /** Only present for HR, the owner and the employee themself. */
   personal: EmployeePersonal | null

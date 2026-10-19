@@ -35,12 +35,19 @@ export const useLeavePolicyConfigStore = defineStore('leavePolicyConfig', () => 
   const holidays = ref<HolidayAdminRead[]>([])
   const holidaysError = ref('')
   const loading = ref(false)
+  // Latest request per list: a slow answer for another policy or year that
+  // lands late is dropped, so the list always matches what's selected.
+  let typesRequest = 0
+  let holidaysRequest = 0
 
   async function fetchTypes(policyId: string): Promise<void> {
+    const request = ++typesRequest
     typesError.value = ''
     try {
-      types.value = (await api.get<LeaveTypeRead[]>(`/v1/leave/policies/${policyId}/types`)).data
+      const { data } = await api.get<LeaveTypeRead[]>(`/v1/leave/policies/${policyId}/types`)
+      if (request === typesRequest) types.value = data
     } catch (err) {
+      if (request !== typesRequest) return
       types.value = []
       typesError.value = extractApiError(err, "Couldn't load leave types. Reload to try again.")
     }
@@ -62,6 +69,7 @@ export const useLeavePolicyConfigStore = defineStore('leavePolicyConfig', () => 
   }
 
   async function fetchHolidays(policyId: string, year: number): Promise<void> {
+    const request = ++holidaysRequest
     loading.value = true
     holidaysError.value = ''
     try {
@@ -69,12 +77,15 @@ export const useLeavePolicyConfigStore = defineStore('leavePolicyConfig', () => 
         `/v1/leave/policies/${policyId}/holidays`,
         { params: { year } },
       )
-      holidays.value = [...data].sort((a, b) => a.date.localeCompare(b.date))
+      if (request === holidaysRequest) {
+        holidays.value = [...data].sort((a, b) => a.date.localeCompare(b.date))
+      }
     } catch (err) {
+      if (request !== holidaysRequest) return
       holidays.value = []
       holidaysError.value = extractApiError(err, "Couldn't load holidays. Reload to try again.")
     } finally {
-      loading.value = false
+      if (request === holidaysRequest) loading.value = false
     }
   }
 

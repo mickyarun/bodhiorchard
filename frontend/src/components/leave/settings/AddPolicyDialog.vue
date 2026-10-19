@@ -17,47 +17,62 @@
 <!-- Create a leave policy: where it applies, working days and when the
      leave year starts. Types and holidays are added after. -->
 <template>
-  <v-dialog :model-value="modelValue" max-width="560" @update:model-value="emit('update:modelValue', $event)">
-    <v-card class="pa-0">
-      <div class="d-flex align-center justify-space-between pa-6 pb-2">
-        <h2 class="text-h6 font-weight-bold">Add policy</h2>
+  <v-dialog :model-value="modelValue" max-width="600" :fullscreen="xs" @update:model-value="emit('update:modelValue', $event)">
+    <v-card color="surface" rounded="lg">
+      <div class="d-flex align-start ga-2 pa-6 pb-4">
+        <div class="flex-grow-1">
+          <h2 class="text-h6 font-weight-bold">Add policy</h2>
+          <p class="text-body-2 text-medium-emphasis">
+            Usually one per country or office. Add leave types and holidays next.
+          </p>
+        </div>
         <v-btn icon="mdi-close" variant="text" size="small" aria-label="Close" @click="close" />
       </div>
-      <v-form class="px-6 d-flex flex-column ga-3" @submit.prevent="submit">
-        <v-text-field v-model="draft.name" label="Name" autofocus v-bind="field" />
-        <RegionFields v-model:country="draft.country_code" v-model:subdivision="draft.subdivision_code" />
-        <div class="form-grid">
-          <v-text-field v-model="draft.timezone" label="Timezone" hint="An IANA name, such as Europe/London." persistent-hint v-bind="field" />
-          <v-select v-model="draft.year_start_month" :items="MONTH_ITEMS" label="Leave year starts in" v-bind="field" />
-        </div>
+      <v-form class="px-6 pb-2 d-flex flex-column ga-5" @submit.prevent="submit">
+        <PolicyDetailsFields
+          v-model:name="draft.name"
+          v-model:country="draft.country_code"
+          v-model:subdivision="draft.subdivision_code"
+          v-model:timezone="draft.timezone"
+        />
+        <LeaveFormGrid>
+          <v-select v-model="draft.year_start_month" :items="MONTH_ITEMS" label="Leave year starts in" v-bind="FIELD_PROPS" />
+        </LeaveFormGrid>
         <WorkingDayChips v-model="draft.working_days" />
         <AppCallout v-if="error" variant="error">{{ error }}</AppCallout>
       </v-form>
-      <div class="d-flex justify-end ga-2 pa-6 pt-4">
+      <v-divider class="mt-4" />
+      <div class="d-flex justify-end ga-2 pa-4">
         <v-btn variant="text" @click="close">Cancel</v-btn>
-        <v-btn color="primary" :loading="saving" :disabled="!draft.name.trim()" @click="submit">Create policy</v-btn>
+        <v-btn color="primary" variant="flat" :loading="saving" :disabled="!valid" @click="submit">
+          Create policy
+        </v-btn>
       </div>
     </v-card>
   </v-dialog>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useDisplay } from 'vuetify'
 import AppCallout from '@/components/common/AppCallout.vue'
-import RegionFields from '@/components/leave/settings/RegionFields.vue'
+import LeaveFormGrid from '@/components/leave/settings/LeaveFormGrid.vue'
+import PolicyDetailsFields from '@/components/leave/settings/PolicyDetailsFields.vue'
 import WorkingDayChips from '@/components/leave/settings/WorkingDayChips.vue'
 import { useLeavePoliciesStore } from '@/stores/leavePolicies'
 import type { PolicyRead, PolicyWrite } from '@/types/leavePolicy'
 import { MONTH_ITEMS, newPolicy } from '@/utils/leavePolicy'
+import { FIELD_PROPS } from '@/utils/leavePolicyDisplay'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; created: [policy: PolicyRead] }>()
 
 const store = useLeavePoliciesStore()
-const field = { variant: 'outlined', density: 'compact', hideDetails: 'auto' } as const
+const { xs } = useDisplay()
 const draft = ref<PolicyWrite>(newPolicy())
 const saving = ref(false)
 const error = ref('')
+const valid = computed(() => !!draft.value.name.trim() && !!draft.value.timezone)
 
 watch(
   () => props.modelValue,
@@ -73,7 +88,7 @@ function close(): void {
 }
 
 async function submit(): Promise<void> {
-  if (!draft.value.name.trim()) return
+  if (!valid.value) return
   saving.value = true
   const result = await store.createPolicy({ ...draft.value, name: draft.value.name.trim() })
   saving.value = false
@@ -85,11 +100,3 @@ async function submit(): Promise<void> {
   close()
 }
 </script>
-
-<style scoped>
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-</style>

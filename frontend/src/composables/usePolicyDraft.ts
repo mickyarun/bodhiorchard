@@ -13,33 +13,58 @@
 // limitations under the License.
 
 /**
- * An editable copy of one policy for a settings tab. Each tab edits the
- * fields it owns and saves the whole policy (the API takes a full PUT).
+ * One editable copy of a policy for a form that owns some of its fields
+ * (`fields`). Saving sends the latest policy with only those fields
+ * replaced, so it never undoes another form's save; and a refresh of the
+ * policy (after any save) only replaces the draft when it has no unsaved
+ * edits.
  */
-import { type Ref, ref, watch } from 'vue'
+import { computed, type Ref, ref, watch } from 'vue'
 
 import { useLeavePoliciesStore } from '@/stores/leavePolicies'
 import type { PolicyRead, PolicyWrite } from '@/types/leavePolicy'
-import { policyToWrite } from '@/utils/leavePolicy'
+import {
+  mergePolicyFields,
+  type PolicyField,
+  policyToWrite,
+  samePolicyFields,
+} from '@/utils/leavePolicy'
 
-export function usePolicyDraft(policy: Ref<PolicyRead>) {
+export function usePolicyDraft(policy: Ref<PolicyRead>, fields: readonly PolicyField[]) {
   const store = useLeavePoliciesStore()
   const draft = ref<PolicyWrite>(policyToWrite(policy.value))
   const saving = ref(false)
   const error = ref('')
-  const saved = ref(false)
 
-  watch(policy, next => {
-    draft.value = policyToWrite(next)
+  const dirty = computed(() => !samePolicyFields(draft.value, policyToWrite(policy.value), fields))
+
+  watch(policy, (next, previous) => {
+    const untouched = samePolicyFields(draft.value, policyToWrite(previous), fields)
+    if (next.id !== previous.id || untouched) {
+      draft.value = policyToWrite(next)
+      error.value = ''
+    }
   })
 
-  async function save(): Promise<void> {
-    saving.value = true
-    saved.value = false
-    error.value = (await store.updatePolicy(policy.value.id, draft.value)) ?? ''
-    saving.value = false
-    saved.value = !error.value
+  function discard(): void {
+    draft.value = policyToWrite(policy.value)
+    error.value = ''
   }
 
-  return { draft, saving, error, saved, save }
+  /** Resolves to true once saved. */
+  async function save(): Promise<boolean> {
+    const id = policy.value.id
+    saving.value = true
+    const body = mergePolicyFields(policyToWrite(policy.value), draft.value, fields)
+    error.value = (await store.updatePolicy(id, body)) ?? ''
+    saving.value = false
+    if (error.value) return false
+    // Take the saved values (the server may tidy them), unless more was
+    // typed while the request was out: that stays as an unsaved edit.
+    const fresh = store.policies.find(p => p.id === id)
+    if (fresh && samePolicyFields(draft.value, body, fields)) draft.value = policyToWrite(fresh)
+    return true
+  }
+
+  return { draft, dirty, saving, error, save, discard }
 }

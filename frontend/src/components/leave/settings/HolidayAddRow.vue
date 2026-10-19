@@ -14,17 +14,29 @@
  * limitations under the License.
  -->
 
-<!-- Inline "add a holiday" row under the holiday list. -->
+<!-- Add one holiday to the year shown. Stays open after adding, so a few
+     can be entered in a row. -->
 <template>
-  <v-form class="add-row" @submit.prevent="submit">
-    <v-text-field v-model="date" label="Date" type="date" :min="`${year}-01-01`" :max="`${year}-12-31`" v-bind="field" />
-    <v-text-field v-model="name" label="Holiday name" maxlength="150" v-bind="field" />
-    <AppPillToggle v-model="kind" :options="KINDS" size="sm" />
-    <v-btn type="submit" color="primary" variant="tonal" :loading="saving" :disabled="!date || !name.trim()">
-      Add
-    </v-btn>
-  </v-form>
-  <AppCallout v-if="error" variant="error" class="mt-2">{{ error }}</AppCallout>
+  <div>
+    <v-form class="add-row" aria-label="Add a holiday" @submit.prevent="submit">
+      <v-text-field
+        v-model="date"
+        label="Date"
+        type="date"
+        :min="`${year}-01-01`"
+        :max="`${year}-12-31`"
+        autofocus
+        v-bind="FIELD_PROPS"
+      />
+      <v-text-field v-model="name" label="Holiday name" maxlength="150" v-bind="FIELD_PROPS" />
+      <AppPillToggle v-model="kind" :options="HOLIDAY_KIND_OPTIONS" size="sm" aria-label="Mandatory or optional" />
+      <div class="d-flex ga-1">
+        <v-btn type="submit" color="primary" variant="flat" :loading="saving" :disabled="!date || !name.trim()">Add</v-btn>
+        <v-btn variant="text" @click="emit('close')">Done</v-btn>
+      </div>
+    </v-form>
+    <AppCallout v-if="error" variant="error" class="mt-2">{{ error }}</AppCallout>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -34,12 +46,12 @@ import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import { useLeavePolicyConfigStore } from '@/stores/leavePolicyConfig'
 import type { HolidayKind } from '@/types/leave'
 import { HOLIDAY_KIND_OPTIONS } from '@/utils/leavePolicy'
+import { FIELD_PROPS } from '@/utils/leavePolicyDisplay'
 
 const props = defineProps<{ policyId: string; year: number }>()
+const emit = defineEmits<{ close: [] }>()
 
 const store = useLeavePolicyConfigStore()
-const field = { variant: 'outlined', density: 'compact', hideDetails: 'auto' } as const
-const KINDS = HOLIDAY_KIND_OPTIONS
 const date = ref('')
 const name = ref('')
 const kind = ref<HolidayKind>('mandatory')
@@ -66,7 +78,7 @@ async function submit(): Promise<void> {
 <style scoped>
 .add-row {
   display: grid;
-  grid-template-columns: 170px minmax(0, 1fr) auto auto;
+  grid-template-columns: 180px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 12px;
 }

@@ -15,38 +15,38 @@
  -->
 
 <!-- Country and region for a policy; the region list follows the
-     country. Public holidays are imported for this pair. -->
+     country. Public holidays are imported for this pair. Renders the two
+     fields side by side as items of the parent's form grid. -->
 <template>
-  <div class="region-fields">
-    <v-autocomplete
-      :model-value="country"
-      :items="store.countries"
-      item-title="name"
-      item-value="code"
-      label="Country"
-      clearable
-      v-bind="field"
-      @update:model-value="setCountry"
-    />
-    <v-autocomplete
-      :model-value="subdivision"
-      :items="subdivisions"
-      item-title="name"
-      item-value="code"
-      label="Region"
-      clearable
-      :disabled="!subdivisions.length"
-      :hint="country && !subdivisions.length ? 'This country has no regional holidays.' : ''"
-      persistent-hint
-      v-bind="field"
-      @update:model-value="emit('update:subdivision', $event ?? null)"
-    />
-  </div>
+  <v-autocomplete
+    :model-value="country"
+    :items="store.countries"
+    item-title="name"
+    item-value="code"
+    label="Country"
+    clearable
+    v-bind="field"
+    @update:model-value="setCountry"
+  />
+  <v-autocomplete
+    :model-value="subdivision"
+    :items="subdivisions"
+    item-title="name"
+    item-value="code"
+    label="Region"
+    clearable
+    :disabled="!subdivisions.length"
+    :hint="country && !subdivisions.length ? 'This country has no regional holidays.' : ''"
+    persistent-hint
+    v-bind="field"
+    @update:model-value="emit('update:subdivision', $event ?? null)"
+  />
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useLeavePoliciesStore } from '@/stores/leavePolicies'
+import { FIELD_PROPS } from '@/utils/leavePolicyDisplay'
 
 const props = defineProps<{ country: string | null; subdivision: string | null }>()
 const emit = defineEmits<{
@@ -55,7 +55,7 @@ const emit = defineEmits<{
 }>()
 
 const store = useLeavePoliciesStore()
-const field = { variant: 'outlined', density: 'compact', hideDetails: 'auto' } as const
+const field = FIELD_PROPS
 
 const subdivisions = computed(
   () => store.countries.find(c => c.code === props.country)?.subdivisions ?? [],
@@ -70,16 +70,3 @@ onMounted(() => {
   void store.fetchCountries()
 })
 </script>
-
-<style scoped>
-.region-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-@media (max-width: 600px) {
-  .region-fields {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-</style>

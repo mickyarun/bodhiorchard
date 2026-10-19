@@ -164,3 +164,17 @@ export interface AssignResult {
   assigned: number
   pending_elsewhere: number
 }
+
+/** One employee and the policy they follow. `explicit` is false for people
+ *  nobody assigned, who follow the default (its id and name are filled in). */
+export interface PolicyMemberRead {
+  user_id: string
+  name: string
+  email: string
+  department: string | null
+  policy_id: string
+  policy_name: string
+  explicit: boolean
+  /** Set only for a transfer; otherwise their joining date drives allocation. */
+  assigned_on: string | null
+}

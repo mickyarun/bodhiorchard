@@ -17,76 +17,86 @@
 <!-- Add or edit a leave type. Types are switched off, never deleted, so
      past requests keep their meaning. -->
 <template>
-  <v-dialog :model-value="modelValue" max-width="480" @update:model-value="emit('update:modelValue', $event)">
-    <v-card class="pa-0">
-      <div class="d-flex align-center justify-space-between pa-6 pb-2">
-        <h2 class="text-h6 font-weight-bold">{{ type ? 'Edit leave type' : 'Add leave type' }}</h2>
+  <v-dialog :model-value="modelValue" max-width="600" :fullscreen="xs" scrollable @update:model-value="emit('update:modelValue', $event)">
+    <v-card color="surface" rounded="lg">
+      <div class="d-flex align-start ga-2 pa-6 pb-2">
+        <div class="flex-grow-1">
+          <h2 class="text-h6 font-weight-bold">{{ type ? 'Edit leave type' : 'Add leave type' }}</h2>
+          <p class="text-body-2 text-medium-emphasis">Applies to everyone on {{ policyName }}.</p>
+        </div>
         <v-btn icon="mdi-close" variant="text" size="small" aria-label="Close" @click="close" />
       </div>
-      <v-form class="px-6 d-flex flex-column ga-3" @submit.prevent="submit">
-        <div class="form-grid">
-          <v-text-field v-model="draft.name" label="Name" autofocus v-bind="field" @update:model-value="syncCode" />
-          <v-text-field v-model="draft.code" label="Code" maxlength="10" v-bind="field" @update:model-value="codeTouched = true" />
-        </div>
-        <div class="d-flex align-center ga-4 flex-wrap">
-          <v-text-field
-            v-model.number="quota"
-            label="Days a year"
-            type="number"
-            min="0"
-            max="365"
-            step="0.5"
-            :disabled="unlimited"
-            style="max-width: 160px"
-            v-bind="field"
-          />
-          <v-checkbox v-model="unlimited" label="No limit" density="compact" hide-details />
-        </div>
-        <div>
-          <div class="text-caption text-medium-emphasis mb-1">Colour</div>
-          <div class="d-flex ga-2" role="radiogroup" aria-label="Colour">
-            <button
-              v-for="(key, index) in SWATCH_KEYS"
-              :key="key"
-              type="button"
-              role="radio"
-              class="swatch"
-              :class="{ 'swatch--active': draft.color_key === key }"
-              :style="{ background: `rgb(var(--v-theme-${SWATCH_COLORS[key]}))` }"
-              :aria-checked="draft.color_key === key"
-              :aria-label="`Colour ${index + 1}`"
-              @click="draft.color_key = key"
+      <v-card-text class="px-6">
+        <v-form class="d-flex flex-column" @submit.prevent="submit">
+          <div class="group" role="group" :aria-labelledby="ids.basics">
+            <div :id="ids.basics" class="group__title text-overline text-medium-emphasis">Basics</div>
+            <v-text-field v-model="draft.name" label="Name" maxlength="100" autofocus v-bind="FIELD_PROPS" @update:model-value="syncCode" />
+            <v-text-field
+              v-model="draft.code"
+              label="Code"
+              maxlength="10"
+              hint="Short ID for reports. Filled in from the name."
+              persistent-hint
+              class="code mt-5"
+              v-bind="FIELD_PROPS"
+              @update:model-value="codeTouched = true"
             />
           </div>
-        </div>
-        <div class="d-flex ga-6 flex-wrap">
-          <v-switch v-model="draft.is_paid" label="Paid" color="primary" density="compact" hide-details inset />
-          <v-switch v-model="draft.is_active" label="Active" color="primary" density="compact" hide-details inset />
-        </div>
-        <AppCallout v-if="error" variant="error">{{ error }}</AppCallout>
-      </v-form>
-      <div class="d-flex justify-end ga-2 pa-6 pt-4">
+          <div class="group" role="group" :aria-labelledby="ids.allowance">
+            <div :id="ids.allowance" class="group__title text-overline text-medium-emphasis">Allowance</div>
+            <LeaveTypeAllowanceField v-model:unlimited="unlimited" v-model:days="quota" />
+          </div>
+          <div class="group" role="group" :aria-labelledby="ids.appearance">
+            <div :id="ids.appearance" class="group__title text-overline text-medium-emphasis">Appearance &amp; status</div>
+            <LeaveTypeColorPicker v-model="draft.color_key" :name="draft.name" class="mb-3" />
+            <LeaveSwitchRow v-model="draft.is_paid" label="Paid leave" />
+            <LeaveSwitchRow
+              v-if="type"
+              v-model="draft.is_active"
+              label="Available to request"
+              description="Switch off to retire it. Past requests and balances are kept."
+            />
+          </div>
+          <AppCallout v-if="error" variant="error" class="mt-2">{{ error }}</AppCallout>
+        </v-form>
+      </v-card-text>
+      <v-divider />
+      <div class="d-flex justify-end ga-2 pa-4">
         <v-btn variant="text" @click="close">Cancel</v-btn>
-        <v-btn color="primary" :loading="saving" :disabled="!valid" @click="submit">Save</v-btn>
+        <v-btn color="primary" variant="flat" :loading="saving" :disabled="!valid" @click="submit">
+          {{ type ? 'Save changes' : 'Add leave type' }}
+        </v-btn>
       </div>
     </v-card>
   </v-dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
+import { useDisplay } from 'vuetify'
 import AppCallout from '@/components/common/AppCallout.vue'
+import LeaveSwitchRow from '@/components/leave/settings/LeaveSwitchRow.vue'
+import LeaveTypeAllowanceField from '@/components/leave/settings/LeaveTypeAllowanceField.vue'
+import LeaveTypeColorPicker from '@/components/leave/settings/LeaveTypeColorPicker.vue'
 import { useLeavePolicyConfigStore } from '@/stores/leavePolicyConfig'
 import type { LeaveTypeRead, LeaveTypeWrite } from '@/types/leavePolicy'
-import { codeFromName, SWATCH_COLORS, SWATCH_KEYS, toNumberOrNull } from '@/utils/leave'
+import { codeFromName, SWATCH_KEYS, toNumberOrNull } from '@/utils/leave'
+import { FIELD_PROPS } from '@/utils/leavePolicyDisplay'
 
-const props = defineProps<{ modelValue: boolean; policyId: string; type: LeaveTypeRead | null }>()
+const props = defineProps<{
+  modelValue: boolean
+  policyId: string
+  policyName: string
+  type: LeaveTypeRead | null
+}>()
 const emit = defineEmits<(e: 'update:modelValue', value: boolean) => void>()
 
+const DEFAULT_QUOTA = 12
+const ids = { basics: useId(), allowance: useId(), appearance: useId() }
 const store = useLeavePolicyConfigStore()
-const field = { variant: 'outlined', density: 'compact', hideDetails: 'auto' } as const
+const { xs } = useDisplay()
 const draft = ref<LeaveTypeWrite>(blank())
-const quota = ref<number | null>(12)
+const quota = ref<number | null>(DEFAULT_QUOTA)
 const unlimited = ref(false)
 const codeTouched = ref(false)
 const saving = ref(false)
@@ -103,24 +113,20 @@ function blank(): LeaveTypeWrite {
   return { name: '', code: '', annual_quota_days: null, is_paid: true, color_key: SWATCH_KEYS[0], is_active: true }
 }
 
+function fromType(type: LeaveTypeRead): LeaveTypeWrite {
+  const { name, code, annual_quota_days, is_paid, color_key, is_active } = type
+  return { name, code, annual_quota_days, is_paid, color_key, is_active }
+}
+
 watch(
   () => props.modelValue,
   open => {
     if (!open) return
     const type = props.type
-    draft.value = type
-      ? {
-          name: type.name,
-          code: type.code,
-          annual_quota_days: type.annual_quota_days,
-          is_paid: type.is_paid,
-          color_key: type.color_key,
-          is_active: type.is_active,
-        }
-      : blank()
-    const current = type ? toNumberOrNull(type.annual_quota_days) : 12
+    draft.value = type ? fromType(type) : blank()
+    const current = type ? toNumberOrNull(type.annual_quota_days) : DEFAULT_QUOTA
     unlimited.value = !!type && current === null
-    quota.value = current ?? 12
+    quota.value = current ?? DEFAULT_QUOTA
     codeTouched.value = !!type
     error.value = ''
   },
@@ -150,20 +156,18 @@ async function submit(): Promise<void> {
 </script>
 
 <style scoped>
-.form-grid {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 12px;
+.group {
+  padding: 0 0 20px;
 }
-.swatch {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  cursor: pointer;
+.group + .group {
+  border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  padding-top: 16px;
 }
-.swatch--active {
-  outline: 2px solid rgb(var(--v-theme-on-surface));
-  outline-offset: 2px;
+.group__title {
+  margin-bottom: 8px;
+  line-height: 1.6;
+}
+.code {
+  max-width: 180px;
 }
 </style>

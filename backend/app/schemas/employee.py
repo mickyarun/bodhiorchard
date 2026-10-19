@@ -100,6 +100,18 @@ class ManagerRef(BaseModel):
     is_active: bool
 
 
+class EmployeeLeavePolicy(BaseModel):
+    """The leave policy an employee follows — part of the work details.
+
+    ``explicit`` is False when nobody has assigned one, so the default applies.
+    """
+
+    id: uuid.UUID
+    name: str
+    is_default: bool
+    explicit: bool
+
+
 class EmployeeAccessRead(BaseModel):
     """What the caller may change on this record (drives the UI)."""
 
@@ -117,6 +129,9 @@ class EmployeeRead(BaseModel):
     email: str
     is_active: bool
     work: EmployeeWork
+    # Read-only alongside the work details; null only before the org has a
+    # default policy. Changed through the leave policy assign route.
+    leave_policy: EmployeeLeavePolicy | None = None
     managers: list[ManagerRef]
     personal: EmployeePersonal | None
     access: EmployeeAccessRead

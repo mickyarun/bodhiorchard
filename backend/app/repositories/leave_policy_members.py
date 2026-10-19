@@ -16,9 +16,10 @@
 
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import ColumnElement, case, exists, func, or_, select
+from sqlalchemy import ColumnElement, and_, case, exists, func, literal, or_, select
 from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +30,20 @@ from app.models.leave_request import LeaveRequest, LeaveStatus
 from app.models.leave_type import LeaveType
 from app.models.user import User
 from app.repositories.base import rowcount
+
+
+@dataclass(frozen=True)
+class PolicyMember:
+    """An employee and the policy they follow (the default when unassigned)."""
+
+    user_id: uuid.UUID
+    name: str
+    email: str
+    department: str | None
+    policy_id: uuid.UUID
+    policy_name: str
+    explicit: bool
+    assigned_on: date | None
 
 
 class LeavePolicyMemberRepository:
@@ -64,6 +79,58 @@ class LeavePolicyMemberRepository:
             .order_by(User.name)
         )
         return [(row[0], row[1]) for row in (await self._db.execute(stmt)).all()]
+
+    async def list_members(
+        self,
+        default_policy: LeavePolicy,
+        *,
+        policy_id: uuid.UUID | None = None,
+        unassigned: bool = False,
+        q: str | None = None,
+        limit: int,
+    ) -> list[PolicyMember]:
+        """Employees with the policy they follow, ordered by name, at most ``limit``.
+
+        Unassigned employees follow ``default_policy``. ``policy_id`` keeps
+        only that policy's followers, ``unassigned`` only people nobody has
+        assigned; ``q`` matches name or email.
+        """
+        effective_id = func.coalesce(EmployeeProfile.leave_policy_id, literal(default_policy.id))
+        stmt = (
+            select(
+                User.id,
+                User.name,
+                User.email,
+                EmployeeProfile.department,
+                effective_id,
+                func.coalesce(LeavePolicy.name, literal(default_policy.name)),
+                EmployeeProfile.leave_policy_id.is_not(None),
+                EmployeeProfile.leave_policy_assigned_on,
+            )
+            .join(EmployeeProfile, EmployeeProfile.user_id == User.id)
+            .outerjoin(
+                LeavePolicy,
+                and_(
+                    LeavePolicy.id == EmployeeProfile.leave_policy_id,
+                    LeavePolicy.org_id == self._org,
+                ),
+            )
+            .where(EmployeeProfile.org_id == self._org)
+            .order_by(User.name)
+            .limit(limit)
+        )
+        if policy_id is not None:
+            stmt = stmt.where(effective_id == policy_id)
+        if unassigned:
+            stmt = stmt.where(EmployeeProfile.leave_policy_id.is_(None))
+        if q and q.strip():
+            # Escape LIKE wildcards so "%" or "_" in a search match literally.
+            term = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{term}%"
+            stmt = stmt.where(
+                or_(User.name.ilike(pattern, escape="\\"), User.email.ilike(pattern, escape="\\"))
+            )
+        return [PolicyMember(*row) for row in (await self._db.execute(stmt)).all()]
 
     async def assign_employees(
         self, policy: LeavePolicy, user_ids: Sequence[uuid.UUID], on: date

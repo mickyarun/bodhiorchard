@@ -34,6 +34,7 @@
       </v-btn>
     </div>
 
+    <AppCallout v-if="policyNotice" :variant="policyNotice.variant" class="mb-4">{{ policyNotice.text }}</AppCallout>
     <FieldGrid v-if="!editing" :fields="fields" />
 
     <v-form v-else @submit.prevent="save">
@@ -71,16 +72,21 @@
       :managers="record.managers"
       :editable="record.access.edit_managers"
     />
+    <ChangePolicyDialog v-model="changingPolicy" :record="record" @moved="onPolicyMoved" />
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
+import ChangePolicyDialog from '@/components/people/ChangePolicyDialog.vue'
 import FieldGrid, { type GridField } from '@/components/people/FieldGrid.vue'
 import ManagersEditor from '@/components/people/ManagersEditor.vue'
+import { usePermissions } from '@/composables/usePermissions'
+import { useAuthStore } from '@/stores/auth'
 import { useEmployeesStore } from '@/stores/employees'
 import type { EmployeeRecord, EmployeeWork } from '@/types/employee'
+import type { AssignResult } from '@/types/leavePolicy'
 import {
   blankToNull,
   EMPLOYMENT_TYPE_LABELS,
@@ -88,11 +94,17 @@ import {
   selectItems,
   STATUS_LABELS,
 } from '@/utils/employee'
+import { movedSummary, movedVariant } from '@/utils/leavePolicy'
+import { canChangeMemberPolicy, employeePolicyLabel } from '@/utils/policyMembers'
 
 const props = defineProps<{ record: EmployeeRecord }>()
 
 const store = useEmployeesStore()
+const authStore = useAuthStore()
+const { canConfigureLeave, isOrgOwner } = usePermissions()
 const editing = ref(false)
+const changingPolicy = ref(false)
+const policyNotice = ref<{ text: string; variant: 'success' | 'warning' } | null>(null)
 const saving = ref(false)
 const error = ref('')
 const draft = ref<EmployeeWork>({ ...props.record.work })
@@ -114,8 +126,28 @@ const fields = computed<GridField[]>(() => {
     { label: 'Date of exit', value: w.date_of_exit ? formatDateOnly(w.date_of_exit) : null, locked },
     { label: 'Country', value: w.country_code, locked },
     { label: 'Work location', value: w.work_location, locked },
+    leavePolicyField.value,
   ]
 })
+
+// Anyone with leave:configure may change it, but never on their own record
+// unless they own the org (the assign route checks the same).
+const leavePolicyField = computed<GridField>(() => {
+  const canChange =
+    canConfigureLeave.value &&
+    canChangeMemberPolicy(props.record.user_id, authStore.user?.id, isOrgOwner.value)
+  return {
+    label: 'Leave policy',
+    value: employeePolicyLabel(props.record.leave_policy),
+    action: canChange
+      ? { label: 'Change', ariaLabel: 'Change leave policy', run: () => (changingPolicy.value = true) }
+      : undefined,
+  }
+})
+
+function onPolicyMoved(result: AssignResult, policyName: string): void {
+  policyNotice.value = { text: movedSummary(result, policyName), variant: movedVariant(result) }
+}
 
 const exitNotice = computed(() => {
   if (props.record.access_revoked === true) {
