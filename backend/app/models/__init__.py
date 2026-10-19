@@ -61,11 +61,16 @@ from app.models.feature_qa_session import FeatureQASession, FeatureQAStatus
 from app.models.feature_to_repo import FeatureToRepo, FeatureToRepoRole
 from app.models.jira_import import ImportStatus, JiraImportSession, JiraIssueBudMap, MapStatus
 from app.models.jwt_token import JWTToken
+from app.models.leave_ledger import LeaveLedgerEntry
+from app.models.leave_policy import LeavePolicy
+from app.models.leave_request import LeaveRequest
+from app.models.leave_type import LeaveType
 from app.models.mcp_audit_log import MCPAuditLogEntry
 from app.models.minigame import MinigameScore, MinigameSession
 from app.models.notification import Notification, NotificationType
 from app.models.organization import Organization
 from app.models.permission import Permission, PermissionCategory
+from app.models.policy_holiday import PolicyHoliday
 from app.models.pull_request import PRReviewStatus, PRState, PullRequest
 from app.models.qa_test_evidence import QATestEvidence
 from app.models.quiz import Quiz, QuizStatus
@@ -146,6 +151,11 @@ __all__ = [
     "BugAttachment",
     "EmployeeProfile",
     "EmployeeReportingManager",
+    "LeaveLedgerEntry",
+    "LeavePolicy",
+    "LeaveRequest",
+    "LeaveType",
+    "PolicyHoliday",
     "BugComment",
     "BugSeverity",
     "BugStatus",

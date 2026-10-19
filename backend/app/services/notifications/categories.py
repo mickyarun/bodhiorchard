@@ -52,6 +52,8 @@ class NotificationCategory(StrEnum):
 
     MINIGAMES = "minigames"
     QUIZ = "quiz"
+    LEAVE_APPROVALS = "leave_approvals"
+    LEAVE_UPDATES = "leave_updates"
 
 
 @dataclass(frozen=True)
@@ -93,6 +95,18 @@ NOTIFICATION_CATEGORIES: tuple[CategoryDef, ...] = (
         description="Daily quiz-open and answer-reveal reminders.",
         group="Games & fun",
         required_permission=WORKSPACE_ENGINEERING,
+    ),
+    CategoryDef(
+        category=NotificationCategory.LEAVE_APPROVALS,
+        label="Requests to approve",
+        description="New leave and work-from-home requests from people you approve for.",
+        group="Leave & WFH",
+    ),
+    CategoryDef(
+        category=NotificationCategory.LEAVE_UPDATES,
+        label="Your requests",
+        description="When your leave or work-from-home request is approved or rejected.",
+        group="Leave & WFH",
     ),
 )
 

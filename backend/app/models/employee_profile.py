@@ -117,6 +117,16 @@ class EmployeeProfile(BaseModel):
     # ISO 3166-1 alpha-2; picks the default leave policy later.
     country_code: Mapped[str | None] = mapped_column(String(2), nullable=True)
     work_location: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    # NULL = the org's default leave policy.
+    leave_policy_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "leave_policies.id", ondelete="RESTRICT", name="fk_employee_profiles_leave_policy"
+        ),
+        nullable=True,
+    )
+    # When the current policy was assigned; new allocations start from here.
+    leave_policy_assigned_on: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # ── Personal ──
     date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)

@@ -23,6 +23,8 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.23,<2.1",
     "asyncpg>=0.29.0",
     "alembic>=1.13.0",
+    # Public holidays by country/region for leave policies (MIT).
+    "holidays>=0.60,<1",
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
     "python-jose[cryptography]>=3.3.0",

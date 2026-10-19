@@ -52,6 +52,13 @@ from app.api.v1.internal_colyseus import router as internal_colyseus_router
 from app.api.v1.jira_import import router as jira_router
 from app.api.v1.jobs import router as jobs_router
 from app.api.v1.learnings import router as learnings_router
+from app.api.v1.leave import router as leave_router
+from app.api.v1.leave_approvals import router as leave_approvals_router
+from app.api.v1.leave_balances import router as leave_balances_router
+from app.api.v1.leave_calendar import router as leave_calendar_router
+from app.api.v1.leave_holidays import router as leave_holidays_router
+from app.api.v1.leave_policies import router as leave_policies_router
+from app.api.v1.leave_types import router as leave_types_router
 from app.api.v1.me import router as me_router
 from app.api.v1.members import router as members_router
 from app.api.v1.minigames import router as minigames_router
@@ -101,6 +108,16 @@ api_router.include_router(public_router, prefix="/api/v1/public")
 # employees:* permission or "own record".
 api_router.include_router(employees_router, prefix="/api/v1/employees")
 api_router.include_router(employee_updates_router, prefix="/api/v1/employees")
+for leave_part in (
+    leave_router,
+    leave_approvals_router,
+    leave_calendar_router,
+    leave_balances_router,
+    leave_policies_router,
+    leave_types_router,
+    leave_holidays_router,
+):
+    api_router.include_router(leave_part, prefix="/api/v1/leave")
 # Org-level settings routes; each is gated by its own org/integration
 # permission. The engineering-only settings sub-routers are mounted below.
 api_router.include_router(settings_router, prefix="/api/v1/settings")

@@ -15,6 +15,7 @@
 """User data access repository."""
 
 import uuid
+from collections.abc import Collection
 from typing import Any
 
 from sqlalchemy import Select, and_, case, false, func, null, or_, select, true
@@ -212,6 +213,7 @@ class UserRepository(BaseRepository[User]):
         category: str,
         default_enabled: bool = True,
         permission: str | None = None,
+        user_ids: Collection[uuid.UUID] | None = None,
     ) -> list[tuple[uuid.UUID, str]]:
         """``(user_id, slack_id)`` pairs for active members who allow ``category``.
 
@@ -232,6 +234,8 @@ class UserRepository(BaseRepository[User]):
 
         ``permission``, when given, keeps only members whose role grants it
         (the system ``org_owner`` role counts as holding everything).
+        ``user_ids``, when given, limits the result to those members (DMs to
+        specific people, e.g. a request's approvers).
         """
         default_text = "true" if default_enabled else "false"
         stmt = (
@@ -246,6 +250,8 @@ class UserRepository(BaseRepository[User]):
         )
         if permission is not None:
             stmt = stmt.where(_membership_holds(permission))
+        if user_ids is not None:
+            stmt = stmt.where(User.id.in_(list(user_ids)))
         result = await self._db.execute(stmt)
         return [(row[0], row[1]) for row in result.all() if row[1]]
 
@@ -723,6 +729,25 @@ class UserRepository(BaseRepository[User]):
         )
         result = await self._db.execute(stmt)
         return {row.slack_id: row.name for row in result.all() if row.slack_id and row.name}
+
+    async def list_member_ids_with_permission(
+        self, org_id: uuid.UUID, permission: str
+    ) -> list[uuid.UUID]:
+        """Active members of ``org_id`` whose role grants ``permission``.
+
+        The system ``org_owner`` role counts as holding everything; role-less
+        memberships resolve to the unassigned-member permission set.
+        """
+        stmt = (
+            select(User.id)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .where(
+                OrgToUser.org_id == org_id,
+                User.is_active.is_(True),
+                _membership_holds(permission),
+            )
+        )
+        return list((await self._db.execute(stmt)).scalars().all())
 
     async def get_names_by_ids(self, user_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
         """Batch-fetch user names by IDs.
