@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.deps import PermissionSet
 from app.models.employee_profile import EmployeeProfile
-from app.models.leave_policy import WfhApproval
+from app.models.leave_policy import ProrationMethod, WfhApproval
 from app.models.leave_request import LeaveKind, LeaveStatus
 from app.models.leave_type import LeaveType
 from app.models.organization import Organization
@@ -461,3 +461,19 @@ async def test_cancelling_an_approved_future_request(pg_session_factory: Factory
         await db.commit()
         cancelled = await cancel(db, org, emp, request.id)
         assert cancelled.status == LeaveStatus.CANCELLED
+
+
+async def test_mid_year_joiner_gets_a_prorated_allocation(pg_session_factory: Factory) -> None:
+    org, (emp,), _ = await _setup(pg_session_factory, "Emp")
+    year = date.today().year
+    async with pg_session_factory() as db:
+        policy = (await resolve_member_policy(db, org, emp)).policy
+        policy.proration_method = ProrationMethod.MONTHLY
+        policy.proration_cutoff_day = 15
+        profile = await EmployeeProfileRepository(db, org_id=org).get_by_user(emp)
+        assert profile is not None
+        profile.date_of_joining = date(year, 7, 20)
+        await db.commit()
+        summary = await build_summary(db, org, emp, year)
+        # Aug to Dec: 5 x 5 / 12 = 2.08, to the nearest half day.
+        assert [b.allocated for b in summary.balances] == [Decimal("2.0")]

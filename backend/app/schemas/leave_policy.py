@@ -20,7 +20,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.models.leave_policy import WfhApproval
+from app.models.leave_policy import AllocationRounding, ProrationMethod, WfhApproval
 from app.models.policy_holiday import HolidayKind, HolidaySource
 from app.schemas.leave import PersonRef
 from app.schemas.leave_summary import Balance, LeaveYear
@@ -40,6 +40,9 @@ class PolicyWrite(BaseModel):
     wfh_monthly_auto_days: int = Field(0, ge=0, le=31)
     backdate_limit_days: int = Field(7, ge=0, le=365)
     optional_holiday_quota: int = Field(0, ge=0, le=60)
+    proration_method: ProrationMethod = ProrationMethod.DAILY
+    proration_cutoff_day: int = Field(15, ge=1, le=31)
+    allocation_rounding: AllocationRounding = AllocationRounding.NEAREST_HALF
 
     @field_validator("working_days")
     @classmethod

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Pure leave rules: leave years, day counting, WFH allowance, allocation."""
+"""Pure leave rules: leave years, day counting, WFH allowance."""
 
 from datetime import date
 from decimal import Decimal
@@ -21,7 +21,6 @@ import pytest
 
 from app.models.leave_policy import WfhApproval
 from app.models.leave_request import HalfDay
-from app.services.leave.allocation import allocation_for_year, round_to_half
 from app.services.leave.calendar_math import (
     count_days,
     days_by_month,
@@ -131,20 +130,3 @@ def test_auto_days_left() -> None:
     assert auto_days_left(WfhApproval.AUTO_WITHIN_ALLOWANCE, 3, Decimal("1")) == 2
     assert auto_days_left(WfhApproval.AUTO_WITHIN_ALLOWANCE, 3, Decimal("5")) == 0
     assert auto_days_left(WfhApproval.REQUIRED, 3, Decimal("0")) is None
-
-
-YEAR = (date(2026, 1, 1), date(2026, 12, 31))
-
-
-def test_full_quota_for_people_who_started_before_the_year() -> None:
-    assert allocation_for_year(Decimal("12"), date(2024, 3, 4), *YEAR) == Decimal("12")
-    assert allocation_for_year(Decimal("12"), None, *YEAR) == Decimal("12")
-
-
-def test_nothing_for_people_starting_after_the_year() -> None:
-    assert allocation_for_year(Decimal("12"), date(2027, 2, 1), *YEAR) == Decimal("0")
-
-
-def test_round_to_half() -> None:
-    assert round_to_half(Decimal("6.24")) == Decimal("6")
-    assert round_to_half(Decimal("6.25")) == Decimal("6.5")

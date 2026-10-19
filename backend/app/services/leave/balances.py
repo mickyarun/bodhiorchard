@@ -14,9 +14,10 @@
 
 """Leave balances: allocation + adjustments − approved − pending.
 
-Allocations are written to the ledger the first time a year is read
-(:func:`app.services.leave.allocation.allocation_for_year`), which freezes
-them: a later quota edit doesn't rewrite a year already in use.
+A year's allocation (:func:`app.services.leave.allocation.allocation_for_year`)
+is written to the ledger on the member's first submit or approval in that
+year, which freezes it: a later quota or proration edit doesn't rewrite a
+year already in use. Until then it is worked out live from the policy.
 """
 
 import uuid
@@ -31,7 +32,7 @@ from app.models.leave_type import LeaveType
 from app.repositories.leave_ledger import LeaveLedgerRepository
 from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.leave_type import LeaveTypeRepository
-from app.services.leave.allocation import allocation_for_year
+from app.services.leave.allocation import ProrationRule, allocation_for_year
 from app.services.leave.calendar_math import LeaveYearBounds
 from app.services.leave.policies import effective_from
 
@@ -78,11 +79,17 @@ async def balances_for(
     )
     ledger = LeaveLedgerRepository(db, org_id=org_id)
     totals = await ledger.totals(user_id, year.label)
+    rule = ProrationRule(
+        method=policy.proration_method,
+        cutoff_day=policy.proration_cutoff_day,
+        rounding=policy.allocation_rounding,
+    )
     for leave_type in types:
         quota = leave_type.annual_quota_days
         stored, adjustments = totals.get(leave_type.id, (None, ZERO))
         if quota is not None and stored is None:
-            days = allocation_for_year(quota, effective_from(profile), year.start, year.end)
+            joined = effective_from(profile)
+            days = allocation_for_year(quota, joined, year.start, year.end, rule)
             if persist:
                 await ledger.ensure_allocation(user_id, leave_type.id, year.label, days)
             totals[leave_type.id] = (days, adjustments)

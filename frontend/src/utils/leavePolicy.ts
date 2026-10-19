@@ -14,7 +14,13 @@
 
 /** Pure helpers for the leave policy settings screens. */
 import type { HolidayKind } from '@/types/leave'
-import type { HolidayCountry, PolicyRead, PolicyWrite } from '@/types/leavePolicy'
+import type {
+  AllocationRounding,
+  HolidayCountry,
+  PolicyRead,
+  PolicyWrite,
+  ProrationMethod,
+} from '@/types/leavePolicy'
 import { MONTH_NAMES } from '@/utils/leaveDates'
 
 /** A new policy's starting values (match the API's own defaults). */
@@ -30,6 +36,9 @@ export function newPolicy(): PolicyWrite {
     wfh_monthly_auto_days: 0,
     backdate_limit_days: 7,
     optional_holiday_quota: 0,
+    proration_method: 'daily',
+    proration_cutoff_day: 15,
+    allocation_rounding: 'nearest_half',
   }
 }
 
@@ -46,7 +55,26 @@ export function policyToWrite(policy: PolicyRead): PolicyWrite {
     wfh_monthly_auto_days: policy.wfh_monthly_auto_days,
     backdate_limit_days: policy.backdate_limit_days,
     optional_holiday_quota: policy.optional_holiday_quota,
+    proration_method: policy.proration_method,
+    proration_cutoff_day: policy.proration_cutoff_day,
+    allocation_rounding: policy.allocation_rounding,
   }
+}
+
+export const PRORATION_LABELS: Record<ProrationMethod, string> = {
+  daily: 'By days left in the leave year',
+  monthly: 'By whole months left in the leave year',
+  none: "Don't prorate: full quota",
+}
+
+export const ROUNDING_LABELS: Record<AllocationRounding, string> = {
+  nearest_half: 'Nearest half day',
+  up_half: 'Up to the next half day',
+  down_half: 'Down to the previous half day',
+  nearest_whole: 'Nearest whole day',
+  up_whole: 'Up to the next whole day',
+  down_whole: 'Down to the previous whole day',
+  none: "Don't round (one decimal place)",
 }
 
 /** "India – Tamil Nadu", "India", or "" when no country is set. */

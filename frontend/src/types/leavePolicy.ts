@@ -27,6 +27,16 @@ import type {
   WfhApproval,
 } from '@/types/leave'
 
+export type ProrationMethod = 'none' | 'daily' | 'monthly'
+export type AllocationRounding =
+  | 'none'
+  | 'nearest_half'
+  | 'up_half'
+  | 'down_half'
+  | 'nearest_whole'
+  | 'up_whole'
+  | 'down_whole'
+
 export interface PolicyWrite {
   name: string
   country_code: string | null
@@ -38,6 +48,10 @@ export interface PolicyWrite {
   wfh_monthly_auto_days: number
   backdate_limit_days: number
   optional_holiday_quota: number
+  proration_method: ProrationMethod
+  /** Monthly proration: joining on or before this day counts the month. */
+  proration_cutoff_day: number
+  allocation_rounding: AllocationRounding
 }
 
 export interface PolicyRead extends PolicyWrite {

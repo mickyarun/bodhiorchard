@@ -31,6 +31,7 @@
       <v-tab value="types">Leave types</v-tab>
       <v-tab value="holidays">Holidays</v-tab>
       <v-tab value="wfh">Work from home</v-tab>
+      <v-tab value="joiners">New joiners</v-tab>
       <v-tab value="general">General</v-tab>
       <v-tab value="employees">Employees</v-tab>
     </v-tabs>
@@ -44,6 +45,9 @@
         </v-tabs-window-item>
         <v-tabs-window-item value="wfh">
           <WfhTab :policy="policy" />
+        </v-tabs-window-item>
+        <v-tabs-window-item value="joiners">
+          <NewJoinersTab :policy="policy" />
         </v-tabs-window-item>
         <v-tabs-window-item value="general">
           <GeneralTab :policy="policy" />
@@ -62,6 +66,7 @@ import EmployeesTab from '@/components/leave/settings/EmployeesTab.vue'
 import GeneralTab from '@/components/leave/settings/GeneralTab.vue'
 import HolidaysTab from '@/components/leave/settings/HolidaysTab.vue'
 import LeaveTypesTab from '@/components/leave/settings/LeaveTypesTab.vue'
+import NewJoinersTab from '@/components/leave/settings/NewJoinersTab.vue'
 import WfhTab from '@/components/leave/settings/WfhTab.vue'
 import type { PolicyRead } from '@/types/leavePolicy'
 

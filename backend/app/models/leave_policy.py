@@ -15,7 +15,8 @@
 """Leave policy: the rules for one country or location.
 
 Each policy carries its own leave types and quotas, holiday calendar,
-working days, timezone, WFH approval rule and leave year. Every employee
+working days, timezone, WFH approval rule, leave year and the rule for
+prorating new joiners' allocations. Every employee
 follows exactly one policy: the one on their profile, else the org's
 default.
 """
@@ -45,6 +46,35 @@ class WfhApproval(StrEnum):
     AUTO = "auto"
     # The first N WFH days in a calendar month need no approval.
     AUTO_WITHIN_ALLOWANCE = "auto_within_allowance"
+
+
+class ProrationMethod(StrEnum):
+    """How a part-year allocation is worked out for someone who joins (or
+    moves onto the policy) after the leave year starts."""
+
+    # Full quota whatever the joining date.
+    NONE = "none"
+    # Share of the year's calendar days left from the joining date.
+    DAILY = "daily"
+    # Share of whole months left; the joining month counts only when they
+    # join on or before ``proration_cutoff_day``.
+    MONTHLY = "monthly"
+
+
+class AllocationRounding(StrEnum):
+    """How a prorated allocation is rounded: step and direction."""
+
+    NONE = "none"  # kept to one decimal place, the ledger's precision
+    NEAREST_HALF = "nearest_half"
+    UP_HALF = "up_half"
+    DOWN_HALF = "down_half"
+    NEAREST_WHOLE = "nearest_whole"
+    UP_WHOLE = "up_whole"
+    DOWN_WHOLE = "down_whole"
+
+
+def _enum_values(enum: type[StrEnum]) -> list[str]:
+    return [member.value for member in enum]
 
 
 class LeavePolicy(BaseModel):
@@ -82,6 +112,22 @@ class LeavePolicy(BaseModel):
     wfh_monthly_auto_days: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     backdate_limit_days: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=7)
     optional_holiday_quota: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    proration_method: Mapped[ProrationMethod] = mapped_column(
+        Enum(ProrationMethod, name="leave_proration_method", values_callable=_enum_values),
+        nullable=False,
+        default=ProrationMethod.DAILY,
+        server_default=ProrationMethod.DAILY.value,
+    )
+    # Monthly proration: joining on or before this day counts the month.
+    proration_cutoff_day: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=15, server_default="15"
+    )
+    allocation_rounding: Mapped[AllocationRounding] = mapped_column(
+        Enum(AllocationRounding, name="leave_allocation_rounding", values_callable=_enum_values),
+        nullable=False,
+        default=AllocationRounding.NEAREST_HALF,
+        server_default=AllocationRounding.NEAREST_HALF.value,
+    )
     is_default: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
