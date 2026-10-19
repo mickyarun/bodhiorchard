@@ -53,6 +53,7 @@ from app.services.employees.merge import (
     EmployeeMergeConflictError,
     transfer_employee_record,
 )
+from app.services.identity_takeover import assert_can_act_as
 from app.services.role_grants import (
     assert_can_assign_role,
     assert_can_manage_member,
@@ -418,9 +419,8 @@ async def set_member_password(
     user = await user_repo.get_by_id_with_membership(user_id, org.id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-    # A temporary password lets the caller sign in as the target, so it
-    # needs the same ceiling as changing their role.
-    await assert_can_manage_member(db, actor=perms, target=user)
+    # A temporary password lets the caller sign in as the target.
+    await assert_can_act_as(db, actor=perms, target=user, org_id=org.id)
 
     password = _generate_password()
     user.password_hash = hash_password(password)
@@ -615,6 +615,12 @@ async def merge_members(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot merge a member into itself.",
         )
+    if current_user.id in (target_id, body.source_id) and not perms.is_owner:
+        # Merging someone into yourself would hand you their account and record.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can't merge your own account. Ask another admin or the org owner.",
+        )
 
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)
@@ -627,10 +633,10 @@ async def merge_members(
     source = await user_repo.get_by_id_with_membership(body.source_id, org.id)
     if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source user not found.")
-    # Merging deactivates the source and hands its history to the target,
-    # so the caller must be able to manage both accounts.
-    await assert_can_manage_member(db, actor=perms, target=source)
-    await assert_can_manage_member(db, actor=perms, target=target)
+    # Merging deactivates the source and hands its history (and employee
+    # record) to the target: the caller must be able to act as both.
+    await assert_can_act_as(db, actor=perms, target=source, org_id=org.id)
+    await assert_can_act_as(db, actor=perms, target=target, org_id=org.id)
 
     # 0. Employee record first: it's the only step that can refuse, so a
     # conflict leaves nothing half-merged.

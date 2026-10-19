@@ -45,6 +45,9 @@ async def assert_can_relink(
     ``target`` must carry the transient role attributes from
     ``UserRepository.get_by_id_with_membership``.
     """
+    # The link decides who clicks Approve in Slack. It can't be used to sign
+    # in as them: the only credential sent over Slack is a password reset,
+    # which members.set_member_password guards with assert_can_act_as.
     await assert_can_manage_member(db, actor=actor, target=target)
     identities = SlackIdentityRepository(db)
     if await identities.membership_count(target.id) > 1:

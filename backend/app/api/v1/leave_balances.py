@@ -49,12 +49,23 @@ async def get_member_balances(
     db: AsyncSession = Depends(get_db),
 ) -> MemberBalances:
     """Balances and ledger: for the member, their managers, and HR."""
+    await _require_balance_access(db, current_user, perms, user_id)
+    return await member_balances(db, current_user.org_id, user_id, year)
+
+
+async def _require_balance_access(
+    db: AsyncSession, current_user: User, perms: PermissionSet, user_id: uuid.UUID
+) -> None:
+    """404 for strangers, 403 unless the caller may see this person's balances.
+
+    Changing a balance returns it, so the write routes check this too:
+    leave:configure alone doesn't show who used which leave.
+    """
     await require_member(db, current_user.org_id, user_id)
     if not await may_view_balances(db, current_user, perms, user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="You can't see this person's balances."
         )
-    return await member_balances(db, current_user.org_id, user_id, year)
 
 
 def _change(
@@ -83,6 +94,7 @@ async def adjust_balance(
     db: AsyncSession = Depends(get_db),
 ) -> MemberBalances:
     """Add or remove days, with a note (HR; not on your own balance)."""
+    await _require_balance_access(db, current_user, perms, user_id)
     change = _change(current_user, perms, user_id, body.leave_type_id, body.leave_year)
     label = await adjustments.adjust(db, change, body.days, body.note)
     return await member_balances(db, current_user.org_id, user_id, label)
@@ -97,6 +109,7 @@ async def recalculate_allocation(
     db: AsyncSession = Depends(get_db),
 ) -> RecalculateResult:
     """Re-run a frozen year's allocation and book any difference (HR)."""
+    await _require_balance_access(db, current_user, perms, user_id)
     change = _change(current_user, perms, user_id, body.leave_type_id, body.leave_year)
     result = await adjustments.recalculate(db, change)
     return RecalculateResult(

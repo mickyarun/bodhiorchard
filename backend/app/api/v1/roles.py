@@ -30,6 +30,7 @@ from app.schemas.role import RoleCreate, RoleRead, RoleUpdate
 from app.services.role_grants import (
     assert_can_grant,
     assert_can_grant_permission_ids,
+    assert_can_manage_role,
     log_sensitive_grant,
 )
 from app.services.role_validation import (
@@ -112,6 +113,9 @@ async def create_role(
     role_repo = RoleRepository(db, org_id=current_user.org_id)
     assert_custom_role_name_allowed(body.name)
     await assert_valid_base_role(role_repo, body.base_role_id)
+    # The base decides the member's effective role (and role-name checks
+    # like tech-arch approval), so basing a role on one is a grant too.
+    assert_can_grant(perms, await permissions_for_role(db, body.base_role_id))
     permission_ids = await with_inherited_workspace(db, body.base_role_id, body.permission_ids)
     granted = await assert_can_grant_permission_ids(db, perms, permission_ids)
     role = Role(
@@ -167,6 +171,7 @@ async def update_role(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can't edit the role you hold. Ask another admin or the org owner.",
         )
+    await assert_can_manage_role(db, actor=perms, role_id=role.id)
 
     if body.name is not None:
         assert_custom_role_name_allowed(body.name)
@@ -204,6 +209,7 @@ async def update_role(
 async def delete_role(
     role_id: uuid.UUID,
     current_user: User = Depends(require_permissions("team:assign_roles")),
+    perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Delete one of this org's custom roles. System roles cannot be deleted."""
@@ -216,4 +222,5 @@ async def delete_role(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="System roles cannot be deleted",
         )
+    await assert_can_manage_role(db, actor=perms, role_id=role.id)
     await role_repo.delete(role)

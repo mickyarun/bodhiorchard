@@ -34,6 +34,24 @@ if [ "${BODHIORCHARD_EGRESS_FIREWALL:-0}" = "1" ]; then
     fi
 fi
 
+# Signing key for sign-in tokens. Full Docker ships without one: generate a
+# random key on first start and keep it on the secrets volume, so every
+# install has its own and it survives rebuilds. An explicit SECRET_KEY wins.
+if [ -z "${SECRET_KEY:-}" ] || [ "$SECRET_KEY" = "change-me-in-production" ]; then
+    SECRETS_DIR="${INSTANCE_SECRETS_DIR:-/data/secrets}"
+    if [ ! -s "$SECRETS_DIR/secret_key" ]; then
+        echo "==> Generating a SECRET_KEY for this install"
+        if ! (umask 077 && mkdir -p "$SECRETS_DIR" && \
+            python -c "import secrets; print(secrets.token_urlsafe(48))" > "$SECRETS_DIR/secret_key"); then
+            echo "Can't write $SECRETS_DIR/secret_key. Mount a writable volume there" \
+                "(see docker-compose.yml) or set SECRET_KEY." >&2
+            exit 1
+        fi
+    fi
+    SECRET_KEY="$(cat "$SECRETS_DIR/secret_key")"
+    export SECRET_KEY
+fi
+
 echo "==> Running database migrations"
 alembic upgrade head
 

@@ -309,14 +309,19 @@ async def auth_test(token: str) -> dict[str, Any] | None:
     Returns:
         Dict with team_id, bot_id, user_id, etc., or None on failure.
     """
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"{_SLACK_BASE}/auth.test",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=_TIMEOUT,
-        )
-        data = resp.json()
-        if not data.get("ok"):
-            logger.warning("slack_auth_test_failed", error=data.get("error"))
-            return None
-        return cast(dict[str, Any], data)
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{_SLACK_BASE}/auth.test",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=_TIMEOUT,
+            )
+            data = resp.json()
+    except (httpx.HTTPError, ValueError):
+        # Slack unreachable or not JSON: report it like any other failure.
+        logger.warning("slack_auth_test_unreachable", exc_info=True)
+        return None
+    if not data.get("ok"):
+        logger.warning("slack_auth_test_failed", error=data.get("error"))
+        return None
+    return cast(dict[str, Any], data)

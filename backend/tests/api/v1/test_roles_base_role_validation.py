@@ -66,6 +66,7 @@ def _skip_grant_ceiling_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
         AsyncMock(side_effect=lambda _db, _base, ids: ids),
     )
     monkeypatch.setattr(role_handlers, "permissions_for_role", AsyncMock(return_value=set()))
+    monkeypatch.setattr(role_handlers, "assert_can_manage_role", AsyncMock(return_value=None))
 
 
 def _patch_role_repo(

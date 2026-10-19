@@ -118,6 +118,21 @@ async def assert_can_assign_role(
     return role_perms
 
 
+async def assert_can_manage_role(
+    db: AsyncSession, *, actor: PermissionSet, role_id: uuid.UUID
+) -> None:
+    """Raise 403 unless the actor holds every escalation permission the role has now.
+
+    Editing or deleting a custom role changes what all its holders can do,
+    so it needs the same ceiling as managing those holders one by one.
+    """
+    if ungrantable(actor, await permissions_for_role(db, role_id)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can't change a role that has access you don't have.",
+        )
+
+
 async def assert_can_manage_member(
     db: AsyncSession, *, actor: PermissionSet, target: User
 ) -> None:

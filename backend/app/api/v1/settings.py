@@ -71,6 +71,7 @@ from app.services.org_settings import (
     get_quiz_settings,
 )
 from app.services.slack_client import auth_test
+from app.services.slack_workspace import bot_token_team
 
 # Re-exported from ``github_app_jwt`` so service-layer modules can use
 # the same template without importing this route module (which would
@@ -254,16 +255,26 @@ async def update_connections(
                     ),
                 )
             org.slack_signing_secret = encrypt_secret(raw_secret)
-        # Allow manual team_id override (fallback if auth.test didn't work)
-        if body.slack.team_id:
+        # Manual team_id (fallback if auth.test didn't run on save): only
+        # accepted when Slack confirms the bot token belongs to that workspace.
+        # A new bot token sets the team id itself (above); a typed one only
+        # counts when it changes it.
+        typed_team = body.slack.team_id if not is_new_bot_token else None
+        if typed_team and typed_team != org.slack_team_id:
+            if await bot_token_team(org.slack_bot_token) != typed_team:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Slack didn't confirm that workspace for this bot token. "
+                    "Check the bot token and save again.",
+                )
             # One workspace, one org: a second org can't claim it (that would
             # make every Slack event and button ambiguous for both).
-            if await SlackIdentityRepository(db).team_id_taken(body.slack.team_id, org.id):
+            if await SlackIdentityRepository(db).team_id_taken(typed_team, org.id):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="That Slack workspace is already connected to another organization.",
                 )
-            org.slack_team_id = body.slack.team_id
+            org.slack_team_id = typed_team
 
     # AI config — preset + optional per-org merge model overrides.
     if body.ai_config is not None:

@@ -167,6 +167,13 @@ class BalanceAdjust(BaseModel):
     note: str = Field(..., min_length=3, max_length=500)
     leave_year: int | None = Field(None, ge=2000, le=2100)
 
+    @field_validator("days")
+    @classmethod
+    def _not_zero(cls, value: Decimal) -> Decimal:
+        if value == 0:
+            raise ValueError("Enter how many days to add or remove.")
+        return value
+
 
 class MemberBalances(BaseModel):
     """A member's balances and ledger for one leave year (HR / managers)."""

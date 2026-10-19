@@ -86,7 +86,11 @@ COPY . .
 # Leave it out and Docker creates the mountpoint itself as root:root
 # mode 755 while this image runs as ``appuser``, so every upload fails
 # with PermissionError and surfaces as a 500 in the UI.
-RUN mkdir -p /data/repos /data/ssh /app/data/uploads && \
+#
+# ``/data/secrets`` keeps the SECRET_KEY that entrypoint.sh generates
+# when none is configured (Full Docker), so it survives rebuilds.
+RUN mkdir -p /data/repos /data/ssh /data/secrets /app/data/uploads && \
+    chmod 700 /data/secrets && \
     chmod +x /app/entrypoint.sh && \
     chown -R appuser:appuser /app /data
 USER appuser

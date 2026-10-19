@@ -19,7 +19,8 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_current_user, get_db, get_permission_set
+from app.core.permission_deps import PermissionSet
 from app.models.organization import Organization
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
@@ -51,6 +52,7 @@ async def list_organizations(
 async def create_organization(
     body: OrganizationCreate,
     current_user: User = Depends(get_current_user),
+    perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> Organization:
     """Create a new organization.
@@ -66,6 +68,12 @@ async def create_organization(
     Raises:
         HTTPException: If the slug is already taken.
     """
+    if not perms.is_owner:
+        # Any member could otherwise mint orgs with arbitrary config.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an org owner can create another organization.",
+        )
     org_repo = OrganizationRepository(db)
     if await org_repo.get_by_slug(body.slug) is not None:
         raise HTTPException(
@@ -110,7 +118,8 @@ async def get_organization(
         HTTPException: If the organization is not found.
     """
     org_repo = OrganizationRepository(db)
-    org = await org_repo.get_by_id(org_id)
+    # Only your own org: another org's config reads as not found.
+    org = await org_repo.get_by_id(org_id) if org_id == current_user.org_id else None
     if org is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -44,7 +44,10 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://bodhiorchard:bodhiorchard@postgres:5432/bodhiorchard
       REDIS_URL: redis://redis:6379
-      SECRET_KEY: change-me-in-production
+      # Leave unset to have the backend generate one on first start and
+      # keep it in the secrets_data volume. A shared, well-known value would
+      # let anyone forge a sign-in as any user, the org owner included.
+      SECRET_KEY: ${SECRET_KEY:-}
       # Employees' sensitive details and documents. Without it those screens
       # say the key isn't configured; generate one with scripts/rotate_hr_keys.py.
       HR_ENCRYPTION_KEYS: ${HR_ENCRYPTION_KEYS:-}
@@ -88,6 +91,8 @@ services:
       # Persistent store for the backend's ed25519 deploy keypair used to
       # clone private GitHub repos. Only the public key is ever exposed.
       - ssh_data:/data/ssh
+      # This install's generated SECRET_KEY (see entrypoint.sh).
+      - secrets_data:/data/secrets
       # Uploaded files (QA evidence, bug attachments) when the local-disk
       # storage backend is in use, which is the default. WORKDIR is /app
       # and FILE_STORAGE_LOCAL_DIR defaults to the relative
@@ -165,4 +170,5 @@ volumes:
   postgres_data:
   repos_data:
   ssh_data:
+  secrets_data:
   uploads_data:

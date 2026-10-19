@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
 
+from app.api.v1 import settings as settings_api
 from app.models.organization import Organization
 from app.models.user import User
 from app.repositories.leave_digest_post import LeaveDigestPostRepository
@@ -76,7 +78,7 @@ async def test_ambiguous_slack_ids_match_nobody(pg_session_factory: Factory) -> 
 
 
 async def test_a_workspace_belongs_to_one_org(
-    client: AsyncClient, pg_session_factory: Factory
+    client: AsyncClient, pg_session_factory: Factory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     first, (owner1,), _ = await setup_org(pg_session_factory, "Own1")
     second, (owner2,), _ = await setup_org(pg_session_factory, "Own2")
@@ -90,6 +92,10 @@ async def test_a_workspace_belongs_to_one_org(
         await db.commit()
     body = {"slack": {"teamId": team}}
     url = "/api/v1/settings/connections"
+    # A typed team id needs Slack to confirm the org's bot token is in it.
+    unconfirmed = await client.patch(url, json=body, headers=as_user(owner2, second))
+    assert unconfirmed.status_code == 400, unconfirmed.text
+    monkeypatch.setattr(settings_api, "bot_token_team", AsyncMock(return_value=team))
     response = await client.patch(url, json=body, headers=as_user(owner2, second))
     assert response.status_code == 409, response.text
 
