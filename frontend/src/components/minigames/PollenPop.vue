@@ -54,7 +54,7 @@
       <span class="pollen__quota-label">{{ popsInLevel }} / {{ quota }} to next level</span>
     </div>
 
-    <div ref="arena" class="pollen__arena">
+    <div class="pollen__arena">
       <button
         v-for="m in motes"
         :key="m.id"
@@ -128,7 +128,6 @@ const quota = ref(8) // pops needed to clear the current level
 const popsInLevel = ref(0) // server-confirmed pops toward the current quota
 const escapes = ref(0) // flowers missed this level (server count) — fills the meter
 const banner = ref<{ id: number; text: string; kind: 'level' | 'life' } | null>(null)
-const arena = ref<HTMLElement | null>(null)
 const result = ref<MinigameResult | null>(null)
 
 const room = useMinigameRoom('pollen_pop', { onEvent, onResult }, { startingLives: POLLEN_LIVES })
