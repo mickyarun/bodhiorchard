@@ -122,23 +122,6 @@ class AIConfigSettings(BaseModel):
     ollama_model: str = Field(default="llama3:8b", alias="ollamaModel")
     cloud_provider: str = Field(default="anthropic", alias="cloudProvider")
     cloud_api_key: str = Field(default="", alias="cloudApiKey")
-    cloud_model: str = Field(default="claude-sonnet-4-5-20250514", alias="cloudModel")
-    merge_model_default: str | None = Field(
-        default=None,
-        alias="mergeModelDefault",
-        description=(
-            "Per-org override for the small-batch merge model. "
-            "None = use platform default from LLMConfig."
-        ),
-    )
-    merge_model_large: str | None = Field(
-        default=None,
-        alias="mergeModelLarge",
-        description=(
-            "Per-org override for the large-batch merge model. "
-            "None = use platform default from LLMConfig."
-        ),
-    )
 
     model_config = {"populate_by_name": True}
 
@@ -146,11 +129,9 @@ class AIConfigSettings(BaseModel):
 class ScanSettings(BaseModel):
     """Scan pipeline tuning settings."""
 
-    # Synth and merge each get their own timeout because the merge phase runs
-    # one long Claude call over every active feature, while synth runs many
-    # short calls in parallel — sharing a single ceiling forces a bad trade.
+    # Per-repo budget for one synthesize call. Synth runs many short calls
+    # in parallel, so this ceiling is per call, not per scan.
     timeout_seconds: int = Field(default=300, alias="timeoutSeconds", ge=60, le=3600)
-    merge_timeout_seconds: int = Field(default=300, alias="mergeTimeoutSeconds", ge=60, le=3600)
     max_turns: int = Field(default=40, alias="maxTurns", ge=0, le=100)
     auto_create_members: bool = Field(
         default=True,

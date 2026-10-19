@@ -48,54 +48,6 @@ class AuthConfig(BaseSettings):
     algorithm: str = "HS256"
 
 
-class LLMConfig(BaseSettings):
-    """LLM provider configuration."""
-
-    model_config = SettingsConfigDict(env_prefix="LLM_", env_file=".env", extra="ignore")
-
-    provider: str = Field(default="ollama")
-    model: str = Field(default="llama3:8b")
-    base_url: str = Field(default="http://localhost:11434")
-    premium_provider: str = Field(default="ollama")
-    premium_model: str = Field(default="llama3:70b")
-    merge_model_default: str = Field(
-        default="claude-sonnet-4-6",
-        description=(
-            "Model for cross-repo feature merge at typical scale. "
-            "Per-org override via org.config['llm']['merge_model_default']."
-        ),
-    )
-    merge_model_large: str = Field(
-        default="claude-opus-4-7",
-        description=(
-            "Escalation model for very large merge runs. "
-            "Per-org override via org.config['llm']['merge_model_large']."
-        ),
-    )
-    merge_safe_feature_budget: int = Field(
-        default=16000,
-        description=(
-            "Active feature count above which the merge phase falls back "
-            "to embedding-blocked clusters (Phase 4). At 1M-token context, "
-            "16K features in a two-section prompt fits comfortably."
-        ),
-    )
-    merge_sonnet_quality_budget: int = Field(
-        default=3000,
-        description=(
-            "Active feature count at or below which Sonnet 4.6 handles "
-            "the merge call; above this, Opus 4.7 is selected."
-        ),
-    )
-    merge_large_cluster_opus: int = Field(
-        default=200,
-        description=(
-            "Per-cluster feature count above which Opus 4.7 is selected "
-            "for that cluster (Phase 4)."
-        ),
-    )
-
-
 class EmbeddingConfig(BaseSettings):
     """Embedding provider configuration."""
 
@@ -334,7 +286,6 @@ class Settings(BaseSettings):
 
     db: DatabaseConfig = DatabaseConfig()
     auth: AuthConfig = AuthConfig()
-    llm: LLMConfig = LLMConfig()
     embedding: EmbeddingConfig = EmbeddingConfig()
     redis: RedisConfig = RedisConfig()
     integrations: IntegrationConfig = IntegrationConfig()

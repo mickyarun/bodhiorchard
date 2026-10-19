@@ -15,10 +15,9 @@
  -->
 
 <!--
-  Per-org scan-pipeline tuning. Synth and merge each get their own
-  timeout because synth runs many short calls in parallel while merge
-  runs one long call over the union of features — sharing a ceiling
-  forces a bad trade. Max steps is the Claude tool-call budget per run.
+  Per-org scan-pipeline tuning. The synthesis timeout is the budget for
+  one synthesize call, not for the whole scan — synth runs many short
+  calls in parallel. Max steps is the Claude tool-call budget per run.
 
   Self-saving: lives on /settings/code which has no shared Save button,
   so this card persists changes inline through ``saveConnections``.
@@ -32,8 +31,8 @@
       <div class="flex-grow-1">
         <div class="text-body-1 font-weight-medium">Scan tuning</div>
         <div class="text-caption text-medium-emphasis">
-          Override Claude subprocess timeouts and tool-call budget. Bump these
-          if synthesis or merge phases are timing out before completing.
+          Override the Claude subprocess timeout and tool-call budget. Bump
+          these if synthesis is timing out before completing.
         </div>
       </div>
     </div>
@@ -42,7 +41,7 @@
 
     <v-form ref="formRef" v-model="formValid">
       <v-row dense>
-        <v-col cols="12" md="4">
+        <v-col cols="12" md="6">
           <v-text-field
             v-model.number="synthTimeout"
             :rules="timeoutRules"
@@ -54,19 +53,7 @@
             persistent-hint
           />
         </v-col>
-        <v-col cols="12" md="4">
-          <v-text-field
-            v-model.number="mergeTimeout"
-            :rules="timeoutRules"
-            type="number"
-            label="Merge timeout (seconds)"
-            variant="outlined"
-            density="compact"
-            :hint="formatMinutes(mergeTimeout)"
-            persistent-hint
-          />
-        </v-col>
-        <v-col cols="12" md="4">
+        <v-col cols="12" md="6">
           <v-text-field
             v-model.number="maxTurns"
             :rules="maxTurnsRules"
@@ -147,13 +134,6 @@ const synthTimeout = computed<number>({
   get: () => settingsStore.connections.scan.timeoutSeconds,
   set: (v) => {
     settingsStore.connections.scan.timeoutSeconds = v
-  },
-})
-
-const mergeTimeout = computed<number>({
-  get: () => settingsStore.connections.scan.mergeTimeoutSeconds,
-  set: (v) => {
-    settingsStore.connections.scan.mergeTimeoutSeconds = v
   },
 })
 

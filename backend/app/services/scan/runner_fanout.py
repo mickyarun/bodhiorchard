@@ -179,9 +179,9 @@ async def _execute_scan(
 
     # Pull the org's Scan-tuning settings (Settings → Code → Scan tuning
     # in the UI) once at fanout setup. The synthesize stage reads
-    # ``timeout_seconds`` / ``max_turns`` from its config dict and
-    # ``feature_merge`` reads ``scan_cfg.merge_timeout_seconds``, so we
-    # both flatten the keys into ``runtime_overrides`` AND nest them
+    # ``timeout_seconds`` / ``max_turns`` flat off its config dict while
+    # skill_extraction reads the whole section as ``config["scan_cfg"]``,
+    # so we both flatten the keys into ``runtime_overrides`` AND nest them
     # under ``scan_cfg``.
     scan_cfg_overrides = await load_scan_cfg(org_id)
 
