@@ -25,7 +25,7 @@ count how many features landed for this repo+sha and reports counts
 back in ``extras``.
 
 Config keys (all optional, defaults from ``synthesis/runner.py``):
-    - ``model``: Claude model identifier (default ``claude-sonnet-4-6``)
+    - ``model``: Claude model identifier (default ``synthesis.runner.DEFAULT_MODEL``)
     - ``max_turns``: Claude tool-call budget (default 40)
     - ``timeout_seconds``: subprocess timeout (default 300)
     - ``files_per_community``: cap inside the synthesis payload

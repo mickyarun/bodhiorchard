@@ -32,7 +32,7 @@ export interface ConnectionsState {
     installationId: number | null
     webhookConfigured: boolean
     org?: string | null
-    // Phase F: lifecycle enum (mirrors backend GitHubAppStatus). The
+    // Lifecycle enum (mirrors backend GitHubAppStatus). The
     // legacy `connected` boolean is kept alongside for back-compat.
     status: GitHubAppStatus
     slug: string | null

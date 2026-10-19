@@ -31,6 +31,8 @@ from typing import Protocol
 
 import structlog
 
+from app.core.claude_model_defaults import default_for_tier
+from app.core.claude_models import ClaudeTier
 from app.models.organization import AIProvider, Organization
 from app.services.ai_runner import run_agent
 from app.services.ai_runner.capabilities import capabilities_for
@@ -51,9 +53,11 @@ _SYNTHESIS_TOOLS = ("write_synthesis_feature",)
 
 logger = structlog.get_logger(__name__)
 
-# Default model for synthesis. Single source of truth — the API
-# config endpoint reads this so the frontend doesn't duplicate the literal.
-DEFAULT_MODEL = "claude-sonnet-4-6"
+# Default model for synthesis. Single source of truth — the API config
+# endpoint reads this so the frontend doesn't duplicate the literal. The id
+# itself comes from the model catalogue, which moves to a newer release when
+# that release costs no more, so this never names a retired model.
+DEFAULT_MODEL = default_for_tier(ClaudeTier.sonnet).id
 DEFAULT_MAX_TURNS = 40
 DEFAULT_TIMEOUT_SECONDS = 300
 

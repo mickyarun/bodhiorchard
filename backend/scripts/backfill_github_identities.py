@@ -345,9 +345,7 @@ async def main() -> None:
         active_emails = {u.email.lower() for u in reals if u.is_active}
         bad_login = sorted(overrides.keys() - stub_logins)
         bad_email = sorted(
-            f"{login}={email}"
-            for login, email in overrides.items()
-            if email not in active_emails
+            f"{login}={email}" for login, email in overrides.items() if email not in active_emails
         )
         if bad_login:
             sys.exit(f"--map login(s) not present as a GitHub stub: {', '.join(bad_login)}")
