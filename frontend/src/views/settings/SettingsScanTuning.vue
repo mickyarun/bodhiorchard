@@ -71,8 +71,8 @@
     <div class="d-flex align-center justify-space-between mt-3">
       <div class="text-caption text-medium-emphasis">
         <v-icon icon="mdi-information-outline" size="14" class="mr-1" />
-        Synth runs once per repo (in parallel). Merge runs once across all
-        synthesised features.
+        Synth runs once per repo, in parallel — this timeout is the budget
+        for each of those calls.
       </div>
       <v-btn
         color="primary"
