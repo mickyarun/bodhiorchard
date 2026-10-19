@@ -22,6 +22,9 @@ exactly the bug the reviewer flagged with a screenshot.
 
 from __future__ import annotations
 
+import re
+from urllib.parse import urlsplit
+
 from app.services.design_system_extractor import (
     _extraction_instructions,
     _fallback_minimal,
@@ -63,7 +66,11 @@ def test_web_fallback_preserves_vuetify_boilerplate(tmp_path) -> None:  # type: 
     platform = get_platform("web_js")
     md, _ = _fallback_minimal(tmp_path, platform)
     assert "vuetify" in md.lower()
-    assert "https://cdn.jsdelivr.net/" in md
+    # Parse the URLs out and compare hostnames exactly. A substring test
+    # against a URL passes on a lookalike host, and reads as sanitisation
+    # the test is not doing.
+    hosts = {urlsplit(url).hostname for url in re.findall(r"https://[^\s\"')]+", md)}
+    assert "cdn.jsdelivr.net" in hosts
 
 
 def test_fallback_includes_discovered_files_when_present() -> None:

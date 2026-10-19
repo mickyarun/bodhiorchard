@@ -143,7 +143,11 @@ export function handleBridgePublish(req: Request, res: Response): void {
     room.handleBridgeEvent(payload.type, payload.data)
     res.status(200).json({ delivered: true })
   } catch (err) {
-    console.error(`[BridgeEndpoint] Error handling event type=${safeLog(payload.type)}:`, err)
+    // Constant format string with the value as an argument: `console.error`
+    // treats its first parameter as a format string once a second one is
+    // present, so interpolating there is an externally-controlled format
+    // string however well the value itself is sanitised.
+    console.error("[BridgeEndpoint] Error handling event type=%s:", safeLog(payload.type), err)
     res.status(500).json({ error: "internal error" })
   }
 }
