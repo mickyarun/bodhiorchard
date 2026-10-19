@@ -26,8 +26,28 @@
     prepend-icon="mdi-beach"
     title="Leave"
     to="/leave"
+    exact
     rounded="lg"
   />
+  <v-list-item
+    prepend-icon="mdi-calendar-month-outline"
+    title="Team calendar"
+    to="/leave/team"
+    rounded="lg"
+  />
+  <v-list-item
+    v-if="leaveStore.approvalCount.is_approver"
+    prepend-icon="mdi-check-decagram-outline"
+    title="Leave approvals"
+    to="/leave/approvals"
+    rounded="lg"
+  >
+    <template v-if="leaveStore.approvalCount.pending > 0 && !rail" #append>
+      <span class="people-nav__pill" :aria-label="`${leaveStore.approvalCount.pending} pending`">
+        {{ leaveStore.approvalCount.pending }}
+      </span>
+    </template>
+  </v-list-item>
   <v-list-item
     v-if="canViewEmployees"
     prepend-icon="mdi-card-account-details-outline"
@@ -44,11 +64,18 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { usePermissions } from '@/composables/usePermissions'
+import { useLeaveStore } from '@/stores/leave'
 
 defineProps<{ rail: boolean; showHeading: boolean }>()
 
 const { canViewEmployees } = usePermissions()
+const leaveStore = useLeaveStore()
+
+onMounted(() => {
+  void leaveStore.fetchApprovalCount()
+})
 </script>
 
 <style scoped>
@@ -59,5 +86,17 @@ const { canViewEmployees } = usePermissions()
   text-transform: uppercase;
   color: rgb(var(--v-theme-muted));
   margin-top: 16px;
+}
+.people-nav__pill {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+  background: rgb(var(--v-theme-primary));
+  color: rgb(var(--v-theme-on-primary));
 }
 </style>

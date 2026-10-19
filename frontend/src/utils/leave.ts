@@ -1,0 +1,192 @@
+// Copyright 2025-2026 Arun Rajkumar
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+/** Labels, numbers and copy for leave. Date math lives in leaveDates.ts. */
+import type {
+  ApprovalRoute,
+  Balance,
+  Decimalish,
+  ExcludedDate,
+  HalfDay,
+  LeaveKind,
+  LeaveStatus,
+  LeaveTypeBrief,
+  PersonRef,
+  WfhApproval,
+} from '@/types/leave'
+import { WEEKDAY_SHORT, weekdayIndex } from '@/utils/leaveDates'
+
+export const KIND_LABELS: Record<LeaveKind, string> = {
+  leave: 'Leave',
+  wfh: 'Work from home',
+  optional_holiday: 'Optional holiday',
+}
+
+export const HALF_DAY_LABELS: Record<HalfDay, string> = {
+  none: 'Full day',
+  first_half: 'Morning',
+  second_half: 'Afternoon',
+}
+
+export const WFH_APPROVAL_LABELS: Record<WfhApproval, string> = {
+  required: 'Always needs approval',
+  auto: 'Approved automatically',
+  auto_within_allowance: 'Approved automatically up to N days a month',
+}
+
+export const ROUTE_TAGS: Record<ApprovalRoute, string> = {
+  manager: 'Your team',
+  hr_queue: 'HR queue',
+  hr_override: 'HR',
+}
+
+export const STATUS_META: Record<LeaveStatus, { label: string; color: string; icon: string }> = {
+  pending: { label: 'Pending', color: 'warning', icon: 'mdi-clock-outline' },
+  approved: { label: 'Approved', color: 'success', icon: 'mdi-check' },
+  rejected: { label: 'Rejected', color: 'error', icon: 'mdi-close' },
+  cancelled: { label: 'Cancelled', color: 'muted', icon: 'mdi-cancel' },
+}
+
+/** `{ label, value }` options for an AppPillToggle from a label map. */
+export function pillOptions<T extends string>(labels: Record<T, string>): { label: string; value: T }[] {
+  return (Object.keys(labels) as T[]).map(value => ({ label: labels[value], value }))
+}
+
+/** Leave-type colour keys map onto theme colours so both themes work. */
+export const SWATCH_COLORS: Record<string, string> = {
+  'swatch-1': 'primary',
+  'swatch-2': 'info',
+  'swatch-3': 'warning',
+  'swatch-4': 'error',
+  'swatch-5': 'secondary',
+  'swatch-6': 'success',
+  'swatch-7': 'muted',
+}
+export const SWATCH_KEYS = Object.keys(SWATCH_COLORS)
+
+export function swatchColor(key: string | null | undefined): string {
+  return (key && SWATCH_COLORS[key]) || 'primary'
+}
+
+/** Decimal from the API (string or number) as a number; blanks are 0. */
+export function toNumber(value: Decimalish | null | undefined): number {
+  if (value === null || value === undefined || value === '') return 0
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+/** Like toNumber, but null stays null ("no limit"). */
+export function toNumberOrNull(value: Decimalish | null | undefined): number | null {
+  return value === null || value === undefined ? null : toNumber(value)
+}
+
+/** 3 → "3", 2.5 → "2.5", 1.25 → "1.3". */
+export function formatDays(value: number): string {
+  return String(Number(value.toFixed(1)))
+}
+
+/** "1 day", "2.5 days". */
+export function pluralDays(value: number): string {
+  return `${formatDays(value)} ${value === 1 ? 'day' : 'days'}`
+}
+
+/** "+2", "−1.5" (a real minus sign). */
+export function formatSignedDays(value: number): string {
+  if (value < 0) return `−${formatDays(-value)}`
+  return `+${formatDays(value)}`
+}
+
+/** Allowance for the year (allocation plus adjustments), or null. */
+export function balanceTotal(balance: Balance): number | null {
+  if (balance.allocated === null) return null
+  return toNumber(balance.allocated) + toNumber(balance.adjustments)
+}
+
+/** Meter fill in percent: used, then pending, never over 100 together. */
+export function meterPercents(balance: Balance): { used: number; pending: number } | null {
+  const total = balanceTotal(balance)
+  if (total === null) return null
+  if (total <= 0) return { used: 0, pending: 0 }
+  const used = Math.min(100, (toNumber(balance.used) / total) * 100)
+  const pending = Math.min(100 - used, (toNumber(balance.pending) / total) * 100)
+  return { used: Math.max(0, used), pending: Math.max(0, pending) }
+}
+
+/** "3 used · 1 pending · of 12" (pending only when there is some). */
+export function balanceCaption(balance: Balance): string {
+  const parts = [`${formatDays(toNumber(balance.used))} used`]
+  const pending = toNumber(balance.pending)
+  if (pending > 0) parts.push(`${formatDays(pending)} pending`)
+  const total = balanceTotal(balance)
+  if (total !== null) parts.push(`of ${formatDays(total)}`)
+  return parts.join(' · ')
+}
+
+/** "Casual leave", "Work from home", "Optional holiday · Diwali". */
+export function requestTypeLabel(request: {
+  kind: LeaveKind
+  leave_type: LeaveTypeBrief | null
+  holiday_name?: string | null
+}): string {
+  if (request.kind === 'leave') return request.leave_type?.name ?? KIND_LABELS.leave
+  if (request.kind === 'optional_holiday' && request.holiday_name) {
+    return `${KIND_LABELS.optional_holiday} · ${request.holiday_name}`
+  }
+  return KIND_LABELS[request.kind]
+}
+
+/** "A", "A and B", "A, B and C". */
+export function joinWithAnd(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? ''
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+}
+
+export function firstName(name: string): string {
+  return name.trim().split(/\s+/)[0] ?? name
+}
+
+/** "skips Sat, Sun and Diwali": weekdays off by name, otherwise the
+ *  server's reason (a holiday name). Empty when nothing is skipped. */
+export function excludedSummary(excluded: ExcludedDate[], workingDays: number[]): string {
+  const labels: string[] = []
+  for (const item of excluded) {
+    const weekday = weekdayIndex(item.date)
+    const label = workingDays.includes(weekday) ? item.reason : WEEKDAY_SHORT[weekday]
+    if (!labels.includes(label)) labels.push(label)
+  }
+  return labels.length ? `skips ${joinWithAnd(labels)}` : ''
+}
+
+/** Who decides, in a sentence, for the request preview. */
+export function approvalLine(
+  preview: { auto_approved: boolean; routes_to_hr: boolean; approvers: PersonRef[] },
+  kind: LeaveKind,
+  wfhApproval: WfhApproval | null,
+): string {
+  if (preview.auto_approved) {
+    return kind === 'wfh' && wfhApproval === 'auto_within_allowance'
+      ? "Approved automatically (within this month's WFH allowance)"
+      : 'Approved automatically'
+  }
+  if (preview.routes_to_hr || preview.approvers.length === 0) return 'Goes to HR for approval'
+  return `Goes to ${joinWithAnd(preview.approvers.map(p => p.name))} for approval`
+}
+
+/** Short code from a type name: "Casual leave" → "CL", "Sick" → "SIC". */
+export function codeFromName(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return ''
+  const code = words.length > 1 ? words.map(w => w[0]).join('') : words[0].slice(0, 3)
+  return code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10)
+}

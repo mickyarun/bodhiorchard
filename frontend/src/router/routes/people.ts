@@ -25,6 +25,24 @@ export const peopleRoutes: RouteRecordRaw[] = [
     component: () => import('@/views/leave/LeaveHomeView.vue'),
   },
   {
+    path: 'leave/team',
+    name: 'leave-team',
+    component: () => import('@/views/leave/TeamCalendarView.vue'),
+  },
+  {
+    // Managers see their reports' requests; holders of leave:approve see
+    // everyone's. The API decides what's in the queue.
+    path: 'leave/approvals',
+    name: 'leave-approvals',
+    component: () => import('@/views/leave/LeaveApprovalsView.vue'),
+  },
+  {
+    path: 'settings/leave',
+    name: 'settings-leave',
+    meta: { permission: 'leave:configure' },
+    component: () => import('@/views/settings/SettingsLeave.vue'),
+  },
+  {
     path: 'people',
     name: 'employees',
     meta: { permission: 'employees:view' },

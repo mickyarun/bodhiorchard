@@ -44,6 +44,7 @@
       <v-tabs v-model="tab" color="primary" density="compact" slider-color="primary" class="mb-4">
         <v-tab v-if="record.personal" value="personal">Personal</v-tab>
         <v-tab value="employment">Employment</v-tab>
+        <v-tab v-if="showLeave" value="leave">Leave</v-tab>
       </v-tabs>
       <v-card color="surface" rounded="lg" class="pa-6">
         <v-tabs-window v-model="tab">
@@ -52,6 +53,9 @@
           </v-tabs-window-item>
           <v-tabs-window-item value="employment">
             <EmploymentTab :record="record" />
+          </v-tabs-window-item>
+          <v-tabs-window-item v-if="showLeave" value="leave">
+            <MemberLeaveTab :user-id="record.user_id" />
           </v-tabs-window-item>
         </v-tabs-window>
       </v-card>
@@ -65,6 +69,7 @@ import { useRoute } from 'vue-router'
 import AppCallout from '@/components/common/AppCallout.vue'
 import EmployeeHeaderCard from '@/components/people/EmployeeHeaderCard.vue'
 import EmploymentTab from '@/components/people/EmploymentTab.vue'
+import MemberLeaveTab from '@/components/leave/MemberLeaveTab.vue'
 import PersonalTab from '@/components/people/PersonalTab.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useAuthStore } from '@/stores/auth'
@@ -73,12 +78,20 @@ import { useEmployeesStore } from '@/stores/employees'
 const route = useRoute()
 const store = useEmployeesStore()
 const authStore = useAuthStore()
-const { canViewEmployees } = usePermissions()
+const { canViewEmployees, canApproveLeave, canConfigureLeave } = usePermissions()
 
 const routeUserId = computed(() => route.params.userId as string | undefined)
 const isOwn = computed(() => !routeUserId.value || routeUserId.value === authStore.user?.id)
 const record = computed(() => store.record)
 const tab = ref('personal')
+// Balances are open to HR, the member and the member's managers (the
+// API enforces the same rule).
+const isManagerOfRecord = computed(
+  () => !!record.value?.managers.some(m => m.user_id === authStore.user?.id),
+)
+const showLeave = computed(
+  () => isOwn.value || canApproveLeave.value || canConfigureLeave.value || isManagerOfRecord.value,
+)
 
 const personalMode = computed<'hr' | 'self' | 'view'>(() => {
   if (record.value?.access.edit_personal) return 'hr'
