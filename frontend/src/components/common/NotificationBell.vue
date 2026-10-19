@@ -275,7 +275,7 @@ const emit = defineEmits<(e: 'update:menu-open', value: boolean) => void>()
 const store = useNotificationStore()
 const yieldStore = useYieldOfferStore()
 const membersStore = useMembersStore()
-const { hasPermission } = usePermissions()
+const { hasPermission, canAccessEngineering } = usePermissions()
 const router = useRouter()
 const menuOpen = ref(false)
 watch(menuOpen, value => emit('update:menu-open', value))
@@ -317,19 +317,23 @@ function loadMembersIfAdmin(): void {
   }
 }
 
+// Yield offers are an engineering-workspace feature: people-only roles
+// would just get 403s from the offers endpoint.
+function loadYieldOffers(): void {
+  if (canAccessEngineering.value) void yieldStore.fetchPending(yieldScope.value)
+}
+
 onMounted(() => {
   store.fetchAll()
-  yieldStore.fetchPending(yieldScope.value)
+  loadYieldOffers()
   loadMembersIfAdmin()
 })
 
-// Re-fetch yield offers and the member list if the admin gate flips
-// after mount (auth hydration race). Without this, an admin who was
-// briefly unauthenticated at mount would never see org-wide offers
-// and reassign targets would stay empty.
-watch(yieldScope, scope => {
-  void yieldStore.fetchPending(scope)
-})
+// Re-fetch yield offers and the member list if the admin or workspace
+// gate flips after mount (auth hydration race). Without this, an admin
+// who was briefly unauthenticated at mount would never see org-wide
+// offers and reassign targets would stay empty.
+watch([yieldScope, canAccessEngineering], loadYieldOffers)
 watch(isAdmin, loadMembersIfAdmin)
 
 function isMine(offer: YieldOffer): boolean {

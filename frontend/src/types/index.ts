@@ -25,6 +25,8 @@ export type UserRoleName =
   | 'qa'
   | 'support'
   | 'viewer'
+  | 'hr'
+  | 'sales'
 
 export interface User {
   id: string
@@ -140,6 +142,8 @@ export const ROLE_LABELS: Record<UserRoleName, string> = {
   qa: 'QA',
   support: 'Support',
   viewer: 'Viewer',
+  hr: 'HR',
+  sales: 'Sales',
 }
 
 /** P0 is highest (drop everything); P3 is lowest (backlog). */

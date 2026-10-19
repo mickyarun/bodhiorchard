@@ -1,0 +1,35 @@
+// Copyright 2025-2026 Arun Rajkumar
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+/**
+ * People-workspace routes, open to every signed-in member regardless of
+ * role. Leave, WFH and employee records land here.
+ */
+import type { RouteRecordRaw } from 'vue-router'
+
+export const peopleRoutes: RouteRecordRaw[] = [
+  {
+    path: 'leave',
+    name: 'leave',
+    component: () => import('@/views/leave/LeaveHomeView.vue'),
+  },
+  {
+    // Self-service per-user notification opt-outs. No permission gate —
+    // any authenticated member manages their own Slack DM preferences
+    // via /v1/me/notification-preferences.
+    path: 'profile/notifications',
+    name: 'profile-notifications',
+    component: () => import('@/views/profile/NotificationSettings.vue'),
+  },
+]

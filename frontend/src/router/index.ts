@@ -12,57 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  createRouter,
-  createWebHistory,
-  isNavigationFailure,
-  NavigationFailureType,
-} from 'vue-router'
-import api from '@/services/api'
-import { useAuthStore } from '@/stores/auth'
-import { useNavigationProgress } from '@/composables/useNavigationProgress'
+import { createRouter, createWebHistory } from 'vue-router'
+import { installGuards } from './guards'
+import { engineeringRoutes } from './routes/engineering'
+import { peopleRoutes } from './routes/people'
 
-const navProgress = useNavigationProgress()
-
-let setupChecked = false
-let isSetupComplete = false
-
-/** Call after setup completes so the next navigation re-checks the backend. */
-export function resetSetupCache(): void {
-  setupChecked = false
-  isSetupComplete = false
-}
-
-async function checkSetupStatus(): Promise<boolean> {
-  // Return cached result for subsequent in-session navigations
-  if (setupChecked) return isSetupComplete
-
-  // Always verify against backend on first navigation
-  try {
-    const { data } = await api.get('/setup/status')
-    isSetupComplete = data.is_setup_complete === true
-    // Sync localStorage with backend truth
-    if (isSetupComplete) {
-      localStorage.setItem('bodhiorchard_setup_complete', 'true')
-    } else {
-      localStorage.removeItem('bodhiorchard_setup_complete')
-    }
-  } catch {
-    // Backend unreachable — fall back to localStorage as last resort
-    isSetupComplete = localStorage.getItem('bodhiorchard_setup_complete') === 'true'
-  }
-
-  setupChecked = true
-  return isSetupComplete
-}
-
-/** Public routes that don't require authentication. */
-const PUBLIC_ROUTES = new Set(['setup', 'login', 'methodology', 'tree-demo', 'house-demo'])
+export { resetSetupCache } from './guards'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
+      // People-only roles are sent on from the dashboard to their own
+      // home by the workspace guard, so one fixed redirect serves everyone.
       path: '/',
       redirect: '/dashboard',
     },
@@ -93,8 +55,10 @@ const router = createRouter({
       component: () => import('@/views/methodology/MethodologyView.vue'),
     },
     {
+      // The garden avatar picker — part of the engineering workspace.
       path: '/character-select',
       name: 'character-select',
+      meta: { workspace: 'engineering' },
       component: () => import('@/views/character/CharacterSelectView.vue'),
     },
     {
@@ -110,242 +74,11 @@ const router = createRouter({
     {
       path: '/',
       component: () => import('@/layouts/AppLayout.vue'),
-      children: [
-        {
-          path: 'dashboard',
-          name: 'dashboard',
-          component: () => import('@/views/dashboard/DashboardView.vue'),
-        },
-        {
-          path: 'buds',
-          name: 'buds',
-          component: () => import('@/views/buds/BUDBoard.vue'),
-        },
-        {
-          path: 'buds/:id',
-          name: 'bud-detail',
-          component: () => import('@/views/buds/BUDDetail.vue'),
-        },
-        {
-          path: 'features',
-          name: 'features',
-          component: () => import('@/views/features/FeaturesView.vue'),
-        },
-        {
-          path: 'bugs',
-          name: 'bugs',
-          component: () => import('@/views/bugs/BugBoard.vue'),
-        },
-        {
-          path: 'leaderboard',
-          name: 'leaderboard',
-          component: () => import('@/views/leaderboard/LeaderboardView.vue'),
-        },
-        {
-          path: 'profile',
-          name: 'profile',
-          component: () => import('@/views/profile/ProfileView.vue'),
-        },
-        {
-          // Self-service MCP token management. No permission gate — any
-          // authenticated user can generate their own token. Hits the
-          // new /v1/me/mcp-token backend endpoint, which writes only to
-          // the user_mcp_tokens row and never touches the org-level hash.
-          path: 'profile/mcp-token',
-          name: 'profile-mcp-token',
-          component: () => import('@/views/profile/ProfileMcpToken.vue'),
-        },
-        {
-          // Self-service per-user notification opt-outs. No permission gate —
-          // any authenticated member manages their own Slack DM preferences
-          // via /v1/me/notification-preferences.
-          path: 'profile/notifications',
-          name: 'profile-notifications',
-          component: () => import('@/views/profile/NotificationSettings.vue'),
-        },
-        {
-          path: 'skills',
-          name: 'skills',
-          component: () => import('@/views/skills/SkillProfilesView.vue'),
-        },
-        {
-          // Org-level Learnings overview: trends across closed BUDs.
-          // Reads the velocity_aggregates rollup + last 50 feature_
-          // learnings rows. Visible to every org member — the data is
-          // aggregate retrospective info with no cross-tenant exposure
-          // (repo queries filter by current_user.org_id).
-          path: 'learnings',
-          name: 'learnings',
-          component: () => import('@/views/learnings/LearningsOverview.vue'),
-        },
-        {
-          path: 'triage',
-          name: 'triage',
-          meta: { permission: 'backlog:approve' },
-          component: () => import('@/views/triage/TriageQueueView.vue'),
-        },
-        {
-          path: 'members',
-          name: 'members',
-          meta: { permission: 'team:manage' },
-          component: () => import('@/views/members/MembersView.vue'),
-        },
-        {
-          path: 'settings',
-          name: 'settings',
-          meta: { permission: 'integrations:view' },
-          component: () => import('@/views/settings/SettingsConnections.vue'),
-        },
-        {
-          path: 'settings/design-systems',
-          name: 'settings-design-systems',
-          meta: { permission: 'integrations:configure' },
-          component: () => import('@/views/settings/SettingsDesignSystems.vue'),
-        },
-        {
-          // Legacy URL: Teams used to live at /settings/teams. They
-          // now live as a tab on /members so admins manage people and
-          // squads side-by-side. Redirect keeps old bookmarks alive.
-          path: 'settings/teams',
-          redirect: { name: 'members', query: { tab: 'teams' } },
-        },
-        {
-          path: 'settings/agent-prompts',
-          name: 'settings-agent-prompts',
-          meta: { permission: 'agents:configure' },
-          component: () => import('@/views/settings/SettingsAgentPrompts.vue'),
-        },
-        {
-          path: 'settings/qa-automation',
-          name: 'settings-qa-automation',
-          meta: { permission: 'integrations:configure' },
-          component: () => import('@/views/settings/SettingsQAAutomation.vue'),
-        },
-        {
-          path: 'settings/presence',
-          name: 'settings-presence',
-          meta: { permission: 'integrations:configure' },
-          component: () => import('@/views/settings/SettingsPresence.vue'),
-        },
-        {
-          path: 'settings/jira-import',
-          name: 'settings-jira-import',
-          meta: { permission: 'integrations:configure' },
-          component: () => import('@/views/settings/SettingsJiraImport.vue'),
-        },
-        {
-          path: 'settings/quiz-game',
-          name: 'settings-quiz-game',
-          meta: { permission: 'quiz:configure' },
-          component: () => import('@/views/settings/SettingsQuizGame.vue'),
-        },
-        {
-          path: 'settings/quiz-review',
-          name: 'settings-quiz-review',
-          meta: { permission: 'quiz:configure' },
-          component: () => import('@/views/quiz/QuizReviewView.vue'),
-        },
-        {
-          path: 'settings/code',
-          name: 'settings-code',
-          meta: { permission: 'integrations:configure' },
-          component: () => import('@/views/settings/SettingsCode.vue'),
-        },
-        {
-          path: 'settings/mcp-connect',
-          name: 'settings-mcp-connect',
-          // Self-service: any authenticated user can manage their own
-          // MCP tokens and copy the connect config for their local AI.
-          // No org-level permission gate.
-          component: () => import('@/views/settings/SettingsMCPConnect.vue'),
-        },
-        {
-          path: 'raceview/:roomId',
-          name: 'race-view',
-          component: () => import('@/views/race/RaceRoomView.vue'),
-          props: true,
-        },
-        {
-          path: 'games/backlash/:roomId',
-          name: 'backlash-room',
-          component: () => import('@/views/backlash/BacklashRoomView.vue'),
-          props: true,
-        },
-      ],
+      children: [...engineeringRoutes, ...peopleRoutes],
     },
   ],
 })
 
-router.beforeEach(async (to) => {
-  // Light the top progress bar the instant a navigation begins — this is
-  // the only feedback that covers the lazy-chunk download for heavy views
-  // like BUDDetail, whose own spinner can't render until it has mounted.
-  navProgress.start()
-
-  const done = await checkSetupStatus()
-
-  // Setup not done — force to setup wizard
-  if (!done && to.name !== 'setup') {
-    return { name: 'setup' }
-  }
-
-  // Setup done — don't allow going back to setup
-  if (done && to.name === 'setup') {
-    return { name: 'dashboard' }
-  }
-
-  // Auth guard — require token for protected routes
-  if (done && !PUBLIC_ROUTES.has(to.name as string)) {
-    const hasToken = !!localStorage.getItem('bodhiorchard_token')
-    if (!hasToken) {
-      return { name: 'login' }
-    }
-  }
-
-  // Already logged in — redirect away from login
-  if (to.name === 'login' && localStorage.getItem('bodhiorchard_token')) {
-    return { name: 'dashboard' }
-  }
-
-  // Permission guard — redirect to dashboard if user lacks required permission
-  const requiredPerm = to.meta?.permission as string | string[] | undefined
-  if (requiredPerm) {
-    const authStore = useAuthStore()
-    // On page refresh, user is null but token exists — load profile first
-    if (!authStore.user && localStorage.getItem('bodhiorchard_token')) {
-      try {
-        await authStore.fetchUser()
-      } catch {
-        // Profile load failed — fall through with empty permissions
-      }
-    }
-    const perms = authStore.user?.permissions ?? []
-    const allowed = Array.isArray(requiredPerm)
-      ? requiredPerm.some(p => perms.includes(p))
-      : perms.includes(requiredPerm)
-    if (!allowed) {
-      return { name: 'dashboard' }
-    }
-  }
-})
-
-// A ``cancelled`` failure means a newer navigation superseded this one —
-// e.g. the user clicked a second BUD before the first resolved (the exact
-// "keep clicking" behaviour this bar exists to soothe). That successor has
-// already lit the bar and owns turning it off, so clearing here would flash
-// it off mid-flight. Every other outcome is terminal and should clear:
-// a successful landing, an abort (guard returned ``false``), or a duplicate.
-// Redirects don't reach here as a distinct event — vue-router resolves the
-// redirect chain before firing ``afterEach`` once, for the final landing.
-router.afterEach((_to, _from, failure) => {
-  if (isNavigationFailure(failure, NavigationFailureType.cancelled)) return
-  navProgress.stop()
-})
-// ``afterEach`` is skipped when a guard throws or an async-component (chunk)
-// load rejects — vue-router routes those through ``onError`` instead. This
-// is the safety net that prevents the bar sticking on after a failed load.
-router.onError(() => {
-  navProgress.stop()
-})
+installGuards(router)
 
 export default router

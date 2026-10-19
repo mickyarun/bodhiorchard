@@ -87,6 +87,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/services/api'
 import BodhiorchardLogo from '@/components/common/BodhiorchardLogo.vue'
+import { canOpenWorkspace, homeRouteFor } from '@/utils/workspace'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -123,12 +124,18 @@ async function handleLogin(): Promise<void> {
   const success = await authStore.login(email.value.trim(), password.value, orgSlug.value)
   loading.value = false
   if (success) {
+    const permissions = authStore.user?.permissions
     if (authStore.mustChangePassword) {
       router.push({ name: 'change-password' })
-    } else if (!authStore.user?.character_model) {
+    } else if (canOpenWorkspace(permissions, 'engineering') && !authStore.user?.character_model) {
+      // The garden avatar only matters inside the engineering workspace.
       router.push({ name: 'character-select' })
+    } else if (permissions) {
+      router.push(homeRouteFor(permissions))
     } else {
-      router.push({ name: 'dashboard' })
+      // Profile didn't load: let the router guard retry it rather than
+      // guessing a workspace from an empty permission list.
+      router.push('/')
     }
   }
 }

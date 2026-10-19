@@ -14,6 +14,7 @@
 
 import { computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { canOpenWorkspace } from '@/utils/workspace'
 
 export function usePermissions() {
   const authStore = useAuthStore()
@@ -31,6 +32,12 @@ export function usePermissions() {
   // counts on the mini-game leaderboards, which ordinary players shouldn't see.
   const isOrgAdmin = computed(
     () => authStore.user?.role === 'org_owner' || authStore.user?.role === 'admin',
+  )
+
+  // Engineering workspace (BUDs, bugs, repos, garden, games). People-only
+  // roles such as sales and HR don't hold it; see utils/workspace.ts.
+  const canAccessEngineering = computed(() =>
+    canOpenWorkspace(authStore.user?.permissions, 'engineering'),
   )
 
   // Sidebar visibility
@@ -83,6 +90,7 @@ export function usePermissions() {
     hasPermission,
     hasAnyPermission,
     isOrgAdmin,
+    canAccessEngineering,
     canApprove,
     canCreateBuds,
     canEditBuds,
