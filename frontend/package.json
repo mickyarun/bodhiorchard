@@ -22,7 +22,7 @@
     "dompurify": "^3.4.2",
     "marked": "^17.0.5",
     "mermaid": "^11.15.0",
-    "pinia": "^2.1.7",
+    "pinia": "^4.1.0",
     "playcanvas": "^2.18.1",
     "vite-plugin-top-level-await": "^1.6.0",
     "vite-plugin-wasm": "^3.6.0",
