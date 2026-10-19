@@ -17,7 +17,7 @@
 import os
 from pathlib import Path
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -76,6 +76,38 @@ class AuthConfig(BaseSettings):
             raise ValueError(
                 f"{', '.join(weak)} must be set to a non-default value when "
                 "ENV=production. Refusing to start.",
+            )
+        return self
+
+
+class HRCryptoConfig(BaseSettings):
+    """The key for employees' sensitive details and documents.
+
+    Separate from ``ENCRYPTION_KEY`` so leaking the integration-secret key
+    doesn't also expose PAN, Aadhaar, bank accounts and ID documents.
+    ``HR_ENCRYPTION_KEYS`` is a comma-separated keyring of ``kid:base64key``
+    entries (32-byte keys), newest first: new data uses the first; older
+    entries stay readable until ``scripts/rotate_hr_keys.py`` re-encrypts.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="", env_file=".env", extra="ignore")
+
+    hr_encryption_keys: SecretStr = Field(default=SecretStr(""), alias="HR_ENCRYPTION_KEYS")
+    environment: str = Field(default="dev", alias="ENV")
+
+    @model_validator(mode="after")
+    def _require_key_in_prod(self) -> "HRCryptoConfig":
+        """Refuse to start in production without an HR key.
+
+        Without one the HR routes answer 503 rather than store plaintext;
+        in production that should never be a surprise discovered by HR.
+        """
+        if (
+            self.environment.lower() == "production"
+            and not self.hr_encryption_keys.get_secret_value().strip()
+        ):
+            raise ValueError(
+                "HR_ENCRYPTION_KEYS must be set when ENV=production. Refusing to start."
             )
         return self
 
@@ -366,6 +398,7 @@ class Settings(BaseSettings):
 
     db: DatabaseConfig = DatabaseConfig()
     auth: AuthConfig = AuthConfig()
+    hr_crypto: HRCryptoConfig = HRCryptoConfig()
     llm: LLMConfig = LLMConfig()
     embedding: EmbeddingConfig = EmbeddingConfig()
     redis: RedisConfig = RedisConfig()

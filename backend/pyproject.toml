@@ -28,6 +28,8 @@ dependencies = [
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
     "python-jose[cryptography]>=3.3.0",
+    # AES-GCM for employees' sensitive details and documents.
+    "cryptography>=42.0",
     "pyjwt[crypto]>=2.8.0",
     "passlib[bcrypt]>=1.7.4",
     # passlib 1.7.x reads `bcrypt.__about__.__version__`, removed in bcrypt 5.0.

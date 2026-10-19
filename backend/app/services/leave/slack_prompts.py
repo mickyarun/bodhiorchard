@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Leave messages on Slack: plain DMs, approval prompts with buttons, and
-closing those prompts once a request is decided.
+"""Approval prompts with buttons on Slack, and closing them once a request
+is decided.
 
 Both run in the background on their own session, after the change that
 triggered them has committed. Slack failures are logged and swallowed:
@@ -23,52 +23,21 @@ the request itself is already saved and visible in the app.
 import uuid
 
 import structlog
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.encryption import decrypt_secret
 from app.database import AsyncSessionLocal
 from app.models.leave_request import LeaveRequest, LeaveStatus
 from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.leave_slack_prompt import LeaveSlackPromptRepository
-from app.repositories.organization import OrganizationRepository
 from app.repositories.user import UserRepository
 from app.services.leave.messages import compose_request_message
 from app.services.leave.slack_blocks import approval_blocks, escape, outcome_blocks
 from app.services.notifications import NotificationCategory, category_default
-from app.services.slack_client import chat_post_message, conversations_open
+from app.services.slack_client import conversations_open
+from app.services.slack_dm import bot_token
 from app.services.slack_interactive import post_message, update_message
 
 logger = structlog.get_logger(__name__)
-
-
-async def bot_token(db: AsyncSession, org_id: uuid.UUID) -> str:
-    """The org's Slack bot token, or "" when Slack isn't connected."""
-    encrypted = await OrganizationRepository(db).get_slack_bot_token(org_id)
-    return (decrypt_secret(encrypted) if encrypted else "") or ""
-
-
-async def send_dm(
-    org_id: uuid.UUID, user_ids: set[uuid.UUID], category: NotificationCategory, text: str
-) -> None:
-    """A plain DM to each of ``user_ids`` who allows ``category``."""
-    async with AsyncSessionLocal() as session:
-        token = await bot_token(session, org_id)
-        if not token:
-            return
-        pairs = await UserRepository(session).list_slack_recipients(
-            org_id,
-            category=category,
-            default_enabled=category_default(category),
-            user_ids=user_ids,
-        )
-    for _user_id, slack_id in pairs:
-        try:
-            channel = await conversations_open(token, slack_id)
-            if channel:
-                await chat_post_message(token, channel, text)
-        except Exception:
-            logger.warning("leave_slack_dm_failed", org_id=str(org_id), exc_info=True)
 
 
 async def send_prompts(

@@ -51,6 +51,8 @@ services:
       REDIS_URL: redis://redis:6379
       SECRET_KEY: ${SECRET_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      # Employees' sensitive details and documents; separate from ENCRYPTION_KEY.
+      HR_ENCRYPTION_KEYS: ${HR_ENCRYPTION_KEYS}
       ACCESS_TOKEN_EXPIRE_MINUTES: "60"
       EMBEDDING_PROVIDER: fastembed
       EMBEDDING_MODEL: BAAI/bge-small-en-v1.5

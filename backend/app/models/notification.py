@@ -43,6 +43,7 @@ class NotificationType(StrEnum):
     MINIGAME_INVITE = "minigame_invite"
     LEAVE_REQUESTED = "leave_requested"
     LEAVE_DECIDED = "leave_decided"
+    EMPLOYEE_RECORD_CHANGED = "employee_record_changed"
 
 
 class Notification(BaseModel):

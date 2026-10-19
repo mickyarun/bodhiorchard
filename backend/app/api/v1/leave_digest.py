@@ -29,7 +29,7 @@ from app.services.leave.digest_settings import (
     load_digest_settings,
     save_digest_settings,
 )
-from app.services.leave.slack_prompts import bot_token
+from app.services.slack_dm import bot_token
 from app.services.slack_interactive import post_message
 
 router = APIRouter(tags=["leave-admin"])

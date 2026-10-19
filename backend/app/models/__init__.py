@@ -51,8 +51,11 @@ from app.models.cluster_cache import ClusterCache
 from app.models.design_system import DesignSystemRef
 from app.models.dev_activity import DevActivityLog
 from app.models.developer_xp import DeveloperXP, RewardEvent, RewardType
+from app.models.employee_audit_event import EmployeeAuditEvent
+from app.models.employee_document import EmployeeDocument
 from app.models.employee_profile import EmployeeProfile
 from app.models.employee_reporting_manager import EmployeeReportingManager
+from app.models.employee_sensitive import EmployeeSensitiveDetails
 from app.models.enterprise_rule import EnterpriseRule
 from app.models.feature import Feature
 from app.models.feature_learning import FeatureLearning
@@ -152,8 +155,11 @@ __all__ = [
     "BUDTimelineEventType",
     "Bug",
     "BugAttachment",
+    "EmployeeAuditEvent",
+    "EmployeeDocument",
     "EmployeeProfile",
     "EmployeeReportingManager",
+    "EmployeeSensitiveDetails",
     "LeaveConfigEvent",
     "LeaveDigestPost",
     "LeaveLedgerEntry",

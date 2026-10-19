@@ -12,6 +12,7 @@ alembic>=1.13.0
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
 python-jose[cryptography]>=3.3.0
+cryptography>=42.0
 # passlib 1.7.x reads `bcrypt.__about__.__version__`, which was removed in
 # bcrypt 5.0. With bcrypt 5.x, passlib's backend probe fails and every
 # hash/verify call raises ValueError regardless of input length. Pin to

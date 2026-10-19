@@ -45,6 +45,8 @@
         <v-tab v-if="record.personal" value="personal">Personal</v-tab>
         <v-tab value="employment">Employment</v-tab>
         <v-tab v-if="showLeave" value="leave">Leave</v-tab>
+        <v-tab v-if="showDetails" value="bank">Bank &amp; IDs</v-tab>
+        <v-tab v-if="showDocuments" value="documents">Documents</v-tab>
       </v-tabs>
       <v-card color="surface" rounded="lg" class="pa-6">
         <v-tabs-window v-model="tab">
@@ -57,6 +59,12 @@
           <v-tabs-window-item v-if="showLeave" value="leave">
             <MemberLeaveTab :user-id="record.user_id" />
           </v-tabs-window-item>
+          <v-tabs-window-item v-if="showDetails" value="bank">
+            <BankIdsTab :user-id="record.user_id" :is-own="isOwn" />
+          </v-tabs-window-item>
+          <v-tabs-window-item v-if="showDocuments" value="documents">
+            <DocumentsTab :user-id="record.user_id" />
+          </v-tabs-window-item>
         </v-tabs-window>
       </v-card>
     </template>
@@ -67,6 +75,8 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppCallout from '@/components/common/AppCallout.vue'
+import BankIdsTab from '@/components/people/BankIdsTab.vue'
+import DocumentsTab from '@/components/people/DocumentsTab.vue'
 import EmployeeHeaderCard from '@/components/people/EmployeeHeaderCard.vue'
 import EmploymentTab from '@/components/people/EmploymentTab.vue'
 import MemberLeaveTab from '@/components/leave/MemberLeaveTab.vue'
@@ -78,7 +88,8 @@ import { useEmployeesStore } from '@/stores/employees'
 const route = useRoute()
 const store = useEmployeesStore()
 const authStore = useAuthStore()
-const { canViewEmployees, canApproveLeave } = usePermissions()
+const { canViewEmployees, canApproveLeave, canManageEmployees, canSeeEmployeeDocuments } =
+  usePermissions()
 
 const routeUserId = computed(() => route.params.userId as string | undefined)
 const isOwn = computed(() => !routeUserId.value || routeUserId.value === authStore.user?.id)
@@ -93,6 +104,11 @@ const showLeave = computed(
   // Not leave:configure alone: balances reveal who used sick leave.
   () => isOwn.value || canApproveLeave.value || isManagerOfRecord.value,
 )
+
+// HR (and the owner, who holds every permission) or the person themself;
+// the API enforces the same rules.
+const showDetails = computed(() => isOwn.value || canManageEmployees.value)
+const showDocuments = computed(() => isOwn.value || canSeeEmployeeDocuments.value)
 
 const personalMode = computed<'hr' | 'self' | 'view'>(() => {
   if (record.value?.access.edit_personal) return 'hr'

@@ -44,6 +44,8 @@ from app.api.v1.bugs import router as bugs_router
 from app.api.v1.claude import router as claude_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.design_system import router as design_system_router
+from app.api.v1.employee_documents import router as employee_documents_router
+from app.api.v1.employee_sensitive import router as employee_sensitive_router
 from app.api.v1.employee_updates import router as employee_updates_router
 from app.api.v1.employees import router as employees_router
 from app.api.v1.features import router as features_router
@@ -111,7 +113,12 @@ api_router.include_router(public_router, prefix="/api/v1/public")
 # employees:* / leave:* permission or "own record". Nothing here may be
 # cached: it carries leave reasons, balances and personal details.
 PEOPLE_NO_STORE = [Depends(no_store)]
-for employee_part in (employees_router, employee_updates_router):
+for employee_part in (
+    employees_router,
+    employee_updates_router,
+    employee_sensitive_router,
+    employee_documents_router,
+):
     api_router.include_router(
         employee_part, prefix="/api/v1/employees", dependencies=PEOPLE_NO_STORE
     )

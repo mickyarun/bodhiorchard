@@ -24,9 +24,7 @@ Messages never include the leave type or reason: sick leave stays private
 even in a manager's DMs.
 """
 
-import asyncio
 import uuid
-from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -37,15 +35,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.leave_request import LeaveRequest, LeaveStatus
 from app.models.notification import Notification, NotificationType
+from app.services.background import spawn
 from app.services.event_bus import publish
 from app.services.leave.messages import compose_decision_message, compose_request_message
-from app.services.leave.slack_prompts import refresh_prompts, send_dm, send_prompts
+from app.services.leave.slack_prompts import refresh_prompts, send_prompts
 from app.services.notifications import NotificationCategory
+from app.services.slack_dm import send_dm
 
 logger = structlog.get_logger(__name__)
-
-# Holds fire-and-forget DM tasks so they aren't garbage-collected mid-send.
-_tasks: set[asyncio.Task[None]] = set()
 
 
 @dataclass
@@ -74,13 +71,6 @@ class Notice:
             spawn(send_dm(self.org_id, self.user_ids, self.category, self.slack_text))
         if self.refresh_request_id:
             spawn(refresh_prompts(self.org_id, self.refresh_request_id))
-
-
-def spawn(job: Coroutine[Any, Any, None]) -> None:
-    """Run a Slack send in the background, holding a reference until it's done."""
-    task = asyncio.create_task(job)
-    _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
 
 
 def _stage(

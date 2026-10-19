@@ -45,6 +45,7 @@ export function usePermissions() {
     hasAnyPermission('employees:view', 'employees:manage'),
   )
   const canManageEmployees = computed(() => hasPermission('employees:manage'))
+  const canSeeEmployeeDocuments = computed(() => hasPermission('employees:documents'))
   // Leave: approving anyone's requests (HR), and configuring policies,
   // types, holidays and balances.
   const canApproveLeave = computed(() => hasPermission('leave:approve'))
@@ -103,6 +104,7 @@ export function usePermissions() {
     canAccessEngineering,
     canViewEmployees,
     canManageEmployees,
+    canSeeEmployeeDocuments,
     canApproveLeave,
     canConfigureLeave,
     canApprove,

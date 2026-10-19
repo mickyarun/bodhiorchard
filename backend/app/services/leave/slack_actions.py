@@ -34,11 +34,12 @@ from app.models.leave_request import LeaveStatus
 from app.models.organization import Organization
 from app.models.user import User
 from app.repositories.user import UserRepository
+from app.services.background import spawn
 from app.services.leave.approvers import approvers_for, route_for
 from app.services.leave.errors import LeaveError
 from app.services.leave.lifecycle import decide, load_request
 from app.services.leave.messages import compose_request_message
-from app.services.leave.notify import spawn, stage_decision
+from app.services.leave.notify import stage_decision
 from app.services.leave.slack_blocks import (
     APPROVE,
     NOTE_BLOCK,
@@ -47,7 +48,8 @@ from app.services.leave.slack_blocks import (
     REJECT_VIEW,
     reject_view,
 )
-from app.services.leave.slack_prompts import bot_token, refresh_prompts
+from app.services.leave.slack_prompts import refresh_prompts
+from app.services.slack_dm import bot_token
 from app.services.slack_interactive import open_view, post_ephemeral
 
 logger = structlog.get_logger(__name__)

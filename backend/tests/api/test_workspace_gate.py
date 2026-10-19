@@ -33,6 +33,8 @@ SHARED_MODULES = frozenset(
     {
         "app.api.health",
         "app.api.v1.auth",
+        "app.api.v1.employee_documents",
+        "app.api.v1.employee_sensitive",
         "app.api.v1.employee_updates",
         "app.api.v1.employees",
         "app.api.v1.leave",

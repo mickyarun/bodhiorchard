@@ -45,6 +45,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://bodhiorchard:bodhiorchard@postgres:5432/bodhiorchard
       REDIS_URL: redis://redis:6379
       SECRET_KEY: change-me-in-production
+      # Employees' sensitive details and documents. Without it those screens
+      # say the key isn't configured; generate one with scripts/rotate_hr_keys.py.
+      HR_ENCRYPTION_KEYS: ${HR_ENCRYPTION_KEYS:-}
       ACCESS_TOKEN_EXPIRE_MINUTES: "60"
       EMBEDDING_PROVIDER: fastembed
       EMBEDDING_MODEL: BAAI/bge-small-en-v1.5

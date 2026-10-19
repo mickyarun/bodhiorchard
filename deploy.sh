@@ -26,6 +26,15 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
+# The backend refuses to start without these; catch it before deploying.
+for required in SECRET_KEY ENCRYPTION_KEY HR_ENCRYPTION_KEYS; do
+  value=$(grep -E "^${required}=" "$ENV_FILE" | head -1 | cut -d= -f2-)
+  if [ -z "$value" ] || [ "$value" = "GENERATE_ME" ]; then
+    echo "ERROR: set ${required} in $ENV_FILE (see .env.production.example)."
+    exit 1
+  fi
+done
+
 echo "==> Pulling latest code"
 git pull
 
