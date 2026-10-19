@@ -20,8 +20,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.core.claude_model_defaults import default_for_tier
-from app.core.claude_models import ClaudeTier
 from app.models.quiz_question import QuizDifficulty, QuizQuestionType
 
 
@@ -116,37 +114,15 @@ class SlackSettings(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-# Named here, and imported by the settings handler, so the GET default and
-# the schema default cannot drift. The catalogue supplies the id: the literal
-# this replaced had gone stale enough to name a model that no longer resolves.
-DEFAULT_CLOUD_MODEL = default_for_tier(ClaudeTier.sonnet).id
-
-
 class AIConfigSettings(BaseModel):
-    """AI/LLM configuration."""
+    """The org's agent preset, as stored at ``org.config["llm"]["preset"]``.
+
+    Provider, model and credentials are not here: they live on the
+    ``organizations`` columns that ``PATCH /v1/settings/claude`` writes.
+    This section is the one key the connections payload owns.
+    """
 
     preset: str = "claude-code"
-    ollama_url: str = Field(default="http://localhost:11434", alias="ollamaUrl")
-    ollama_model: str = Field(default="llama3:8b", alias="ollamaModel")
-    cloud_provider: str = Field(default="anthropic", alias="cloudProvider")
-    cloud_api_key: str = Field(default="", alias="cloudApiKey")
-    cloud_model: str = Field(default=DEFAULT_CLOUD_MODEL, alias="cloudModel")
-    merge_model_default: str | None = Field(
-        default=None,
-        alias="mergeModelDefault",
-        description=(
-            "Per-org override for the small-batch merge model. "
-            "None = use platform default from LLMConfig."
-        ),
-    )
-    merge_model_large: str | None = Field(
-        default=None,
-        alias="mergeModelLarge",
-        description=(
-            "Per-org override for the large-batch merge model. "
-            "None = use platform default from LLMConfig."
-        ),
-    )
 
     model_config = {"populate_by_name": True}
 
@@ -154,11 +130,9 @@ class AIConfigSettings(BaseModel):
 class ScanSettings(BaseModel):
     """Scan pipeline tuning settings."""
 
-    # Synth and merge each get their own timeout because the merge phase runs
-    # one long Claude call over every active feature, while synth runs many
-    # short calls in parallel — sharing a single ceiling forces a bad trade.
+    # Per-repo budget for one synthesize call. Synth runs many short calls
+    # in parallel, so this ceiling is per call, not per scan.
     timeout_seconds: int = Field(default=300, alias="timeoutSeconds", ge=60, le=3600)
-    merge_timeout_seconds: int = Field(default=300, alias="mergeTimeoutSeconds", ge=60, le=3600)
     max_turns: int = Field(default=40, alias="maxTurns", ge=0, le=100)
     auto_create_members: bool = Field(
         default=True,

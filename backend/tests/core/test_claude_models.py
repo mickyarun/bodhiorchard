@@ -45,7 +45,6 @@ from app.core.claude_models import (
     model_ids,
     models_in_tier,
 )
-from app.schemas.settings import DEFAULT_CLOUD_MODEL
 from app.services.scan.synthesis.runner import DEFAULT_MODEL
 
 # A complete model id, as the CLI accepts it. Date-suffixed ids are the
@@ -226,11 +225,6 @@ class TestLivePinnedIds:
     def test_synthesis_default(self) -> None:
         resolved = get_model(DEFAULT_MODEL)
         assert resolved is not None, f"{DEFAULT_MODEL} is not catalogued"
-        assert is_recommended(resolved)
-
-    def test_cloud_model_default(self) -> None:
-        resolved = get_model(DEFAULT_CLOUD_MODEL)
-        assert resolved is not None, f"{DEFAULT_CLOUD_MODEL} is not catalogued"
         assert is_recommended(resolved)
 
     def test_skill_frontmatter(self) -> None:

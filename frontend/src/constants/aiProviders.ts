@@ -66,34 +66,6 @@ export interface ProviderCaps {
   limitations?: string[]
 }
 
-/**
- * One model the cross-repo merge settings may name, as the capabilities
- * endpoint describes it.
- *
- * Distinct from `ProviderCaps.models`, which are the aliases (`sonnet`,
- * `opus`) the CLI resolves to whichever generation is current. These are
- * exact ids, for the two settings that have to pin one.
- *
- * Both flags are the backend's answers, served rather than derived here so
- * the price rule lives in one language instead of two:
- *
- * - `offered` — belongs in the dropdown: the tier's default, or a release
- *   newer than it that the rule leaves as a deliberate opt-in because it
- *   costs more.
- * - `recommended` — is the tier's default.
- *
- * A model with neither flag is still served, so a pin an org made before a
- * newer release arrived renders as its name rather than a raw id.
- */
-export interface MergeModelChoice {
-  id: string
-  label: string
-  tier: string
-  price_label: string
-  offered: boolean
-  recommended: boolean
-}
-
 export function providerTitle(provider: string): string {
   return PROVIDER_META[provider]?.title ?? provider
 }

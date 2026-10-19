@@ -39,7 +39,6 @@ logger = structlog.get_logger(__name__)
 # ``V2ConfigResponse`` defaults so a fresh org sees identical numbers
 # in the UI vs the backend.
 _DEFAULT_TIMEOUT_SECONDS = 300
-_DEFAULT_MERGE_TIMEOUT_SECONDS = 300
 _DEFAULT_MAX_TURNS = 40
 
 
@@ -64,7 +63,7 @@ def mint_mcp_credentials(*, org_id: uuid.UUID) -> dict[str, str]:
 async def load_scan_cfg(org_id: uuid.UUID) -> dict[str, Any]:
     """Read the Scan-tuning section of the org config.
 
-    Returns the keys the synthesize / merge stages care about with safe
+    Returns the keys the synthesize stage cares about with safe
     fallbacks. Pre-loaded once at fanout setup so the per-repo workers
     don't each hit the DB just to learn the same numbers.
     """
@@ -77,8 +76,5 @@ async def load_scan_cfg(org_id: uuid.UUID) -> dict[str, Any]:
         scan_cfg = {}
     return {
         "timeout_seconds": int(scan_cfg.get("timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS),
-        "merge_timeout_seconds": int(
-            scan_cfg.get("merge_timeout_seconds") or _DEFAULT_MERGE_TIMEOUT_SECONDS
-        ),
         "max_turns": int(scan_cfg.get("max_turns") or _DEFAULT_MAX_TURNS),
     }

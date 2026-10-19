@@ -48,60 +48,6 @@ class AuthConfig(BaseSettings):
     algorithm: str = "HS256"
 
 
-class LLMConfig(BaseSettings):
-    """LLM provider configuration."""
-
-    model_config = SettingsConfigDict(env_prefix="LLM_", env_file=".env", extra="ignore")
-
-    provider: str = Field(default="ollama")
-    model: str = Field(default="llama3:8b")
-    base_url: str = Field(default="http://localhost:11434")
-    premium_provider: str = Field(default="ollama")
-    premium_model: str = Field(default="llama3:70b")
-    # Both default to empty rather than a pinned id: the current model for a
-    # tier lives in ``core.claude_models``, which promotes a newer release
-    # once it costs no more. A literal here would be a second place to update
-    # on every release, and the one that goes stale (see get_merge_models).
-    merge_model_default: str = Field(
-        default="",
-        description=(
-            "Model for cross-repo feature merge at typical scale. Empty means "
-            "the current Sonnet-tier model. "
-            "Per-org override via org.config['llm']['merge_model_default']."
-        ),
-    )
-    merge_model_large: str = Field(
-        default="",
-        description=(
-            "Escalation model for very large merge runs. Empty means the "
-            "current Opus-tier model. "
-            "Per-org override via org.config['llm']['merge_model_large']."
-        ),
-    )
-    merge_safe_feature_budget: int = Field(
-        default=16000,
-        description=(
-            "Active feature count above which the merge phase falls back "
-            "to embedding-blocked clusters. At 1M-token context, "
-            "16K features in a two-section prompt fits comfortably."
-        ),
-    )
-    merge_sonnet_quality_budget: int = Field(
-        default=3000,
-        description=(
-            "Active feature count at or below which the default merge "
-            "model handles the call; above this, the escalation model runs."
-        ),
-    )
-    merge_large_cluster_opus: int = Field(
-        default=200,
-        description=(
-            "Per-cluster feature count above which the escalation model "
-            "is selected for that cluster."
-        ),
-    )
-
-
 class EmbeddingConfig(BaseSettings):
     """Embedding provider configuration."""
 
@@ -340,7 +286,6 @@ class Settings(BaseSettings):
 
     db: DatabaseConfig = DatabaseConfig()
     auth: AuthConfig = AuthConfig()
-    llm: LLMConfig = LLMConfig()
     embedding: EmbeddingConfig = EmbeddingConfig()
     redis: RedisConfig = RedisConfig()
     integrations: IntegrationConfig = IntegrationConfig()

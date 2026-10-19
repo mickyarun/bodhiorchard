@@ -37,9 +37,6 @@ from typing import Any
 
 import structlog
 
-from app.config import settings
-from app.core.claude_model_defaults import default_for_tier
-from app.core.claude_models import ClaudeTier, model_ids
 from app.schemas.settings import (
     BUDStageSettings,
     BugAttachmentSettings,
@@ -289,76 +286,6 @@ def get_ai_agent_profile(org_config: dict[str, Any] | None) -> dict[str, str]:
     llm = (org_config or {}).get("llm") or {}
     preset = llm.get("preset") or _DEFAULT_AGENT_PRESET
     return _AI_AGENT_PROFILES.get(preset, _AI_AGENT_PROFILES[_DEFAULT_AGENT_PRESET])
-
-
-# Which tiers a merge model may come from. Narrower than the catalogue on
-# purpose, because the two merge settings are not a free cost/quality choice:
-# the prompt is sized for a 1M-token context (see
-# ``LLMConfig.merge_safe_feature_budget``) and Haiku 4.5 is the one 200K
-# model catalogued, so it would truncate rather than degrade; and the second
-# setting is an *escalation* path, so a tier below Sonnet is a regression
-# rather than an option. Fable stays out because it is 5x Opus — too large a
-# jump to sit behind a caption that says "cost / quality preference".
-MERGE_MODEL_TIERS: tuple[ClaudeTier, ...] = (ClaudeTier.sonnet, ClaudeTier.opus)
-
-# Every model in those tiers, including releases a newer one has taken over:
-# an org that pinned one before the newer arrived keeps that choice, instead
-# of being silently moved back to the platform default.
-_MERGE_MODEL_ALLOWLIST: frozenset[str] = model_ids(MERGE_MODEL_TIERS)
-
-
-def _platform_merge_model(configured: str, tier: ClaudeTier) -> str:
-    """The platform-wide merge model for ``tier``, validating the env override.
-
-    An operator's ``LLM_MERGE_MODEL_*`` value gets the same allowlist check an
-    org's pin gets. A typo, or a model from a tier merge cannot use, degrades
-    to the tier's current model rather than reaching ``ClaudeRunnerConfig``
-    as-is. Without this the two paths disagree — the org pin is checked, the
-    env default is not — so the one place nothing validates is the one that
-    can put an unusable model in front of the runner.
-
-    Logged rather than silently swallowed: a stale env var that quietly does
-    nothing is what let these ids rot in the first place.
-    """
-    if configured in _MERGE_MODEL_ALLOWLIST:
-        return configured
-    chosen = default_for_tier(tier).id
-    if configured:
-        logger.warning(
-            "merge_model_env_ignored", requested=configured, tier=tier.value, using=chosen
-        )
-    return chosen
-
-
-def get_merge_models(org_config: dict[str, Any] | None) -> tuple[str, str]:
-    """Resolve (default_model, large_model) for cross-repo feature merge.
-
-    Reads the per-org overrides at ``org.config['llm']['merge_model_default']``
-    and ``org.config['llm']['merge_model_large']``. Either or both may be
-    absent / null; missing keys fall through to the platform-wide
-    ``LLMConfig`` defaults, and an unset ``LLMConfig`` default falls through
-    again to the current model for the tier (:mod:`app.core.claude_models`).
-    Values outside the allowlist fall back at *both* levels — so neither a
-    typo in the settings UI nor one in ``LLM_MERGE_MODEL_DEFAULT`` escalates
-    to running an unknown model name through the runner.
-
-    Args:
-        org_config: The raw ``organization.config`` JSONB dict, or None.
-
-    Returns:
-        ``(default_model, large_model)`` ready to pass into
-        ``ClaudeRunnerConfig(model=...)``.
-    """
-    default_fallback = _platform_merge_model(settings.llm.merge_model_default, ClaudeTier.sonnet)
-    large_fallback = _platform_merge_model(settings.llm.merge_model_large, ClaudeTier.opus)
-
-    llm = (org_config or {}).get("llm") or {}
-    raw_default = llm.get("merge_model_default")
-    raw_large = llm.get("merge_model_large")
-
-    chosen_default = raw_default if raw_default in _MERGE_MODEL_ALLOWLIST else default_fallback
-    chosen_large = raw_large if raw_large in _MERGE_MODEL_ALLOWLIST else large_fallback
-    return chosen_default, chosen_large
 
 
 def get_jira_settings(org_config: dict[str, Any] | None) -> JiraSettings:

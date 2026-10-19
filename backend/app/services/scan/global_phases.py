@@ -16,13 +16,13 @@
 
 After every per-repo workflow has finished, the ``scan_runner``
 calls into here to run the cross-repo phases that *can't* be sharded
-per-repo: feature merge, skill remap (rebuilds skills with feature
-names as modules), persist results, and audit.
+per-repo: skill remap (rebuilds skills with feature names as modules),
+backend link, persist results, and audit.
 
 Each phase is best-effort: a failure logs and the next phase still
-runs. (historical: an earlier pipeline iteration called these same functions
-order; we route through the stage registry so each one is uniformly
-gated by ``resolve_runtime_context``.
+runs. (Historically an earlier pipeline iteration called these same
+functions in a fixed order; we now route through the stage registry so
+each one is uniformly gated by ``resolve_runtime_context``.)
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ import structlog
 
 from app.models.scan_phase import ScanPhase
 from app.scan.session import with_session
+from app.services.scan.runner_config import load_scan_cfg
 from app.services.scan.stages import StageContext, StageOutput, get_stage
 
 logger = structlog.get_logger(__name__)
@@ -78,10 +79,8 @@ async def run_global_phases(
         return
     counts = await _collect_global_counts(org_id=org_id)
     # Pull the org's Scan-tuning settings (Settings → Code → Scan tuning).
-    # Used downstream by stages that respect per-org timeouts; the legacy
-    # merge-specific keys (``merge_timeout_seconds`` etc.) remain in the
-    # config payload for backwards compatibility but are unused.
-    scan_cfg = await _load_scan_cfg(org_id=org_id)
+    # Used downstream by stages that respect per-org timeouts.
+    scan_cfg = await load_scan_cfg(org_id)
     config: dict[str, Any] = {
         "org_id": str(org_id),
         "scan_id": str(scan_id),
@@ -256,31 +255,6 @@ async def _mark_global_phase_failed(
             await db.commit()
     except Exception:
         logger.exception("scan_global_phase_failed_write_failed")
-
-
-async def _load_scan_cfg(*, org_id: uuid.UUID) -> dict[str, int]:
-    """Read the Scan-tuning section of the org config for global phases.
-
-    Mirror of ``scan_runner._load_scan_cfg`` — kept here as a separate
-    helper because ``run_global_phases`` is invoked outside the
-    per-repo fanout that already loaded scan_cfg into ``runtime_overrides``.
-    The legacy ``merge_timeout_seconds`` key is preserved in the return
-    value for backwards compatibility with consumers that still read it.
-    """
-    from app.repositories.organization import OrganizationRepository
-
-    try:
-        async with with_session(org_id) as db:
-            org = await OrganizationRepository(db).get_by_id(org_id)
-            cfg = dict((org.config or {}).get("scan", {})) if org else {}
-    except Exception:
-        logger.exception("scan_global_load_scan_cfg_failed", org_id=str(org_id))
-        cfg = {}
-    return {
-        "timeout_seconds": int(cfg.get("timeout_seconds") or 300),
-        "merge_timeout_seconds": int(cfg.get("merge_timeout_seconds") or 300),
-        "max_turns": int(cfg.get("max_turns") or 40),
-    }
 
 
 async def _collect_global_counts(*, org_id: uuid.UUID) -> dict[str, int]:

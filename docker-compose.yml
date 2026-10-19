@@ -53,10 +53,6 @@ services:
       # When unset this is empty; orgs using api_key auth mode override it
       # from the encrypted value stored in the DB.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      # LLM provider — defaults to anthropic; override via root .env if needed
-      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
-      LLM_MODEL: ${LLM_MODEL:-claude-haiku-5-5}
-      LLM_PREMIUM_MODEL: ${LLM_PREMIUM_MODEL:-claude-sonnet-5-5}
       # Shared HMAC with the multiplayer service — both sides must match or
       # internal bridge calls (verify-token, org-snapshot, race-*) get 403.
       COLYSEUS_BRIDGE_SECRET: ${COLYSEUS_BRIDGE_SECRET:-dev-colyseus-bridge-secret}

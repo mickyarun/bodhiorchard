@@ -25,8 +25,6 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.claude_model_defaults import is_recommended, offered_models
-from app.core.claude_models import CLAUDE_MODELS
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.organization import AIProvider, Organization
 from app.models.user import User
@@ -40,7 +38,6 @@ from app.services.ai_runner.ollama_models import (
     list_tool_models,
 )
 from app.services.deployment_info import deployment_info
-from app.services.org_settings import MERGE_MODEL_TIERS
 
 router = APIRouter(tags=["settings-ai"])
 
@@ -80,40 +77,6 @@ def serialize_provider(provider: AIProvider) -> dict[str, Any]:
         # Named here rather than in the UI's own copy, which drifted stale.
         "limitations": provider_limitations(provider),
     }
-
-
-def serialize_merge_models() -> list[dict[str, Any]]:
-    """The models the cross-repo merge settings may name, for their dropdowns.
-
-    Separate from ``serialize_provider``: a provider's ``models`` are the
-    aliases a skill picks from, which the CLI resolves to whatever generation
-    is current. These are exact ids, for the two settings that have to pin one.
-
-    Restricted to ``MERGE_MODEL_TIERS`` — the same tiers ``get_merge_models``
-    will accept on read, so the UI cannot offer a model the backend would
-    discard. Two flags, because "valid" and "worth offering" differ:
-
-    * ``offered`` — belongs in the dropdown: the tier's default, or a release
-      newer than it (one the price rule leaves as a deliberate opt-in).
-    * ``recommended`` — is the tier's default.
-
-    Models that are neither are still listed, so a pin an org made before a
-    newer release arrived renders as its name rather than a raw id.
-    """
-    merge_tiers = set(MERGE_MODEL_TIERS)
-    offered = {model.id for model in offered_models(MERGE_MODEL_TIERS)}
-    return [
-        {
-            "id": model.id,
-            "label": model.label,
-            "tier": model.tier.value,
-            "price_label": model.price_label,
-            "offered": model.id in offered,
-            "recommended": is_recommended(model),
-        }
-        for model in CLAUDE_MODELS
-        if model.tier in merge_tiers
-    ]
 
 
 async def with_dynamic_models(
@@ -209,5 +172,4 @@ async def get_ai_capabilities(
         "current_provider": (org.ai_provider or AIProvider.claude).value,
         "deployment_mode": deployment_info()["mode"],
         "providers": providers,
-        "merge_models": serialize_merge_models(),
     }
