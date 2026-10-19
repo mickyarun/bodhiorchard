@@ -32,7 +32,15 @@ jobs:
             revert
             scan
           requireScope: false
-          subjectPattern: ^(?![A-Z]).+$
+          # The lowercase-subject rule is for people, not bots. Dependabot
+          # titles every PR "Bump x from a to b" and rewrites the title back
+          # to that on each rebase, so correcting one by hand never survives
+          # — the rule rejected 100% of its pull requests and nothing it
+          # opened could merge. Bots keep the type and scope check and skip
+          # the subject check; for everyone else nothing changes.
+          subjectPattern: >-
+            ${{ endsWith(github.event.pull_request.user.login, '[bot]')
+            && '.+' || '^(?![A-Z]).+$' }}
           subjectPatternError: |
             The subject "{subject}" must start with a lowercase letter.
             Example: "feat(backend): add foo" not "feat(backend): Add foo".
