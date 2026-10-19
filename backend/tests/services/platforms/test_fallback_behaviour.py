@@ -63,7 +63,7 @@ def test_web_fallback_preserves_vuetify_boilerplate(tmp_path) -> None:  # type: 
     platform = get_platform("web_js")
     md, _ = _fallback_minimal(tmp_path, platform)
     assert "vuetify" in md.lower()
-    assert "cdn.jsdelivr.net" in md
+    assert "https://cdn.jsdelivr.net/" in md
 
 
 def test_fallback_includes_discovered_files_when_present() -> None:

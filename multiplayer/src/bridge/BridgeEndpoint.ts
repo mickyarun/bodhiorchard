@@ -143,7 +143,7 @@ export function handleBridgePublish(req: Request, res: Response): void {
     room.handleBridgeEvent(payload.type, payload.data)
     res.status(200).json({ delivered: true })
   } catch (err) {
-    console.error(`[BridgeEndpoint] Error handling event type=${payload.type}:`, err)
+    console.error(`[BridgeEndpoint] Error handling event type=${safeLog(payload.type)}:`, err)
     res.status(500).json({ error: "internal error" })
   }
 }

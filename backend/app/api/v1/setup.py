@@ -122,12 +122,20 @@ def _list_directory_sync(target: Path) -> list[DirectoryEntry]:
 @router.get("/browse-directories", response_model=BrowseDirectoriesResponse)
 async def browse_directories(
     path: str = Query(default="", description="Directory path to list. Defaults to home."),
+    db: AsyncSession = Depends(get_db),
 ) -> BrowseDirectoriesResponse:
     """List subdirectories at a given path for the file picker.
 
     Returns the resolved current path, parent path, and child directories.
     Only directories are listed — no file contents are exposed.
+
+    Unauthenticated, because the setup wizard needs a directory picker
+    before an org or a JWT exists — so it is gated on setup being
+    incomplete, like every other pre-auth endpoint here. Without that
+    gate it stays reachable for the life of the deployment and walks the
+    whole filesystem for anyone who can reach the port.
     """
+    await _require_setup_incomplete(db)
     target = Path(path).expanduser().resolve() if path else Path.home()
 
     if not target.exists():
@@ -161,15 +169,23 @@ async def browse_directories(
 @router.get("/repo-branches")
 async def get_repo_branches(
     path: str = Query(..., description="Absolute path to a git repository"),
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """List branches for a repo by path (no auth — used during setup).
 
+    Gated on setup being incomplete for the same reason as
+    :func:`browse_directories`: it takes a caller-chosen path and runs git
+    against it, which is a filesystem probe for anything that is not a
+    repository.
+
     Args:
         path: Absolute path to the git repository.
+        db: Session used only to check whether setup is still open.
 
     Returns:
         Dict with branches list and auto-detected main/develop.
     """
+    await _require_setup_incomplete(db)
     repo_path = Path(path).resolve()
     if not repo_path.exists() or not (repo_path / ".git").exists():
         raise HTTPException(
