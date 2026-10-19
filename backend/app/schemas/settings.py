@@ -20,6 +20,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.core.claude_model_defaults import default_for_tier
+from app.core.claude_models import ClaudeTier
 from app.models.quiz_question import QuizDifficulty, QuizQuestionType
 
 
@@ -114,6 +116,12 @@ class SlackSettings(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+# Named here, and imported by the settings handler, so the GET default and
+# the schema default cannot drift. The catalogue supplies the id: the literal
+# this replaced had gone stale enough to name a model that no longer resolves.
+DEFAULT_CLOUD_MODEL = default_for_tier(ClaudeTier.sonnet).id
+
+
 class AIConfigSettings(BaseModel):
     """AI/LLM configuration."""
 
@@ -122,7 +130,7 @@ class AIConfigSettings(BaseModel):
     ollama_model: str = Field(default="llama3:8b", alias="ollamaModel")
     cloud_provider: str = Field(default="anthropic", alias="cloudProvider")
     cloud_api_key: str = Field(default="", alias="cloudApiKey")
-    cloud_model: str = Field(default="claude-sonnet-4-5-20250514", alias="cloudModel")
+    cloud_model: str = Field(default=DEFAULT_CLOUD_MODEL, alias="cloudModel")
     merge_model_default: str | None = Field(
         default=None,
         alias="mergeModelDefault",

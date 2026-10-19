@@ -42,7 +42,7 @@
       </v-col>
     </v-row>
 
-    <!-- Per-org merge model override (Phase 3.5) -->
+    <!-- Per-org merge model override -->
     <SettingsMergeModel />
   </div>
 </template>

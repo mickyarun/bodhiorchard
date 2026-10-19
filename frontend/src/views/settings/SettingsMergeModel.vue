@@ -41,7 +41,7 @@
       <v-col cols="12" md="6">
         <v-select
           v-model="mergeModelDefault"
-          :items="mergeModelOptions"
+          :items="defaultOptions"
           label="Small batches (≤3000 features)"
           variant="outlined"
           density="compact"
@@ -53,7 +53,7 @@
       <v-col cols="12" md="6">
         <v-select
           v-model="mergeModelLarge"
-          :items="mergeModelOptions"
+          :items="largeOptions"
           label="Large batches (>3000 features)"
           variant="outlined"
           density="compact"
@@ -73,7 +73,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import api from '@/services/api'
+import type { MergeModelChoice } from '@/constants/aiProviders'
 import { useSettingsStore } from '@/stores/settings'
 
 const settingsStore = useSettingsStore()
@@ -83,14 +85,48 @@ interface MergeModelOption {
   value: string | null
 }
 
-// Allowlist mirrors backend get_merge_models — keep in sync. Platform
-// default sentinel uses ``null`` so partial overrides round-trip cleanly
-// (only the field that's set ships to the backend).
-const mergeModelOptions: ReadonlyArray<MergeModelOption> = [
-  { label: 'Use platform default', value: null },
-  { label: 'Claude Sonnet 4.6 (faster, cheaper)', value: 'claude-sonnet-4-6' },
-  { label: 'Claude Opus 4.7 (higher quality)', value: 'claude-opus-4-7' },
-]
+// ``null`` ⇒ "use platform default", so a partial override round-trips
+// cleanly: only the field that is actually set ships to the backend.
+const PLATFORM_DEFAULT: MergeModelOption = { label: 'Use platform default', value: null }
+
+// Served by the capabilities endpoint, not listed here. The copy this replaced
+// kept its own allowlist behind a "keep in sync" comment, and by the time
+// anyone read it the dropdown was offering two models that had each been
+// superseded by a newer release at the same price or less. The backend also
+// decides which tiers belong in a merge setting, so this can no longer offer
+// a model that `get_merge_models` would discard on read.
+const choices = ref<MergeModelChoice[]>([])
+
+onMounted(async () => {
+  try {
+    const { data } = await api.get('/v1/settings/ai/capabilities')
+    choices.value = data.merge_models ?? []
+  } catch (err: unknown) {
+    const axiosErr = err as { response?: { status?: number } }
+    if (axiosErr?.response?.status !== 401) {
+      console.warn('[SettingsMergeModel] failed to load the merge model choices', err)
+    }
+  }
+})
+
+function describe(model: MergeModelChoice): MergeModelOption {
+  return { label: `${model.label} — ${model.price_label}`, value: model.id }
+}
+
+/**
+ * Platform default plus every model the backend offers — and whatever the org
+ * has actually pinned, when that is something else.
+ *
+ * The backend still honours a pin on a model it no longer offers, so dropping
+ * it from the list would render the select blank and rewrite a deliberate
+ * choice on the next save. Same for the moment before the choices load.
+ */
+function optionsFor(selected: string | null): MergeModelOption[] {
+  const options = [PLATFORM_DEFAULT, ...choices.value.filter(m => m.offered).map(describe)]
+  if (selected === null || options.some(o => o.value === selected)) return options
+  const known = choices.value.find(m => m.id === selected)
+  return [...options, known ? describe(known) : { label: selected, value: selected }]
+}
 
 const mergeModelDefault = computed<string | null>({
   get: () => settingsStore.connections.aiConfig.mergeModelDefault,
@@ -105,4 +141,7 @@ const mergeModelLarge = computed<string | null>({
     settingsStore.connections.aiConfig.mergeModelLarge = v
   },
 })
+
+const defaultOptions = computed(() => optionsFor(mergeModelDefault.value))
+const largeOptions = computed(() => optionsFor(mergeModelLarge.value))
 </script>

@@ -44,6 +44,7 @@ from app.models.user_mcp_token import DEFAULT_TOKEN_NAME, UserMCPToken
 from app.repositories.organization import OrganizationRepository
 from app.repositories.user_mcp_token import UserMCPTokenRepository
 from app.schemas.settings import (
+    DEFAULT_CLOUD_MODEL,
     AIConfigSettings,
     ConnectionsRead,
     ConnectionsUpdate,
@@ -152,7 +153,7 @@ async def get_connections(
             ollamaModel=llm_cfg.get("ollama_model", "llama3:8b"),
             cloudProvider=llm_cfg.get("cloud_provider", "anthropic"),
             cloudApiKey=_mask_secret(decrypt_secret(llm_cfg.get("cloud_api_key", ""))),
-            cloudModel=llm_cfg.get("cloud_model", "claude-sonnet-4-5-20250514"),
+            cloudModel=llm_cfg.get("cloud_model", DEFAULT_CLOUD_MODEL),
             mergeModelDefault=llm_cfg.get("merge_model_default"),
             mergeModelLarge=llm_cfg.get("merge_model_large"),
         ),
