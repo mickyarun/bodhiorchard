@@ -146,13 +146,7 @@ async def get_connections(
             signingSecret=_mask_secret(decrypt_secret(org.slack_signing_secret or "")),
             teamId=org.slack_team_id or "",
         ),
-        aiConfig=AIConfigSettings(
-            preset=llm_cfg.get("preset", "claude-code"),
-            ollamaUrl=llm_cfg.get("ollama_url", "http://localhost:11434"),
-            ollamaModel=llm_cfg.get("ollama_model", "llama3:8b"),
-            cloudProvider=llm_cfg.get("cloud_provider", "anthropic"),
-            cloudApiKey=_mask_secret(decrypt_secret(llm_cfg.get("cloud_api_key", ""))),
-        ),
+        aiConfig=AIConfigSettings(preset=llm_cfg.get("preset", "claude-code")),
         scan=ScanSettings(
             timeoutSeconds=scan_cfg.get("timeout_seconds", 300),
             maxTurns=scan_cfg.get("max_turns", 40),

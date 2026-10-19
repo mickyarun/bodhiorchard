@@ -115,13 +115,14 @@ class SlackSettings(BaseModel):
 
 
 class AIConfigSettings(BaseModel):
-    """AI/LLM configuration."""
+    """The org's agent preset, as stored at ``org.config["llm"]["preset"]``.
+
+    Provider, model and credentials are not here: they live on the
+    ``organizations`` columns that ``PATCH /v1/settings/claude`` writes.
+    This section is the one key the connections payload owns.
+    """
 
     preset: str = "claude-code"
-    ollama_url: str = Field(default="http://localhost:11434", alias="ollamaUrl")
-    ollama_model: str = Field(default="llama3:8b", alias="ollamaModel")
-    cloud_provider: str = Field(default="anthropic", alias="cloudProvider")
-    cloud_api_key: str = Field(default="", alias="cloudApiKey")
 
     model_config = {"populate_by_name": True}
 
