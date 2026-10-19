@@ -114,10 +114,10 @@ async def assign_policy(
 ) -> dict[str, int]:
     """Move employees onto this policy from today (never yourself, unless owner)."""
     policy = await load_policy(db, current_user.org_id, policy_id)
-    assigned = await policy_admin.assign_employees(
+    result = await policy_admin.assign_employees(
         db, policy, current_user.id, body.user_ids, actor_is_owner=perms.is_owner
     )
-    return {"assigned": assigned}
+    return {"assigned": result.assigned, "pending_elsewhere": result.pending_elsewhere}
 
 
 @router.get("/policies/{policy_id}/history", response_model=list[ConfigEventRead])

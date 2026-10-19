@@ -16,6 +16,7 @@
 import type { HolidayKind } from '@/types/leave'
 import type {
   AllocationRounding,
+  AssignResult,
   HolidayCountry,
   PolicyRead,
   PolicyWrite,
@@ -97,3 +98,13 @@ export const HOLIDAY_KIND_OPTIONS: { label: string; value: HolidayKind }[] = [
   { label: 'Mandatory', value: 'mandatory' },
   { label: 'Optional', value: 'optional' },
 ]
+
+/** "Moved 3 people to this policy." plus a note about requests still pending
+ *  under their old policy, which are decided on that policy's rules. */
+export function movedSummary(result: AssignResult): string {
+  const people = (n: number) => `${n} ${n === 1 ? 'person' : 'people'}`
+  const moved = `Moved ${people(result.assigned)} to this policy.`
+  if (!result.pending_elsewhere) return moved
+  const who = result.pending_elsewhere === 1 ? '1 of them has' : `${result.pending_elsewhere} of them have`
+  return `${moved} ${who} requests still pending from their old policy; those are decided on that policy's rules and balances.`
+}

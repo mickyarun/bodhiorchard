@@ -37,6 +37,7 @@ from app.models.organization import Organization
 from app.models.user import User
 from app.models.user_mcp_token import DEFAULT_TOKEN_NAME, UserMCPToken
 from app.repositories.organization import OrganizationRepository
+from app.repositories.slack_identity import SlackIdentityRepository
 from app.repositories.user_mcp_token import UserMCPTokenRepository
 from app.schemas.settings import (
     AIConfigSettings,
@@ -229,6 +230,12 @@ async def update_connections(
             # Auto-fetch team_id via auth.test so we can resolve orgs from webhooks
             auth_info = await auth_test(body.slack.bot_token)
             if auth_info and auth_info.get("team_id"):
+                if await SlackIdentityRepository(db).team_id_taken(auth_info["team_id"], org.id):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="That Slack workspace is already connected to another "
+                        "organization.",
+                    )
                 org.slack_team_id = auth_info["team_id"]
                 logger.info(
                     "slack_team_id_set",
@@ -249,6 +256,13 @@ async def update_connections(
             org.slack_signing_secret = encrypt_secret(raw_secret)
         # Allow manual team_id override (fallback if auth.test didn't work)
         if body.slack.team_id:
+            # One workspace, one org: a second org can't claim it (that would
+            # make every Slack event and button ambiguous for both).
+            if await SlackIdentityRepository(db).team_id_taken(body.slack.team_id, org.id):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="That Slack workspace is already connected to another organization.",
+                )
             org.slack_team_id = body.slack.team_id
 
     # AI config — preset + optional per-org merge model overrides.

@@ -157,3 +157,10 @@ export interface ConfigEventRead {
   at: string
   changes: Record<string, unknown>
 }
+
+/** Moving people onto a policy: how many moved, and how many of them still
+ *  have requests pending under their old policy. */
+export interface AssignResult {
+  assigned: number
+  pending_elsewhere: number
+}

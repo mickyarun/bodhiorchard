@@ -20,6 +20,7 @@ the same transaction, so the route handlers only load, call and reply.
 
 import uuid
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -105,6 +106,15 @@ async def delete_policy(db: AsyncSession, policy: LeavePolicy, actor_id: uuid.UU
     await repo.delete(policy)
 
 
+@dataclass(frozen=True)
+class AssignResult:
+    """How many moved, and how many of them still have requests pending from
+    their old policy (decided on that policy's rules and balances)."""
+
+    assigned: int
+    pending_elsewhere: int
+
+
 async def assign_employees(
     db: AsyncSession,
     policy: LeavePolicy,
@@ -112,7 +122,7 @@ async def assign_employees(
     user_ids: list[uuid.UUID],
     *,
     actor_is_owner: bool,
-) -> int:
+) -> AssignResult:
     """Move employees onto this policy from today; their old balances stay.
 
     Nobody but the owner moves themself: a policy with bigger quotas would
@@ -122,18 +132,24 @@ async def assign_employees(
     """
     if actor_id in user_ids and not actor_is_owner:
         raise LeaveForbiddenError("Ask another admin to change your own leave policy.")
-    assigned = await LeavePolicyMemberRepository(db, org_id=policy.org_id).assign_employees(
-        policy, user_ids, today_for(policy)
-    )
+    members = LeavePolicyMemberRepository(db, org_id=policy.org_id)
+    assigned = await members.assign_employees(policy, user_ids, today_for(policy))
+    # Pending requests keep the policy they were made under (approval prices
+    # them there), so HR is told about them rather than having them re-priced.
+    pending_elsewhere = await members.count_pending_elsewhere(policy, user_ids)
     if assigned:
         _record(
             db,
             policy,
             actor_id,
             LeaveConfigAction.EMPLOYEES_ASSIGNED,
-            {"user_ids": sorted(str(u) for u in user_ids), "assigned": assigned},
+            {
+                "user_ids": sorted(str(u) for u in user_ids),
+                "assigned": assigned,
+                "pending_elsewhere": pending_elsewhere,
+            },
         )
-    return assigned
+    return AssignResult(assigned=assigned, pending_elsewhere=pending_elsewhere)
 
 
 def _record(

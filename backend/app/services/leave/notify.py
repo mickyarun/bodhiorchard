@@ -26,6 +26,7 @@ even in a manager's DMs.
 
 import asyncio
 import uuid
+from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -34,16 +35,12 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.encryption import decrypt_secret
-from app.database import AsyncSessionLocal
 from app.models.leave_request import LeaveRequest, LeaveStatus
 from app.models.notification import Notification, NotificationType
-from app.repositories.organization import OrganizationRepository
-from app.repositories.user import UserRepository
 from app.services.event_bus import publish
 from app.services.leave.messages import compose_decision_message, compose_request_message
-from app.services.notifications import NotificationCategory, category_default
-from app.services.slack_client import chat_post_message, conversations_open
+from app.services.leave.slack_prompts import refresh_prompts, send_dm, send_prompts
+from app.services.notifications import NotificationCategory
 
 logger = structlog.get_logger(__name__)
 
@@ -60,17 +57,30 @@ class Notice:
     category: NotificationCategory
     slack_text: str
     events: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    # Send these approvers Approve / Reject buttons instead of a plain DM.
+    prompt_request_id: uuid.UUID | None = None
+    # Afterwards, swap earlier prompts for this request to its outcome.
+    refresh_request_id: uuid.UUID | None = None
 
     def send(self) -> None:
-        """Push the in-app rows and start the Slack DMs. Call after commit."""
+        """Push the in-app rows and start the Slack messages. Call after commit."""
         for topic, payload in self.events:
             publish(topic, payload)
-        if self.user_ids:
-            task = asyncio.create_task(
-                _dm(self.org_id, self.user_ids, self.category, self.slack_text)
+        if self.user_ids and self.prompt_request_id:
+            spawn(
+                send_prompts(self.org_id, self.prompt_request_id, self.user_ids, self.slack_text)
             )
-            _tasks.add(task)
-            task.add_done_callback(_tasks.discard)
+        elif self.user_ids:
+            spawn(send_dm(self.org_id, self.user_ids, self.category, self.slack_text))
+        if self.refresh_request_id:
+            spawn(refresh_prompts(self.org_id, self.refresh_request_id))
+
+
+def spawn(job: Coroutine[Any, Any, None]) -> None:
+    """Run a Slack send in the background, holding a reference until it's done."""
+    task = asyncio.create_task(job)
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
 
 
 def _stage(
@@ -111,29 +121,6 @@ def _stage(
     return notice
 
 
-async def _dm(
-    org_id: uuid.UUID, user_ids: set[uuid.UUID], category: NotificationCategory, text: str
-) -> None:
-    async with AsyncSessionLocal() as session:
-        encrypted = await OrganizationRepository(session).get_slack_bot_token(org_id)
-        token = decrypt_secret(encrypted) if encrypted else ""
-        if not token:
-            return
-        pairs = await UserRepository(session).list_slack_recipients(
-            org_id,
-            category=category,
-            default_enabled=category_default(category),
-            user_ids=user_ids,
-        )
-    for _user_id, slack_id in pairs:
-        try:
-            channel = await conversations_open(token, slack_id)
-            if channel:
-                await chat_post_message(token, channel, text)
-        except Exception:
-            logger.warning("leave_slack_dm_failed", org_id=str(org_id), exc_info=True)
-
-
 def stage_new_request(
     db: AsyncSession,
     *,
@@ -150,7 +137,12 @@ def stage_new_request(
         org_id=org_id,
         user_ids=set(targets),
         category=NotificationCategory.LEAVE_APPROVALS,
-        slack_text=f"{message} <{settings.frontend_url}{link}|Open in Bodhiorchard>",
+        # A request to decide gets buttons (and its own Open link); an FYI
+        # for an auto-approved WFH is a plain DM.
+        slack_text=message
+        if not auto_approved
+        else f"{message} <{settings.frontend_url}{link}|Open in Bodhiorchard>",
+        prompt_request_id=None if auto_approved else request.id,
     )
     return _stage(
         db,
@@ -172,6 +164,7 @@ def stage_decision(
         user_ids={request.user_id},
         category=NotificationCategory.LEAVE_UPDATES,
         slack_text=f"{message} <{settings.frontend_url}/leave|See details>",
+        refresh_request_id=request.id,
     )
     return _stage(
         db,
@@ -180,4 +173,15 @@ def stage_decision(
         title="Request approved" if request.status == LeaveStatus.APPROVED else "Request rejected",
         message=message,
         link="/leave",
+    )
+
+
+def after_cancel(org_id: uuid.UUID, request: LeaveRequest) -> Notice:
+    """Approvers' Slack prompts show the request was cancelled."""
+    return Notice(
+        org_id=org_id,
+        user_ids=set(),
+        category=NotificationCategory.LEAVE_APPROVALS,
+        slack_text="",
+        refresh_request_id=request.id,
     )

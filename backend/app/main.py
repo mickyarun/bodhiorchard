@@ -32,6 +32,7 @@ from app.api.v1._leave_errors import register_leave_errors
 from app.core.event_loop import configure_event_loop_policy
 from app.core.logging import setup_logging
 from app.core.middleware import RequestLoggingMiddleware
+from app.services.leave.digest_scheduler import run_forever as run_leave_digest
 from app.services.mcp_audit_cleanup import run_forever as run_audit_cleanup
 from app.services.minigame_nudge import run_forever as run_minigame_nudge
 from app.services.pr_merge_worker import WorkerPool, start_pr_merge_workers
@@ -281,6 +282,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # month's org-wide top scorer (idempotent; the feature's only economy hook).
     quiz_rollup_task = asyncio.create_task(run_quiz_monthly_rollup())
 
+    # 8g. Daily who's-out Slack post — 60s tick, at most one post per org-day.
+    leave_digest_task = asyncio.create_task(run_leave_digest())
+
     # 9. PR-merge Redis-stream worker pool. One consumer per
     # (org, repo) stream; supervisor task spawns consumers lazily as
     # streams appear in the registry. Orphan recovery re-publishes
@@ -319,6 +323,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     minigame_nudge_task.cancel()
     quiz_batch_task.cancel()
     quiz_scheduler_task.cancel()
+    leave_digest_task.cancel()
     quiz_rollup_task.cancel()
     if pr_merge_pool is not None:
         await pr_merge_pool.stop()

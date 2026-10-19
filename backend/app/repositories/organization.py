@@ -118,6 +118,15 @@ class OrganizationRepository(BaseRepository[Organization]):
         )
         return result.scalar_one_or_none()
 
+    async def set_config_section(self, org_id: uuid.UUID, key: str, value: Any) -> None:
+        """Replace one top-level section of the org's ``config`` JSONB."""
+        org = await self._db.get(Organization, org_id)
+        if org is None:
+            return
+        # A new dict (not an in-place edit) so SQLAlchemy sees the change.
+        org.config = {**(org.config or {}), key: value}
+        await self._db.flush()
+
     async def get_by_github_app_id(self, app_id: int) -> Organization | None:
         """Fetch an organization by its configured GitHub App ID.
 
@@ -148,7 +157,9 @@ class OrganizationRepository(BaseRepository[Organization]):
         result = await self._db.execute(
             select(Organization).where(Organization.slack_team_id == team_id)
         )
-        return result.scalar_one_or_none()
+        orgs = list(result.scalars().all())
+        # One workspace, one org: an ambiguous team id matches nothing.
+        return orgs[0] if len(orgs) == 1 else None
 
     async def get_all_with_mcp_tokens(self) -> list[Organization]:
         """Fetch all organizations that have an MCP token hash set.

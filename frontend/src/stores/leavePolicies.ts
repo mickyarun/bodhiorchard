@@ -22,7 +22,12 @@ import { ref } from 'vue'
 
 import api from '@/services/api'
 import type { PersonRef } from '@/types/leave'
-import type { HolidayCountry, PolicyRead, PolicyWrite } from '@/types/leavePolicy'
+import type {
+  AssignResult,
+  HolidayCountry,
+  PolicyRead,
+  PolicyWrite,
+} from '@/types/leavePolicy'
 import { extractApiError } from '@/utils/errors'
 
 export const useLeavePoliciesStore = defineStore('leavePolicies', () => {
@@ -108,16 +113,20 @@ export const useLeavePoliciesStore = defineStore('leavePolicies', () => {
     }
   }
 
-  async function assign(policyId: string, userIds: string[]): Promise<string | null> {
+  /** Move people onto a policy; resolves to the result, or an error message. */
+  async function assign(policyId: string, userIds: string[]): Promise<AssignResult | string> {
+    let result: AssignResult
     try {
-      await api.post<{ assigned: number }>(`/v1/leave/policies/${policyId}/assign`, {
-        user_ids: userIds,
-      })
+      result = (
+        await api.post<AssignResult>(`/v1/leave/policies/${policyId}/assign`, {
+          user_ids: userIds,
+        })
+      ).data
     } catch (err) {
       return extractApiError(err, "Couldn't move these employees. Try again.")
     }
     await Promise.all([fetchEmployees(policyId), fetchPolicies()])
-    return null
+    return result
   }
 
   return {

@@ -37,6 +37,7 @@
     <PolicyDetail v-if="open" :policy="open" :region="regionOf(open)" @back="select(null)" />
 
     <template v-else>
+      <SlackLeaveCard />
       <p v-if="!store.loading && !store.policies.length && !store.error" class="text-body-2 text-medium-emphasis">
         No policies yet. Add one to set up leave types and holidays.
       </p>
@@ -74,6 +75,7 @@ import AppCallout from '@/components/common/AppCallout.vue'
 import AddPolicyDialog from '@/components/leave/settings/AddPolicyDialog.vue'
 import PolicyCard from '@/components/leave/settings/PolicyCard.vue'
 import PolicyDetail from '@/components/leave/settings/PolicyDetail.vue'
+import SlackLeaveCard from '@/components/leave/settings/SlackLeaveCard.vue'
 import ConfirmDialog from '@/components/settings/code/ConfirmDialog.vue'
 import { useLeavePoliciesStore } from '@/stores/leavePolicies'
 import type { PolicyRead } from '@/types/leavePolicy'

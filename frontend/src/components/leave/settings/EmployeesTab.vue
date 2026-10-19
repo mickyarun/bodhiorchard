@@ -54,6 +54,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import { useMemberDirectory } from '@/composables/useMemberDirectory'
 import { useLeavePoliciesStore } from '@/stores/leavePolicies'
+import { movedSummary } from '@/utils/leavePolicy'
 
 const props = defineProps<{ policyId: string }>()
 
@@ -73,11 +74,14 @@ const candidates = computed(() => {
 async function move(): Promise<void> {
   if (!selected.value.length) return
   moving.value = true
-  const count = selected.value.length
-  error.value = (await store.assign(props.policyId, selected.value)) ?? ''
+  const result = await store.assign(props.policyId, selected.value)
   moving.value = false
-  if (error.value) return
-  movedText.value = `Moved ${count} ${count === 1 ? 'person' : 'people'} to this policy.`
+  if (typeof result === 'string') {
+    error.value = result
+    return
+  }
+  error.value = ''
+  movedText.value = movedSummary(result)
   selected.value = []
 }
 

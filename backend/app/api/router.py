@@ -56,6 +56,7 @@ from app.api.v1.leave import router as leave_router
 from app.api.v1.leave_approvals import router as leave_approvals_router
 from app.api.v1.leave_balances import router as leave_balances_router
 from app.api.v1.leave_calendar import router as leave_calendar_router
+from app.api.v1.leave_digest import router as leave_digest_router
 from app.api.v1.leave_holidays import router as leave_holidays_router
 from app.api.v1.leave_policies import router as leave_policies_router
 from app.api.v1.leave_types import router as leave_types_router
@@ -80,6 +81,7 @@ from app.api.v1.settings_slack import router as settings_slack_router
 from app.api.v1.setup import router as setup_router
 from app.api.v1.skills import router as skills_router
 from app.api.v1.slack import router as slack_router
+from app.api.v1.slack_interactions import router as slack_interactions_router
 from app.api.v1.standups import router as standups_router
 from app.api.v1.teams import router as teams_router
 from app.api.v1.triage_sessions import router as triage_router
@@ -121,6 +123,7 @@ for leave_part in (
     leave_policies_router,
     leave_types_router,
     leave_holidays_router,
+    leave_digest_router,
 ):
     api_router.include_router(leave_part, prefix="/api/v1/leave", dependencies=PEOPLE_NO_STORE)
 # Org-level settings routes; each is gated by its own org/integration
@@ -129,6 +132,8 @@ api_router.include_router(settings_router, prefix="/api/v1/settings")
 # Self-authenticating transports: signed webhooks, MCP bearer tokens and the
 # Colyseus bridge secret. They don't use the JWT the gate depends on.
 api_router.include_router(slack_router, prefix="/api/v1/slack")
+# Signed by Slack (no login): approve / reject leave from a DM.
+api_router.include_router(slack_interactions_router, prefix="/api/v1/slack")
 api_router.include_router(github_webhook_router, prefix="/api/v1/webhooks")
 api_router.include_router(mcp_router)
 # Remote MCP endpoint for external LLM clients (Claude Desktop / Cursor /

@@ -292,11 +292,12 @@ class UserRepository(BaseRepository[User]):
                 User.slack_id == slack_id,
             )
         )
-        result = await self._db.execute(stmt)
-        row = result.one_or_none()
-        if row is None:
+        rows = (await self._db.execute(stmt)).all()
+        # Two members on one Slack id is ambiguous: match nobody rather than
+        # guess (linking refuses duplicates; old data may still have them).
+        if len(rows) != 1:
             return None
-        return (row[0], _role_from_name(row[1]))
+        return (rows[0][0], _role_from_name(rows[0][1]))
 
     async def list_in_org_by_ids_with_role(
         self, org_id: uuid.UUID, user_ids: list[uuid.UUID]
@@ -687,7 +688,8 @@ class UserRepository(BaseRepository[User]):
             .join(OrgToUser, OrgToUser.user_id == User.id)
             .where(OrgToUser.org_id == org_id, User.slack_id == slack_id)
         )
-        return result.scalar_one_or_none()
+        users = list(result.scalars().all())
+        return users[0] if len(users) == 1 else None
 
     async def get_membership(self, user_id: uuid.UUID, org_id: uuid.UUID) -> OrgToUser | None:
         """Fetch the OrgToUser membership row for a user/org pair.

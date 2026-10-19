@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.employee_profile import EmployeeProfile
 from app.models.leave_ledger import LeaveLedgerEntry
 from app.models.leave_policy import LeavePolicy
+from app.models.leave_request import LeaveRequest, LeaveStatus
 from app.models.leave_type import LeaveType
 from app.models.user import User
 from app.repositories.base import rowcount
@@ -115,3 +116,17 @@ class LeavePolicyMemberRepository:
             LeaveLedgerEntry.leave_type_id == LeaveType.id,
             LeaveType.policy_id != policy.id,
         )
+
+    async def count_pending_elsewhere(
+        self, policy: LeavePolicy, user_ids: Sequence[uuid.UUID]
+    ) -> int:
+        """How many of ``user_ids`` have pending requests made under another policy."""
+        if not user_ids:
+            return 0
+        stmt = select(func.count(func.distinct(LeaveRequest.user_id))).where(
+            LeaveRequest.org_id == self._org,
+            LeaveRequest.user_id.in_(user_ids),
+            LeaveRequest.policy_id != policy.id,
+            LeaveRequest.status == LeaveStatus.PENDING,
+        )
+        return int((await self._db.execute(stmt)).scalar() or 0)

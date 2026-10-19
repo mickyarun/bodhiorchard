@@ -62,9 +62,11 @@ from app.models.feature_to_repo import FeatureToRepo, FeatureToRepoRole
 from app.models.jira_import import ImportStatus, JiraImportSession, JiraIssueBudMap, MapStatus
 from app.models.jwt_token import JWTToken
 from app.models.leave_config_event import LeaveConfigEvent
+from app.models.leave_digest_post import LeaveDigestPost
 from app.models.leave_ledger import LeaveLedgerEntry
 from app.models.leave_policy import LeavePolicy
 from app.models.leave_request import LeaveRequest
+from app.models.leave_slack_prompt import LeaveSlackPrompt
 from app.models.leave_type import LeaveType
 from app.models.mcp_audit_log import MCPAuditLogEntry
 from app.models.minigame import MinigameScore, MinigameSession
@@ -153,9 +155,11 @@ __all__ = [
     "EmployeeProfile",
     "EmployeeReportingManager",
     "LeaveConfigEvent",
+    "LeaveDigestPost",
     "LeaveLedgerEntry",
     "LeavePolicy",
     "LeaveRequest",
+    "LeaveSlackPrompt",
     "LeaveType",
     "PolicyHoliday",
     "BugComment",

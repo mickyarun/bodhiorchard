@@ -40,7 +40,7 @@ from app.services.leave.approvers import notify_targets
 from app.services.leave.cancellation import cancel
 from app.services.leave.evaluation import evaluate
 from app.services.leave.lifecycle import submit
-from app.services.leave.notify import stage_new_request
+from app.services.leave.notify import after_cancel, stage_new_request
 from app.services.leave.policies import resolve_member_policy, today_for
 from app.services.leave.summary import build_summary
 from app.services.leave.views import request_reads
@@ -148,6 +148,10 @@ async def cancel_request(
     """Cancel one of the caller's own requests."""
     org_id = current_user.org_id
     request = await cancel(db, org_id, current_user.id, request_id)
+    notice = after_cancel(org_id, request)
+    # Commit, then update approvers' Slack prompts (see create_request).
+    await db.commit()
+    notice.send()
     reads = await request_reads(
         db,
         org_id,

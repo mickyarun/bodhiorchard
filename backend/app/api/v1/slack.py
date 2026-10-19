@@ -18,8 +18,6 @@ Receives Slack events (reactions, messages), verifies HMAC-SHA256 signatures,
 deduplicates, and dispatches to the async job queue for triage processing.
 """
 
-import hashlib
-import hmac
 import time
 
 import structlog
@@ -32,6 +30,7 @@ from app.repositories.organization import OrganizationRepository
 from app.schemas.jobs import FeatureQAJobPayload, TriageJobPayload
 from app.schemas.slack import SlackEventWrapper, SlackMessageEvent, SlackReactionEvent
 from app.services.job_queue import JOB_FEATURE_QA, JOB_TRIAGE, create_job
+from app.services.slack_verify import verify_slack_signature
 
 logger = structlog.get_logger(__name__)
 
@@ -55,52 +54,6 @@ def _is_duplicate(event_id: str) -> bool:
         return True
     _seen_events[event_id] = now
     return False
-
-
-# ── HMAC-SHA256 verification ────────────────────────────────────────
-
-
-def _verify_slack_signature(
-    signing_secret: str,
-    timestamp: str,
-    body: bytes,
-    signature: str,
-) -> tuple[bool, str]:
-    """Verify a Slack request signature.
-
-    Args:
-        signing_secret: The org's Slack signing secret (plaintext).
-        timestamp: X-Slack-Request-Timestamp header value.
-        body: Raw request body bytes.
-        signature: X-Slack-Signature header value (v0=hex).
-
-    Returns:
-        Tuple of (is_valid, failure_reason). reason is empty on success.
-    """
-    now = time.time()
-    drift = abs(now - int(timestamp))
-    if drift > 300:
-        return False, f"timestamp_drift={int(drift)}s"
-
-    sig_basestring = f"v0:{timestamp}:{body.decode('utf-8')}"
-    computed = (
-        "v0="
-        + hmac.new(
-            signing_secret.encode("utf-8"),
-            sig_basestring.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
-    )
-    if hmac.compare_digest(computed, signature):
-        return True, ""
-    return (
-        False,
-        f"hmac_mismatch secret_len={len(signing_secret)} "
-        f"secret_prefix={signing_secret[:4]}*** "
-        f"body_len={len(body)} "
-        f"computed_suffix=...{computed[-8:]} "
-        f"received_suffix=...{signature[-8:]}",
-    )
 
 
 # ── Org resolution ──────────────────────────────────────────────────
@@ -181,7 +134,7 @@ async def slack_events(
             )
             return Response(status_code=401)
 
-        valid, reason = _verify_slack_signature(signing_secret, timestamp, raw_body, signature)
+        valid, reason = verify_slack_signature(signing_secret, timestamp, raw_body, signature)
         if not valid:
             logger.warning(
                 "slack_signature_invalid",

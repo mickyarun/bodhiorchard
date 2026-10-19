@@ -29,6 +29,7 @@ from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.leave_policy_members import LeavePolicyMemberRepository
 from app.repositories.policy_holiday import PolicyHolidayRepository
 from app.schemas.leave import LeaveRequestCreate
+from app.services.leave import policy_admin
 from app.services.leave.holidays import (
     HolidayImportError,
     import_public_holidays,
@@ -176,3 +177,19 @@ async def test_wfh_alone_is_not_policy_history(pg_session_factory: Factory) -> N
         )
         await db.commit()
     assert await _assigned_on(pg_session_factory, org, emp) is None
+
+
+async def test_moving_someone_reports_requests_pending_on_their_old_policy(
+    pg_session_factory: Factory,
+) -> None:
+    org, (emp, mgr, hr), casual = await setup_org(pg_session_factory, "Emp", "Mgr", "Hr")
+    await report_to(pg_session_factory, org, emp, mgr)
+    india = await _policy(pg_session_factory, org, "India")
+    mon = future_monday()
+    async with pg_session_factory() as db:
+        await submit(db, org, emp, leave_body(casual, mon, mon))
+        result = await policy_admin.assign_employees(
+            db, india, hr, [emp, mgr], actor_is_owner=False
+        )
+        await db.commit()
+    assert (result.assigned, result.pending_elsewhere) == (2, 1)

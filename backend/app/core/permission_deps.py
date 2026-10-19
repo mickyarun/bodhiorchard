@@ -107,6 +107,25 @@ async def member_has_permission(
     return permission in await permissions_for_role(db, membership.role_id)
 
 
+async def member_permission_set(
+    db: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID
+) -> PermissionSet | None:
+    """A member's full :class:`PermissionSet` outside a JWT request; None if
+    they aren't a member.
+
+    For callers that authenticate some other way (e.g. a signed Slack button
+    click) and need the same answer :func:`get_permission_set` would give.
+    """
+    pair = await UserRepository(db).get_membership_with_role(user_id, org_id)
+    if pair is None:
+        return None
+    membership, _effective = pair
+    if _is_owner_role(membership.role_ref):
+        return PermissionSet(ids=frozenset(), is_owner=True)
+    ids = await permissions_for_role(db, membership.role_id)
+    return PermissionSet(ids=frozenset(ids), is_owner=False)
+
+
 async def permissions_for_role(db: AsyncSession, role_id: uuid.UUID | None) -> set[str]:
     """Resolve a membership's role to permission ids — the single resolver.
 
