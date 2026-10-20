@@ -64,6 +64,10 @@ async def test_members_without_a_profile_count_under_the_default_policy(
     assert "Loner" in [r["name"] for r in balances]
     scope = (await client.get(f"{LEAVE}/reports/scope", headers=hr)).json()
     assert str(loner) in [x["user_id"] for x in scope["people"]]
+    # One policy starting in January: this leave year is labelled by its
+    # calendar year (in the policy's zone, so allow for New Year's Eve).
+    assert len(scope["current_leave_years"]) == 1
+    assert scope["current_leave_years"][0] in {date.today().year - 1, date.today().year}
     # A department filter can't match someone without a profile.
     assert await rows(client, "summary", hr, **JUNE, department="Sales") == []
 

@@ -27,7 +27,7 @@
       @update:start="(v: string) => (store.filters.start = v)"
       @update:end="(v: string) => (store.filters.end = v)"
     />
-    <v-select v-model="store.filters.kind" :items="kinds" label="Kind" v-bind="FIELD" />
+    <v-select v-model="store.filters.kind" :items="KIND_OPTIONS" label="Kind" v-bind="FIELD" />
     <v-select
       v-model="store.filters.leave_type_id"
       :items="store.leaveTypes"
@@ -51,8 +51,7 @@
 import { ref } from 'vue'
 import DateRangeFilter, { type DatePreset } from '@/components/leave/DateRangeFilter.vue'
 import { useLeaveApprovalsStore } from '@/stores/leaveApprovals'
-import type { LeaveKind } from '@/types/leave'
-import { KIND_LABELS } from '@/utils/leave'
+import { KIND_OPTIONS } from '@/utils/leaveFilterOptions'
 
 const FIELD = {
   density: 'compact',
@@ -65,7 +64,6 @@ const PRESETS: DatePreset[] = ['any', 'this_week', 'this_month', 'next_30_days',
 
 const store = useLeaveApprovalsStore()
 const preset = ref<DatePreset>(store.filters.start ? 'custom' : 'any')
-const kinds = (Object.keys(KIND_LABELS) as LeaveKind[]).map(value => ({ value, title: KIND_LABELS[value] }))
 </script>
 
 <style scoped>

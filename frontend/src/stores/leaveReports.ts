@@ -51,6 +51,23 @@ export function reportParams(name: ReportName, filters: ReportFilters): Record<s
   return out
 }
 
+/** Filter values the new scope doesn't offer (e.g. another viewer's picks). */
+export function outOfScope(filters: ReportFilters, scope: ReportScope): (keyof ReportFilters)[] {
+  const people = new Set(scope.people.map(p => p.user_id))
+  const offered: Partial<Record<keyof ReportFilters, Set<string>>> = {
+    user_id: people,
+    manager_id: people,
+    department: new Set(scope.departments),
+    office_id: new Set(scope.offices.map(o => o.id)),
+    policy_id: new Set(scope.policies.map(p => p.id)),
+    leave_type_id: new Set(scope.leave_types.map(t => t.id)),
+  }
+  return (Object.keys(offered) as (keyof ReportFilters)[]).filter(key => {
+    const value = filters[key]
+    return typeof value === 'string' && value !== '' && !offered[key]?.has(value)
+  })
+}
+
 export const useLeaveReportsStore = defineStore('leaveReports', () => {
   const report = ref<ReportName>('summary')
   const preset = ref<RangePreset>('this_month')
@@ -74,15 +91,24 @@ export const useLeaveReportsStore = defineStore('leaveReports', () => {
   const loading = ref(false)
   const exporting = ref(false)
   const error = ref('')
+  /** Kept apart from `error`, which each report fetch clears. */
+  const scopeError = ref('')
   let call = 0
 
+  /** Who the viewer can report on. The store outlives a sign-out, so this
+   *  also drops the previous viewer's reports and filter picks. */
   async function loadScope(): Promise<void> {
+    summary.value = register.value = balances.value = null
+    scopeError.value = ''
     try {
-      scope.value = (await api.get<ReportScope>('/v1/leave/reports/scope')).data
+      const loaded = (await api.get<ReportScope>('/v1/leave/reports/scope')).data
+      for (const key of outOfScope(filters, loaded)) Object.assign(filters, { [key]: null })
+      scope.value = loaded
       noAccess.value = false
     } catch (err) {
+      scope.value = null
       noAccess.value = isAxiosError(err) && err.response?.status === 403
-      if (!noAccess.value) error.value = extractApiError(err, "Couldn't load reports.")
+      if (!noAccess.value) scopeError.value = extractApiError(err, "Couldn't load the filter choices.")
     }
   }
 
@@ -132,6 +158,6 @@ export const useLeaveReportsStore = defineStore('leaveReports', () => {
 
   return {
     report, preset, filters, scope, noAccess, summary, register, balances,
-    loading, exporting, error, loadScope, setPreset, fetch, exportCsv,
+    loading, exporting, error, scopeError, loadScope, setPreset, fetch, exportCsv,
   }
 })

@@ -22,6 +22,8 @@ from app.repositories.leave_type import LeaveTypeRepository
 from app.schemas.leave import PersonRef
 from app.schemas.leave_report_filters import PeopleFilters
 from app.schemas.leave_reports import NamedRef, ReportScopeRead
+from app.services.leave.calendar_math import leave_year_bounds
+from app.services.leave.policies import today_for
 from app.services.leave.report_scope import ReportScope
 from app.services.leave.reports.population import people
 from app.services.leave.reports.summary import type_refs
@@ -50,4 +52,12 @@ async def scope_options(
             (NamedRef(id=pid, name=name) for pid, name in names.items()), key=lambda p: p.name
         ),
         leave_types=type_refs(sorted(types, key=lambda t: t.name.lower()), names),
+        # Policies can start their year in different months, so "this year"
+        # can be a different label per policy.
+        current_leave_years=sorted(
+            {
+                leave_year_bounds(today_for(policy), policy.year_start_month).label
+                for policy in policies.values()
+            }
+        ),
     )

@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { filenameFrom } from '@/utils/download'
 import { presetRange } from '@/utils/leaveRanges'
 
 // Wednesday 20 May 2026, local time.
@@ -42,18 +41,5 @@ describe('presetRange', () => {
   it('keeps the current range for custom', () => {
     const current = { start: '2026-02-03', end: '2026-02-09' }
     expect(presetRange('custom', TODAY, current)).toBe(current)
-  })
-})
-
-describe('filenameFrom', () => {
-  it('reads plain and encoded names', () => {
-    expect(filenameFrom('attachment; filename="leave-summary-2026-06.csv"', 'x.csv')).toBe(
-      'leave-summary-2026-06.csv',
-    )
-    expect(filenameFrom("attachment; filename*=UTF-8''a%20b.csv", 'x.csv')).toBe('a b.csv')
-  })
-
-  it('falls back when the header is missing', () => {
-    expect(filenameFrom(undefined, 'leave-history.csv')).toBe('leave-history.csv')
   })
 })

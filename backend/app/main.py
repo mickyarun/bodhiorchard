@@ -354,7 +354,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Design-Job-Id"],
+    # Content-Disposition carries CSV export file names to a cross-origin SPA.
+    expose_headers=["X-Design-Job-Id", "Content-Disposition"],
 )
 
 

@@ -41,7 +41,7 @@
       <BalanceGrid v-else :balances="data.balances" class="mb-6" />
       <h3 class="text-subtitle-2 font-weight-bold mb-2">Ledger</h3>
       <LedgerTable :entries="data.ledger" :balances="data.balances" class="mb-6" />
-      <LeaveHistoryTable :user-id="userId" />
+      <LeaveHistoryTable :user-id="userId" :current-year="data.leave_year.label" />
       <AdjustBalanceDialog
         v-model="adjusting"
         :balances="data.balances"

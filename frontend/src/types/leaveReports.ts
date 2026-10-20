@@ -97,6 +97,8 @@ export interface ReportScope {
   offices: NamedRef[]
   policies: NamedRef[]
   leave_types: NamedRef[]
+  /** Each in-scope policy's current leave-year label. */
+  current_leave_years: number[]
 }
 
 /** Every filter the reports take; each report sends only the ones it uses. */

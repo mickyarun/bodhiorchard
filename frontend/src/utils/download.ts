@@ -14,10 +14,23 @@
 
 /** Saving a downloaded file (a CSV export, a document) from a Blob. */
 
-/** The file name a `Content-Disposition` header asks for, or `fallback`. */
+/**
+ * The file name a `Content-Disposition` header asks for, or `fallback`.
+ * The encoded `filename*` wins over the plain `filename` (RFC 6266); only
+ * the encoded form is percent-decoded, so a plain name may contain `%`.
+ */
 export function filenameFrom(disposition: string | undefined, fallback: string): string {
-  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition ?? '')
-  return match ? decodeURIComponent(match[1]) : fallback
+  const header = disposition ?? ''
+  const encoded = /filename\*=UTF-8''([^;\s]+)/i.exec(header)
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded[1])
+    } catch {
+      // Malformed encoding: fall through to the plain name.
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(header)
+  return plain ? plain[1] : fallback
 }
 
 /** Save `blob` as `filename` via a temporary link. */

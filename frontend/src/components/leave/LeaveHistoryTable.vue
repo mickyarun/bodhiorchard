@@ -22,7 +22,7 @@
       <h3 class="text-subtitle-2 font-weight-bold">Leave history</h3>
       <div class="d-flex align-center flex-wrap ga-3">
         <v-select v-model="year" :items="years" label="Leave year" v-bind="FIELD" />
-        <v-select v-model="kind" :items="kinds" label="Kind" clearable v-bind="FIELD" />
+        <v-select v-model="kind" :items="KIND_OPTIONS" label="Kind" clearable v-bind="FIELD" />
         <v-btn variant="tonal" size="small" prepend-icon="mdi-download" :loading="exporting" @click="exportCsv">
           Export CSV
         </v-btn>
@@ -39,22 +39,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import ReportRegisterTable from '@/components/leave/reports/ReportRegisterTable.vue'
 import { useMemberHistory } from '@/composables/useMemberHistory'
 import type { LeaveKind } from '@/types/leave'
-import { KIND_LABELS } from '@/utils/leave'
+import { KIND_OPTIONS, leaveYearOptions } from '@/utils/leaveFilterOptions'
 
-const props = defineProps<{ userId: string }>()
+// currentYear: the member's current leave-year label, from their policy.
+const props = defineProps<{ userId: string; currentYear: number }>()
 
 const FIELD = { density: 'compact', variant: 'outlined', hideDetails: true, class: 'field' } as const
-const thisYear = new Date().getFullYear()
-const years = [
-  { title: 'Current leave year', value: null },
-  ...[thisYear + 1, thisYear, thisYear - 1, thisYear - 2].map(y => ({ title: String(y), value: y })),
-]
-const kinds = (Object.keys(KIND_LABELS) as LeaveKind[]).map(value => ({ value, title: KIND_LABELS[value] }))
+const years = computed(() => leaveYearOptions([props.currentYear]))
 
 const history = useMemberHistory(() => props.userId)
 const year = ref<number | null>(null)

@@ -44,7 +44,8 @@
     </div>
 
     <AppCallout v-if="showLimitHint" variant="info" class="mb-4">
-      Showing the latest {{ DECIDED_LIMIT }} decisions. Pick dates to find older ones.
+      Showing the latest {{ DECIDED_LIMIT }} decisions.
+      {{ dated ? 'Narrow the dates or filters to see the rest.' : 'Pick dates to find older ones.' }}
     </AppCallout>
     <div class="d-flex flex-column ga-3">
       <ApprovalCard v-for="item in store.items" :key="item.request.id" :item="item" />
@@ -72,8 +73,10 @@ const emptyTitle = computed(() => {
   if (filtered.value) return 'Nothing matches these filters'
   return store.status === 'pending' ? "You're all caught up" : 'No decisions yet'
 })
+// The cap applies with or without dates; dates only lift the 90-day window.
+const dated = computed(() => !!(store.filters.start || store.filters.end))
 const showLimitHint = computed(
-  () => store.status === 'decided' && !store.filters.start && store.items.length >= DECIDED_LIMIT,
+  () => store.status === 'decided' && store.items.length >= DECIDED_LIMIT,
 )
 
 // One request per settled change, not one per keystroke in a custom date.

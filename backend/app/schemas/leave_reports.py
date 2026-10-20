@@ -118,3 +118,4 @@ class ReportScopeRead(BaseModel):
     offices: list[NamedRef]
     policies: list[NamedRef]
     leave_types: list[NamedRef]
+    current_leave_years: list[int]

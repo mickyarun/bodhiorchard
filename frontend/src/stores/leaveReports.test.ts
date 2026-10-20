@@ -62,4 +62,16 @@ describe('approvalParams', () => {
       }),
     ).toEqual({ status: 'decided', start: '2026-01-01', leave_type_id: 't1' })
   })
+
+  it('sends both ends of a range', () => {
+    expect(
+      approvalParams('pending', {
+        start: '2026-03-01',
+        end: '2026-03-31',
+        kind: 'leave',
+        leave_type_id: null,
+        user_id: 'u2',
+      }),
+    ).toEqual({ status: 'pending', start: '2026-03-01', end: '2026-03-31', kind: 'leave', user_id: 'u2' })
+  })
 })

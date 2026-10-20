@@ -80,7 +80,7 @@
       v-bind="FIELD"
     />
     <template v-if="store.report === 'register'">
-      <v-select v-model="store.filters.kind" :items="kinds" label="Kind" v-bind="FIELD" />
+      <v-select v-model="store.filters.kind" :items="KIND_OPTIONS" label="Kind" v-bind="FIELD" />
       <v-select
         v-model="store.filters.leave_type_id"
         :items="scope?.leave_types ?? []"
@@ -89,7 +89,7 @@
         label="Leave type"
         v-bind="FIELD"
       />
-      <v-select v-model="store.filters.status" :items="statuses" label="Status" v-bind="FIELD" />
+      <v-select v-model="store.filters.status" :items="STATUS_OPTIONS" label="Status" v-bind="FIELD" />
     </template>
   </div>
 </template>
@@ -98,8 +98,7 @@
 import { computed } from 'vue'
 import DateRangeFilter, { type DatePreset } from '@/components/leave/DateRangeFilter.vue'
 import { useLeaveReportsStore } from '@/stores/leaveReports'
-import type { LeaveKind, LeaveStatus } from '@/types/leave'
-import { KIND_LABELS, STATUS_META } from '@/utils/leave'
+import { KIND_OPTIONS, leaveYearOptions, STATUS_OPTIONS } from '@/utils/leaveFilterOptions'
 import type { RangePreset } from '@/utils/leaveRanges'
 
 const FIELD = {
@@ -113,16 +112,7 @@ const PRESETS: DatePreset[] = ['this_month', 'last_month', 'this_quarter', 'this
 
 const store = useLeaveReportsStore()
 const scope = computed(() => store.scope)
-const thisYear = new Date().getFullYear()
-const years = [
-  { title: 'Current leave year', value: null },
-  ...[thisYear + 1, thisYear, thisYear - 1, thisYear - 2].map(y => ({ title: String(y), value: y })),
-]
-const kinds = (Object.keys(KIND_LABELS) as LeaveKind[]).map(value => ({ value, title: KIND_LABELS[value] }))
-const statuses = (Object.keys(STATUS_META) as LeaveStatus[]).map(value => ({
-  value,
-  title: STATUS_META[value].label,
-}))
+const years = computed(() => leaveYearOptions(scope.value?.current_leave_years ?? []))
 </script>
 
 <style scoped>

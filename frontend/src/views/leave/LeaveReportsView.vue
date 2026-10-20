@@ -50,6 +50,9 @@
     </div>
     <template v-else>
       <ReportFilterBar class="mb-4" />
+      <AppCallout v-if="store.scopeError" variant="error" class="mb-4">
+        {{ store.scopeError }} Reload the page to pick people, offices or policies.
+      </AppCallout>
       <AppCallout v-if="store.error || exportError" variant="error" class="mb-4">
         {{ exportError || store.error }}
       </AppCallout>
