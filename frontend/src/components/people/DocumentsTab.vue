@@ -19,7 +19,9 @@
 <template>
   <section>
     <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-4">
-      <p class="text-body-2 text-medium-emphasis">PDF, JPEG or PNG, up to 10 MB. Stored encrypted.</p>
+      <p class="text-body-2 text-medium-emphasis">
+        PDF, JPEG or PNG<template v-if="list">, up to {{ formatBytes(list.max_upload_bytes) }}</template>. Stored encrypted.
+      </p>
       <v-btn v-if="list?.can_upload" color="primary" variant="tonal" size="small" prepend-icon="mdi-upload" @click="uploading = true">
         Upload
       </v-btn>
@@ -38,7 +40,7 @@
           <td class="filename">{{ doc.filename }}</td>
           <td>{{ DOC_TYPE_LABELS[doc.doc_type] }}</td>
           <td>{{ formatBytes(doc.size_bytes) }}</td>
-          <td>{{ formatDateOnly(doc.created_at.slice(0, 10)) }} · {{ doc.uploaded_by?.name ?? '—' }}</td>
+          <td>{{ formatTimestampDay(doc.created_at) }} · {{ doc.uploaded_by?.name ?? '—' }}</td>
           <td class="text-right text-no-wrap">
             <v-btn size="small" variant="text" @click="openDoc(doc, false)">Open</v-btn>
             <v-btn size="small" variant="text" @click="openDoc(doc, true)">Download</v-btn>
@@ -67,7 +69,7 @@ import DocumentUploadDialog from '@/components/people/DocumentUploadDialog.vue'
 import ConfirmDialog from '@/components/settings/code/ConfirmDialog.vue'
 import { useEmployeeDocuments } from '@/composables/useEmployeeDocuments'
 import type { DocumentRead } from '@/types/employeeRecords'
-import { formatDateOnly } from '@/utils/employee'
+import { formatTimestampDay } from '@/utils/employee'
 import { DOC_TYPE_LABELS, formatBytes } from '@/utils/employeeRecords'
 
 const props = defineProps<{ userId: string }>()

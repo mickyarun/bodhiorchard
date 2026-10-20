@@ -17,7 +17,7 @@ import { ref } from 'vue'
 
 import api from '@/services/api'
 import type { DocumentList, DocumentRead, DocumentType } from '@/types/employeeRecords'
-import { extractApiError } from '@/utils/errors'
+import { extractApiError, extractBlobApiError } from '@/utils/errors'
 
 export function useEmployeeDocuments(userId: () => string) {
   const data = ref<DocumentList | null>(null)
@@ -45,7 +45,7 @@ export function useEmployeeDocuments(userId: () => string) {
       await load()
       return null
     } catch (err) {
-      return extractApiError(err, "Couldn't upload. Use a PDF, JPEG or PNG up to 10 MB.")
+      return extractApiError(err, "Couldn't upload this file. Try again.")
     }
   }
 
@@ -69,7 +69,8 @@ export function useEmployeeDocuments(userId: () => string) {
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
       return null
     } catch (err) {
-      return extractApiError(err, "Couldn't open this document.")
+      // The body is a Blob here, even for errors: read the server's reason.
+      return await extractBlobApiError(err, "Couldn't open this document.")
     }
   }
 

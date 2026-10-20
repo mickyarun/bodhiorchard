@@ -89,6 +89,13 @@ export function formatDateOnly(iso: string | null): string {
   })
 }
 
+/** A timestamp's day in the viewer's time zone, as "20 Oct 2026". */
+export function formatTimestampDay(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
 /**
  * Apply a manager-list edit: one entry per person, exactly one primary
  * when the list isn't empty (the first, unless another is marked).

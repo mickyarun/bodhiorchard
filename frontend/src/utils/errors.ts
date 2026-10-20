@@ -34,6 +34,23 @@ export function extractApiError(err: unknown, fallback: string): string {
 }
 
 /**
+ * Like {@link extractApiError} for requests made with ``responseType: 'blob'``,
+ * where an error body arrives as a Blob instead of parsed JSON.
+ */
+export async function extractBlobApiError(err: unknown, fallback: string): Promise<string> {
+  const response = (err as { response?: { status?: number; data?: unknown } } | null)?.response
+  if (response?.data instanceof Blob && response.data.type.includes('json')) {
+    try {
+      const data: unknown = JSON.parse(await response.data.text())
+      return extractApiError({ response: { status: response.status, data } }, fallback)
+    } catch {
+      return fallback
+    }
+  }
+  return extractApiError(err, fallback)
+}
+
+/**
  * Coerce a FastAPI ``detail`` field to a string. Handles the legacy
  * shape (plain string) and the typed envelope used by Phase J's
  * credential validation (``{ error: "...", message: "..." }``) so

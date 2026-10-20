@@ -75,7 +75,14 @@
             @click="open(row.user_id)"
           >
             <td>
-              <div class="font-weight-medium">{{ row.name }}</div>
+              <!-- A real link, so keyboards and screen readers can open it too. -->
+              <router-link
+                :to="{ name: 'employee-profile', params: { userId: row.user_id } }"
+                class="directory__name font-weight-medium"
+                @click.stop
+              >
+                {{ row.name }}
+              </router-link>
               <div class="text-caption text-medium-emphasis">{{ row.email }}</div>
             </td>
             <td class="bo-mono">{{ row.employee_code || '—' }}</td>
@@ -102,6 +109,7 @@ import { useRouter } from 'vue-router'
 import AppCallout from '@/components/common/AppCallout.vue'
 import AddEmployeeDialog from '@/components/people/AddEmployeeDialog.vue'
 import EmployeeStatusChip from '@/components/people/EmployeeStatusChip.vue'
+import { useDebounced } from '@/composables/useDebounced'
 import { usePermissions } from '@/composables/usePermissions'
 import { useEmployeesStore } from '@/stores/employees'
 import type { DirectoryEntry, EmployeeStatus } from '@/types/employee'
@@ -140,21 +148,25 @@ function open(userId: string): void {
   void router.push({ name: 'employee-profile', params: { userId } })
 }
 
-let searchTimer: ReturnType<typeof setTimeout> | undefined
+const debouncedSearch = useDebounced(search)
 function load(): void {
-  void store.fetchDirectory({ q: search.value, status: status.value })
+  void store.fetchDirectory({ q: debouncedSearch.value, status: status.value })
 }
-watch(status, load)
-watch(search, () => {
-  clearTimeout(searchTimer)
-  searchTimer = setTimeout(load, 250)
-})
+watch([debouncedSearch, status], load)
 onMounted(load)
 </script>
 
 <style scoped>
 .directory {
   max-width: 1120px;
+}
+.directory__name {
+  color: inherit;
+  text-decoration: none;
+  display: block;
+}
+.directory__name:hover {
+  text-decoration: underline;
 }
 .directory__row {
   cursor: pointer;

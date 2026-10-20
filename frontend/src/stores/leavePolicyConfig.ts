@@ -39,6 +39,9 @@ export const useLeavePolicyConfigStore = defineStore('leavePolicyConfig', () => 
   // lands late is dropped, so the list always matches what's selected.
   let typesRequest = 0
   let holidaysRequest = 0
+  // The leave year the holiday list shows: a new or moved holiday may
+  // belong to another one, so writes reload this year from the server.
+  let holidaysYear: number | null = null
 
   async function fetchTypes(policyId: string): Promise<void> {
     const request = ++typesRequest
@@ -70,6 +73,7 @@ export const useLeavePolicyConfigStore = defineStore('leavePolicyConfig', () => 
 
   async function fetchHolidays(policyId: string, year: number): Promise<void> {
     const request = ++holidaysRequest
+    holidaysYear = year
     loading.value = true
     holidaysError.value = ''
     try {
@@ -91,11 +95,8 @@ export const useLeavePolicyConfigStore = defineStore('leavePolicyConfig', () => 
 
   async function addHoliday(policyId: string, body: HolidayWrite): Promise<string | null> {
     try {
-      const { data } = await api.post<HolidayAdminRead>(
-        `/v1/leave/policies/${policyId}/holidays`,
-        body,
-      )
-      holidays.value = [...holidays.value, data].sort((a, b) => a.date.localeCompare(b.date))
+      await api.post<HolidayAdminRead>(`/v1/leave/policies/${policyId}/holidays`, body)
+      if (holidaysYear !== null) await fetchHolidays(policyId, holidaysYear)
       return null
     } catch (err) {
       return extractApiError(err, "Couldn't add the holiday. Check the date and try again.")

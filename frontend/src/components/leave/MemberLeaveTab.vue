@@ -26,7 +26,7 @@
         <div class="text-body-2 text-medium-emphasis">
           {{ data.policy_name }} · Leave year {{ formatLeaveYear(data.leave_year) }}
         </div>
-        <div v-if="canConfigureLeave && data.balances.length" class="d-flex ga-2">
+        <div v-if="canChangeBalance && data.balances.length" class="d-flex ga-2">
           <v-btn variant="text" size="small" prepend-icon="mdi-calculator-variant" @click="recalculating = true">
             Recalculate
           </v-btn>
@@ -66,11 +66,20 @@ import LedgerTable from '@/components/leave/LedgerTable.vue'
 import RecalculateDialog from '@/components/leave/RecalculateDialog.vue'
 import { useMemberBalances } from '@/composables/useMemberBalances'
 import { usePermissions } from '@/composables/usePermissions'
+import { useAuthStore } from '@/stores/auth'
 import { formatLeaveYear } from '@/utils/leaveDates'
+import { canChangeMemberPolicy } from '@/utils/policyMembers'
 
 const props = defineProps<{ userId: string }>()
 
-const { canConfigureLeave } = usePermissions()
+const { canConfigureLeave, isOrgOwner } = usePermissions()
+const authStore = useAuthStore()
+// Nobody but the owner changes their own balance (the API refuses it).
+const canChangeBalance = computed(
+  () =>
+    canConfigureLeave.value &&
+    canChangeMemberPolicy(props.userId, authStore.user?.id, isOrgOwner.value),
+)
 const balances = useMemberBalances()
 const data = computed(() => balances.data.value)
 const adjusting = ref(false)

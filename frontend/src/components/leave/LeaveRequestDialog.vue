@@ -149,8 +149,10 @@ const selectedTypeName = computed(
       .name ?? '',
 )
 
-// An optional holiday's date is the holiday itself.
-watch(form.holidayId, id => {
+// An optional holiday's date is the holiday itself: also when switching
+// back to this kind after editing the (hidden) dates for leave or WFH.
+watch([form.kind, form.holidayId], ([kind, id]) => {
+  if (kind !== 'optional_holiday') return
   const holiday = summary.value?.optional_holidays.holidays.find(h => h.id === id)
   if (!holiday) return
   form.startDate.value = holiday.date

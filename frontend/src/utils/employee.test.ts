@@ -13,7 +13,13 @@
 // limitations under the License.
 
 import { describe, expect, it } from 'vitest'
-import { formatDateOnly, normalizeManagers, setPrimary, workplaceLabel } from './employee'
+import {
+  formatDateOnly,
+  formatTimestampDay,
+  normalizeManagers,
+  setPrimary,
+  workplaceLabel,
+} from './employee'
 
 describe('formatDateOnly', () => {
   it('formats a date-only string without shifting the day', () => {
@@ -68,5 +74,14 @@ describe('workplaceLabel', () => {
   it('has nothing to say for an office worker with no office set', () => {
     expect(workplaceLabel('office', null)).toBeNull()
     expect(workplaceLabel('hybrid', null)).toBe('Hybrid')
+  })
+})
+
+describe('formatTimestampDay', () => {
+  it("uses the viewer's day, not the UTC one", () => {
+    // Late evening local time on 20 Oct is the same instant as some UTC
+    // time; whatever the zone, the local calendar day is what shows.
+    const local = new Date(2026, 9, 20, 23, 30)
+    expect(formatTimestampDay(local.toISOString())).toBe('20 Oct 2026')
   })
 })

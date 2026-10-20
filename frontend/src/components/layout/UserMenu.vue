@@ -134,7 +134,10 @@ const userInitials = computed(() => {
 
 function handleLogout(): void {
   authStore.logout()
-  router.push({ name: 'login' })
+  // A full page load, as when a session expires (services/api.ts): every
+  // store, socket and the 3D scene start empty, so nothing of this user's
+  // (leave, HR records, approvals) is left for whoever signs in next.
+  window.location.assign(router.resolve({ name: 'login' }).href)
 }
 </script>
 

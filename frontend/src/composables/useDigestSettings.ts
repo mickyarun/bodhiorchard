@@ -36,6 +36,8 @@ const SLACK_ERRORS: Record<string, string> = {
   not_in_channel: 'The Bodhiorchard bot isn\'t in that channel. In Slack, type /invite @Bodhiorchard there.',
   channel_not_found: 'Slack can\'t find that channel. Check the channel ID (it starts with C or G).',
   slack_not_connected: 'Slack isn\'t connected yet. Connect it in Settings → Integrations.',
+  slack_token_unreadable:
+    'The saved Slack bot token can\'t be read (the server\'s ENCRYPTION_KEY may have changed). Save the bot token again in Settings → Integrations.',
   no_channel: 'Save a channel ID first.',
 }
 

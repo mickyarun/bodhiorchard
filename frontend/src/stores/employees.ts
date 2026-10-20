@@ -57,8 +57,11 @@ export const useEmployeesStore = defineStore('employees', () => {
   // Latest record request; an older response that lands late is ignored
   // so quick navigation between profiles never shows the wrong person.
   let recordRequest = 0
+  // Same for directory searches: a slow "a" must not overwrite "an".
+  let directoryRequest = 0
 
   async function fetchDirectory(filters: DirectoryFilters = {}): Promise<void> {
+    const current = ++directoryRequest
     loading.value = true
     error.value = ''
     try {
@@ -68,11 +71,13 @@ export const useEmployeesStore = defineStore('employees', () => {
         status: filters.status || undefined,
       }
       const { data } = await api.get<DirectoryEntry[]>('/v1/employees', { params })
-      directory.value = data
+      if (current === directoryRequest) directory.value = data
     } catch (err) {
-      error.value = extractApiError(err, "Couldn't load the employee directory.")
+      if (current === directoryRequest) {
+        error.value = extractApiError(err, "Couldn't load the employee directory.")
+      }
     } finally {
-      loading.value = false
+      if (current === directoryRequest) loading.value = false
     }
   }
 

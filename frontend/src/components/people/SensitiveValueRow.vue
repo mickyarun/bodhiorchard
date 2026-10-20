@@ -61,6 +61,7 @@ const remaining = ref(REVEAL_SECONDS)
 const revealing = ref(false)
 const error = ref('')
 let timer: ReturnType<typeof setInterval> | null = null
+let unmounted = false
 
 function hide(): void {
   shown.value = null
@@ -72,6 +73,8 @@ async function show(): Promise<void> {
   revealing.value = true
   const result = await props.reveal()
   revealing.value = false
+  // Left the tab while the reveal was in flight: don't hold the value.
+  if (unmounted) return
   if ('error' in result) {
     error.value = result.error
     return
@@ -85,7 +88,10 @@ async function show(): Promise<void> {
   }, 1000)
 }
 
-onBeforeUnmount(hide)
+onBeforeUnmount(() => {
+  unmounted = true
+  hide()
+})
 </script>
 
 <style scoped>
