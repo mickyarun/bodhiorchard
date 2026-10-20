@@ -250,10 +250,18 @@ class FileStorage:
         dest.parent.mkdir(parents=True, exist_ok=True)
         # Write then rename, so a crash mid-write never leaves a truncated
         # file in place of a good one (rewrites happen, e.g. key rotation).
-        # Through the same containment check as ``dest``, not derived from it.
-        partial = self._safe_local_path(f"{full_path}.partial")
-        partial.write_bytes(data)
-        os.replace(partial, dest)
+        # ``dest`` is already contained; the check is repeated here, on the
+        # exact paths written, because static analysis (CodeQL's path
+        # injection query) only trusts a realpath + startswith check made
+        # where the path is used, not one inside ``safe_join``.
+        root = os.path.realpath(self.local_dir) + os.sep
+        target = os.path.realpath(dest)
+        partial = os.path.realpath(f"{target}.partial")
+        if not (target.startswith(root) and partial.startswith(root)):
+            raise FileStorageError("Invalid storage path: directory traversal detected")
+        with open(partial, "wb") as handle:
+            handle.write(data)
+        os.replace(partial, target)
         # ``info`` (not ``debug``) so the active backend is visible at
         # default log verbosity. Matches the new info-level ``file_uploaded_s3``
         # — operators can grep either event to confirm which path ran.
