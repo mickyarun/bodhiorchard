@@ -63,3 +63,10 @@ function days(value: Decimalish | undefined): string {
   return n ? formatDays(n) : '–'
 }
 </script>
+
+<style scoped>
+/* Many type columns: keep headers on one line and let the table scroll. */
+:deep(th) {
+  white-space: nowrap;
+}
+</style>

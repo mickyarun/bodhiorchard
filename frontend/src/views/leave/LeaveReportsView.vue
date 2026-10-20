@@ -22,8 +22,8 @@
     <div class="d-flex align-start justify-space-between flex-wrap ga-3 mb-4">
       <div>
         <h1 class="text-h5 font-weight-bold bo-display">Leave reports</h1>
-        <p class="text-body-2 text-medium-emphasis">
-          {{ store.scope?.all ? 'Everyone in the organisation.' : 'Your direct reports.' }}
+        <p v-if="store.scope" class="text-body-2 text-medium-emphasis">
+          {{ store.scope.all ? 'Everyone in the organisation.' : 'Your direct reports.' }}
         </p>
       </div>
       <div class="d-flex align-center ga-3">

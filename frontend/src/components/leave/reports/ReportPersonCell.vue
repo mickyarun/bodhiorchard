@@ -25,8 +25,8 @@
     >
       {{ row.name }}
     </router-link>
-    <span v-else class="font-weight-medium">{{ row.name }}</span>
-    <div class="text-caption text-medium-emphasis">{{ caption }}</div>
+    <span v-else class="font-weight-medium text-no-wrap">{{ row.name }}</span>
+    <div class="text-caption text-medium-emphasis text-no-wrap">{{ caption }}</div>
   </div>
 </template>
 
@@ -45,6 +45,7 @@ const caption = computed(() => [props.row.employee_code, props.row.department].f
 .name {
   color: inherit;
   text-decoration: none;
+  white-space: nowrap;
 }
 .name:hover {
   text-decoration: underline;
