@@ -18,7 +18,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.leave_request import HalfDay, LeaveKind, LeaveStatus
 from app.schemas.leave import HolidayRead, LeaveRequestRead, LeaveTypeBrief, PersonRef
@@ -85,3 +85,29 @@ class CalendarRead(BaseModel):
 
     entries: list[CalendarEntry]
     holidays: list[HolidayRead]
+
+
+class ApprovalFilters(BaseModel):
+    """Optional narrowing for the approvals queue; dates match overlapping leave."""
+
+    start: date | None = None
+    end: date | None = None
+    kind: LeaveKind | None = None
+    leave_type_id: uuid.UUID | None = None
+    user_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _range(self) -> "ApprovalFilters":
+        if self.start and self.end and self.end < self.start:
+            raise ValueError("The end date must be on or after the start date.")
+        return self
+
+    @property
+    def dated(self) -> bool:
+        return self.start is not None or self.end is not None
+
+
+class ApprovalQuery(ApprovalFilters):
+    """The queue's query string: which tab, plus the filters."""
+
+    status: Literal["pending", "decided"] = "pending"

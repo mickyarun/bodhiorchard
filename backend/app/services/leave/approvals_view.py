@@ -31,8 +31,9 @@ from app.models.leave_request import LeaveRequest
 from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.employee_reporting_manager import EmployeeReportingManagerRepository
 from app.repositories.leave_request import LeaveRequestRepository
+from app.repositories.leave_request_filter import RequestFilter
 from app.repositories.user import UserRepository
-from app.schemas.leave_views import AlsoOut, ApprovalCount, ApprovalItem
+from app.schemas.leave_views import AlsoOut, ApprovalCount, ApprovalFilters, ApprovalItem
 from app.services.leave.approvers import Approvers, approvers_for_many, route_for
 from app.services.leave.balance_after import balances_after
 from app.services.leave.permissions import APPROVE
@@ -48,18 +49,34 @@ async def _decidable(
     actor: uuid.UUID,
     perms: PermissionSet,
     status: Literal["pending", "decided"],
+    filters: ApprovalFilters | None = None,
 ) -> tuple[
     list[tuple[LeaveRequest, Route]], dict[uuid.UUID, Approvers], list[tuple[uuid.UUID, uuid.UUID]]
 ]:
     repo = LeaveRequestRepository(db, org_id=org_id)
     edges = await EmployeeReportingManagerRepository(db, org_id=org_id).reporting_edges()
     scope = None if perms.has(APPROVE) else {who for who, boss in edges if boss == actor}
+    if filters is not None and filters.user_id is not None:
+        # Narrows only: someone outside the caller's scope stays out.
+        scope = {filters.user_id} if scope is None else scope & {filters.user_id}
     if scope is not None and not scope:
         return [], {}, edges
+    narrow = (
+        RequestFilter(
+            start=filters.start,
+            end=filters.end,
+            kind=filters.kind,
+            leave_type_id=filters.leave_type_id,
+        )
+        if filters is not None
+        else None
+    )
+    # A date range replaces the "last 90 days" window for decided requests.
+    since = None if filters is not None and filters.dated else datetime.now(UTC) - DECIDED_WINDOW
     requests = (
-        await repo.list_pending(scope)
+        await repo.list_pending(scope, narrow)
         if status == "pending"
-        else await repo.list_decided(scope, datetime.now(UTC) - DECIDED_WINDOW)
+        else await repo.list_decided(scope, since, narrow)
     )
     approvers = await approvers_for_many(db, org_id, {r.user_id for r in requests})
     allowed: list[tuple[LeaveRequest, Route]] = []
@@ -76,9 +93,13 @@ async def approval_items(
     actor: uuid.UUID,
     perms: PermissionSet,
     status: Literal["pending", "decided"],
+    filters: ApprovalFilters | None = None,
 ) -> list[ApprovalItem]:
-    """Requests the caller may decide (or decided recently)."""
-    allowed, approvers, edges = await _decidable(db, org_id, actor, perms, status)
+    """Requests the caller may decide (or decided recently), optionally filtered.
+
+    The nav count (:func:`approval_count`) stays unfiltered.
+    """
+    allowed, approvers, edges = await _decidable(db, org_id, actor, perms, status, filters)
     requests = [r for r, _ in allowed]
     reads = await request_reads(
         db,

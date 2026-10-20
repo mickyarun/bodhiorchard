@@ -25,11 +25,11 @@ from decimal import Decimal
 import pytest
 from httpx import AsyncClient
 
-from app.models.leave_request import LeaveKind, LeaveRequest, LeaveStatus
+from app.models.leave_request import LeaveKind, LeaveStatus
 from app.models.user import OrgToUser, User
-from app.services.leave.policies import ensure_default_policy
 from tests.integration.leave_support import (
     Factory,
+    add_request,
     as_user,
     give_role,
     report_to,
@@ -39,32 +39,6 @@ from tests.integration.leave_support import (
 pytestmark = pytest.mark.integration
 LEAVE = "/api/v1/leave"
 JUNE = {"start": "2026-06-01", "end": "2026-06-30"}
-
-
-async def add_request(
-    factory: Factory,
-    org: uuid.UUID,
-    user: uuid.UUID,
-    start: date,
-    end: date,
-    days: str,
-    *,
-    type_id: uuid.UUID | None = None,
-    lop: str = "0",
-    kind: LeaveKind = LeaveKind.LEAVE,
-    status: LeaveStatus = LeaveStatus.APPROVED,
-) -> None:
-    async with factory() as db:
-        policy = await ensure_default_policy(db, org)
-        db.add(
-            LeaveRequest(
-                org_id=org, user_id=user, policy_id=policy.id, kind=kind,
-                leave_type_id=type_id if kind == LeaveKind.LEAVE else None,
-                start_date=start, end_date=end, days=Decimal(days), lop_days=Decimal(lop),
-                status=status,
-            )
-        )  # fmt: skip
-        await db.commit()
 
 
 async def team(factory: Factory) -> tuple[uuid.UUID, dict[str, uuid.UUID], uuid.UUID]:
