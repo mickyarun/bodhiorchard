@@ -15,8 +15,8 @@
  -->
 
 <!-- Profile Leave tab: one member's balances and ledger for the current
-     leave year. HR (leave:configure) can adjust balances and recalculate
-     a frozen allocation. -->
+     leave year, then their leave history. HR (leave:configure) can adjust
+     balances and recalculate a frozen allocation. -->
 <template>
   <section>
     <v-progress-linear v-if="balances.loading.value" indeterminate color="primary" class="mb-4" />
@@ -40,7 +40,8 @@
       </p>
       <BalanceGrid v-else :balances="data.balances" class="mb-6" />
       <h3 class="text-subtitle-2 font-weight-bold mb-2">Ledger</h3>
-      <LedgerTable :entries="data.ledger" :balances="data.balances" />
+      <LedgerTable :entries="data.ledger" :balances="data.balances" class="mb-6" />
+      <LeaveHistoryTable :user-id="userId" />
       <AdjustBalanceDialog
         v-model="adjusting"
         :balances="data.balances"
@@ -62,6 +63,7 @@ import { computed, ref, watch } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import AdjustBalanceDialog from '@/components/leave/AdjustBalanceDialog.vue'
 import BalanceGrid from '@/components/leave/BalanceGrid.vue'
+import LeaveHistoryTable from '@/components/leave/LeaveHistoryTable.vue'
 import LedgerTable from '@/components/leave/LedgerTable.vue'
 import RecalculateDialog from '@/components/leave/RecalculateDialog.vue'
 import { useMemberBalances } from '@/composables/useMemberBalances'

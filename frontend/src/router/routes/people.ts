@@ -37,6 +37,13 @@ export const peopleRoutes: RouteRecordRaw[] = [
     component: () => import('@/views/leave/LeaveApprovalsView.vue'),
   },
   {
+    // HR and the owner (leave:reports) see everyone; managers their direct
+    // reports. The API decides; the view explains when there's nothing.
+    path: 'leave/reports',
+    name: 'leave-reports',
+    component: () => import('@/views/leave/LeaveReportsView.vue'),
+  },
+  {
     path: 'settings/leave',
     name: 'settings-leave',
     meta: { permission: 'leave:configure' },

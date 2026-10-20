@@ -17,6 +17,7 @@ import { ref } from 'vue'
 
 import api from '@/services/api'
 import type { DocumentList, DocumentRead, DocumentType } from '@/types/employeeRecords'
+import { saveBlob } from '@/utils/download'
 import { extractApiError, extractBlobApiError } from '@/utils/errors'
 
 export function useEmployeeDocuments(userId: () => string) {
@@ -56,15 +57,12 @@ export function useEmployeeDocuments(userId: () => string) {
         params: { download },
         responseType: 'blob',
       })
-      const url = URL.createObjectURL(response.data)
       if (download) {
-        const link = document.createElement('a')
-        link.href = url
-        link.download = doc.filename
-        link.click()
-      } else {
-        window.open(url, '_blank', 'noopener')
+        saveBlob(response.data, doc.filename)
+        return null
       }
+      const url = URL.createObjectURL(response.data)
+      window.open(url, '_blank', 'noopener')
       // Give the new tab time to load before releasing the decrypted copy.
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
       return null

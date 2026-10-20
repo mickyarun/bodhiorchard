@@ -30,6 +30,7 @@
       </div>
       <v-form class="px-6 d-flex flex-column ga-4" @submit.prevent="submit">
         <AppPillToggle v-if="kindOptions.length > 1" v-model="form.kind.value" :options="kindOptions" class="align-self-start" />
+        <LeaveBalanceStrip v-if="summary" :summary="summary" :kind="form.kind.value" :selected-type-id="form.leaveTypeId.value" />
         <v-select
           v-if="form.kind.value === 'leave'"
           v-model="form.leaveTypeId.value"
@@ -100,6 +101,7 @@ import { computed, ref, watch } from 'vue'
 import { useDisplay } from 'vuetify'
 import AppCallout from '@/components/common/AppCallout.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
+import LeaveBalanceStrip from '@/components/leave/LeaveBalanceStrip.vue'
 import LeavePreviewPanel from '@/components/leave/LeavePreviewPanel.vue'
 import { useLeaveRequestForm } from '@/composables/useLeaveRequestForm'
 import { useLeaveStore } from '@/stores/leave'

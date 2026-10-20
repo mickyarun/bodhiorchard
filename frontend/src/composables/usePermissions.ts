@@ -53,6 +53,7 @@ export function usePermissions() {
   // types, holidays and balances.
   const canApproveLeave = computed(() => hasPermission('leave:approve'))
   const canConfigureLeave = computed(() => hasPermission('leave:configure'))
+  const canViewLeaveReports = computed(() => hasPermission('leave:reports'))
 
   // Sidebar visibility
   const canApprove = computed(() => hasPermission('backlog:approve'))
@@ -111,6 +112,7 @@ export function usePermissions() {
     canSeeEmployeeDocuments,
     canApproveLeave,
     canConfigureLeave,
+    canViewLeaveReports,
     canApprove,
     canCreateBuds,
     canEditBuds,

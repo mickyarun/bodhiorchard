@@ -49,6 +49,13 @@
     </template>
   </v-list-item>
   <v-list-item
+    v-if="canViewLeaveReports || leaveStore.approvalCount.is_approver"
+    prepend-icon="mdi-file-chart-outline"
+    title="Leave reports"
+    to="/leave/reports"
+    rounded="lg"
+  />
+  <v-list-item
     v-if="canViewEmployees"
     prepend-icon="mdi-card-account-details-outline"
     title="Employees"
@@ -70,7 +77,7 @@ import { useLeaveStore } from '@/stores/leave'
 
 defineProps<{ rail: boolean; showHeading: boolean }>()
 
-const { canViewEmployees } = usePermissions()
+const { canViewEmployees, canViewLeaveReports } = usePermissions()
 const leaveStore = useLeaveStore()
 
 onMounted(() => {

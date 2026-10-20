@@ -88,8 +88,13 @@ import { useEmployeesStore } from '@/stores/employees'
 const route = useRoute()
 const store = useEmployeesStore()
 const authStore = useAuthStore()
-const { canViewEmployees, canApproveLeave, canManageEmployees, canSeeEmployeeDocuments } =
-  usePermissions()
+const {
+  canViewEmployees,
+  canApproveLeave,
+  canViewLeaveReports,
+  canManageEmployees,
+  canSeeEmployeeDocuments,
+} = usePermissions()
 
 const routeUserId = computed(() => route.params.userId as string | undefined)
 const isOwn = computed(() => !routeUserId.value || routeUserId.value === authStore.user?.id)
@@ -102,7 +107,8 @@ const isManagerOfRecord = computed(
 )
 const showLeave = computed(
   // Not leave:configure alone: balances reveal who used sick leave.
-  () => isOwn.value || canApproveLeave.value || isManagerOfRecord.value,
+  () =>
+    isOwn.value || canApproveLeave.value || canViewLeaveReports.value || isManagerOfRecord.value,
 )
 
 // HR (and the owner, who holds every permission) or the person themself;

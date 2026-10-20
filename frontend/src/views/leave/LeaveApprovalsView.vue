@@ -28,6 +28,7 @@
       <AppPillToggle :model-value="store.status" :options="TABS" @update:model-value="store.fetch" />
     </div>
 
+    <ApprovalFilters class="mb-4" />
     <v-progress-linear v-if="store.loading" indeterminate color="primary" class="mb-4" />
     <AppCallout v-if="store.error" variant="error" class="mb-4">{{ store.error }}</AppCallout>
     <AppCallout v-if="store.notice" variant="info" class="mb-4">{{ store.notice }}</AppCallout>
@@ -35,13 +36,16 @@
     <div v-if="!store.loading && !store.error && !store.items.length" class="empty">
       <v-icon icon="mdi-check-all" size="32" color="success" />
       <div class="text-body-1 font-weight-medium mt-2">
-        {{ store.status === 'pending' ? "You're all caught up" : 'No decisions yet' }}
+        {{ emptyTitle }}
       </div>
       <div class="text-body-2 text-medium-emphasis">
         {{ store.status === 'pending' ? 'New requests show here.' : 'Requests approved or rejected recently show here.' }}
       </div>
     </div>
 
+    <AppCallout v-if="showLimitHint" variant="info" class="mb-4">
+      Showing the latest {{ DECIDED_LIMIT }} decisions. Pick dates to find older ones.
+    </AppCallout>
     <div class="d-flex flex-column ga-3">
       <ApprovalCard v-for="item in store.items" :key="item.request.id" :item="item" />
     </div>
@@ -49,17 +53,41 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import ApprovalCard from '@/components/leave/ApprovalCard.vue'
-import { type ApprovalTab, useLeaveApprovalsStore } from '@/stores/leaveApprovals'
+import ApprovalFilters from '@/components/leave/ApprovalFilters.vue'
+import { useDebounced } from '@/composables/useDebounced'
+import { type ApprovalTab, DECIDED_LIMIT, useLeaveApprovalsStore } from '@/stores/leaveApprovals'
 
 const store = useLeaveApprovalsStore()
 const TABS: { label: string; value: ApprovalTab }[] = [
   { label: 'Pending', value: 'pending' },
   { label: 'Decided', value: 'decided' },
 ]
+
+const filtered = computed(() => Object.values(store.filters).some(Boolean))
+const emptyTitle = computed(() => {
+  if (filtered.value) return 'Nothing matches these filters'
+  return store.status === 'pending' ? "You're all caught up" : 'No decisions yet'
+})
+const showLimitHint = computed(
+  () => store.status === 'decided' && !store.filters.start && store.items.length >= DECIDED_LIMIT,
+)
+
+// One request per settled change, not one per keystroke in a custom date.
+const query = ref('')
+const settled = useDebounced(query)
+watch(
+  () => JSON.stringify(store.filters),
+  value => {
+    query.value = value
+  },
+)
+watch(settled, () => {
+  void store.fetch()
+})
 
 onMounted(() => {
   void store.fetch()
