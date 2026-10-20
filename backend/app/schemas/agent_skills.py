@@ -45,7 +45,7 @@ class AgentSkillRead(BaseModel):
         "",
         description=(
             "Optional faster model for chat-iteration paths "
-            "(e.g. claude-haiku-4-5). Empty falls back to ``model``."
+            "(e.g. claude-haiku-5-5). Empty falls back to ``model``."
         ),
     )
     iteration_max_turns: int = Field(

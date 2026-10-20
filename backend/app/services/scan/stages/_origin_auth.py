@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 import structlog
 
@@ -157,14 +158,15 @@ def _extract_github_full_name(https_url: str) -> str | None:
     already trust at this stage. Here we just need the original
     ``owner/repo`` string back.
     """
-    body = https_url
-    if "://" in body:
-        body = body.split("://", 1)[1]
-    if "@" in body:
-        body = body.split("@", 1)[1]
-    if not body.startswith("github.com/"):
+    # Compare the parsed hostname rather than a string prefix. Hand-slicing
+    # the scheme and credentials off and then testing the remainder reads as
+    # a host check but is not one — it trusts whatever the slicing left
+    # behind. urlsplit does the parsing, and ``hostname`` is already
+    # lowercased and stripped of any userinfo and port.
+    parsed = urlsplit(https_url if "://" in https_url else f"https://{https_url}")
+    if parsed.hostname != "github.com":
         return None
-    path = body[len("github.com/") :].rstrip("/")
+    path = parsed.path.lstrip("/").rstrip("/")
     if path.endswith(".git"):
         path = path[: -len(".git")]
     if "/" not in path:

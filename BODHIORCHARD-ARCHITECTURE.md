@@ -7142,7 +7142,7 @@ def run_setup():
         config["anthropic_api_key"] = questionary.password("Anthropic API key:").ask()
         config["api_model"] = questionary.select(
             "Default model:",
-            choices=["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5"]
+            choices=["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"]
         ).ask()
 
     # Save config

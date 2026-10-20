@@ -22,6 +22,9 @@ exactly the bug the reviewer flagged with a screenshot.
 
 from __future__ import annotations
 
+import re
+from urllib.parse import urlsplit
+
 from app.services.design_system_extractor import (
     _extraction_instructions,
     _fallback_minimal,
@@ -63,7 +66,12 @@ def test_web_fallback_preserves_vuetify_boilerplate(tmp_path) -> None:  # type: 
     platform = get_platform("web_js")
     md, _ = _fallback_minimal(tmp_path, platform)
     assert "vuetify" in md.lower()
-    assert "cdn.jsdelivr.net" in md
+    # Pin the complete set of third-party origins the boilerplate pulls
+    # from, by parsed hostname. Stronger than asking whether one CDN
+    # appears somewhere in the text: a new origin sneaking into the
+    # generated HTML fails this, and a lookalike host cannot satisfy it.
+    hosts = {urlsplit(url).hostname for url in re.findall(r"https://[^\s\"')]+", md)}
+    assert hosts == {"cdn.jsdelivr.net", "fonts.googleapis.com"}
 
 
 def test_fallback_includes_discovered_files_when_present() -> None:

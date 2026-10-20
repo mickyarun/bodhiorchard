@@ -46,7 +46,7 @@ type SocketCallbacks = {
   onMissing?: () => void | Promise<void>
 }
 
-const startTracking = vi.fn<[string, SocketCallbacks], void>()
+const startTracking = vi.fn<(jobId: string, cbs: SocketCallbacks) => void>()
 
 vi.mock('@/composables/useJobSocket', () => ({
   useJobSocket: () => ({ startTracking }),

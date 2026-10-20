@@ -41,13 +41,9 @@
         </div>
       </v-col>
     </v-row>
-
-    <!-- Per-org merge model override (Phase 3.5) -->
-    <SettingsMergeModel />
   </div>
 </template>
 
 <script setup lang="ts">
 import SettingsClaudeCode from './SettingsClaudeCode.vue'
-import SettingsMergeModel from './SettingsMergeModel.vue'
 </script>

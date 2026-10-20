@@ -47,9 +47,7 @@ function deferred<T = void>(): {
 describe('SerializedExecutor', () => {
   describe('single submit', () => {
     it('invokes the runner once with the submitted input', async () => {
-      const runner = vi.fn<Parameters<SerializedRunner<string>>, ReturnType<SerializedRunner<string>>>(
-        async () => {},
-      )
+      const runner = vi.fn<SerializedRunner<string>>(async () => {})
       const executor = new SerializedExecutor<string>(runner)
 
       await executor.submit('hello')

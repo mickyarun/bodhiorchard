@@ -351,7 +351,6 @@
                   :bud-id="bud.id"
                 />
                 <BUDDevelopmentPanel
-                  ref="devPanelRef"
                   :bud-id="bud.id"
                   :bud-number="bud.bud_number"
                   :has-tech-spec="!!bud.tech_spec_md"
@@ -739,7 +738,6 @@ watch(uatStageEnabled, (enabled) => {
 
 // Child component refs
 const designPanelRef = ref<InstanceType<typeof BUDDesignPanel> | null>(null)
-const devPanelRef = ref<InstanceType<typeof BUDDevelopmentPanel> | null>(null)
 const workflowRef = ref<InstanceType<typeof BUDWorkflowActions> | null>(null)
 
 // Status-transition orchestration: guards (code_review PR check,

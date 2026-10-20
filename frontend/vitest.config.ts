@@ -27,6 +27,12 @@ import { fileURLToPath, URL } from 'node:url'
  * browser global (``localStorage``, ``File``, ``FormData``) belongs there
  * too — see ``services/api.formdata.spec.ts``.
  *
+ * The split is expressed as two vitest *projects*, one per environment.
+ * It used to be ``environmentMatchGlobs``, which vitest removed in v3 —
+ * and removed silently: the option is simply ignored, so every spec ran
+ * under the node environment and 33 tests failed on ``document is not
+ * defined`` rather than on anything to do with their subject.
+ *
  * Path alias `@/` is mirrored from vite.config.ts so test imports match
  * production imports.
  *
@@ -35,20 +41,25 @@ import { fileURLToPath, URL } from 'node:url'
  * its own install path, which under npm workspaces is the root. Frontend
  * declares it locally too for IDE type resolution.
  */
+const alias = {
+  '@': fileURLToPath(new URL('./src', import.meta.url)),
+  '@shared': fileURLToPath(new URL('../shared', import.meta.url)),
+}
+
+/** One project per environment, so the suffix keeps selecting it. */
+function project(environment: 'node' | 'jsdom', include: string[]) {
+  return {
+    plugins: [vue()],
+    resolve: { alias },
+    test: { name: environment, environment, globals: false, include },
+  }
+}
+
 export default defineConfig({
-  plugins: [vue()],
   test: {
-    environment: 'node',
-    globals: false,
-    include: ['src/**/*.{test,spec}.ts'],
-    environmentMatchGlobs: [
-      ['src/**/*.spec.ts', 'jsdom'],
+    projects: [
+      project('node', ['src/**/*.test.ts']),
+      project('jsdom', ['src/**/*.spec.ts']),
     ],
-  },
-  resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url)),
-      '@shared': fileURLToPath(new URL('../shared', import.meta.url)),
-    },
   },
 })
