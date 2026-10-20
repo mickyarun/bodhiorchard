@@ -63,10 +63,21 @@ def test_holidays_and_drift_never_push_days_past_the_stored_total() -> None:
     holiday = {date(2026, 6, 1): "New holiday"}
     may = split(span, date(2026, 5, 1), date(2026, 5, 31), holiday)
     june = split(span, date(2026, 6, 1), date(2026, 6, 30), holiday)
-    assert may.days == D("2") and june.days <= D("3")
+    # The lost day stays in the request's last month, so the months add up.
+    assert (may.days, june.days) == (D("2"), D("3"))
     # A range in the middle of the request still adds up.
     mid = split(span, date(2026, 5, 29), date(2026, 6, 2), holiday)
     assert mid.days == D("2")
+
+
+def test_consecutive_months_always_add_up_to_the_stored_days() -> None:
+    # Thu 28 May - Wed 3 Jun, recounted lower (a new holiday) and higher (a removed one).
+    for stored in (D("4"), D("6")):
+        span = Span(date(2026, 5, 28), date(2026, 6, 3), stored, D("1"))
+        may = split(span, date(2026, 5, 1), date(2026, 5, 31))
+        june = split(span, date(2026, 6, 1), date(2026, 6, 30))
+        assert may.days + june.days == stored
+        assert may.lop_days + june.lop_days == D("1")
 
 
 def rows(content: bytes) -> list[list[str]]:

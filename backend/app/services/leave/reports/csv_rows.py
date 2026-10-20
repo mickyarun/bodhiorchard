@@ -16,6 +16,7 @@
 
 from collections.abc import Sequence
 
+from app.models.leave_request import HalfDay
 from app.schemas.leave_reports import (
     BalanceReport,
     PersonColumns,
@@ -80,7 +81,7 @@ def register_rows(rows: Sequence[RegisterRow]) -> tuple[list[str], list[list[Cel
             r.leave_type,
             r.start_date,
             r.end_date,
-            None if r.half_day.value == "none" else r.half_day.value,
+            None if r.half_day == HalfDay.NONE else r.half_day.value,
             r.days,
             r.lop_days,
             r.status.value,

@@ -29,7 +29,7 @@ from decimal import Decimal
 
 Cell = str | Decimal | int | date | datetime | None
 
-BOM = "﻿"
+BOM = "\ufeff"
 _FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
 
 

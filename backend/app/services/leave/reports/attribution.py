@@ -18,9 +18,11 @@ A request wholly inside the range counts its stored ``days`` and
 ``lop_days`` as they are: approved leave that has started is never
 re-priced, so recounting today could disagree with what was booked. Only a
 request that crosses a range edge is recounted on the calendar it was
-booked under, and any drift is pushed outside the range so the parts always
-add up to the stored total. Loss of pay is the tail of a request (see
-``cancellation``), so the range gets whatever unpaid days fall in it.
+booked under, and any drift goes to the request's last part (inside the
+range if it ends there, otherwise after it), so consecutive ranges always
+add up to the stored total and no booked day is lost between months.
+Loss of pay is the tail of a request (see ``cancellation``), so the range
+gets whatever unpaid days fall in it.
 """
 
 from collections.abc import Collection, Mapping
@@ -78,7 +80,11 @@ def within(
         return found.days
 
     before = min(counted(span.start, start - timedelta(days=1)), span.days)
-    inside = min(counted(max(span.start, start), min(span.end, end)), span.days - before)
-    after = span.days - before - inside
+    if span.end <= end:
+        # The range holds the request's last part: it takes whatever is left.
+        inside, after = span.days - before, ZERO
+    else:
+        inside = min(counted(max(span.start, start), min(span.end, end)), span.days - before)
+        after = span.days - before - inside
     lop = max(ZERO, min(inside, span.lop_days - after))
     return InRange(inside, lop)

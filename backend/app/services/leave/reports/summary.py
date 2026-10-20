@@ -44,6 +44,7 @@ from app.services.leave.reports.population import Person, people, scoped_ids
 
 REQUEST_CAP = 20_000
 ZERO = Decimal("0")
+UNKNOWN_POLICY = "other policy"
 
 
 async def _in_range(
@@ -59,16 +60,16 @@ async def _in_range(
         own = [r for r in crossing if r.policy_id == policy.id]
         first, last = min(r.start_date for r in own), max(r.end_date for r in own)
         holidays[policy.id] = await mandatory_holidays(db, policy, first, last)
-    out: dict[uuid.UUID, InRange] = {}
-    for r in requests:
-        span = Span(r.start_date, r.end_date, r.days, r.lop_days)
-        booked = policies.get(r.policy_id)
+    out = {r.id: InRange(r.days, r.lop_days) for r in requests}
+    for r in crossing:
+        # policy_id is required and org-scoped, so the policy is always found.
+        booked = policies[r.policy_id]
         out[r.id] = within(
-            span,
+            Span(r.start_date, r.end_date, r.days, r.lop_days),
             f.start,
             f.end,
-            working_days=booked.working_days if booked else [0, 1, 2, 3, 4],
-            holidays=holidays.get(r.policy_id, {}),
+            working_days=booked.working_days,
+            holidays=holidays[r.policy_id],
         )
     return out
 
@@ -79,8 +80,9 @@ async def _types(
     """Types on the members' policies plus any type their leave used."""
     repo = LeaveTypeRepository(db, org_id=org_id)
     found = dict(await repo.by_ids(used))
-    for policy_id in {p.policy.id for p in persons if p.policy}:
-        for leave_type in await repo.list_for_policy(policy_id, active_only=True):
+    policy_ids = {p.policy.id for p in persons if p.policy}
+    for per in (await repo.list_for_policies(policy_ids, active_only=True)).values():
+        for leave_type in per:
             found.setdefault(leave_type.id, leave_type)
     return sorted(found.values(), key=lambda t: t.name.lower())
 
@@ -93,7 +95,7 @@ def type_refs(types: Sequence[LeaveType], policy_names: dict[uuid.UUID, str]) ->
     return [
         NamedRef(
             id=t.id,
-            name=f"{t.name} ({policy_names.get(t.policy_id, '?')})"
+            name=f"{t.name} ({policy_names.get(t.policy_id, UNKNOWN_POLICY)})"
             if seen[t.name] > 1
             else t.name,
         )
@@ -122,7 +124,9 @@ async def summary_report(
     for r in requests:
         part, row = parts[r.id], sums[r.user_id]
         if r.status == LeaveStatus.PENDING:
-            row["pending"] += part.days
+            # Pending leave only: pending WFH isn't time off.
+            if r.kind == LeaveKind.LEAVE:
+                row["pending"] += part.days
         elif r.kind == LeaveKind.WFH:
             row["wfh"] += part.days
         elif r.kind == LeaveKind.OPTIONAL_HOLIDAY:

@@ -26,29 +26,18 @@ import pytest
 from httpx import AsyncClient
 
 from app.models.leave_request import LeaveKind, LeaveStatus
-from app.models.user import OrgToUser, User
 from tests.integration.leave_support import (
     Factory,
+    add_member_without_profile,
     add_request,
     as_user,
-    give_role,
-    report_to,
     setup_org,
+    team,
 )
 
 pytestmark = pytest.mark.integration
 LEAVE = "/api/v1/leave"
 JUNE = {"start": "2026-06-01", "end": "2026-06-30"}
-
-
-async def team(factory: Factory) -> tuple[uuid.UUID, dict[str, uuid.UUID], uuid.UUID]:
-    """HR, a manager with one report, a skip-level boss and a bystander."""
-    org, ids, casual = await setup_org(factory, "Hr", "Boss", "Mgr", "Emp", "Peer")
-    people = dict(zip(("hr", "boss", "mgr", "emp", "peer"), ids, strict=True))
-    await give_role(factory, org, people["hr"], "hr")
-    await report_to(factory, org, people["mgr"], people["boss"])
-    await report_to(factory, org, people["emp"], people["mgr"])
-    return org, people, casual
 
 
 async def test_report_access_follows_leave_reports_and_direct_reports(
@@ -116,15 +105,7 @@ async def test_members_without_a_profile_still_appear_when_they_took_leave(
     client: AsyncClient, pg_session_factory: Factory
 ) -> None:
     org, p, casual = await team(pg_session_factory)
-    async with pg_session_factory() as db:
-        user = User(
-            email=f"np-{uuid.uuid4().hex[:6]}@acme.dev", name="No Profile", password_hash="x"
-        )
-        db.add(user)
-        await db.flush()
-        db.add(OrgToUser(user_id=user.id, org_id=org))
-        await db.commit()
-        loner = user.id
+    loner = await add_member_without_profile(pg_session_factory, org, "No Profile")
     await add_request(
         pg_session_factory, org, loner, date(2026, 6, 2), date(2026, 6, 2), "1", type_id=casual
     )
@@ -158,7 +139,7 @@ async def test_register_and_csv_exports(client: AsyncClient, pg_session_factory:
         assert out.headers["content-type"].startswith("text/csv")
         assert out.headers["cache-control"] == "no-store, private"
         assert out.headers["content-disposition"].startswith("attachment;")
-        assert out.content.startswith("﻿".encode())
+        assert out.content.startswith("\ufeff".encode())
     balances = await client.get(f"{LEAVE}/reports/balances.csv", headers=hr)
     rows = list(csv.reader(io.StringIO(balances.content.decode("utf-8-sig"))))
     assert rows[0][:2] == ["Employee", "Code"] and len(rows) == 6  # header + 5 members x 1 type

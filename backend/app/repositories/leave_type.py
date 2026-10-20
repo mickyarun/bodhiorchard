@@ -59,3 +59,17 @@ class LeaveTypeRepository(BaseRepository[LeaveType]):
             self._scoped(select(LeaveType).where(LeaveType.id.in_(ids)))
         )
         return {row.id: row for row in result.scalars().all()}
+
+    async def list_for_policies(
+        self, policy_ids: Collection[uuid.UUID], *, active_only: bool = False
+    ) -> dict[uuid.UUID, list[LeaveType]]:
+        """Leave types per policy in one query, each list by name."""
+        if not policy_ids:
+            return {}
+        stmt = self._scoped(select(LeaveType).where(LeaveType.policy_id.in_(policy_ids)))
+        if active_only:
+            stmt = stmt.where(LeaveType.is_active.is_(True))
+        out: dict[uuid.UUID, list[LeaveType]] = {pid: [] for pid in policy_ids}
+        for row in (await self._db.execute(stmt.order_by(LeaveType.name))).scalars().all():
+            out[row.policy_id].append(row)
+        return out

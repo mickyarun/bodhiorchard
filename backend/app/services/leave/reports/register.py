@@ -36,6 +36,7 @@ from app.services.leave.report_scope import ReportScope
 from app.services.leave.reports.population import people, scoped_ids
 
 REGISTER_CAP = 5_000
+UNKNOWN_NAME = "Unknown"
 
 
 async def register_report(
@@ -73,7 +74,7 @@ async def register_report(
             RegisterRow(
                 request_id=r.id,
                 user_id=r.user_id,
-                name=names.get(r.user_id, "Unknown"),
+                name=names.get(r.user_id, UNKNOWN_NAME),
                 employee_code=profile.employee_code if profile else None,
                 department=profile.department if profile else None,
                 kind=r.kind,

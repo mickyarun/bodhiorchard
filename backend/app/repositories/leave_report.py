@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.employee_profile import EmployeeProfile
 from app.models.leave_request import LeaveRequest
-from app.models.user import User
+from app.models.user import OrgToUser, User
 from app.repositories.base import BaseRepository
 from app.repositories.leave_request_filter import RequestFilter, apply_filter
 
@@ -39,7 +39,6 @@ class ProfileRow:
 
     profile: EmployeeProfile
     name: str
-    email: str
     is_active: bool
 
 
@@ -49,7 +48,6 @@ class LeaveReportRepository(BaseRepository[LeaveRequest]):
     def __init__(self, db: AsyncSession, *, org_id: uuid.UUID) -> None:
         """Initialize the repository."""
         super().__init__(LeaveRequest, db, org_id=org_id)
-        self._org = org_id
 
     async def overlapping(
         self,
@@ -91,9 +89,9 @@ class LeaveReportRepository(BaseRepository[LeaveRequest]):
         if user_ids is not None and not user_ids:
             return []
         stmt = (
-            select(EmployeeProfile, User.name, User.email, User.is_active)
+            select(EmployeeProfile, User.name, User.is_active)
             .join(User, User.id == EmployeeProfile.user_id)
-            .where(EmployeeProfile.org_id == self._org)
+            .where(EmployeeProfile.org_id == self._org_id)
             .order_by(User.name)
         )
         if user_ids is not None:
@@ -108,4 +106,24 @@ class LeaveReportRepository(BaseRepository[LeaveRequest]):
                 match = or_(match, EmployeeProfile.leave_policy_id.is_(None))
             stmt = stmt.where(match)
         rows = (await self._db.execute(stmt)).all()
-        return [ProfileRow(p, name, email, active) for p, name, email, active in rows]
+        return [ProfileRow(p, name, active) for p, name, active in rows]
+
+    async def members_without_profile(
+        self, user_ids: Collection[uuid.UUID] | None
+    ) -> list[uuid.UUID]:
+        """Active members of this org with no profile here (they follow the default policy)."""
+        if user_ids is not None and not user_ids:
+            return []
+        has_profile = select(EmployeeProfile.user_id).where(EmployeeProfile.org_id == self._org_id)
+        stmt = (
+            select(User.id)
+            .join(OrgToUser, OrgToUser.user_id == User.id)
+            .where(
+                OrgToUser.org_id == self._org_id,
+                User.is_active.is_(True),
+                User.id.not_in(has_profile),
+            )
+        )
+        if user_ids is not None:
+            stmt = stmt.where(User.id.in_(user_ids))
+        return list((await self._db.execute(stmt)).scalars().all())

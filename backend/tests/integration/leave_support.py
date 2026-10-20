@@ -181,3 +181,24 @@ async def add_request(
             )
         )  # fmt: skip
         await db.commit()
+
+
+async def team(factory: Factory) -> tuple[uuid.UUID, dict[str, uuid.UUID], uuid.UUID]:
+    """HR, a manager with one report, a skip-level boss and a bystander."""
+    org, ids, casual = await setup_org(factory, "Hr", "Boss", "Mgr", "Emp", "Peer")
+    people = dict(zip(("hr", "boss", "mgr", "emp", "peer"), ids, strict=True))
+    await give_role(factory, org, people["hr"], "hr")
+    await report_to(factory, org, people["mgr"], people["boss"])
+    await report_to(factory, org, people["emp"], people["mgr"])
+    return org, people, casual
+
+
+async def add_member_without_profile(factory: Factory, org: uuid.UUID, name: str) -> uuid.UUID:
+    """An active member of ``org`` with no employee profile (default policy)."""
+    async with factory() as db:
+        user = User(email=f"np-{uuid.uuid4().hex[:6]}@acme.dev", name=name, password_hash="x")
+        db.add(user)
+        await db.flush()
+        db.add(OrgToUser(user_id=user.id, org_id=org))
+        await db.commit()
+        return user.id

@@ -14,10 +14,10 @@
 
 """The people a report covers, with the columns every report shows.
 
-Members with a profile come first. Anyone who took leave in the range but
-has no profile yet (they follow the default policy) is still included, so a
-payroll export never silently drops them; they're left out only when a
-profile filter (department, office, policy) is set, which they can't match.
+Members with a profile, plus active members with none yet and anyone who
+took leave without one (they follow the default policy), so a payroll export
+never silently drops them. Those without a profile are left out only by a
+filter they can't match: a department, an office, or a non-default policy.
 """
 
 import uuid
@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.employee_profile import EmployeeProfile
 from app.models.leave_policy import LeavePolicy
+from app.models.office_location import OfficeLocation
 from app.repositories.employee_reporting_manager import EmployeeReportingManagerRepository
 from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.leave_report import LeaveReportRepository
@@ -45,6 +46,7 @@ class Person:
     columns: PersonColumns
     profile: EmployeeProfile | None
     policy: LeavePolicy | None
+    office: OfficeLocation | None = None
 
     @property
     def user_id(self) -> uuid.UUID:
@@ -106,11 +108,15 @@ async def people(
             status=p.status.value,
             is_active=row.is_active,
         )
-        out.append(Person(columns, p, policy))
-    if filters.department or filters.office_id or filters.policy_id:
+        out.append(Person(columns, p, policy, office))
+    other_policy = filters.policy_id is not None and (
+        default is None or filters.policy_id != default.id
+    )
+    if filters.department or filters.office_id or other_policy:
         return out
     known = {person.user_id for person in out}
-    extra = [u for u in requesters if u not in known and (ids is None or u in ids)]
+    unprofiled = await LeaveReportRepository(db, org_id=org_id).members_without_profile(ids)
+    extra = [u for u in {*unprofiled, *requesters} if u not in known and (ids is None or u in ids)]
     for user in await UserRepository(db).get_many_by_ids(extra):
         columns = PersonColumns(
             user_id=user.id,

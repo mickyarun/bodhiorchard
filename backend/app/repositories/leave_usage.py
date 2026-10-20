@@ -167,6 +167,7 @@ class LeaveUsageRepository(BaseRepository[LeaveRequest]):
             select(LeaveRequest.user_id, LeaveRequest.start_date, func.sum(LeaveRequest.lop_days))
             .where(
                 LeaveRequest.user_id.in_(user_ids),
+                LeaveRequest.kind == LeaveKind.LEAVE,
                 LeaveRequest.status.in_(ACTIVE),
                 LeaveRequest.lop_days > 0,
                 LeaveRequest.start_date >= start,

@@ -19,7 +19,6 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.leave_type import LeaveTypeRepository
-from app.repositories.office_location import OfficeLocationRepository
 from app.schemas.leave import PersonRef
 from app.schemas.leave_report_filters import PeopleFilters
 from app.schemas.leave_reports import NamedRef, ReportScopeRead
@@ -33,11 +32,12 @@ async def scope_options(
 ) -> ReportScopeRead:
     """Filter choices limited to what ``scope`` covers."""
     persons = await people(db, org_id, scope.user_ids, PeopleFilters())
-    office_ids = {p.profile.office_id for p in persons if p.profile and p.profile.office_id}
-    offices = await OfficeLocationRepository(db, org_id=org_id).by_ids(office_ids)
+    offices = {p.office.id: p.office for p in persons if p.office}
     policies = {p.policy.id: p.policy for p in persons if p.policy}
-    type_repo = LeaveTypeRepository(db, org_id=org_id)
-    types = [t for pid in policies for t in await type_repo.list_for_policy(pid, active_only=True)]
+    per_policy = await LeaveTypeRepository(db, org_id=org_id).list_for_policies(
+        policies, active_only=True
+    )
+    types = [t for per in per_policy.values() for t in per]
     names = {pid: policy.name for pid, policy in policies.items()}
     return ReportScopeRead(
         all=scope.is_all,

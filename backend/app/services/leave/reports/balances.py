@@ -28,7 +28,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.leave_policy import LeavePolicy
 from app.models.leave_request import LeaveStatus
-from app.models.leave_type import LeaveType
 from app.repositories.leave_ledger import LeaveLedgerRepository
 from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.leave_usage import LeaveUsageRepository
@@ -63,10 +62,9 @@ async def balance_report(
         return BalanceReport(rows=[])
     policies = {p.policy.id: p.policy for p in persons if p.policy}
     years = {pid: _year(policy, f.year) for pid, policy in policies.items()}
-    type_repo = LeaveTypeRepository(db, org_id=org_id)
-    types: dict[uuid.UUID, list[LeaveType]] = {
-        pid: await type_repo.list_for_policy(pid, active_only=True) for pid in policies
-    }
+    types = await LeaveTypeRepository(db, org_id=org_id).list_for_policies(
+        policies, active_only=True
+    )
     users = {p.user_id for p in persons}
     type_ids = {t.id for per in types.values() for t in per}
     first = min(y.start for y in years.values())
