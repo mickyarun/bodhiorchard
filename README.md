@@ -12,7 +12,7 @@
 [![Vue 3](https://img.shields.io/badge/Vue.js-3-4FC08D.svg)](https://vuejs.org)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED.svg)](https://www.docker.com)
 
-[Website](https://bodhiorchard.ai/) · [Quick Start](#quick-start) · [Why Bodhiorchard](#why-bodhiorchard) · [The Twelve Agents](#the-twelve-agents) · [Docs](#documentation) · [FAQ](#faq)
+[Website](https://bodhiorchard.ai/) · [Quick Start](#quick-start) · [Why Bodhiorchard](#why-bodhiorchard) · [People](#people-leave-wfh-and-employee-records) · [The Twelve Agents](#the-twelve-agents) · [Docs](#documentation) · [FAQ](#faq)
 
 <a href="https://bodhiorchard.ai/"><img src="docs/images/board-ui.webp" width="85%" alt="The BUD board — every feature tracked from backlog to production in one view"></a>
 
@@ -63,6 +63,7 @@ npm install && npm run setup && npm run dev
 | 📄 **One BUD per feature** | A single living document (spec + tech spec + test plan + history) replaces tickets scattered across Jira, Confluence, Notion, and Slack. |
 | 🌱 **Knowledge that stays current** | Auto-synced from code, vector-indexed, and fed into every agent prompt. No stale wiki pages. |
 | 🏆 **XP for shipped work** | Developers level up when their PRs reach production — recognition for shipped outcomes, split across contributors, never for hours logged or tickets closed. |
+| 🧑‍🤝‍🧑 **People ops in the same place** | Leave, work from home, holidays, offices and encrypted employee records. HR and Sales get their own workspace and never see the engineering side. |
 
 ### Old way vs Agent-Driven Development
 
@@ -112,6 +113,30 @@ And yes — your codebase is a living orchard. Repos as trees, features as fruit
 
 **More walkthroughs:** [Setup](https://youtu.be/ot-BmKxRgRA) · [Slack triage & MCP tools](https://youtu.be/i8kZdcL1bME) · [Requirements & estimation](https://youtu.be/YBwdTes0Fno) · [Design phase](https://youtu.be/lV71qhmfzzw) · [Development & retrospective](https://youtu.be/YjRihN_SKaw)
 
+## People: leave, WFH and employee records
+
+The rest of the company can use Bodhiorchard too. HR and Sales staff get a People workspace with leave, the team calendar and their own details. Everything engineering is hidden from them in the UI and refused at the API, MCP, WebSocket and multiplayer layers.
+
+- **Leave and work from home.** Balances per leave type, half days, optional holidays with a yearly quota, and backdating up to a limit HR sets. The request dialog counts working days, skipping weekends and holidays, before anything is sent.
+- **Loss of pay.** Leave past someone's balance is not refused. The extra days are marked unpaid, shown to the employee before they send the request and to the approver before they decide, and handed back if the request is cancelled or a holiday is added later.
+- **Approvals.** Anyone can have several reporting managers. Any one of them can decide, the first decision wins, and HR covers when no manager is left. Approvers get a Slack DM with Approve and Reject buttons, so most decisions never need a login.
+- **Leave policies per location.** Each policy has its own leave types and quotas, working days, timezone, leave year, proration for new joiners, and work-from-home rule (always ask, never ask, or approve automatically up to N days a month). Public holidays are imported for the country and region, then HR edits them.
+- **Offices and remote work.** Each office follows a leave policy, so moving someone to London moves them onto the UK calendar. Remote people have no office and never show as working from home.
+- **Team calendar and a daily Slack post.** One calendar for who is out and who is at home. A short post every working morning lists names only, never the leave type or reason, and nobody on leave is @mentioned.
+- **Employee records.** Work and personal details, bank and ID numbers, and documents. Sensitive fields and files are encrypted with AES-256-GCM under a separate HR key. Bank and ID numbers stay masked until someone reveals them, every reveal and download is logged, and each employee can see who opened their records.
+
+| Leave home — balances and loss of pay | Request dialog — days counted before you send |
+|---|---|
+| ![Leave home with balances per leave type and a loss-of-pay card](docs/images/people-leave-home-ui.webp) | ![Request dialog showing working days and a loss-of-pay warning](docs/images/people-request-dialog-ui.webp) |
+
+| Approvals — balance and overlaps on every card | Team calendar — leave, WFH and holidays |
+|---|---|
+| ![Approval queue with balance after, loss of pay and who else is out](docs/images/people-approvals-ui.webp) | ![Team calendar with leave, work from home and public holidays](docs/images/people-calendar-ui.webp) |
+
+| Leave policies per location | Employee directory — offices, remote and hybrid |
+|---|---|
+| ![Leave policy settings with leave types, holidays, rules and people](docs/images/people-policy-detail-ui.webp) | ![Employee directory showing office, work arrangement and manager](docs/images/people-directory-ui.webp) |
+
 ## How it works
 
 <div align="center">
@@ -132,7 +157,7 @@ bud → design → tech_arch → development → testing → uat → prod → cl
 - **Smart quality loops** — production bugs auto-link to the originating BUD; threshold breaches trigger reassignment; every fix feeds the knowledge base.
 - **Developer skill profiling** — per-module expertise scores rebuilt nightly from git history, with bus-factor alerts and best-fit assignment.
 - **Living knowledge** — git repos, agent skills, the central DB, and vector search stay auto-synced and feed every agent prompt.
-- **Enterprise-grade security** — multi-tenant isolation, RBAC with 9 roles, AES encryption at rest, JWT auth, full audit trail.
+- **Enterprise-grade security** — multi-tenant isolation, role-based access with a ceiling (nobody grants more than they hold), separate engineering and People workspaces, AES encryption at rest with key rotation, JWT auth, full audit trail.
 
 ## The Twelve Agents
 
@@ -227,6 +252,10 @@ Copilot Workspace is cloud-only and GitHub-bound. Bodhiorchard is self-hosted, r
 
 Yes — **Apache 2.0**, including embedding in proprietary products. Contributions require DCO sign-off (`git commit -s`). Commercial licences with support are available separately from the maintainer.
 
+### Can people outside engineering use it?
+
+Yes. Give someone the **HR** or **Sales** role and they get the People workspace only: leave, the team calendar and their own details, with HR also handling approvals, policies and employee records. The engineering side is hidden from them and refused by the API, so it isn't just a hidden menu.
+
 ### Does it run on Windows?
 
 Yes — **natively** (no WSL required) in Hybrid mode, as well as via WSL2 or Full
@@ -239,7 +268,7 @@ if it isn't running, re-scans fall back to a direct scan.
 
 ## Roadmap
 
-- **Shipped** — core platform (auth, multi-tenant, RBAC), BUD lifecycle, feature registry with vector search, repo scanning + code intelligence, skill profiling, 3D Living Tree, Slack-native triage **and real-time Slack bot conversations**, **GitHub webhook pipeline** (PR-merge → BUD status + repo re-scan), **automated test-plan generation from BUDs** (unit / integration / e2e / security / UAT), **CI/CD integration** (QA-automation repo wired via MCP; test commits flow back to the BUD), MCP server, 12 agent definitions, `npx bodhiorchard` installer
+- **Shipped** — core platform (auth, multi-tenant, RBAC), BUD lifecycle, feature registry with vector search, repo scanning + code intelligence, skill profiling, 3D Living Tree, Slack-native triage **and real-time Slack bot conversations**, **GitHub webhook pipeline** (PR-merge → BUD status + repo re-scan), **automated test-plan generation from BUDs** (unit / integration / e2e / security / UAT), **CI/CD integration** (QA-automation repo wired via MCP; test commits flow back to the BUD), MCP server, 12 agent definitions, `npx bodhiorchard` installer, **People workspace** (leave and WFH with Slack approvals, holidays per location, offices and remote work, loss of pay, encrypted employee records)
 - **Next** — autonomous agent execution engine: small, low-risk BUDs run tech spec → code → review → test end to end, with a human approval gate before release (deliberately not lights-out)
 - **Future** — multi-org marketplace, custom agent builder, analytics dashboards, mobile companion, plugin ecosystem
 
