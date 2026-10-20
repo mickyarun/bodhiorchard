@@ -131,6 +131,41 @@ jobs:
             backend/htmlcov/
           retention-days: 14
 
+  pytest-integration:
+    # The tests marked ``integration`` (approvals, balances and loss of pay,
+    # races, Slack signing, encryption at rest, per-role access, …). They
+    # start their own pgvector Postgres through testcontainers
+    # (tests/integration/conftest.py), so this job needs Docker, which the
+    # hosted Ubuntu runners have, and no service container.
+    name: pytest (integration, real Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      SECRET_KEY: ci-secret-not-for-prod
+      ENCRYPTION_KEY: ci-encryption-key-not-for-prod
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend (with dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run integration tests
+        # ``-m integration`` overrides the ``not integration`` default in
+        # pyproject.toml's addopts.
+        run: pytest -m integration -q --maxfail=10
+
   alembic-check:
     name: alembic (migrations in sync with models)
     runs-on: ubuntu-latest

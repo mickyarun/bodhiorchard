@@ -82,7 +82,7 @@ async def _seed_bud(factory: async_sessionmaker[AsyncSession], org_id: uuid.UUID
 async def test_seed_splits_shared_slugs_per_agent_type(
     pg_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """``product-manager`` (3 agent types) should end up as 3 rows, all default."""
+    """``testing`` (bug linker and test plan) should end up as 2 rows, all default."""
     org_id = await _seed_org(pg_session_factory)
 
     async with pg_session_factory() as db:
@@ -95,7 +95,7 @@ async def test_seed_splits_shared_slugs_per_agent_type(
                 await db.execute(
                     select(AgentSkill)
                     .where(AgentSkill.org_id == org_id)
-                    .where(AgentSkill.skill_slug == "product-manager")
+                    .where(AgentSkill.skill_slug == "testing")
                 )
             )
             .scalars()
@@ -103,7 +103,7 @@ async def test_seed_splits_shared_slugs_per_agent_type(
         )
 
     agent_types = {r.agent_type for r in rows}
-    assert agent_types == {AgentType.BUD, AgentType.STANDUP, AgentType.REASSIGNMENT}
+    assert agent_types == {AgentType.BUG_LINKER, AgentType.TEST_PLAN}
     assert all(r.is_default for r in rows)
     assert not any(r.is_custom for r in rows)
 
