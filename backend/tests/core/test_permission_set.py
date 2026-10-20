@@ -65,11 +65,13 @@ def test_sales_role_has_no_permissions() -> None:
 
 def test_hr_role_is_people_only() -> None:
     assert WORKSPACE_ENGINEERING not in ROLES["hr"]
+    assert "leave:reports" in ROLES["hr"]
     assert ROLES["hr"] >= SENSITIVE_PERMISSION_IDS
 
 
 def test_admin_cannot_see_leave_reasons_or_employee_documents() -> None:
     assert "leave:approve" not in ROLES["admin"]
+    assert "leave:reports" not in ROLES["admin"]
     assert "employees:documents" not in ROLES["admin"]
     assert "employees:manage" not in ROLES["admin"]
 

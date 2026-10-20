@@ -16,3 +16,4 @@
 
 APPROVE = "leave:approve"
 CONFIGURE = "leave:configure"
+REPORTS = "leave:reports"

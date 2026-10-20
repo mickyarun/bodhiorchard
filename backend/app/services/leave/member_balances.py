@@ -24,12 +24,11 @@ from app.repositories.leave_ledger import LeaveLedgerRepository
 from app.repositories.user import UserRepository
 from app.schemas.leave import PersonRef
 from app.schemas.leave_policy import LedgerEntryRead, MemberBalances
-from app.services.leave.approvers import reports_of
 from app.services.leave.balances import balances_for
 from app.services.leave.calendar_math import leave_year_bounds, leave_year_by_label
 from app.services.leave.errors import LeaveNotFoundError
-from app.services.leave.permissions import APPROVE
 from app.services.leave.policies import resolve_member_policy, today_for
+from app.services.leave.report_scope import may_view_member_leave
 from app.services.leave.summary import balance_schema, year_schema
 
 
@@ -42,14 +41,12 @@ async def require_member(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID
 async def may_view_balances(
     db: AsyncSession, viewer: User, perms: PermissionSet, user_id: uuid.UUID
 ) -> bool:
-    """Self, their managers and HR (leave:approve).
+    """Self, their managers, HR (leave:approve) and leave:reports.
 
     Not leave:configure on its own: per-type used/pending days next to the
     calendar's "on leave" would tell a policy admin who is off sick.
     """
-    if user_id == viewer.id or perms.has(APPROVE):
-        return True
-    return user_id in await reports_of(db, viewer.org_id, viewer.id)
+    return await may_view_member_leave(db, viewer, perms, user_id)
 
 
 async def member_balances(

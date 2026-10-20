@@ -55,6 +55,12 @@ PEOPLE_PERMISSION_CATEGORIES: list[CategoryDef] = [
                 "Leave types, holidays, WFH rules, balance adjustments and the Slack post",
                 sensitive=True,
             ),
+            PermissionDef(
+                "leave:reports",
+                "View Leave Reports",
+                "Everyone's leave taken, requests and balances, with CSV export. No reasons.",
+                sensitive=True,
+            ),
         ],
     ),
     CategoryDef(
