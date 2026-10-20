@@ -22,6 +22,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.leave_request import LeaveKind, LeaveStatus
 from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.leave_report import LeaveReportRepository
 from app.repositories.leave_request_filter import RequestFilter
@@ -29,6 +30,8 @@ from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.user import UserRepository
 from app.schemas.leave_report_filters import PeopleFilters, RegisterFilters
 from app.schemas.leave_reports import RegisterReport, RegisterRow
+from app.services.leave.calendar_math import leave_year_bounds, leave_year_by_label
+from app.services.leave.policies import resolve_member_policy, today_for
 from app.services.leave.report_scope import ReportScope
 from app.services.leave.reports.population import people, scoped_ids
 
@@ -88,3 +91,23 @@ async def register_report(
             )
         )
     return RegisterReport(rows=rows, truncated=truncated)
+
+
+async def member_history(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    year: int | None,
+    *,
+    kind: LeaveKind | None = None,
+    status: LeaveStatus | None = None,
+) -> RegisterReport:
+    """One member's requests in a leave year of their current policy (now by default)."""
+    policy = (await resolve_member_policy(db, org_id, user_id)).policy
+    bounds = (
+        leave_year_by_label(year, policy.year_start_month)
+        if year
+        else leave_year_bounds(today_for(policy), policy.year_start_month)
+    )
+    filters = RegisterFilters(start=bounds.start, end=bounds.end, kind=kind, status=status)
+    return await register_report(db, org_id, ReportScope(frozenset({user_id})), filters)
