@@ -28,14 +28,30 @@ def _backend(compose_file: str) -> dict[str, object]:
     return dict(raw["services"]["backend"])
 
 
-def test_secret_key_is_only_ever_passed_through() -> None:
+def _service(compose_file: str, name: str) -> dict[str, object]:
+    raw = yaml.safe_load((REPO_ROOT / compose_file).read_text())
+    return dict(raw["services"][name])
+
+
+SECRETS = ("SECRET_KEY", "ENCRYPTION_KEY", "COLYSEUS_BRIDGE_SECRET")
+
+
+def test_secrets_are_only_ever_passed_through() -> None:
     for compose_file in ("docker-compose.yml", "docker-compose.prod.yml"):
         env = dict(_backend(compose_file)["environment"])  # type: ignore[call-overload]
-        assert str(env["SECRET_KEY"]).startswith("${SECRET_KEY"), compose_file
+        for name in SECRETS:
+            # "${NAME}" or "${NAME:-}": never a value baked into the file.
+            assert str(env[name]) in (f"${{{name}}}", f"${{{name}:-}}"), (compose_file, name)
+    multiplayer = dict(_service("docker-compose.yml", "multiplayer")["environment"])  # type: ignore[call-overload]
+    assert multiplayer["COLYSEUS_BRIDGE_SECRET"] == "${COLYSEUS_BRIDGE_SECRET:-}"
 
 
 def test_full_docker_keeps_its_generated_key_on_a_volume() -> None:
     volumes = _backend("docker-compose.yml")["volumes"]
     assert "secrets_data:/data/secrets" in volumes  # type: ignore[operator]
     entrypoint = (REPO_ROOT / "backend" / "entrypoint.sh").read_text()
-    assert "/data/secrets" in entrypoint and "token_urlsafe" in entrypoint
+    assert "instance-secrets.sh" in entrypoint and "rotate_from_default_key" in entrypoint
+    # Multiplayer reads the generated bridge secret from the same volume.
+    assert (
+        "secrets_data:/data/secrets:ro" in _service("docker-compose.yml", "multiplayer")["volumes"]
+    )  # type: ignore[operator]

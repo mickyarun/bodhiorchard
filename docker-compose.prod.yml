@@ -51,6 +51,8 @@ services:
       REDIS_URL: redis://redis:6379
       SECRET_KEY: ${SECRET_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      # Only while rotating ENCRYPTION_KEY (scripts/rotate_encryption_key.py).
+      ENCRYPTION_KEY_PREVIOUS: ${ENCRYPTION_KEY_PREVIOUS:-}
       # Employees' sensitive details and documents; separate from ENCRYPTION_KEY.
       HR_ENCRYPTION_KEYS: ${HR_ENCRYPTION_KEYS}
       ACCESS_TOKEN_EXPIRE_MINUTES: "60"

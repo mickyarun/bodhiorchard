@@ -20,6 +20,8 @@ from pathlib import Path
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app import instance_secrets
+
 
 class DatabaseConfig(BaseSettings):
     """Database connection configuration."""
@@ -33,7 +35,7 @@ class DatabaseConfig(BaseSettings):
 
 
 _DEV_SECRET_KEY = "change-me-in-production"
-_DEV_ENCRYPTION_KEY = "change-me-encryption-key"
+_DEV_ENCRYPTION_KEY = instance_secrets.LEGACY_ENCRYPTION_KEY
 
 
 class AuthConfig(BaseSettings):
@@ -47,10 +49,33 @@ class AuthConfig(BaseSettings):
         alias="ENCRYPTION_KEY",
         description="Key used to encrypt secrets (PATs, tokens) at rest in the database.",
     )
+    encryption_key_previous: str = Field(
+        default="",
+        alias="ENCRYPTION_KEY_PREVIOUS",
+        description="Comma-separated older ENCRYPTION_KEYs, still readable during a rotation.",
+    )
     environment: str = Field(default="dev", alias="ENV")
     access_token_expire_minutes: int = Field(default=60, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
     refresh_token_expire_days: int = Field(default=7, alias="REFRESH_TOKEN_EXPIRE_DAYS")
     algorithm: str = "HS256"
+
+    @model_validator(mode="after")
+    def _use_instance_secrets(self) -> "AuthConfig":
+        """Full Docker: take the generated keys when none are set.
+
+        The old shared default stays readable as a previous key, so tokens
+        still under it are re-encrypted rather than lost.
+        """
+        if not instance_secrets.enabled():
+            return self
+        if self.secret_key in ("", _DEV_SECRET_KEY):
+            self.secret_key = instance_secrets.read("secret_key") or self.secret_key
+        if self.encryption_key in ("", _DEV_ENCRYPTION_KEY):
+            self.encryption_key = instance_secrets.read("encryption_key") or self.encryption_key
+        previous = [k.strip() for k in self.encryption_key_previous.split(",") if k.strip()]
+        if self.encryption_key != _DEV_ENCRYPTION_KEY and _DEV_ENCRYPTION_KEY not in previous:
+            self.encryption_key_previous = ",".join([*previous, _DEV_ENCRYPTION_KEY])
+        return self
 
     @model_validator(mode="after")
     def _reject_dev_secrets_in_prod(self) -> "AuthConfig":
@@ -355,6 +380,15 @@ class ColyseusConfig(BaseSettings):
         alias="COLYSEUS_BRIDGE_SECRET",
         description="Shared secret for backend ↔ Colyseus bridge authentication.",
     )
+
+    @model_validator(mode="after")
+    def _use_instance_secret(self) -> "ColyseusConfig":
+        """Full Docker: take the generated bridge secret when none is set."""
+        if self.bridge_secret in ("", _DEV_BRIDGE_SECRET):
+            self.bridge_secret = (
+                instance_secrets.read("colyseus_bridge_secret") or self.bridge_secret
+            )
+        return self
 
     @model_validator(mode="after")
     def _reject_dev_secret_in_prod(self) -> "ColyseusConfig":

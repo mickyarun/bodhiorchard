@@ -25,5 +25,7 @@ RUN npm ci --omit=dev --no-audit --no-fund
 
 COPY --from=builder /app/multiplayer/dist ./dist
 
+COPY multiplayer/docker-entrypoint.sh ./docker-entrypoint.sh
+
 EXPOSE 2567
-CMD ["node", "dist/multiplayer/src/main.js"]
+CMD ["sh", "./docker-entrypoint.sh"]

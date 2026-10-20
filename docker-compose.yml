@@ -44,10 +44,17 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://bodhiorchard:bodhiorchard@postgres:5432/bodhiorchard
       REDIS_URL: redis://redis:6379
-      # Leave unset to have the backend generate one on first start and
-      # keep it in the secrets_data volume. A shared, well-known value would
-      # let anyone forge a sign-in as any user, the org owner included.
+      # Leave these unset to have the backend generate them on first start
+      # and keep them in the secrets_data volume (backend/docker/
+      # instance-secrets.sh). Shared, well-known values would let anyone
+      # forge a sign-in, read stored integration tokens from a database
+      # dump, or call the multiplayer bridge. Older installs' tokens are
+      # re-encrypted under the new ENCRYPTION_KEY on first start.
+      # Turns on per-install secret generation (Full Docker only).
+      INSTANCE_SECRETS_DIR: /data/secrets
       SECRET_KEY: ${SECRET_KEY:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      ENCRYPTION_KEY_PREVIOUS: ${ENCRYPTION_KEY_PREVIOUS:-}
       # Employees' sensitive details and documents. Without it those screens
       # say the key isn't configured; generate one with scripts/rotate_hr_keys.py.
       HR_ENCRYPTION_KEYS: ${HR_ENCRYPTION_KEYS:-}
@@ -65,7 +72,8 @@ services:
       LLM_PREMIUM_MODEL: ${LLM_PREMIUM_MODEL:-claude-sonnet-4-6}
       # Shared HMAC with the multiplayer service — both sides must match or
       # internal bridge calls (verify-token, org-snapshot, race-*) get 403.
-      COLYSEUS_BRIDGE_SECRET: ${COLYSEUS_BRIDGE_SECRET:-dev-colyseus-bridge-secret}
+      # Unset: generated into secrets_data, which multiplayer reads too.
+      COLYSEUS_BRIDGE_SECRET: ${COLYSEUS_BRIDGE_SECRET:-}
       # Inside Docker the multiplayer server is reachable at its service
       # name. Without this, settings.colyseus.url defaults to
       # http://localhost:2567 which resolves to the backend container
@@ -146,11 +154,13 @@ services:
       # localhost — BackendClient.ts defaults to http://localhost:8000 which
       # resolves to this container itself.
       BACKEND_URL: http://backend:8000
-      # Shared HMAC for internal bridge calls. Pinned to the same default on
-      # both sides so they can't drift silently; override in production via
-      # a host env var and the backend's COLYSEUS_BRIDGE_SECRET will see it
-      # too (they share the key).
-      COLYSEUS_BRIDGE_SECRET: ${COLYSEUS_BRIDGE_SECRET:-dev-colyseus-bridge-secret}
+      # Shared HMAC for internal bridge calls. Set it on the host to pin
+      # both sides; unset, this reads the one the backend generated into
+      # secrets_data (multiplayer/docker-entrypoint.sh).
+      COLYSEUS_BRIDGE_SECRET: ${COLYSEUS_BRIDGE_SECRET:-}
+      INSTANCE_SECRETS_DIR: /data/secrets
+    volumes:
+      - secrets_data:/data/secrets:ro
     ports:
       - "2567:2567"
 

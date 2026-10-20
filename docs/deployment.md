@@ -118,6 +118,14 @@ Once the UI is up:
 
 The key is encrypted (Fernet AES-128) in Postgres and pushed into the backend's process env on save, so every subsequent agent run inherits it. No compose-level env var required.
 
+#### Secrets in Full Docker
+
+You don't set any. On first start the backend generates this install's own `SECRET_KEY` (signs sign-ins), `ENCRYPTION_KEY` (encrypts stored tokens such as the Claude, Slack, GitHub and Jira keys) and `COLYSEUS_BRIDGE_SECRET` (shared with the multiplayer server), and keeps them in the `secrets_data` volume so they survive rebuilds. Setting any of them in your environment overrides the generated one.
+
+Installs from before per-install keys had their stored tokens encrypted under a shared default key. Every start re-encrypts anything still under that old key, so the first start after updating moves them all over (and signs everyone out once). A token that can't be read with any key is listed in the log; save it again in Settings. Scripts run with `docker compose exec backend python -m scripts...` use the same generated keys as the server.
+
+Keep the `secrets_data` volume with your database: without its `encryption_key` the stored tokens can't be read. `docker compose down -v` deletes it.
+
 ### Hybrid mode (hot reload)
 
 ```bash
@@ -139,6 +147,14 @@ All three host processes run in a single terminal with color-coded logs. Ctrl-C 
 ### Switching between modes
 
 The database is the same shape either way, so you can swap modes against the same data. Stop the current mode first (`Ctrl-C` + `npm run stop` for Hybrid, `docker compose down` for Full Docker), then start the other. The stored `claude_auth_mode` on your organization determines which path agent runs take — update it in Settings when you switch.
+
+Going from Full Docker to Hybrid, give the host backend the same `ENCRYPTION_KEY`, or the tokens Full Docker stored can't be read. Copy it into `backend/.env` (skip this if you set `ENCRYPTION_KEY` yourself):
+
+```bash
+key=$(docker compose run --rm --no-deps --entrypoint cat backend /data/secrets/encryption_key) && [ -n "$key" ] && echo "ENCRYPTION_KEY=$key" >> backend/.env
+```
+
+The other way round needs nothing: tokens saved in Hybrid under the default key are re-encrypted on the next Full Docker start.
 
 ## Try the included examples
 
