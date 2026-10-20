@@ -33,6 +33,7 @@ from app.models.employee_document import EmployeeDocument
 from app.models.employee_sensitive import EmployeeSensitiveDetails
 from app.models.notification import Notification, NotificationType
 from app.services.employees import documents, hr_key_rotation, record_alerts
+from app.services.employees.document_policy import MAX_DOCUMENT_BYTES
 from app.services.file_storage import FileStorage
 from tests.integration.leave_support import Factory, as_user, give_role, setup_org
 
@@ -150,6 +151,20 @@ async def test_documents_are_encrypted_at_rest_and_only_hr_deletes(
         headers=as_user(emp, org),
     )
     assert rejected.status_code == 422
+    # The list says the cap; one byte over it is refused before storage.
+    listed = await client.get(f"{BASE}/{emp}/documents", headers=as_user(emp, org))
+    assert listed.json()["max_upload_bytes"] == MAX_DOCUMENT_BYTES
+    too_big = {
+        "file": ("scan.pdf", PDF + b"0" * (MAX_DOCUMENT_BYTES + 1 - len(PDF)), "application/pdf")
+    }
+    over = await client.post(
+        f"{BASE}/{emp}/documents",
+        data={"doc_type": "id_proof"},
+        files=too_big,
+        headers=as_user(emp, org),
+    )
+    assert over.status_code == 422 and "10 MB" in over.json()["detail"]
+    assert len(list(Path(hr_key.local_dir).rglob("*.bin"))) == 1
     delete = f"{BASE}/documents/{doc_id}"
     assert (await client.delete(delete, headers=as_user(emp, org))).status_code == 403
     assert (await client.delete(delete, headers=as_user(hr, org))).status_code == 204

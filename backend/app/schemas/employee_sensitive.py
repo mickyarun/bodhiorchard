@@ -125,6 +125,8 @@ class DocumentList(BaseModel):
     documents: list[DocumentRead]
     can_upload: bool
     can_delete: bool
+    # The size cap, so the upload dialog can say it and check before sending.
+    max_upload_bytes: int
 
 
 class AccessLogEntry(BaseModel):

@@ -67,9 +67,9 @@ export function accessLine(entry: AccessLogEntry): string {
   return `${entry.actor.name} ${verb} ${listed}`
 }
 
-/** "1.2 MB", "340 KB". */
+/** "1.2 MB", "10 MB", "340 KB". */
 export function formatBytes(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes >= 1024 * 1024) return `${Number((bytes / (1024 * 1024)).toFixed(1))} MB`
   return `${Math.max(1, Math.round(bytes / 1024))} KB`
 }
 

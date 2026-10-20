@@ -89,7 +89,10 @@ async def list_documents(
         profile.id
     )
     return DocumentList(
-        documents=await _reads(db, docs), can_upload=True, can_delete=access.delete_documents
+        documents=await _reads(db, docs),
+        can_upload=True,
+        can_delete=access.delete_documents,
+        max_upload_bytes=MAX_DOCUMENT_BYTES,
     )
 
 

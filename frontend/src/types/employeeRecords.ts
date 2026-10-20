@@ -65,6 +65,8 @@ export interface DocumentList {
   documents: DocumentRead[]
   can_upload: boolean
   can_delete: boolean
+  /** Largest file the server accepts. */
+  max_upload_bytes: number
 }
 
 export type AccessAction =

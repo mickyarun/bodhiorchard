@@ -46,5 +46,6 @@ describe('formatBytes', () => {
     expect(formatBytes(1_258_291)).toBe('1.2 MB')
     expect(formatBytes(348_160)).toBe('340 KB')
     expect(formatBytes(10)).toBe('1 KB')
+    expect(formatBytes(10 * 1024 * 1024)).toBe('10 MB')
   })
 })

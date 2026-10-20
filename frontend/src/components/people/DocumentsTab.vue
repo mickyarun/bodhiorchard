@@ -47,7 +47,7 @@
         </tr>
       </tbody>
     </v-table>
-    <DocumentUploadDialog v-model="uploading" :upload="docs.upload" />
+    <DocumentUploadDialog v-model="uploading" :upload="docs.upload" :max-bytes="list?.max_upload_bytes ?? null" />
     <ConfirmDialog
       :model-value="!!deleting"
       title="Delete this document?"

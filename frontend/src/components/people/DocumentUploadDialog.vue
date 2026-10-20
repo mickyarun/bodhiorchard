@@ -30,29 +30,38 @@
           accept=".pdf,.jpg,.jpeg,.png"
           prepend-icon=""
           prepend-inner-icon="mdi-paperclip"
-          show-size
+          :hint="limitHint"
+          persistent-hint
+          :error-messages="tooBig ? [tooBigMessage] : []"
           v-bind="input"
-        />
+        >
+          <!-- Same units as the limit, so "10.4 MB" never sits under "up to 10 MB". -->
+          <template #selection>
+            <span v-if="file" class="text-truncate">{{ file.name }} ({{ formatBytes(file.size) }})</span>
+          </template>
+        </v-file-input>
         <AppCallout v-if="error" variant="error">{{ error }}</AppCallout>
       </div>
       <div class="d-flex justify-end ga-2 pa-6 pt-4">
         <v-btn variant="text" @click="close">Cancel</v-btn>
-        <v-btn color="primary" :loading="saving" :disabled="!file" @click="submit">Upload</v-btn>
+        <v-btn color="primary" :loading="saving" :disabled="!file || tooBig" @click="submit">Upload</v-btn>
       </div>
     </v-card>
   </v-dialog>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import type { DocumentType } from '@/types/employeeRecords'
 import { selectItems } from '@/utils/employee'
-import { DOC_TYPE_LABELS } from '@/utils/employeeRecords'
+import { DOC_TYPE_LABELS, formatBytes } from '@/utils/employeeRecords'
 
 const props = defineProps<{
   modelValue: boolean
   upload: (docType: DocumentType, file: File) => Promise<string | null>
+  /** The server's size cap; null until the document list has loaded. */
+  maxBytes: number | null
 }>()
 const emit = defineEmits<(e: 'update:modelValue', value: boolean) => void>()
 const TYPES = selectItems<DocumentType>(DOC_TYPE_LABELS)
@@ -61,6 +70,15 @@ const docType = ref<DocumentType>('id_proof')
 const file = ref<File | null>(null)
 const saving = ref(false)
 const error = ref('')
+
+const limitHint = computed(() =>
+  props.maxBytes ? `PDF, JPEG or PNG, up to ${formatBytes(props.maxBytes)}.` : 'PDF, JPEG or PNG.',
+)
+// Checked here so a big scan isn't sent just to be refused.
+const tooBig = computed(() => !!file.value && !!props.maxBytes && file.value.size > props.maxBytes)
+const tooBigMessage = computed(() =>
+  props.maxBytes ? `This file is larger than ${formatBytes(props.maxBytes)}. Choose a smaller one.` : '',
+)
 
 watch(
   () => props.modelValue,
@@ -77,7 +95,7 @@ function close(): void {
 }
 
 async function submit(): Promise<void> {
-  if (!file.value) return
+  if (!file.value || tooBig.value) return
   saving.value = true
   error.value = (await props.upload(docType.value, file.value)) ?? ''
   saving.value = false
