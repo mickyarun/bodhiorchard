@@ -35,6 +35,7 @@ from app.repositories.leave_request import ACTIVE
 ZERO = Decimal("0")
 PAID_DAYS = LeaveRequest.days - LeaveRequest.lop_days
 UsageRow = tuple[uuid.UUID, uuid.UUID, LeaveStatus, date, Decimal]
+LopRow = tuple[uuid.UUID, date, Decimal]
 
 
 class LeaveUsageRepository(BaseRepository[LeaveRequest]):
@@ -151,3 +152,26 @@ class LeaveUsageRepository(BaseRepository[LeaveRequest]):
         )
         rows = (await self._db.execute(stmt)).all()
         return [(user, kind, status, day, days) for user, kind, status, day, days in rows]
+
+    async def lop_by_start(
+        self, user_ids: Collection[uuid.UUID], start: date, end: date
+    ) -> list[LopRow]:
+        """Active loss-of-pay days per member and start date, for many members.
+
+        Callers bucket the rows into each member's own leave year, as with
+        :meth:`leave_days_by_start`.
+        """
+        if not user_ids:
+            return []
+        stmt = self._scoped(
+            select(LeaveRequest.user_id, LeaveRequest.start_date, func.sum(LeaveRequest.lop_days))
+            .where(
+                LeaveRequest.user_id.in_(user_ids),
+                LeaveRequest.status.in_(ACTIVE),
+                LeaveRequest.lop_days > 0,
+                LeaveRequest.start_date >= start,
+                LeaveRequest.start_date <= end,
+            )
+            .group_by(LeaveRequest.user_id, LeaveRequest.start_date)
+        )
+        return [(user, day, lop) for user, day, lop in (await self._db.execute(stmt)).all()]

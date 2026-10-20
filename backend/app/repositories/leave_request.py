@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.leave_request import LeaveKind, LeaveRequest, LeaveStatus
 from app.models.user import OrgToUser
 from app.repositories.base import BaseRepository
+from app.repositories.leave_request_filter import RequestFilter, apply_filter
 
 ACTIVE = (LeaveStatus.PENDING, LeaveStatus.APPROVED)
 Scope = Literal["upcoming", "past", "all"]
@@ -105,25 +106,33 @@ class LeaveRequestRepository(BaseRepository[LeaveRequest]):
         result = await self._db.execute(stmt.order_by(LeaveRequest.start_date))
         return list(result.scalars().all())
 
-    async def list_pending(self, user_ids: Collection[uuid.UUID] | None) -> list[LeaveRequest]:
+    async def list_pending(
+        self, user_ids: Collection[uuid.UUID] | None, filters: RequestFilter | None = None
+    ) -> list[LeaveRequest]:
         """Pending requests, oldest first; ``None`` = every member."""
         stmt = self._scoped(select(LeaveRequest).where(LeaveRequest.status == LeaveStatus.PENDING))
+        stmt = apply_filter(stmt, filters)
         if user_ids is not None:
             stmt = stmt.where(LeaveRequest.user_id.in_(user_ids))
         result = await self._db.execute(stmt.order_by(LeaveRequest.created_at))
         return list(result.scalars().all())
 
     async def list_decided(
-        self, user_ids: Collection[uuid.UUID] | None, since: datetime
+        self,
+        user_ids: Collection[uuid.UUID] | None,
+        since: datetime | None,
+        filters: RequestFilter | None = None,
     ) -> list[LeaveRequest]:
-        """Requests decided by a person since ``since``, newest first."""
+        """Requests decided by a person (since ``since``), newest first; at most 200."""
         stmt = self._scoped(
             select(LeaveRequest).where(
                 LeaveRequest.status.in_((LeaveStatus.APPROVED, LeaveStatus.REJECTED)),
                 LeaveRequest.decided_by.is_not(None),
-                LeaveRequest.decided_at >= since,
             )
         )
+        if since is not None:
+            stmt = stmt.where(LeaveRequest.decided_at >= since)
+        stmt = apply_filter(stmt, filters)
         if user_ids is not None:
             stmt = stmt.where(LeaveRequest.user_id.in_(user_ids))
         result = await self._db.execute(stmt.order_by(LeaveRequest.decided_at.desc()).limit(200))

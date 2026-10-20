@@ -1,0 +1,154 @@
+# Copyright 2025-2026 Arun Rajkumar
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Employee-wise leave taken in a date range (approved), plus what is pending.
+
+Days are the part of each request inside the range (see ``attribution``),
+so a month's report shows that month's leave even when it spans a month end.
+These are "taken in range", not the leave-year "used" that balances show.
+"""
+
+import uuid
+from collections import defaultdict
+from collections.abc import Sequence
+from datetime import date
+from decimal import Decimal
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.leave_request import LeaveKind, LeaveRequest, LeaveStatus
+from app.models.leave_type import LeaveType
+from app.repositories.leave_policy import LeavePolicyRepository
+from app.repositories.leave_report import LeaveReportRepository
+from app.repositories.leave_request import ACTIVE
+from app.repositories.leave_request_filter import RequestFilter
+from app.repositories.leave_type import LeaveTypeRepository
+from app.schemas.leave_report_filters import SummaryFilters
+from app.schemas.leave_reports import NamedRef, SummaryReport, SummaryRow
+from app.services.leave.errors import LeaveInvalidError
+from app.services.leave.policies import mandatory_holidays
+from app.services.leave.report_scope import ReportScope
+from app.services.leave.reports.attribution import InRange, Span, within
+from app.services.leave.reports.population import Person, people, scoped_ids
+
+REQUEST_CAP = 20_000
+ZERO = Decimal("0")
+
+
+async def _in_range(
+    db: AsyncSession, org_id: uuid.UUID, requests: Sequence[LeaveRequest], f: SummaryFilters
+) -> dict[uuid.UUID, InRange]:
+    """Each request's days inside the range, recounting only those that cross an edge."""
+    crossing = [r for r in requests if r.start_date < f.start or r.end_date > f.end]
+    policies = await LeavePolicyRepository(db, org_id=org_id).by_ids(
+        {r.policy_id for r in crossing}
+    )
+    holidays: dict[uuid.UUID, dict[date, str]] = {}
+    for policy in policies.values():
+        own = [r for r in crossing if r.policy_id == policy.id]
+        first, last = min(r.start_date for r in own), max(r.end_date for r in own)
+        holidays[policy.id] = await mandatory_holidays(db, policy, first, last)
+    out: dict[uuid.UUID, InRange] = {}
+    for r in requests:
+        span = Span(r.start_date, r.end_date, r.days, r.lop_days)
+        booked = policies.get(r.policy_id)
+        out[r.id] = within(
+            span,
+            f.start,
+            f.end,
+            working_days=booked.working_days if booked else [0, 1, 2, 3, 4],
+            holidays=holidays.get(r.policy_id, {}),
+        )
+    return out
+
+
+async def _types(
+    db: AsyncSession, org_id: uuid.UUID, persons: Sequence[Person], used: set[uuid.UUID]
+) -> list[LeaveType]:
+    """Types on the members' policies plus any type their leave used."""
+    repo = LeaveTypeRepository(db, org_id=org_id)
+    found = dict(await repo.by_ids(used))
+    for policy_id in {p.policy.id for p in persons if p.policy}:
+        for leave_type in await repo.list_for_policy(policy_id, active_only=True):
+            found.setdefault(leave_type.id, leave_type)
+    return sorted(found.values(), key=lambda t: t.name.lower())
+
+
+def type_refs(types: Sequence[LeaveType], policy_names: dict[uuid.UUID, str]) -> list[NamedRef]:
+    """Type columns; a name used by two policies gets the policy added."""
+    seen: dict[str, int] = defaultdict(int)
+    for t in types:
+        seen[t.name] += 1
+    return [
+        NamedRef(
+            id=t.id,
+            name=f"{t.name} ({policy_names.get(t.policy_id, '?')})"
+            if seen[t.name] > 1
+            else t.name,
+        )
+        for t in types
+    ]
+
+
+async def summary_report(
+    db: AsyncSession, org_id: uuid.UUID, scope: ReportScope, f: SummaryFilters
+) -> SummaryReport:
+    """One row per member in scope (and anyone who took leave without a profile)."""
+    ids = await scoped_ids(db, org_id, scope, f)
+    requests = await LeaveReportRepository(db, org_id=org_id).overlapping(
+        ids, f.start, f.end, RequestFilter(statuses=ACTIVE), limit=REQUEST_CAP + 1
+    )
+    if len(requests) > REQUEST_CAP:
+        raise LeaveInvalidError("Too much leave in this range. Narrow the dates or filters.")
+    persons = await people(db, org_id, ids, f, requesters={r.user_id for r in requests})
+    wanted = {p.user_id for p in persons}
+    requests = [r for r in requests if r.user_id in wanted]
+    parts = await _in_range(db, org_id, requests, f)
+    sums: dict[uuid.UUID, dict[str, Decimal]] = defaultdict(lambda: defaultdict(lambda: ZERO))
+    by_type: dict[uuid.UUID, dict[uuid.UUID, Decimal]] = defaultdict(
+        lambda: defaultdict(lambda: ZERO)
+    )
+    for r in requests:
+        part, row = parts[r.id], sums[r.user_id]
+        if r.status == LeaveStatus.PENDING:
+            row["pending"] += part.days
+        elif r.kind == LeaveKind.WFH:
+            row["wfh"] += part.days
+        elif r.kind == LeaveKind.OPTIONAL_HOLIDAY:
+            row["optional"] += part.days
+        else:
+            row["leave"] += part.days
+            row["lop"] += part.lop_days
+            if r.leave_type_id is not None:
+                by_type[r.user_id][r.leave_type_id] += part.days
+    used = {t for per in by_type.values() for t in per}
+    types = await _types(db, org_id, persons, used)
+    names = {p.policy.id: p.policy.name for p in persons if p.policy}
+    return SummaryReport(
+        start=f.start,
+        end=f.end,
+        leave_types=type_refs(types, names),
+        rows=[
+            SummaryRow(
+                **p.columns.model_dump(),
+                leave_by_type=dict(by_type.get(p.user_id, {})),
+                leave_days=sums[p.user_id]["leave"],
+                lop_days=sums[p.user_id]["lop"],
+                wfh_days=sums[p.user_id]["wfh"],
+                optional_holidays=sums[p.user_id]["optional"],
+                pending_days=sums[p.user_id]["pending"],
+            )
+            for p in persons
+        ],
+    )

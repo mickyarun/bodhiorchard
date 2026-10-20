@@ -66,6 +66,33 @@ class BalanceLine:
         return self.allocated + self.adjustments - self.used - self.pending
 
 
+def build_line(
+    leave_type: LeaveType,
+    stored: Decimal | None,
+    adjustments: Decimal,
+    used: Decimal,
+    pending: Decimal,
+    *,
+    profile: EmployeeProfile | None,
+    year: LeaveYearBounds,
+    rule: ProrationRule,
+) -> BalanceLine:
+    """One type's balance; a year with no stored allocation gets one worked out live."""
+    quota = leave_type.annual_quota_days
+    allocated = stored
+    if quota is None:
+        allocated = None
+    elif stored is None:
+        allocated = allocation_for_year(quota, effective_from(profile), year.start, year.end, rule)
+    return BalanceLine(
+        leave_type=leave_type,
+        allocated=allocated,
+        adjustments=adjustments,
+        used=used,
+        pending=pending,
+    )
+
+
 async def balances_for(
     db: AsyncSession,
     *,
@@ -90,33 +117,31 @@ async def balances_for(
     ledger = LeaveLedgerRepository(db, org_id=org_id)
     totals = await ledger.totals(user_id, year.label)
     rule = proration_rule(policy)
-    for leave_type in types:
-        quota = leave_type.annual_quota_days
-        stored, adjustments = totals.get(leave_type.id, (None, ZERO))
-        if quota is not None and stored is None:
+    persist = next((t for t in types if t.id == persist_type_id), None)
+    if persist is not None and persist.annual_quota_days is not None:
+        stored, adjustments = totals.get(persist.id, (None, ZERO))
+        if stored is None:
             joined = effective_from(profile)
-            days = allocation_for_year(quota, joined, year.start, year.end, rule)
-            if leave_type.id == persist_type_id:
-                # Callers hold the member's lock, so nobody else writes it meanwhile.
-                await ledger.ensure_allocation(user_id, leave_type.id, year.label, days)
-            totals[leave_type.id] = (days, adjustments)
+            days = allocation_for_year(
+                persist.annual_quota_days, joined, year.start, year.end, rule
+            )
+            # Callers hold the member's lock, so nobody else writes it meanwhile.
+            await ledger.ensure_allocation(user_id, persist.id, year.label, days)
+            totals[persist.id] = (days, adjustments)
     usage = await LeaveUsageRepository(db, org_id=org_id).leave_day_totals(
         user_id, year.start, year.end
     )
-    lines = []
-    for leave_type in types:
-        allocated, adjustments = totals.get(leave_type.id, (None, ZERO))
-        used, pending = usage.get(leave_type.id, (ZERO, ZERO))
-        lines.append(
-            BalanceLine(
-                leave_type=leave_type,
-                allocated=allocated if leave_type.annual_quota_days is not None else None,
-                adjustments=adjustments,
-                used=used,
-                pending=pending,
-            )
+    return [
+        build_line(
+            t,
+            *totals.get(t.id, (None, ZERO)),
+            *usage.get(t.id, (ZERO, ZERO)),
+            profile=profile,
+            year=year,
+            rule=rule,
         )
-    return lines
+        for t in types
+    ]
 
 
 def find_line(lines: list[BalanceLine], leave_type_id: uuid.UUID) -> BalanceLine | None:
