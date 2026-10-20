@@ -32,16 +32,6 @@ If a future test genuinely needs a shared schema-bootstrapped DB:
    not enough; the bar for re-introducing global DB teardown is high.
 """
 
-import asyncio
-
-import pytest
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Session-scoped event loop. Required by pytest-asyncio for
-    session-scope async fixtures defined elsewhere in the suite.
-    """
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+# The session-wide event loop is configured in pyproject.toml
+# (``asyncio_default_*_loop_scope``); pytest-asyncio 1.x no longer lets a
+# conftest replace the ``event_loop`` fixture.

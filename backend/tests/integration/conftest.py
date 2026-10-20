@@ -32,7 +32,6 @@ local Postgres is never touched.
 
 from __future__ import annotations
 
-import asyncio
 import os
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
@@ -92,16 +91,15 @@ def pg_async_url(pg_container: PostgresContainer) -> str:
 def _apply_migrations(
     pg_container: PostgresContainer,
     pg_async_url: str,
-    event_loop: asyncio.AbstractEventLoop,
 ) -> str:
     """Run ``alembic upgrade head`` against the ephemeral container.
 
     Runs once per session. Returns the asyncpg URL so downstream fixtures
     can depend on this fixture by name to enforce migration order.
 
-    Alembic's env.py runs the migrations with ``asyncio.run``, which leaves
-    the thread with no current event loop; the session loop is put back
-    afterwards so async tests and fixtures that run next still find it.
+    Alembic's env.py runs the migrations with ``asyncio.run`` on a loop of
+    its own; tests run on pytest-asyncio's session loop, which this
+    doesn't touch.
     """
     backend_root = Path(__file__).resolve().parents[2]
     alembic_cfg = Config(str(backend_root / "alembic.ini"))
@@ -114,7 +112,6 @@ def _apply_migrations(
     try:
         command.upgrade(alembic_cfg, "head")
     finally:
-        asyncio.set_event_loop(event_loop)
         if prior is None:
             os.environ.pop("DATABASE_URL", None)
         else:

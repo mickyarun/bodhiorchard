@@ -56,7 +56,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4.0",
-    "pytest-asyncio>=0.23.0",
+    # 1.x: the loop scope is set by the options below, not an event_loop fixture.
+    "pytest-asyncio>=1.0",
     "pytest-cov>=4.1.0",
     "pytest-mock>=3.12.0",
     "respx>=0.21.0",
@@ -113,6 +114,12 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# One event loop for the whole session, tests and fixtures alike. Session
+# fixtures (the integration Postgres, a module-level lock or pool) are
+# created on the first test's loop; a loop per test would leave them
+# attached to a closed one ("attached to a different loop").
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 # Heavy / Docker-dependent tests are gated behind the ``integration``
 # marker so the default ``pytest`` run stays fast and works without

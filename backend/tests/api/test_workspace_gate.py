@@ -21,10 +21,9 @@ belongs in the shared list. A people-only role (sales) must never reach
 engineering data by accident.
 """
 
-from fastapi.routing import APIRoute, APIWebSocketRoute
-
 from app.api.router import api_router
 from app.core.permissions import WORKSPACE_ENGINEERING
+from tests.api.route_walk import ServedRoute, depends_on, served_routes
 
 # Modules whose routes are open to any authenticated member, or that
 # authenticate with their own credential (webhook signature, MCP token,
@@ -83,35 +82,27 @@ MUST_BE_GATED = frozenset(
 )
 
 
-def _is_gated(route: APIRoute | APIWebSocketRoute) -> bool:
-    return any(
-        WORKSPACE_ENGINEERING in getattr(dep.dependency, "required_permissions", ())
-        for dep in route.dependencies
-    )
+def _requires_engineering(call: object) -> bool:
+    return WORKSPACE_ENGINEERING in getattr(call, "required_permissions", ())
 
 
-def _routes() -> list[APIRoute | APIWebSocketRoute]:
-    return [r for r in api_router.routes if isinstance(r, APIRoute | APIWebSocketRoute)]
+def _is_gated(route: ServedRoute) -> bool:
+    """The gate is in the dependencies FastAPI solves for this route."""
+    return depends_on(route, _requires_engineering)
 
 
-def _route_is_gated_by_any_dependency(route: APIRoute | APIWebSocketRoute) -> bool:
-    """Also look through the route's own dependency tree (per-route gates)."""
-    if _is_gated(route):
-        return True
-    stack = list(route.dependant.dependencies)
-    while stack:
-        dep = stack.pop()
-        if WORKSPACE_ENGINEERING in getattr(dep.call, "required_permissions", ()):
-            return True
-        stack.extend(dep.dependencies)
-    return False
+def _routes() -> list[ServedRoute]:
+    routes = served_routes(api_router)
+    # Hundreds today; a walk that finds none would let every check pass.
+    assert len(routes) > 200, f"only {len(routes)} routes found"
+    return routes
 
 
 def test_every_route_is_gated_or_shared() -> None:
     offenders = []
     for route in _routes():
-        module = route.endpoint.__module__
-        if _route_is_gated_by_any_dependency(route):
+        module = route.module
+        if _is_gated(route):
             continue
         if module in SHARED_MODULES:
             continue
@@ -125,7 +116,7 @@ def test_engineering_data_in_shared_modules_is_gated() -> None:
     found = {r.path for r in _routes() if r.path in MUST_BE_GATED}
     assert found == MUST_BE_GATED, f"missing routes: {MUST_BE_GATED - found}"
     ungated = {r.path for r in _routes() if r.path in MUST_BE_GATED} - {
-        r.path for r in _routes() if _route_is_gated_by_any_dependency(r)
+        r.path for r in _routes() if _is_gated(r)
     }
     assert ungated == set()
 

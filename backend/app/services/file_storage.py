@@ -250,7 +250,8 @@ class FileStorage:
         dest.parent.mkdir(parents=True, exist_ok=True)
         # Write then rename, so a crash mid-write never leaves a truncated
         # file in place of a good one (rewrites happen, e.g. key rotation).
-        partial = dest.with_name(f"{dest.name}.partial")
+        # Through the same containment check as ``dest``, not derived from it.
+        partial = self._safe_local_path(f"{full_path}.partial")
         partial.write_bytes(data)
         os.replace(partial, dest)
         # ``info`` (not ``debug``) so the active backend is visible at

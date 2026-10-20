@@ -21,20 +21,16 @@ proxy cache.
 
 import pytest
 from fastapi import Response
-from fastapi.routing import APIRoute
 
 from app.api.router import api_router
 from app.core.http_cache import no_store
+from tests.api.route_walk import ServedRoute, depends_on, served_routes
 
 PEOPLE_PREFIXES = ("/api/v1/leave", "/api/v1/employees", "/api/v1/offices")
 
 
-def _people_routes() -> list[APIRoute]:
-    return [
-        r
-        for r in api_router.routes
-        if isinstance(r, APIRoute) and r.path.startswith(PEOPLE_PREFIXES)
-    ]
+def _people_routes() -> list[ServedRoute]:
+    return [r for r in served_routes(api_router) if r.path.startswith(PEOPLE_PREFIXES)]
 
 
 def test_people_routes_exist() -> None:
@@ -43,9 +39,7 @@ def test_people_routes_exist() -> None:
 
 def test_every_people_route_is_no_store() -> None:
     missing = [
-        r.path
-        for r in _people_routes()
-        if not any(d.dependency is no_store for d in r.dependencies)
+        r.path for r in _people_routes() if not depends_on(r, lambda call: call is no_store)
     ]
     assert missing == []
 
