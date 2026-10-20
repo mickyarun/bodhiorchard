@@ -19,9 +19,11 @@ export async function updateCommand(projectDir: string, opts: UpdateOptions): Pr
   if (opts.tag && opts.tag !== config.imageTag) {
     config.imageTag = opts.tag;
     await writeConfig(dir, config);
-    await materialize(dir, config, await loadSecrets(dir));
     log.info(`Pinned image tag to ${opts.tag}.`);
   }
+  // Always re-render: a newer CLI may pass new settings (such as the HR key)
+  // that an install's existing compose file and .env don't have yet.
+  await materialize(dir, config, await loadSecrets(dir));
 
   log.step(`Pulling ${config.imageTag} images…`);
   const pull = await compose(dir, ["-p", PROJECT_NAME, "pull"], { inherit: true });

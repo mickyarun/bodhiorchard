@@ -3,14 +3,19 @@
 // `init` (fresh secrets) and `start`/`update` (secrets recovered from .env).
 import fs from "fs-extra";
 import path from "node:path";
-import type { ProjectConfig } from "./config.js";
+import { CONFIG_DIR, type ProjectConfig } from "./config.js";
 import { renderComposeFile } from "./compose.js";
 import { renderEnvFile, parseSecretsFromEnv } from "./env.js";
-import type { InfraSecrets } from "./secrets.js";
+import { generateHrKeyring, type InfraSecrets } from "./secrets.js";
+import { log } from "./ui.js";
 
 export const COMPOSE_FILE = "docker-compose.yml";
 export const ENV_FILE = ".env";
 export const GITIGNORE_FILE = ".gitignore";
+// Written once an HR keyring has been put in .env. If the keyring later goes
+// missing, it was lost rather than never issued, and a new one would orphan
+// every employee record encrypted under the old one.
+const HR_KEYRING_ISSUED_FILE = "hr-keyring-issued";
 
 // The .env holds the at-rest encryption key and JWT secret. If the install dir
 // is (or becomes) a git repo, this keeps those out of version control.
@@ -22,6 +27,10 @@ export function composeFilePath(projectDir: string): string {
 
 export function envFilePath(projectDir: string): string {
   return path.join(projectDir, ENV_FILE);
+}
+
+function hrKeyringIssuedPath(projectDir: string): string {
+  return path.join(projectDir, CONFIG_DIR, HR_KEYRING_ISSUED_FILE);
 }
 
 /** Write docker-compose.yml and .env. The .env is chmod 600 because it holds
@@ -38,6 +47,7 @@ export async function materialize(
   // `mode` only applies when the file is created; chmod again so a re-render
   // over an existing (possibly 0644) .env still locks the secrets down.
   await fs.chmod(env, 0o600);
+  await fs.outputFile(hrKeyringIssuedPath(projectDir), "");
 
   // Write a .gitignore once; don't clobber a user's edits on re-render.
   const gitignore = path.join(projectDir, GITIGNORE_FILE);
@@ -53,11 +63,17 @@ export async function loadSecrets(projectDir: string): Promise<InfraSecrets> {
     throw new Error(`Missing ${ENV_FILE} in ${projectDir}. Run \`bodhiorchard init\` first.`);
   }
   const secrets = parseSecretsFromEnv(await fs.readFile(file, "utf8"));
-  if (!secrets) {
+  const hrKeyringLost =
+    !secrets?.HR_ENCRYPTION_KEYS && (await fs.pathExists(hrKeyringIssuedPath(projectDir)));
+  if (!secrets || hrKeyringLost) {
     throw new Error(
       `${ENV_FILE} is missing one or more secrets. Restore it from backup — ` +
         `regenerating would orphan encrypted data.`,
     );
   }
-  return secrets;
+  const { HR_ENCRYPTION_KEYS } = secrets;
+  if (HR_ENCRYPTION_KEYS) return { ...secrets, HR_ENCRYPTION_KEYS };
+  // An install from before HR records: nothing is encrypted yet, so a new key is safe.
+  log.warn(`Added HR_ENCRYPTION_KEYS to ${ENV_FILE}. Back it up: employee records need it.`);
+  return { ...secrets, HR_ENCRYPTION_KEYS: generateHrKeyring() };
 }

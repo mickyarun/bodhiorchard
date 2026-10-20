@@ -51,6 +51,15 @@ else
   say "backend/.env already exists — keeping it"
 fi
 
+# Employee records are encrypted with their own key. Generated once and never
+# replaced: records encrypted with it can't be read without it.
+if ! grep -Eq '^(export )?HR_ENCRYPTION_KEYS=.' backend/.env; then
+  say "Generating HR_ENCRYPTION_KEYS in backend/.env"
+  # Don't glue the new line onto a last line that has no newline.
+  if [ -s backend/.env ] && [ -n "$(tail -c1 backend/.env)" ]; then echo >> backend/.env; fi
+  python3 -c "import base64, os; print('HR_ENCRYPTION_KEYS=k' + os.urandom(3).hex() + ':' + base64.b64encode(os.urandom(32)).decode())" >> backend/.env
+fi
+
 if [ ! -f frontend/.env ]; then
   say "Creating frontend/.env from .env.example"
   cp frontend/.env.example frontend/.env

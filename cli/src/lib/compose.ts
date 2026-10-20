@@ -73,6 +73,7 @@ function backendService(config: ProjectConfig): ComposeService {
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}",
       COLYSEUS_URL: "http://multiplayer:2567",
       COLYSEUS_BRIDGE_SECRET: "${COLYSEUS_BRIDGE_SECRET}",
+      HR_ENCRYPTION_KEYS: "${HR_ENCRYPTION_KEYS}",
     },
     ports: ["${BACKEND_HOST_PORT}:8000"],
     volumes: ["repos_data:/data/repos", "ssh_data:/data/ssh"],

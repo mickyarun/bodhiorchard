@@ -21,6 +21,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from app.core.hr_crypto import decrypt, encrypt, parse_keyring
+
 SCRIPT = Path(__file__).resolve().parents[2] / "docker" / "instance-secrets.sh"
 SHOW = 'echo "$SECRET_KEY|$ENCRYPTION_KEY|$COLYSEUS_BRIDGE_SECRET|${ENCRYPTION_KEY_PREVIOUS:-}"'
 LEGACY = "change-me-encryption-key"
@@ -63,6 +65,7 @@ def test_values_from_the_environment_win_and_the_legacy_key_is_still_readable(
         ENCRYPTION_KEY="my-key",
         COLYSEUS_BRIDGE_SECRET="my-bridge",
         ENCRYPTION_KEY_PREVIOUS="older",
+        HR_ENCRYPTION_KEYS="mine:a2V5",
     )
     assert result.stdout.strip() == f"mine|my-key|my-bridge|older,{LEGACY}"
     assert not (tmp_path / "s").exists()
@@ -116,3 +119,27 @@ def test_the_bridge_secret_lives_apart_from_the_backend_keys(tmp_path: Path) -> 
     assert "colyseus_bridge_secret" not in [p.name for p in (tmp_path / "keys").iterdir()]
     # Readable by the multiplayer container's non-root user.
     assert (tmp_path / "bridge" / "colyseus_bridge_secret").stat().st_mode & 0o044 == 0o044
+
+
+def test_a_full_docker_install_gets_its_own_hr_keyring(tmp_path: Path) -> None:
+    secrets_dir = tmp_path / "s"
+    first = _run('echo "$HR_ENCRYPTION_KEYS"', INSTANCE_SECRETS_DIR=str(secrets_dir))
+    assert first.returncode == 0, first.stderr
+    raw = first.stdout.strip()
+    ring = parse_keyring(raw)
+    assert len(ring.keys) == 1 and ring.current.startswith("k")
+    assert decrypt(encrypt(b"pan", "aad", ring), "aad", ring) == b"pan"
+    # Generated once: later starts reuse it, or every record becomes unreadable.
+    again = _run('echo "$HR_ENCRYPTION_KEYS"', INSTANCE_SECRETS_DIR=str(secrets_dir))
+    assert again.stdout.strip() == raw
+    assert (secrets_dir / "hr_encryption_keys").stat().st_mode & 0o077 == 0
+
+
+def test_an_hr_keyring_from_the_environment_wins(tmp_path: Path) -> None:
+    result = _run(
+        'echo "$HR_ENCRYPTION_KEYS"',
+        INSTANCE_SECRETS_DIR=str(tmp_path / "s"),
+        HR_ENCRYPTION_KEYS="mine:a2V5",
+    )
+    assert result.stdout.strip() == "mine:a2V5"
+    assert not (tmp_path / "s" / "hr_encryption_keys").exists()

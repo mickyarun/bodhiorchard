@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from app.config import AuthConfig, ColyseusConfig
+from app.config import AuthConfig, ColyseusConfig, HRCryptoConfig
 
 LEGACY = "change-me-encryption-key"
 
@@ -30,6 +30,7 @@ def _secrets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         ("secret_key", "gen-secret"),
         ("encryption_key", "gen-key"),
         ("colyseus_bridge_secret", "gen-bridge"),
+        ("hr_encryption_keys", "k1:gen-hr"),
     ):
         (tmp_path / name).write_text(value + "\n")
     monkeypatch.setenv("INSTANCE_SECRETS_DIR", str(tmp_path))
@@ -65,3 +66,16 @@ def test_outside_full_docker_nothing_changes(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setenv("ENCRYPTION_KEY_PREVIOUS", "")
     auth = AuthConfig()
     assert (auth.encryption_key, auth.encryption_key_previous) == ("", "")
+
+
+def test_full_docker_processes_use_the_generated_hr_keyring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _secrets(tmp_path, monkeypatch)
+    monkeypatch.setenv("HR_ENCRYPTION_KEYS", "")
+    assert HRCryptoConfig().hr_encryption_keys.get_secret_value() == "k1:gen-hr"
+    monkeypatch.setenv("HR_ENCRYPTION_KEYS", "mine:key")
+    assert HRCryptoConfig().hr_encryption_keys.get_secret_value() == "mine:key"
+    monkeypatch.delenv("INSTANCE_SECRETS_DIR")
+    monkeypatch.setenv("HR_ENCRYPTION_KEYS", "")
+    assert HRCryptoConfig().hr_encryption_keys.get_secret_value() == ""

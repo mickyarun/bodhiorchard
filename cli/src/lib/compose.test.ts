@@ -39,6 +39,13 @@ describe("renderComposeFile — bundled infra", () => {
     expect(doc.services.backend.depends_on.postgres.condition).toBe("service_healthy");
     expect(doc.services.backend.extra_hosts).toBeUndefined();
   });
+
+  it("passes every secret through from .env, the HR keyring included", () => {
+    const env = doc.services.backend.environment;
+    for (const name of ["SECRET_KEY", "ENCRYPTION_KEY", "COLYSEUS_BRIDGE_SECRET", "HR_ENCRYPTION_KEYS"]) {
+      expect(env[name]).toBe(`\${${name}}`);
+    }
+  });
 });
 
 describe("renderComposeFile — reused postgres", () => {

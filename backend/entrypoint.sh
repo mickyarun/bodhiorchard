@@ -34,7 +34,7 @@ if [ "${BODHIORCHARD_EGRESS_FIREWALL:-0}" = "1" ]; then
     fi
 fi
 
-# Per-install SECRET_KEY, ENCRYPTION_KEY and bridge secret (Full Docker).
+# Per-install SECRET_KEY, ENCRYPTION_KEY, HR key and bridge secret (Full Docker).
 . "$(dirname "$0")/docker/instance-secrets.sh"
 
 echo "==> Running database migrations"

@@ -51,4 +51,19 @@ describe("parseSecretsFromEnv", () => {
   it("returns null when a secret is missing", () => {
     expect(parseSecretsFromEnv("SECRET_KEY=abc\nENCRYPTION_KEY=def\n")).toBeNull();
   });
+
+  it("leaves the HR keyring out for an install from before HR records", () => {
+    const old = "SECRET_KEY=a\nENCRYPTION_KEY=b\nCOLYSEUS_BRIDGE_SECRET=c\n";
+    expect(parseSecretsFromEnv(old)).toEqual({
+      SECRET_KEY: "a",
+      ENCRYPTION_KEY: "b",
+      COLYSEUS_BRIDGE_SECRET: "c",
+      HR_ENCRYPTION_KEYS: undefined,
+    });
+  });
+
+  it("keeps an HR keyring that is already set", () => {
+    const env = "SECRET_KEY=a\nENCRYPTION_KEY=b\nCOLYSEUS_BRIDGE_SECRET=c\nHR_ENCRYPTION_KEYS=k1:abc=,k0:def=\n";
+    expect(parseSecretsFromEnv(env)?.HR_ENCRYPTION_KEYS).toBe("k1:abc=,k0:def=");
+  });
 });

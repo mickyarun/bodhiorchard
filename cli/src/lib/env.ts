@@ -1,7 +1,7 @@
 // Renders the .env that docker compose interpolates into the compose file.
 // Holds the concrete ports, connection URLs and secrets — written chmod 600.
 import type { ProjectConfig } from "./config.js";
-import type { InfraSecrets } from "./secrets.js";
+import type { InfraSecrets, StoredSecrets } from "./secrets.js";
 
 const BUNDLED_DATABASE_URL =
   "postgresql+asyncpg://bodhiorchard:bodhiorchard@postgres:5432/bodhiorchard";
@@ -28,6 +28,7 @@ export function renderEnvFile(config: ProjectConfig, secrets: InfraSecrets): str
   lines.push(`SECRET_KEY=${secrets.SECRET_KEY}`);
   lines.push(`ENCRYPTION_KEY=${secrets.ENCRYPTION_KEY}`);
   lines.push(`COLYSEUS_BRIDGE_SECRET=${secrets.COLYSEUS_BRIDGE_SECRET}`);
+  lines.push(`HR_ENCRYPTION_KEYS=${secrets.HR_ENCRYPTION_KEYS}`);
 
   // Configured in the app's setup wizard (AI Engine step), stored encrypted on
   // the org. Left empty here so a key never lands in a plaintext file.
@@ -39,8 +40,9 @@ export function renderEnvFile(config: ProjectConfig, secrets: InfraSecrets): str
 /** Recover the generated secrets from an existing .env so re-rendering (e.g. on
  *  `start` after a config port change) preserves them. Secrets are created once
  *  at init and must never be rotated — ENCRYPTION_KEY rotation would orphan
- *  every value encrypted at rest. Returns null if any secret is missing. */
-export function parseSecretsFromEnv(envContent: string): InfraSecrets | null {
+ *  every value encrypted at rest. Returns null if any secret is missing. The
+ *  HR keyring came later, so it may be absent; loadSecrets decides what to do. */
+export function parseSecretsFromEnv(envContent: string): StoredSecrets | null {
   const read = (key: string): string | undefined => {
     const match = envContent.match(new RegExp(`^${key}=(.*)$`, "m"));
     return match?.[1]?.trim() || undefined;
@@ -49,5 +51,6 @@ export function parseSecretsFromEnv(envContent: string): InfraSecrets | null {
   const ENCRYPTION_KEY = read("ENCRYPTION_KEY");
   const COLYSEUS_BRIDGE_SECRET = read("COLYSEUS_BRIDGE_SECRET");
   if (!SECRET_KEY || !ENCRYPTION_KEY || !COLYSEUS_BRIDGE_SECRET) return null;
-  return { SECRET_KEY, ENCRYPTION_KEY, COLYSEUS_BRIDGE_SECRET };
+  const HR_ENCRYPTION_KEYS = read("HR_ENCRYPTION_KEYS");
+  return { SECRET_KEY, ENCRYPTION_KEY, COLYSEUS_BRIDGE_SECRET, HR_ENCRYPTION_KEYS };
 }

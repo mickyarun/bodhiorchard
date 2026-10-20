@@ -13,4 +13,11 @@ describe("generateSecrets", () => {
   it("is non-deterministic across calls", () => {
     expect(generateSecrets().SECRET_KEY).not.toBe(generateSecrets().SECRET_KEY);
   });
+
+  it("produces an HR keyring holding one 32-byte key", () => {
+    const [kid, encoded] = generateSecrets().HR_ENCRYPTION_KEYS.split(":");
+    expect(kid).toMatch(/^k[0-9a-f]{6}$/);
+    expect(Buffer.from(encoded, "base64")).toHaveLength(32);
+    expect(generateSecrets().HR_ENCRYPTION_KEYS).not.toBe(generateSecrets().HR_ENCRYPTION_KEYS);
+  });
 });

@@ -121,6 +121,15 @@ class HRCryptoConfig(BaseSettings):
     environment: str = Field(default="dev", alias="ENV")
 
     @model_validator(mode="after")
+    def _use_instance_secret(self) -> "HRCryptoConfig":
+        """Full Docker: take the generated keyring when none is set."""
+        if instance_secrets.enabled() and not self.hr_encryption_keys.get_secret_value().strip():
+            generated = instance_secrets.read("hr_encryption_keys")
+            if generated:
+                self.hr_encryption_keys = SecretStr(generated)
+        return self
+
+    @model_validator(mode="after")
     def _require_key_in_prod(self) -> "HRCryptoConfig":
         """Refuse to start in production without an HR key.
 

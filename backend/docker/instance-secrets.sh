@@ -16,14 +16,14 @@
 #
 # Per-install secrets for Full Docker, sourced by entrypoint.sh.
 #
-# Full Docker ships without SECRET_KEY, ENCRYPTION_KEY or
-# COLYSEUS_BRIDGE_SECRET. Fixed values would let anyone with the source
-# forge sign-ins, read stored integration tokens from a database dump, or
-# call the multiplayer bridge. So each install generates its own on first
+# Full Docker ships without SECRET_KEY, ENCRYPTION_KEY,
+# COLYSEUS_BRIDGE_SECRET or HR_ENCRYPTION_KEYS. Fixed values would let
+# anyone with the source forge sign-ins, read stored integration tokens or
+# employee records from a database dump, or call the multiplayer bridge. So each install generates its own on first
 # start and keeps them on volumes, where they survive rebuilds. The bridge
 # secret sits on a volume of its own (BRIDGE_SECRET_DIR): the multiplayer
-# container mounts only that one, so it never sees the backend's keys. A value set in the
-# environment always wins. app/instance_secrets.py reads the same files
+# container mounts only that one, so it never sees the backend's keys. A
+# value set in the environment always wins. app/instance_secrets.py reads the same files
 # for processes started outside this entrypoint.
 #
 # Opt-in: only docker-compose.yml sets INSTANCE_SECRETS_DIR. Production and
@@ -54,14 +54,21 @@ rotate_from_default_key() {
 if [ -n "${INSTANCE_SECRETS_DIR:-}" ]; then
     BRIDGE_SECRET_DIR="${BRIDGE_SECRET_DIR:-$INSTANCE_SECRETS_DIR}"
 
-    # instance_secret DIR NAME [UMASK]: print the secret NAME in DIR, creating it once.
+    # A 48-byte random token; HR keys use their own kid:base64 format instead.
+    RANDOM_TOKEN="import secrets; print(secrets.token_urlsafe(48))"
+    # One AES-256 key in the kid:base64 shape app/core/hr_crypto.py parses. The
+    # kid is random so keyrings from two installs can be combined.
+    HR_KEYRING="import base64, os; print('k' + os.urandom(3).hex() + ':' + base64.b64encode(os.urandom(32)).decode())"
+
+    # instance_secret DIR NAME [UMASK] [PYTHON]: print the secret NAME in DIR,
+    # creating it once with the PYTHON one-liner (a random token by default).
     instance_secret() {
         file="$1/$2"
         if [ ! -s "$file" ]; then
             echo "==> Generating $2 for this install" >&2
             # Write then rename, so a reader never sees half a file.
             if ! (umask "${3:-077}" && mkdir -p "$1" && \
-                python -c "import secrets; print(secrets.token_urlsafe(48))" > "$file.tmp" && \
+                python -c "${4:-$RANDOM_TOKEN}" > "$file.tmp" && \
                 mv "$file.tmp" "$file"); then
                 echo "Can't write $file. Mount a writable volume at $1" \
                     "(see docker-compose.yml) or set the value in the environment." >&2
@@ -84,6 +91,12 @@ if [ -n "${INSTANCE_SECRETS_DIR:-}" ]; then
     if [ -z "${ENCRYPTION_KEY:-}" ] || [ "$ENCRYPTION_KEY" = "$LEGACY_ENCRYPTION_KEY" ]; then
         ENCRYPTION_KEY="$(instance_secret "$INSTANCE_SECRETS_DIR" encryption_key)"
         export ENCRYPTION_KEY
+    fi
+    # Losing this key loses every encrypted employee record, so it is only
+    # ever generated once and lives on the same volume as the other keys.
+    if [ -z "${HR_ENCRYPTION_KEYS:-}" ]; then
+        HR_ENCRYPTION_KEYS="$(instance_secret "$INSTANCE_SECRETS_DIR" hr_encryption_keys 077 "$HR_KEYRING")"
+        export HR_ENCRYPTION_KEYS
     fi
     case ",${ENCRYPTION_KEY_PREVIOUS:-}," in
         *",$LEGACY_ENCRYPTION_KEY,"*) ;;
