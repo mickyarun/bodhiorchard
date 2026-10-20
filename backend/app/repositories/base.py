@@ -19,6 +19,7 @@ from typing import Any, Generic, TypeVar, cast
 
 from sqlalchemy import Result, Select, func, select
 from sqlalchemy.engine import CursorResult
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.base import BaseModel as ORMBase
@@ -35,6 +36,17 @@ def rowcount(result: Result[Any]) -> int:
     ``CursorResult`` which exposes ``rowcount``.
     """
     return cast(CursorResult[Any], result).rowcount
+
+
+def violated_constraint(exc: IntegrityError) -> str | None:
+    """The constraint (or unique index) an ``IntegrityError`` broke, if the driver says.
+
+    Lets a handler answer only the conflict it expects and re-raise others,
+    instead of reporting every integrity failure as the same message.
+    """
+    cause = getattr(exc.orig, "__cause__", None)
+    name = getattr(cause, "constraint_name", None)
+    return name if isinstance(name, str) else None
 
 
 # PEP 695 `class BaseRepository[T: ORMBase]` would be more concise, but

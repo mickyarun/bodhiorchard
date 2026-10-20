@@ -21,6 +21,7 @@ documents; only HR deletes. Files are decrypted in memory and never cached.
 import uuid
 from urllib.parse import quote
 
+import structlog
 from fastapi import (
     APIRouter,
     Depends,
@@ -47,10 +48,13 @@ from app.services.employees import documents
 from app.services.employees.document_policy import MAX_DOCUMENT_BYTES
 from app.services.employees.sensitive_access import sensitive_access
 from app.services.employees.sensitive_details import Subject
+from app.services.file_storage import FileStorageError
 from app.services.upload_policy import UploadPolicyError
 
 router = APIRouter(tags=["employees"])
 NO_ACCESS = "Only HR and the employee can see these documents."
+STORAGE_DOWN = "Document storage isn't available right now. Try again in a moment."
+logger = structlog.get_logger(__name__)
 
 
 async def _reads(db: AsyncSession, docs: list[EmployeeDocument]) -> list[DocumentRead]:
@@ -61,7 +65,7 @@ async def _reads(db: AsyncSession, docs: list[EmployeeDocument]) -> list[Documen
         DocumentRead(
             id=d.id,
             doc_type=d.doc_type,
-            filename=documents.filename_of(d),
+            filename=documents.listed_filename(d),
             mime_type=d.mime_type,
             size_bytes=d.size_bytes,
             uploaded_by=PersonRef(user_id=d.uploaded_by, name=names.get(d.uploaded_by, "Someone"))
@@ -124,6 +128,9 @@ async def upload_document(
         )
     except UploadPolicyError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except FileStorageError as exc:
+        logger.error("hr_document_storage_failed", op="upload", user_id=str(user_id))
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=STORAGE_DOWN) from exc
     try:
         await db.commit()
     except Exception:
@@ -159,7 +166,15 @@ async def open_document(
 ) -> Response:
     """The decrypted file; the view is logged."""
     doc, subject = await _document(db, current_user, perms, doc_id)
-    opened = await documents.open_document(db, subject, current_user.id, doc)
+    try:
+        opened = await documents.open_document(db, subject, current_user.id, doc)
+    except FileStorageError as exc:
+        logger.error("hr_document_storage_failed", op="open", doc_id=str(doc.id), exc_info=True)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="This document's file couldn't be read from storage. Try again; if it "
+            "keeps failing, ask HR to upload it again.",
+        ) from exc
     # The view must be on record before the file leaves the server.
     await db.commit()
     disposition = "attachment" if download else "inline"

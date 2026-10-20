@@ -31,7 +31,9 @@ logger = structlog.get_logger(__name__)
 CONFIG_KEY = "leave_digest"
 
 
-def digest_settings(org_config: dict[str, Any] | None) -> LeaveDigestSettings:
+def digest_settings(
+    org_config: dict[str, Any] | None, org_id: uuid.UUID | None = None
+) -> LeaveDigestSettings:
     """The org's settings, or defaults (off) if missing or unreadable.
 
     Never raises: one bad org must not stop the scheduler for every other.
@@ -40,13 +42,14 @@ def digest_settings(org_config: dict[str, Any] | None) -> LeaveDigestSettings:
     try:
         return LeaveDigestSettings.model_validate(raw)
     except ValidationError:
-        logger.error("leave_digest_settings_invalid", keys=sorted(raw))
+        keys = sorted(raw) if isinstance(raw, dict) else type(raw).__name__
+        logger.error("leave_digest_settings_invalid", org_id=str(org_id), keys=keys)
         return LeaveDigestSettings()
 
 
 async def load_digest_settings(db: AsyncSession, org_id: uuid.UUID) -> LeaveDigestSettings:
     """The org's saved settings."""
-    return digest_settings(await OrganizationRepository(db).get_config(org_id))
+    return digest_settings(await OrganizationRepository(db).get_config(org_id), org_id)
 
 
 async def save_digest_settings(

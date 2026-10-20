@@ -25,6 +25,10 @@ directory, so nothing here applies to them.
 import os
 from pathlib import Path
 
+import structlog
+
+logger = structlog.get_logger(__name__)
+
 # The default every Full Docker install used before keys were per install.
 # Kept readable there so anything still under it gets re-encrypted.
 LEGACY_ENCRYPTION_KEY = "change-me-encryption-key"
@@ -35,13 +39,23 @@ def enabled() -> bool:
     return bool(os.environ.get("INSTANCE_SECRETS_DIR"))
 
 
-def read(name: str) -> str | None:
-    """This install's generated secret ``name``, or None."""
-    base = os.environ.get("INSTANCE_SECRETS_DIR")
+def read(name: str, *, directory_env: str = "INSTANCE_SECRETS_DIR") -> str | None:
+    """This install's generated secret ``name``, or None.
+
+    The bridge secret lives in ``BRIDGE_SECRET_DIR`` (its own volume, shared
+    with the multiplayer container); everything else in the main directory.
+    """
+    base = os.environ.get(directory_env) or os.environ.get("INSTANCE_SECRETS_DIR")
     if not base:
         return None
+    path = Path(base) / name
     try:
-        value = (Path(base) / name).read_text().strip()
-    except OSError:
+        value = path.read_text().strip()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        # Present but unreadable: say so, or settings quietly fall back to
+        # the shared default key.
+        logger.warning("instance_secret_unreadable", path=str(path), error=type(exc).__name__)
         return None
     return value or None

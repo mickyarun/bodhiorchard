@@ -24,11 +24,12 @@ from dataclasses import dataclass, field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import hr_crypto
+from app.models.employee_document import EmployeeDocument
 from app.repositories.hr_rotation import HRRotationRepository
 from app.services.employees.document_policy import ENCRYPTED_BLOB_POLICY
 from app.services.employees.documents import document_aad, document_path
 from app.services.employees.sensitive_details import ENCRYPTED, field_aad
-from app.services.file_storage import get_file_storage
+from app.services.file_storage import FileStorage, FileStorageError, get_file_storage
 
 
 @dataclass
@@ -59,8 +60,8 @@ async def rotate(db: AsyncSession, *, dry_run: bool) -> RotationReport:
                 continue
             try:
                 fresh = _reencrypt(blob, field_aad(row.org_id, row.profile_id, name), ring)
-            except hr_crypto.HRDecryptionError:
-                report.failed.append(f"details {row.id} {name}")
+            except hr_crypto.HRDecryptionError as exc:
+                report.failed.append(f"details {row.id} {name}: {exc}")
                 continue
             if fresh is not None:
                 report.fields += 1
@@ -68,19 +69,33 @@ async def rotate(db: AsyncSession, *, dry_run: bool) -> RotationReport:
                     setattr(row, name, fresh)
     storage = get_file_storage()
     for doc in await repo.all_documents():
-        # One unreadable or missing file mustn't stop the rest: report it.
+        # One unreadable or missing file mustn't stop the rest: report it,
+        # with the reason (key ids at most, never key bytes).
         try:
-            filename = _reencrypt(doc.filename, document_aad(doc.org_id, doc.id, "name"), ring)
-            content, _ = await storage.download(doc.storage_path)
-            body = _reencrypt(content, document_aad(doc.org_id, doc.id, "content"), ring)
-        except Exception:
-            report.failed.append(f"document {doc.id}")
-            continue
-        if filename is None and body is None:
-            continue
-        report.documents += 1
-        if dry_run:
-            continue
+            await _rotate_document(doc, storage, ring, report, dry_run=dry_run)
+        except (hr_crypto.HRDecryptionError, FileStorageError) as exc:
+            report.failed.append(f"document {doc.id}: {type(exc).__name__}: {exc}")
+    if not dry_run:
+        await db.commit()
+    return report
+
+
+async def _rotate_document(
+    doc: EmployeeDocument,
+    storage: FileStorage,
+    ring: hr_crypto.Keyring,
+    report: RotationReport,
+    *,
+    dry_run: bool,
+) -> None:
+    """Re-encrypt one document's file and name. The file goes first: if
+    storing it fails, the name stays as it was and both still match."""
+    filename = _reencrypt(doc.filename, document_aad(doc.org_id, doc.id, "name"), ring)
+    content, _ = await storage.download(doc.storage_path)
+    body = _reencrypt(content, document_aad(doc.org_id, doc.id, "content"), ring)
+    if filename is None and body is None:
+        return
+    if not dry_run:
         if body is not None:
             await storage.upload(
                 str(doc.org_id),
@@ -91,6 +106,4 @@ async def rotate(db: AsyncSession, *, dry_run: bool) -> RotationReport:
             )
         if filename is not None:
             doc.filename = filename
-    if not dry_run:
-        await db.commit()
-    return report
+    report.documents += 1

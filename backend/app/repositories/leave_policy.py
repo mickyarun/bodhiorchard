@@ -44,6 +44,20 @@ class LeavePolicyRepository(BaseRepository[LeavePolicy]):
         super().__init__(LeavePolicy, db, org_id=org_id)
         self._org = org_id
 
+    async def lock(self, policy_id: uuid.UUID, *, shared: bool) -> None:
+        """Hold the policy row until the transaction ends.
+
+        Calendar changes (holidays, working days) take it exclusively before
+        recounting; a submit takes it shared before counting its days. So a
+        submit never counts against a calendar that is changing, and the
+        recount always sees the requests submitted before it. Always taken
+        before any member lock, so the two can't deadlock.
+        """
+        stmt = self._scoped(select(LeavePolicy.id).where(LeavePolicy.id == policy_id))
+        await self._db.execute(
+            stmt.with_for_update(read=True) if shared else stmt.with_for_update()
+        )
+
     async def list_ordered(self) -> list[LeavePolicy]:
         """Default policy first, then by name."""
         result = await self._db.execute(

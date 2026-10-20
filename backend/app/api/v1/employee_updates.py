@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1._employee_helpers import forbid, load_record
 from app.core.deps import PermissionSet, get_db, get_permission_set, require_permissions
 from app.models.user import User
+from app.repositories.base import violated_constraint
 from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.employee_reporting_manager import EmployeeReportingManagerRepository
 from app.schemas.employee import EmployeePersonal, EmployeeRead, EmployeeWork, ManagersUpdate
@@ -35,6 +36,9 @@ from app.services.employees.managers import (
 )
 from app.services.employees.offices import check_office, follow_office_policy
 from app.services.employees.views import employee_read
+
+CODE_CONSTRAINT = "uq_employee_profiles_org_code"
+OFFICE_CONSTRAINT = "fk_employee_profiles_office"
 
 router = APIRouter(tags=["employees"])
 
@@ -76,17 +80,24 @@ async def update_work(
     try:
         await db.flush()
     except IntegrityError as exc:
-        # A concurrent save claimed the same employee code.
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=f"Employee code {code} is already used."
-        ) from exc
+        if violated_constraint(exc) == CODE_CONSTRAINT:  # a concurrent save took the code
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Employee code {code} is already used.",
+            ) from exc
+        if violated_constraint(exc) == OFFICE_CONSTRAINT:  # deleted meanwhile
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="That office was just deleted. Pick another.",
+            ) from exc
+        raise
     await follow_office_policy(
         db,
         profile=profile,
         office=office,
         previous_office_id=previous_office_id,
         actor_id=current_user.id,
-        actor_is_owner=perms.is_owner,
+        perms=perms,
     )
     return await employee_read(
         db, org_id=org_id, profile=profile, user=user, access=access, access_revoked=revoked

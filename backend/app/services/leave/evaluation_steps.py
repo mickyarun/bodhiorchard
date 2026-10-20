@@ -26,6 +26,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.leave_policy import LeavePolicy
+from app.models.leave_request import HalfDay, LeaveRequest
 from app.models.policy_holiday import PolicyHoliday
 from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.leave_type import LeaveTypeRepository
@@ -90,16 +91,31 @@ async def apply_optional_holiday(
         )
 
 
+def _other_half(existing: LeaveRequest, start: date, end: date, half_day: HalfDay) -> bool:
+    """True when both are single-day half days on different halves (no clash)."""
+    single_day = existing.start_date == existing.end_date == start == end
+    halves = (existing.half_day, half_day)
+    return single_day and HalfDay.NONE not in halves and halves[0] != halves[1]
+
+
 async def check_overlap(
     db: AsyncSession,
     org_id: uuid.UUID,
     user_id: uuid.UUID,
     result: Evaluation,
+    half_day: HalfDay,
 ) -> None:
-    """Refuse dates already covered by another pending or approved request."""
-    clashes = await LeaveRequestRepository(db, org_id=org_id).active_between(
-        [user_id], result.start, result.end
-    )
+    """Refuse dates already covered by another pending or approved request.
+
+    A morning and an afternoon of the same day don't clash.
+    """
+    clashes = [
+        clash
+        for clash in await LeaveRequestRepository(db, org_id=org_id).active_between(
+            [user_id], result.start, result.end
+        )
+        if not _other_half(clash, result.start, result.end, half_day)
+    ]
     if clashes:
         first = clashes[0]
         when = f"{first.start_date:%a %d %b}"

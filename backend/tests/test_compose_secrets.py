@@ -51,7 +51,8 @@ def test_full_docker_keeps_its_generated_key_on_a_volume() -> None:
     assert "secrets_data:/data/secrets" in volumes  # type: ignore[operator]
     entrypoint = (REPO_ROOT / "backend" / "entrypoint.sh").read_text()
     assert "instance-secrets.sh" in entrypoint and "rotate_from_default_key" in entrypoint
-    # Multiplayer reads the generated bridge secret from the same volume.
-    assert (
-        "secrets_data:/data/secrets:ro" in _service("docker-compose.yml", "multiplayer")["volumes"]
-    )  # type: ignore[operator]
+    # Multiplayer reads the bridge secret from a volume of its own and never
+    # mounts the backend's keys.
+    multiplayer = _service("docker-compose.yml", "multiplayer")
+    assert list(multiplayer["volumes"]) == ["bridge_secret_data:/data/bridge:ro"]  # type: ignore[call-overload]
+    assert "bridge_secret_data:/data/bridge" in volumes  # type: ignore[operator]

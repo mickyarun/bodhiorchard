@@ -16,7 +16,8 @@
 
 An office can name a leave policy. Putting someone in that office (or
 creating them there) moves them onto it, through the same assignment
-rules as moving them by hand; HR can still choose another policy after.
+rules as moving them by hand (so it needs leave:configure too); HR can
+still choose another policy after.
 """
 
 import uuid
@@ -24,12 +25,14 @@ import uuid
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.permission_deps import PermissionSet
 from app.models.employee_profile import EmployeeProfile
 from app.models.office_location import OfficeLocation
 from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.office_location import OfficeLocationRepository
 from app.schemas.employee import OfficeRef
 from app.services.leave import policy_admin
+from app.services.leave.permissions import CONFIGURE
 
 
 async def check_office(
@@ -53,9 +56,13 @@ async def follow_office_policy(
     office: OfficeLocation | None,
     previous_office_id: uuid.UUID | None,
     actor_id: uuid.UUID,
-    actor_is_owner: bool,
+    perms: PermissionSet,
 ) -> None:
-    """Move ``profile`` onto its new office's policy, if the office names one."""
+    """Move ``profile`` onto its new office's policy, if the office names one.
+
+    Raises 403 when that move needs leave:configure the actor doesn't have;
+    the caller's transaction is rolled back, so the office isn't saved either.
+    """
     if office is None or office.id == previous_office_id or office.leave_policy_id is None:
         return
     policy = await LeavePolicyRepository(db, org_id=profile.org_id).get_by_id(
@@ -63,8 +70,14 @@ async def follow_office_policy(
     )
     if policy is None or policy.id == profile.leave_policy_id:
         return
+    if not perms.has(CONFIGURE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"{office.name} moves people onto the {policy.name} leave policy, which "
+            "needs leave settings access. Ask someone who manages leave.",
+        )
     await policy_admin.assign_employees(
-        db, policy, actor_id, [profile.user_id], actor_is_owner=actor_is_owner
+        db, policy, actor_id, [profile.user_id], actor_is_owner=perms.is_owner
     )
     await db.refresh(profile)
 

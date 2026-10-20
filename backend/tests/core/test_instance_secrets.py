@@ -103,3 +103,16 @@ def test_a_failed_rotation_does_not_stop_the_start(tmp_path: Path) -> None:
         assert "python -m scripts.rotate_encryption_key --rotate" in result.stdout
         assert result.stdout.strip().endswith("started")
         assert expected in result.stderr
+
+
+def test_the_bridge_secret_lives_apart_from_the_backend_keys(tmp_path: Path) -> None:
+    result = _run(
+        SHOW,
+        INSTANCE_SECRETS_DIR=str(tmp_path / "keys"),
+        BRIDGE_SECRET_DIR=str(tmp_path / "bridge"),
+    )
+    assert result.returncode == 0, result.stderr
+    assert sorted(p.name for p in (tmp_path / "bridge").iterdir()) == ["colyseus_bridge_secret"]
+    assert "colyseus_bridge_secret" not in [p.name for p in (tmp_path / "keys").iterdir()]
+    # Readable by the multiplayer container's non-root user.
+    assert (tmp_path / "bridge" / "colyseus_bridge_secret").stat().st_mode & 0o044 == 0o044

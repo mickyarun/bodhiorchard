@@ -20,10 +20,11 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1._leave_admin import CONFIGURE, load_policy
+from app.api.v1._leave_admin import load_policy
 from app.core.deps import get_db, require_permissions
-from app.models.policy_holiday import HolidaySource, PolicyHoliday
+from app.models.policy_holiday import HolidayKind, HolidaySource, PolicyHoliday
 from app.models.user import User
+from app.repositories.leave_usage import LeaveUsageRepository
 from app.repositories.policy_holiday import PolicyHolidayRepository
 from app.schemas.leave_policy import (
     HolidayAdminRead,
@@ -39,6 +40,7 @@ from app.services.leave.holidays import (
     import_public_holidays,
     recount_requests,
 )
+from app.services.leave.permissions import CONFIGURE
 
 router = APIRouter(tags=["leave-admin"])
 
@@ -108,6 +110,17 @@ async def add_holiday(
     return _read(holiday)
 
 
+async def _refuse_if_booked(db: AsyncSession, holiday: PolicyHoliday) -> None:
+    """409 if people booked this optional holiday: their requests would keep its old date."""
+    if holiday.kind != HolidayKind.OPTIONAL:
+        return
+    if await LeaveUsageRepository(db, org_id=holiday.org_id).holiday_booked(holiday.id):
+        raise LeaveConflictError(
+            "People have booked this optional holiday, so its date and type can't change "
+            "and it can't be deleted. They can cancel their requests first; renaming is fine."
+        )
+
+
 @router.put("/holidays/{holiday_id}", response_model=HolidayAdminRead)
 async def update_holiday(
     holiday_id: uuid.UUID,
@@ -117,6 +130,8 @@ async def update_holiday(
 ) -> HolidayAdminRead:
     """Rename, move, or switch a holiday between mandatory and optional."""
     holiday = await _load(db, current_user.org_id, holiday_id)
+    if body.date != holiday.date or body.kind != holiday.kind:
+        await _refuse_if_booked(db, holiday)
     earliest = min(holiday.date, body.date)
     for field, value in body.model_dump().items():
         setattr(holiday, field, value)
@@ -137,6 +152,7 @@ async def delete_holiday(
 ) -> None:
     """Remove a holiday; requests over that date are recounted."""
     holiday = await _load(db, current_user.org_id, holiday_id)
+    await _refuse_if_booked(db, holiday)
     policy = await load_policy(db, current_user.org_id, holiday.policy_id)
     on = holiday.date
     await PolicyHolidayRepository(db, org_id=current_user.org_id).delete(holiday)

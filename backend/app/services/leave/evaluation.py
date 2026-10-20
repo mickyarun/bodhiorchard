@@ -94,7 +94,7 @@ async def evaluate(
         result.days, result.excluded = counted.days, counted.excluded
         if result.days == ZERO:
             result.problem("no_working_days", "These dates are all weekends or holidays.")
-    await check_overlap(db, policy.org_id, user_id, result)
+    await check_overlap(db, policy.org_id, user_id, result, body.half_day)
     if body.kind == LeaveKind.LEAVE and body.leave_type_id is not None:
         await apply_balance(db, member, user_id, body.leave_type_id, result, persist)
     if body.kind == LeaveKind.WFH:

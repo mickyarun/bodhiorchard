@@ -33,8 +33,10 @@ from app.repositories.role import RoleRepository
 from tests.integration.leave_support import (
     Factory,
     as_user,
+    future_monday,
     give_custom_role,
     give_role,
+    report_to,
     setup_org,
 )
 
@@ -132,3 +134,21 @@ async def test_roles_above_your_access_cannot_be_changed_or_minted(
         headers=as_user(mgr, org),
     )
     assert minted.status_code == 403
+
+
+async def test_a_sales_user_has_leave_and_their_own_record_only(
+    client: AsyncClient, pg_session_factory: Factory
+) -> None:
+    org, (seller, mgr), casual = await setup_org(pg_session_factory, "Seller", "Mgr")
+    await give_role(pg_session_factory, org, seller, "sales")
+    await report_to(pg_session_factory, org, seller, mgr)
+    headers = as_user(seller, org)
+    day = future_monday().isoformat()
+    body = {"kind": "leave", "leave_type_id": str(casual), "start_date": day, "end_date": day}
+    sent = await client.post("/api/v1/leave/requests", json=body, headers=headers)
+    assert sent.status_code == 201, sent.text
+    assert (await client.get("/api/v1/leave/me/summary", headers=headers)).status_code == 200
+    assert (await client.get("/api/v1/employees/me", headers=headers)).status_code == 200
+    for engineering in ("/api/v1/features", "/api/v1/bugs", "/api/v1/me/mcp-tokens"):
+        assert (await client.get(engineering, headers=headers)).status_code == 403, engineering
+    assert (await client.get(f"/api/v1/employees/{mgr}", headers=headers)).status_code == 403

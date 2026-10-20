@@ -38,6 +38,7 @@ from app.models.notification import Notification, NotificationType
 from app.services.background import spawn
 from app.services.event_bus import publish
 from app.services.leave.messages import compose_decision_message, compose_request_message
+from app.services.leave.slack_blocks import escape
 from app.services.leave.slack_prompts import refresh_prompts, send_prompts
 from app.services.notifications import NotificationCategory
 from app.services.slack_dm import send_dm
@@ -131,7 +132,8 @@ def stage_new_request(
         # for an auto-approved WFH is a plain DM.
         slack_text=message
         if not auto_approved
-        else f"{message} <{settings.frontend_url}{link}|Open in Bodhiorchard>",
+        # Escaped: a name like "<https://evil|Open>" must not become a link.
+        else f"{escape(message)} <{settings.frontend_url}{link}|Open in Bodhiorchard>",
         prompt_request_id=None if auto_approved else request.id,
     )
     return _stage(
@@ -153,7 +155,7 @@ def stage_decision(
         org_id=org_id,
         user_ids={request.user_id},
         category=NotificationCategory.LEAVE_UPDATES,
-        slack_text=f"{message} <{settings.frontend_url}/leave|See details>",
+        slack_text=f"{escape(message)} <{settings.frontend_url}/leave|See details>",
         refresh_request_id=request.id,
     )
     return _stage(

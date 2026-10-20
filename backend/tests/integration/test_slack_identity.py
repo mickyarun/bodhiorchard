@@ -29,7 +29,7 @@ from app.models.organization import Organization
 from app.models.user import User
 from app.repositories.leave_digest_post import LeaveDigestPostRepository
 from app.repositories.user import UserRepository
-from tests.integration.leave_support import Factory, as_user, give_role, setup_org
+from tests.integration.leave_support import Factory, as_user, give_role, report_to, setup_org
 
 pytestmark = pytest.mark.integration
 LINK = "/api/v1/settings/slack/link-members"
@@ -116,3 +116,33 @@ async def test_an_abandoned_daily_claim_is_retried(pg_session_factory: Factory) 
             {"org": org},
         )
         assert await posts.claim(day) is True
+
+
+async def test_a_managers_slack_link_needs_hr(
+    client: AsyncClient, pg_session_factory: Factory
+) -> None:
+    org, (admin, owner, mgr, report, dev), _ = await setup_org(
+        pg_session_factory, "Admin", "Own", "Mgr", "Report", "Dev"
+    )
+    await give_role(pg_session_factory, org, admin, "admin")
+    await give_role(pg_session_factory, org, owner, "org_owner")
+    for user in (mgr, report, dev):
+        await give_role(pg_session_factory, org, user, "developer")
+    await report_to(pg_session_factory, org, report, mgr)
+    # Their link would approve their team's leave from Slack.
+    assert await _link(client, org, admin, mgr, "UMGR") == 403
+    assert await _link(client, org, admin, dev, "UDEV2") == 200
+    assert await _link(client, org, owner, mgr, "UMGR") == 200
+
+
+async def test_only_hr_or_the_owner_changes_the_signing_secret(
+    client: AsyncClient, pg_session_factory: Factory
+) -> None:
+    org, (admin, owner), _ = await setup_org(pg_session_factory, "Admin", "Own")
+    await give_role(pg_session_factory, org, admin, "admin")
+    await give_role(pg_session_factory, org, owner, "org_owner")
+    body = {"slack": {"signingSecret": "ab" * 16}}
+    url = "/api/v1/settings/connections"
+    refused = await client.patch(url, json=body, headers=as_user(admin, org))
+    assert refused.status_code == 403, refused.text
+    assert (await client.patch(url, json=body, headers=as_user(owner, org))).status_code == 200

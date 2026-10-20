@@ -19,6 +19,11 @@ someone's link is treated like managing their account: you can't relink a
 member who has access you don't (e.g. HR, unless you're the owner), and a
 person who belongs to more than one org can't be relinked from just one of
 them (the link is shared across their orgs).
+
+Approving from Slack trusts two things: the org's signing secret (whoever
+holds it can sign any click) and each member's link. So changing the
+secret, or the link of anyone who approves leave for a team, needs the
+same right as approving: HR (leave:approve) or the owner.
 """
 
 import uuid
@@ -29,7 +34,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.permission_deps import PermissionSet
 from app.models.user import User
 from app.repositories.slack_identity import SlackIdentityRepository
+from app.services.leave.approvers import reports_of
+from app.services.leave.permissions import APPROVE
 from app.services.role_grants import assert_can_manage_member
+
+APPROVER_ONLY = (
+    "Slack approvals act as this person, so only HR or the org owner can change their Slack link."
+)
 
 
 async def assert_can_relink(
@@ -49,6 +60,10 @@ async def assert_can_relink(
     # in as them: the only credential sent over Slack is a password reset,
     # which members.set_member_password guards with assert_can_act_as.
     await assert_can_manage_member(db, actor=actor, target=target)
+    # A reporting manager's link approves their team's leave from Slack; the
+    # ceiling above doesn't see that, as being a manager isn't a permission.
+    if not actor.has(APPROVE) and await reports_of(db, org_id, target.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=APPROVER_ONLY)
     identities = SlackIdentityRepository(db)
     if await identities.membership_count(target.id) > 1:
         raise HTTPException(
@@ -63,4 +78,14 @@ async def assert_can_relink(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="That Slack account is already linked to someone else here.",
+        )
+
+
+def assert_can_change_signing_secret(actor: PermissionSet) -> None:
+    """403 unless ``actor`` may change the secret that authenticates Slack approvals."""
+    if not actor.has(APPROVE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The Slack signing secret decides who can approve leave from Slack, "
+            "so only HR or the org owner can change it.",
         )

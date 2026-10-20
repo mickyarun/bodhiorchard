@@ -31,8 +31,8 @@ from app.core.permission_deps import PermissionSet
 from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.employee_reporting_manager import EmployeeReportingManagerRepository
 from app.repositories.user import UserRepository
+from app.services.leave.permissions import APPROVE
 
-APPROVE = "leave:approve"
 Route = Literal["manager", "hr_queue", "hr_override"]
 
 

@@ -19,7 +19,6 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1._leave_admin import CONFIGURE
 from app.core.deps import (
     PermissionSet,
     get_current_user,
@@ -36,6 +35,7 @@ from app.services.leave.member_balances import (
     member_balances,
     require_member,
 )
+from app.services.leave.permissions import CONFIGURE
 
 router = APIRouter(tags=["leave"])
 

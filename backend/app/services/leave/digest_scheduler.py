@@ -55,7 +55,7 @@ async def tick_once(now_utc: datetime | None = None) -> None:
 async def _org_pass(
     org_id: uuid.UUID, encrypted_token: str, config: dict[str, Any] | None, now: datetime
 ) -> None:
-    settings = digest_settings(config)
+    settings = digest_settings(config, org_id)
     if not settings.enabled or not settings.channel_id:
         return
     async with AsyncSessionLocal() as db:
@@ -78,13 +78,20 @@ async def _org_pass(
             await posts.finish(day, DigestStatus.SKIPPED, None)
             await db.commit()
             return
-    token = decrypt_secret(encrypted_token) or ""
-    _channel, _ts, error = await post_message(token, settings.channel_id, text)
+    token = decrypt_secret(encrypted_token)
+    if token:
+        _channel, _ts, error = await post_message(token, settings.channel_id, text)
+    else:
+        # Don't call Slack with an empty token; say why instead.
+        error = "token_unreadable"
     async with AsyncSessionLocal() as db:
         status = DigestStatus.FAILED if error else DigestStatus.POSTED
         await LeaveDigestPostRepository(db, org_id=org_id).finish(day, status, error or None)
         await db.commit()
-    logger.info("leave_digest_posted", org_id=str(org_id), day=day.isoformat(), error=error)
+    if error:
+        logger.warning("leave_digest_failed", org_id=str(org_id), day=day.isoformat(), error=error)
+    else:
+        logger.info("leave_digest_posted", org_id=str(org_id), day=day.isoformat())
 
 
 async def run_forever() -> None:

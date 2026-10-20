@@ -24,10 +24,11 @@ from app.repositories.leave_ledger import LeaveLedgerRepository
 from app.repositories.user import UserRepository
 from app.schemas.leave import PersonRef
 from app.schemas.leave_policy import LedgerEntryRead, MemberBalances
-from app.services.leave.approvers import APPROVE, reports_of
+from app.services.leave.approvers import reports_of
 from app.services.leave.balances import balances_for
 from app.services.leave.calendar_math import leave_year_bounds, leave_year_by_label
 from app.services.leave.errors import LeaveNotFoundError
+from app.services.leave.permissions import APPROVE
 from app.services.leave.policies import resolve_member_policy, today_for
 from app.services.leave.summary import balance_schema, year_schema
 

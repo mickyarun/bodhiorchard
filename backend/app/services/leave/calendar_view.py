@@ -28,7 +28,7 @@ from app.repositories.policy_holiday import PolicyHolidayRepository
 from app.repositories.user import UserRepository
 from app.schemas.leave import LeaveTypeBrief, PersonRef
 from app.schemas.leave_views import CalendarEntry, CalendarRead
-from app.services.leave.approvers import APPROVE
+from app.services.leave.permissions import APPROVE
 from app.services.leave.policies import resolve_member_policy
 from app.services.leave.summary import holiday_schema
 

@@ -20,8 +20,9 @@
 # COLYSEUS_BRIDGE_SECRET. Fixed values would let anyone with the source
 # forge sign-ins, read stored integration tokens from a database dump, or
 # call the multiplayer bridge. So each install generates its own on first
-# start and keeps them on the secrets volume, where they survive rebuilds
-# and the multiplayer container reads the shared one. A value set in the
+# start and keeps them on volumes, where they survive rebuilds. The bridge
+# secret sits on a volume of its own (BRIDGE_SECRET_DIR): the multiplayer
+# container mounts only that one, so it never sees the backend's keys. A value set in the
 # environment always wins. app/instance_secrets.py reads the same files
 # for processes started outside this entrypoint.
 #
@@ -39,23 +40,30 @@ LEGACY_ENCRYPTION_KEY="change-me-encryption-key"
 rotate_from_default_key() {
     [ -n "${INSTANCE_SECRETS_DIR:-}" ] || return 0
     echo "==> Re-encrypting stored secrets still under the old default key"
-    if ! python -m scripts.rotate_encryption_key --rotate; then
+    status=0
+    python -m scripts.rotate_encryption_key --rotate || status=$?
+    if [ "$status" -eq 1 ]; then
         echo "Some stored secrets couldn't be re-encrypted (listed above);" \
             "starting anyway. Re-save them in Settings." >&2
+    elif [ "$status" -ne 0 ]; then
+        echo "Re-encrypting stored secrets failed (exit $status, see above);" \
+            "starting anyway and trying again on the next start." >&2
     fi
 }
 
 if [ -n "${INSTANCE_SECRETS_DIR:-}" ]; then
-    # instance_secret NAME: print this install's secret NAME, creating it once.
+    BRIDGE_SECRET_DIR="${BRIDGE_SECRET_DIR:-$INSTANCE_SECRETS_DIR}"
+
+    # instance_secret DIR NAME [UMASK]: print the secret NAME in DIR, creating it once.
     instance_secret() {
-        file="$INSTANCE_SECRETS_DIR/$1"
+        file="$1/$2"
         if [ ! -s "$file" ]; then
-            echo "==> Generating $1 for this install" >&2
+            echo "==> Generating $2 for this install" >&2
             # Write then rename, so a reader never sees half a file.
-            if ! (umask 077 && mkdir -p "$INSTANCE_SECRETS_DIR" && \
+            if ! (umask "${3:-077}" && mkdir -p "$1" && \
                 python -c "import secrets; print(secrets.token_urlsafe(48))" > "$file.tmp" && \
                 mv "$file.tmp" "$file"); then
-                echo "Can't write $file. Mount a writable volume at $INSTANCE_SECRETS_DIR" \
+                echo "Can't write $file. Mount a writable volume at $1" \
                     "(see docker-compose.yml) or set the value in the environment." >&2
                 exit 1
             fi
@@ -64,16 +72,17 @@ if [ -n "${INSTANCE_SECRETS_DIR:-}" ]; then
     }
 
     if [ -z "${SECRET_KEY:-}" ] || [ "$SECRET_KEY" = "change-me-in-production" ]; then
-        SECRET_KEY="$(instance_secret secret_key)"
+        SECRET_KEY="$(instance_secret "$INSTANCE_SECRETS_DIR" secret_key)"
         export SECRET_KEY
     fi
     if [ -z "${COLYSEUS_BRIDGE_SECRET:-}" ] || \
         [ "$COLYSEUS_BRIDGE_SECRET" = "dev-colyseus-bridge-secret" ]; then
-        COLYSEUS_BRIDGE_SECRET="$(instance_secret colyseus_bridge_secret)"
+        # Readable by the multiplayer container's own (non-root) user.
+        COLYSEUS_BRIDGE_SECRET="$(instance_secret "$BRIDGE_SECRET_DIR" colyseus_bridge_secret 022)"
         export COLYSEUS_BRIDGE_SECRET
     fi
     if [ -z "${ENCRYPTION_KEY:-}" ] || [ "$ENCRYPTION_KEY" = "$LEGACY_ENCRYPTION_KEY" ]; then
-        ENCRYPTION_KEY="$(instance_secret encryption_key)"
+        ENCRYPTION_KEY="$(instance_secret "$INSTANCE_SECRETS_DIR" encryption_key)"
         export ENCRYPTION_KEY
     fi
     case ",${ENCRYPTION_KEY_PREVIOUS:-}," in

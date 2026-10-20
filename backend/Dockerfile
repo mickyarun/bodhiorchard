@@ -89,7 +89,7 @@ COPY . .
 #
 # ``/data/secrets`` keeps the SECRET_KEY that entrypoint.sh generates
 # when none is configured (Full Docker), so it survives rebuilds.
-RUN mkdir -p /data/repos /data/ssh /data/secrets /app/data/uploads && \
+RUN mkdir -p /data/repos /data/ssh /data/secrets /data/bridge /app/data/uploads && \
     chmod 700 /data/secrets && \
     chmod +x /app/entrypoint.sh && \
     chown -R appuser:appuser /app /data

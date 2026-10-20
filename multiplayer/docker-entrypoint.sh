@@ -16,16 +16,18 @@
 #
 # Multiplayer container start. The bridge secret is shared with the
 # backend: when it isn't set in the environment, read the one the backend
-# generated on the shared secrets volume (backend/docker/instance-secrets.sh),
-# waiting briefly in case the backend is still starting.
+# generated on the bridge volume (backend/docker/instance-secrets.sh),
+# waiting briefly in case the backend is still starting. That volume holds
+# only this secret; the backend's own keys are on a volume this container
+# never mounts.
 
 set -e
 
 # The old dev default counts as unset, as it does on the backend side, or
 # the two would disagree and every bridge call would be refused.
-if [ -n "${INSTANCE_SECRETS_DIR:-}" ] && { [ -z "${COLYSEUS_BRIDGE_SECRET:-}" ] || \
+if [ -n "${BRIDGE_SECRET_DIR:-}" ] && { [ -z "${COLYSEUS_BRIDGE_SECRET:-}" ] || \
     [ "$COLYSEUS_BRIDGE_SECRET" = "dev-colyseus-bridge-secret" ]; }; then
-    file="$INSTANCE_SECRETS_DIR/colyseus_bridge_secret"
+    file="$BRIDGE_SECRET_DIR/colyseus_bridge_secret"
     waited=0
     while [ ! -s "$file" ] && [ "$waited" -lt "${BRIDGE_SECRET_WAIT_SECONDS:-60}" ]; do
         sleep 1
@@ -33,7 +35,7 @@ if [ -n "${INSTANCE_SECRETS_DIR:-}" ] && { [ -z "${COLYSEUS_BRIDGE_SECRET:-}" ] 
     done
     if [ ! -s "$file" ]; then
         echo "COLYSEUS_BRIDGE_SECRET isn't set and $file never appeared." \
-            "Start the backend with the secrets_data volume, or set the secret." >&2
+            "Start the backend with the bridge_secret_data volume, or set the secret." >&2
         exit 1
     fi
     COLYSEUS_BRIDGE_SECRET="$(cat "$file")"

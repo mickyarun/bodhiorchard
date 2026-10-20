@@ -19,7 +19,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1._leave_admin import CONFIGURE, load_policy, policy_read
+from app.api.v1._leave_admin import load_policy, policy_read
 from app.core.deps import PermissionSet, get_db, get_permission_set, require_permissions
 from app.models.user import User
 from app.repositories.leave_policy import LeavePolicyRepository
@@ -30,6 +30,7 @@ from app.schemas.leave_policy import PolicyAssign, PolicyRead, PolicyWrite
 from app.schemas.leave_policy_members import PolicyMemberRead
 from app.services.leave import policy_admin
 from app.services.leave.config_history import config_history
+from app.services.leave.permissions import CONFIGURE
 from app.services.leave.policies import ensure_default_policy
 
 router = APIRouter(tags=["leave-admin"])

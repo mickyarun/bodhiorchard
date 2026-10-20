@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.leave_policy import LeavePolicy
 from app.models.leave_request import LeaveKind
 from app.models.policy_holiday import HolidayKind, HolidaySource, PolicyHoliday
+from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.policy_holiday import PolicyHolidayRepository
 from app.schemas.leave_policy import HolidayCountry, Subdivision
@@ -131,6 +132,9 @@ async def recount_requests(db: AsyncSession, policy: LeavePolicy, start: date) -
     into paid and loss-of-pay days again.
     """
     repo = LeaveRequestRepository(db, org_id=policy.org_id)
+    # Wait for submits counting against the old calendar to finish, so
+    # their requests are found below (LeavePolicyRepository.lock).
+    await LeavePolicyRepository(db, org_id=policy.org_id).lock(policy.id, shared=False)
     today = today_for(policy)
     found = await repo.open_for_policy_from(policy.id, start, today)
     if not found:

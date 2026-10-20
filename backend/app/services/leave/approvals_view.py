@@ -33,8 +33,9 @@ from app.repositories.employee_reporting_manager import EmployeeReportingManager
 from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.user import UserRepository
 from app.schemas.leave_views import AlsoOut, ApprovalCount, ApprovalItem
-from app.services.leave.approvers import APPROVE, Approvers, approvers_for_many, route_for
+from app.services.leave.approvers import Approvers, approvers_for_many, route_for
 from app.services.leave.balance_after import balances_after
+from app.services.leave.permissions import APPROVE
 from app.services.leave.views import request_reads
 
 DECIDED_WINDOW = timedelta(days=90)

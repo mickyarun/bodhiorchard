@@ -23,11 +23,25 @@ import asyncio
 from collections.abc import Coroutine
 from typing import Any
 
+import structlog
+
+logger = structlog.get_logger(__name__)
+
 _tasks: set[asyncio.Task[None]] = set()
 
 
 def spawn(job: Coroutine[Any, Any, None]) -> None:
-    """Run ``job`` in the background."""
-    task = asyncio.create_task(job)
+    """Run ``job`` in the background; a failure is logged, never raised."""
+    task = asyncio.create_task(job, name=job.__qualname__)
     _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
+    task.add_done_callback(_finished)
+
+
+def _finished(task: asyncio.Task[None]) -> None:
+    _tasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        # Otherwise only "Task exception was never retrieved", with no name.
+        logger.error("background_job_failed", job=task.get_name(), exc_info=exc)

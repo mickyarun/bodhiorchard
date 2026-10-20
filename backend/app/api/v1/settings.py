@@ -28,8 +28,9 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.core.deps import get_current_user, get_db, require_permissions
+from app.core.deps import get_current_user, get_db, get_permission_set, require_permissions
 from app.core.encryption import decrypt_secret, encrypt_secret
+from app.core.permission_deps import PermissionSet
 from app.core.permissions import WORKSPACE_ENGINEERING
 from app.core.security import hash_password
 from app.mcp.auth import compute_token_prefix
@@ -71,6 +72,7 @@ from app.services.org_settings import (
     get_quiz_settings,
 )
 from app.services.slack_client import auth_test
+from app.services.slack_identity import assert_can_change_signing_secret
 from app.services.slack_workspace import bot_token_team
 
 # Re-exported from ``github_app_jwt`` so service-layer modules can use
@@ -165,6 +167,7 @@ async def get_connections(
 async def update_connections(
     body: ConnectionsUpdate,
     current_user: User = Depends(get_current_user),
+    perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> ConnectionsRead:
     """Update organization connection settings.
@@ -234,6 +237,7 @@ async def update_connections(
                     org_id=str(org.id),
                 )
         if body.slack.signing_secret and not _is_masked(body.slack.signing_secret):
+            assert_can_change_signing_secret(perms)
             raw_secret = body.slack.signing_secret.strip()
             if not re.fullmatch(r"[0-9a-f]{32,}", raw_secret):
                 raise HTTPException(

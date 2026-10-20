@@ -137,3 +137,28 @@ async def test_switching_a_type_off_keeps_its_loss_of_pay(pg_session_factory: Fa
         )
         await db.commit()
         assert approved.lop_days == D(2)
+
+
+async def test_a_switched_off_type_gives_back_loss_of_pay_first_on_cancel(
+    pg_session_factory: Factory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    org, (emp, mgr), casual = await setup_org(pg_session_factory, "Emp", "Mgr")
+    await report_to(pg_session_factory, org, emp, mgr)
+    mon = future_monday()
+    async with pg_session_factory() as db:
+        # 7 working days against 5: 2 are loss of pay.
+        request, _ = await submit(db, org, emp, leave_body(casual, mon, mon + timedelta(days=8)))
+        await decide(
+            db, org_id=org, actor=mgr, perms=NOBODY, request_id=request.id, approve=True, note=None
+        )
+        leave_type = await db.get(LeaveType, casual)
+        assert leave_type is not None
+        leave_type.is_active = False
+        await db.commit()
+    # Back on Thursday after 3 days: no balance to re-price against, so the
+    # cut alone must give the unpaid days back first.
+    monkeypatch.setattr(cancellation, "today_for", lambda _policy: mon + timedelta(days=3))
+    async with pg_session_factory() as db:
+        cut = await cancel(db, org, emp, request.id)
+        await db.commit()
+    assert (cut.days, cut.lop_days) == (D(3), D(0))

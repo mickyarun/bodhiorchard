@@ -337,9 +337,10 @@ class ColyseusConfig(BaseSettings):
     def _use_instance_secret(self) -> "ColyseusConfig":
         """Full Docker: take the generated bridge secret when none is set."""
         if self.bridge_secret in ("", _DEV_BRIDGE_SECRET):
-            self.bridge_secret = (
-                instance_secrets.read("colyseus_bridge_secret") or self.bridge_secret
+            generated = instance_secrets.read(
+                "colyseus_bridge_secret", directory_env="BRIDGE_SECRET_DIR"
             )
+            self.bridge_secret = generated or self.bridge_secret
         return self
 
     @model_validator(mode="after")

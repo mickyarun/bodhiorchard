@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permission_deps import PermissionSet
 from app.models.leave_request import ApprovalMode, LeaveRequest, LeaveStatus
+from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.user import UserRepository
 from app.schemas.leave import LeaveRequestCreate
@@ -70,6 +71,10 @@ async def submit(
             retry_after_seconds=wait,
         )
     repo = LeaveRequestRepository(db, org_id=org_id)
+    # Policy before member, like a calendar change: no deadlock, and the
+    # days are counted against holidays that can't change underneath.
+    policy_id = (await resolve_member_policy(db, org_id, user_id)).policy.id
+    await LeavePolicyRepository(db, org_id=org_id).lock(policy_id, shared=True)
     await repo.lock_member(user_id)
     member = await resolve_member_policy(db, org_id, user_id)
     result = await evaluate(db, member=member, user_id=user_id, body=body, persist=True)

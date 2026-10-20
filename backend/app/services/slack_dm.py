@@ -34,9 +34,19 @@ logger = structlog.get_logger(__name__)
 
 
 async def bot_token(db: AsyncSession, org_id: uuid.UUID) -> str:
-    """The org's Slack bot token, or "" when Slack isn't connected."""
+    """The org's Slack bot token, or "" when Slack isn't connected (or the
+    saved token can't be read, which is logged: see :func:`token_unreadable`)."""
     encrypted = await OrganizationRepository(db).get_slack_bot_token(org_id)
-    return (decrypt_secret(encrypted) if encrypted else "") or ""
+    token = decrypt_secret(encrypted) if encrypted else ""
+    if encrypted and not token:
+        logger.error("slack_bot_token_unreadable", org_id=str(org_id))
+    return token
+
+
+async def token_unreadable(db: AsyncSession, org_id: uuid.UUID) -> bool:
+    """A token is saved but can't be decrypted (ENCRYPTION_KEY changed?)."""
+    encrypted = await OrganizationRepository(db).get_slack_bot_token(org_id)
+    return bool(encrypted) and not decrypt_secret(encrypted or "")
 
 
 async def send_dm(
@@ -61,9 +71,14 @@ async def send_security_dm(org_id: uuid.UUID, user_id: uuid.UUID, text: str) -> 
     async with AsyncSessionLocal() as session:
         token = await bot_token(session, org_id)
         if not token:
+            logger.info("security_dm_not_sent", reason="no_token", user_id=str(user_id))
             return
         pairs = await UserRepository(session).list_active_slack_user_pairs(org_id)
-    await _deliver(org_id, token, [sid for uid, sid in pairs if uid == user_id], text)
+    slack_ids = [sid for uid, sid in pairs if uid == user_id]
+    if not slack_ids:
+        # The in-app notice still went out; there's just no Slack copy.
+        logger.info("security_dm_not_sent", reason="not_linked", user_id=str(user_id))
+    await _deliver(org_id, token, slack_ids, text)
 
 
 async def _deliver(org_id: uuid.UUID, token: str, slack_ids: list[str], text: str) -> None:

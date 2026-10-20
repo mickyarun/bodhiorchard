@@ -280,8 +280,12 @@ async def unlink_slack_member(
             detail="No user linked with this Slack ID",
         )
     target = await user_repo.get_by_id_with_membership(user.id, org.id)
-    if target is not None:
-        await assert_can_relink(db, actor=perms, target=target, org_id=org.id, slack_id=None)
+    if target is None:
+        # Never unlink without the guard below.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No member linked with this Slack ID"
+        )
+    await assert_can_relink(db, actor=perms, target=target, org_id=org.id, slack_id=None)
 
     user.slack_id = None
     await db.flush()

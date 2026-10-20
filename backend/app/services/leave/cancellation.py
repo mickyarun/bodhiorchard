@@ -22,6 +22,7 @@ row lock with a conditional status update.
 
 import uuid
 from datetime import timedelta
+from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,7 +72,7 @@ async def cancel(
                 end_date=yesterday,
                 days=taken.days,
                 # Fewer days now: loss-of-pay days are given back first.
-                lop_days=min(request.lop_days, taken.days),
+                lop_days=max(Decimal(0), request.lop_days - (request.days - taken.days)),
             )
     elif request.status == LeaveStatus.PENDING:
         changed = await repo.transition(

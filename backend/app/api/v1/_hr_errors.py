@@ -23,15 +23,18 @@ from app.core.hr_crypto import HRCryptoUnavailableError, HRDecryptionError
 logger = structlog.get_logger(__name__)
 
 UNAVAILABLE = (
-    "Sensitive details aren't available: the HR encryption key isn't configured. "
-    "Ask your administrator to set HR_ENCRYPTION_KEYS."
+    "Sensitive details aren't available: the HR encryption key isn't set or isn't valid. "
+    "Ask your administrator to check HR_ENCRYPTION_KEYS."
 )
 UNREADABLE = "This can't be decrypted with the configured HR key. Ask your administrator."
 
 
 async def _respond(request: Request, exc: Exception) -> JSONResponse:
     unavailable = isinstance(exc, HRCryptoUnavailableError)
-    logger.error("hr_crypto_failed", path=request.url.path, kind=type(exc).__name__)
+    # The reason names a key id at most ("unknown key 'k2026a'"), never key bytes.
+    logger.error(
+        "hr_crypto_failed", path=request.url.path, kind=type(exc).__name__, reason=str(exc)
+    )
     return JSONResponse(
         {"detail": UNAVAILABLE if unavailable else UNREADABLE},
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

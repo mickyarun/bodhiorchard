@@ -35,6 +35,7 @@ from app.core.deps import (
 )
 from app.models.employee_profile import EmployeeProfile, EmployeeStatus
 from app.models.user import User
+from app.repositories.base import violated_constraint
 from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.user import UserRepository
 from app.schemas.employee import (
@@ -121,17 +122,21 @@ async def create_employee(
         )
     except IntegrityError as exc:
         # Lost a race with a concurrent create (same member or same code).
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="This member or employee code already has a record.",
-        ) from exc
+        conflicts = {
+            "uq_employee_profiles_org_user": "This member already has a record.",
+            "uq_employee_profiles_org_code": f"Employee code {code} is already used.",
+        }
+        detail = conflicts.get(violated_constraint(exc) or "")
+        if detail is None:
+            raise
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail) from exc
     await follow_office_policy(
         db,
         profile=profile,
         office=office,
         previous_office_id=None,
         actor_id=current_user.id,
-        actor_is_owner=perms.is_owner,
+        perms=perms,
     )
     return await employee_read(db, org_id=org_id, profile=profile, user=member, access=access)
 

@@ -50,8 +50,10 @@ services:
       # forge a sign-in, read stored integration tokens from a database
       # dump, or call the multiplayer bridge. Older installs' tokens are
       # re-encrypted under the new ENCRYPTION_KEY on first start.
-      # Turns on per-install secret generation (Full Docker only).
+      # Turns on per-install secret generation (Full Docker only). The
+      # bridge secret goes on its own volume, shared with multiplayer.
       INSTANCE_SECRETS_DIR: /data/secrets
+      BRIDGE_SECRET_DIR: /data/bridge
       SECRET_KEY: ${SECRET_KEY:-}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
       ENCRYPTION_KEY_PREVIOUS: ${ENCRYPTION_KEY_PREVIOUS:-}
@@ -95,8 +97,9 @@ services:
       # Persistent store for the backend's ed25519 deploy keypair used to
       # clone private GitHub repos. Only the public key is ever exposed.
       - ssh_data:/data/ssh
-      # This install's generated SECRET_KEY (see entrypoint.sh).
+      # This install's generated keys (backend/docker/instance-secrets.sh).
       - secrets_data:/data/secrets
+      - bridge_secret_data:/data/bridge
       # Uploaded files (QA evidence, bug attachments) when the local-disk
       # storage backend is in use, which is the default. WORKDIR is /app
       # and FILE_STORAGE_LOCAL_DIR defaults to the relative
@@ -154,9 +157,10 @@ services:
       # both sides; unset, this reads the one the backend generated into
       # secrets_data (multiplayer/docker-entrypoint.sh).
       COLYSEUS_BRIDGE_SECRET: ${COLYSEUS_BRIDGE_SECRET:-}
-      INSTANCE_SECRETS_DIR: /data/secrets
+      BRIDGE_SECRET_DIR: /data/bridge
     volumes:
-      - secrets_data:/data/secrets:ro
+      # Only the bridge secret: never the backend's secrets_data.
+      - bridge_secret_data:/data/bridge:ro
     ports:
       - "2567:2567"
 
@@ -177,4 +181,5 @@ volumes:
   repos_data:
   ssh_data:
   secrets_data:
+  bridge_secret_data:
   uploads_data:

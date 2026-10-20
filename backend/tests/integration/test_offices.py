@@ -21,8 +21,11 @@ from typing import Any
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.exc import IntegrityError
 
 from app.models.leave_policy import LeavePolicy
+from app.models.office_location import OfficeLocation
+from app.repositories.base import violated_constraint
 from tests.integration.leave_support import (
     Factory,
     as_user,
@@ -156,3 +159,38 @@ async def test_setting_an_offices_policy_needs_leave_rights(
         f"{OFFICES}/{office['id']}", json={"name": "London HQ"}, headers=as_user(dev, org)
     )
     assert renamed.status_code == 200
+
+
+async def test_placing_someone_needs_leave_rights_when_the_office_moves_their_policy(
+    client: AsyncClient, pg_session_factory: Factory
+) -> None:
+    org, emp, hr, dev = await _team(pg_session_factory)
+    uk = await _uk_policy(pg_session_factory, org)
+    with_policy = (
+        await client.post(
+            OFFICES, json={"name": "London", "leave_policy_id": str(uk)}, headers=as_user(hr, org)
+        )
+    ).json()[0]
+    plain = (await client.post(OFFICES, json={"name": "Pune"}, headers=as_user(hr, org))).json()
+    plain_id = next(o["id"] for o in plain if o["name"] == "Pune")
+    await give_custom_role(pg_session_factory, org, dev, "employees:manage", "employees:view")
+    record = (await client.get(f"{EMPLOYEES}/{emp}", headers=as_user(dev, org))).json()
+    url = f"{EMPLOYEES}/{emp}/work"
+    london = {**record["work"], "office_id": with_policy["id"]}
+    refused = await client.put(url, json=london, headers=as_user(dev, org))
+    assert refused.status_code == 403 and "leave settings" in refused.json()["detail"]
+    pune = {**record["work"], "office_id": plain_id}
+    assert (await client.put(url, json=pune, headers=as_user(dev, org))).status_code == 200
+
+
+async def test_a_duplicate_office_name_is_named_by_the_database(
+    pg_session_factory: Factory,
+) -> None:
+    org, (_one,), _ = await setup_org(pg_session_factory, "One")
+    async with pg_session_factory() as db:
+        db.add(OfficeLocation(org_id=org, name="Chennai"))
+        await db.commit()
+        db.add(OfficeLocation(org_id=org, name="Chennai"))
+        with pytest.raises(IntegrityError) as excinfo:
+            await db.flush()
+    assert violated_constraint(excinfo.value) == "uq_office_locations_org_name"

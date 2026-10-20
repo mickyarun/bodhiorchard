@@ -62,6 +62,18 @@ def filename_of(doc: EmployeeDocument) -> str:
     return hr_crypto.decrypt(doc.filename, document_aad(doc.org_id, doc.id, "name")).decode()
 
 
+UNREADABLE_NAME = "(name can't be read)"
+
+
+def listed_filename(doc: EmployeeDocument) -> str:
+    """The filename for a list: one unreadable name mustn't hide the others."""
+    try:
+        return filename_of(doc)
+    except hr_crypto.HRDecryptionError:
+        logger.error("hr_document_name_unreadable", doc_id=str(doc.id))
+        return UNREADABLE_NAME
+
+
 async def upload(
     db: AsyncSession,
     subject: Subject,
@@ -75,6 +87,11 @@ async def upload(
     mime = check_document(filename, data)
     doc_id = uuid.uuid4()
     blob = hr_crypto.encrypt(data, document_aad(subject.org_id, doc_id, "content"))
+    # Everything that can fail before the row is saved happens before the
+    # file is stored, so a failure never leaves an orphaned file behind.
+    encrypted_name = hr_crypto.encrypt(
+        filename.encode(), document_aad(subject.org_id, doc_id, "name")
+    )
     path = await get_file_storage().upload(
         str(subject.org_id),
         f"hr-documents/{subject.profile.id}/{doc_id}.bin",  # see document_path
@@ -87,9 +104,7 @@ async def upload(
         org_id=subject.org_id,
         profile_id=subject.profile.id,
         doc_type=doc_type,
-        filename=hr_crypto.encrypt(
-            filename.encode(), document_aad(subject.org_id, doc_id, "name")
-        ),
+        filename=encrypted_name,
         mime_type=mime,
         size_bytes=len(data),
         storage_path=path,

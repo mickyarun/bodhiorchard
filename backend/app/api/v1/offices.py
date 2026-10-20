@@ -24,17 +24,20 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1._leave_admin import CONFIGURE
 from app.core.deps import get_current_user, get_db, get_permission_set, require_permissions
 from app.core.permission_deps import PermissionSet
 from app.models.office_location import OfficeLocation
 from app.models.user import User
+from app.repositories.base import violated_constraint
 from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.office_location import OfficeLocationRepository
 from app.schemas.office import OfficeRead, OfficeWrite
 from app.services.employees.access import MANAGE
+from app.services.leave.permissions import CONFIGURE
 
 router = APIRouter(tags=["employees"])
+NAME_CONSTRAINT = "uq_office_locations_org_name"
+PLACED_CONSTRAINT = "fk_employee_profiles_office"
 PEOPLE_THERE = "People work from this office, including former employees. Move them first."
 
 
@@ -115,7 +118,10 @@ async def create_office(
         await OfficeLocationRepository(db, org_id=current_user.org_id).create(
             OfficeLocation(org_id=current_user.org_id, **body.model_dump())
         )
-    except IntegrityError as exc:  # a same-named office saved at the same moment
+    except IntegrityError as exc:
+        if violated_constraint(exc) != NAME_CONSTRAINT:
+            raise
+        # A same-named office saved at the same moment.
         raise _conflict(f"There's already an office called {body.name}.") from exc
     return await _list(db, current_user.org_id)
 
@@ -136,6 +142,8 @@ async def update_office(
     try:
         await db.flush()
     except IntegrityError as exc:
+        if violated_constraint(exc) != NAME_CONSTRAINT:
+            raise
         raise _conflict(f"There's already an office called {body.name}.") from exc
     return await _list(db, current_user.org_id)
 
@@ -153,5 +161,7 @@ async def delete_office(
         raise _conflict(PEOPLE_THERE)
     try:
         await repo.delete(office)
-    except IntegrityError as exc:  # someone was placed here meanwhile
-        raise _conflict(PEOPLE_THERE) from exc
+    except IntegrityError as exc:
+        if violated_constraint(exc) != PLACED_CONSTRAINT:
+            raise
+        raise _conflict(PEOPLE_THERE) from exc  # someone was placed here meanwhile

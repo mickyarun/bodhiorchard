@@ -103,6 +103,15 @@ class LeaveUsageRepository(BaseRepository[LeaveRequest]):
         )
         return list((await self._db.scalars(stmt)).all())
 
+    async def holiday_booked(self, holiday_id: uuid.UUID) -> bool:
+        """Whether any approved or pending request books this optional holiday."""
+        stmt = self._scoped(
+            select(LeaveRequest.id).where(
+                LeaveRequest.holiday_id == holiday_id, LeaveRequest.status.in_(ACTIVE)
+            )
+        ).limit(1)
+        return (await self._db.execute(stmt)).first() is not None
+
     async def leave_days_by_start(
         self,
         user_ids: Collection[uuid.UUID],

@@ -24,8 +24,8 @@ import uuid
 from dataclasses import dataclass
 
 from app.core.permission_deps import PermissionSet
+from app.services.employees.access import MANAGE
 
-MANAGE = "employees:manage"
 DOCUMENTS = "employees:documents"
 
 

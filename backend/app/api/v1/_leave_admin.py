@@ -24,8 +24,6 @@ from app.repositories.leave_policy_members import LeavePolicyMemberRepository
 from app.schemas.leave_policy import PolicyRead
 from app.services.leave.errors import LeaveNotFoundError
 
-CONFIGURE = "leave:configure"
-
 
 async def load_policy(db: AsyncSession, org_id: uuid.UUID, policy_id: uuid.UUID) -> LeavePolicy:
     """A policy in this org, or 404."""

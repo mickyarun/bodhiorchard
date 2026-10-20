@@ -62,12 +62,26 @@ async def send_prompts(
                 if not dm:
                     continue
                 channel, ts, error = await post_message(token, dm, escape(text), blocks)
-                if not error:
-                    await prompts.remember(request_id, user_id, channel, ts)
             except Exception:
                 # One approver's DM failing mustn't stop the others.
                 logger.warning("leave_slack_prompt_failed", org_id=str(org_id), exc_info=True)
-        await db.commit()
+                continue
+            if error:
+                logger.warning("leave_slack_prompt_failed", org_id=str(org_id), error=error)
+                continue
+            # Saved one by one: a prompt that went out is recorded (so its
+            # buttons are replaced once decided) even if a later one fails.
+            try:
+                await prompts.remember(request_id, user_id, channel, ts)
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                logger.error(
+                    "leave_slack_prompt_not_recorded",
+                    org_id=str(org_id),
+                    request_id=str(request_id),
+                    exc_info=True,
+                )
     # It may have been decided while the DMs were going out.
     await refresh_prompts(org_id, request_id)
 

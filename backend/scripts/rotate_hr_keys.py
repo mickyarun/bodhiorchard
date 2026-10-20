@@ -25,6 +25,7 @@ Usage (from backend/):
 
 import argparse
 import asyncio
+import sys
 from datetime import UTC, datetime
 
 from app.core.hr_crypto import generate_key
@@ -32,7 +33,7 @@ from app.database import AsyncSessionLocal
 from app.services.employees.hr_key_rotation import rotate
 
 
-async def _rotate(dry_run: bool) -> None:
+async def _rotate(dry_run: bool) -> int:
     async with AsyncSessionLocal() as db:
         report = await rotate(db, dry_run=dry_run)
     verb = "Would re-encrypt" if dry_run else "Re-encrypted"
@@ -41,6 +42,8 @@ async def _rotate(dry_run: bool) -> None:
         print(f"  could not re-encrypt {item}")
     if report.failed:
         print("Keep the old keys until these are fixed and a re-run reports none.")
+        return 1
+    return 0
 
 
 def main() -> None:
@@ -54,7 +57,8 @@ def main() -> None:
     if args.generate:
         print(f"k{datetime.now(UTC):%Y%m%d}:{generate_key()}")
         return
-    asyncio.run(_rotate(args.dry_run))
+    # Non-zero when anything was skipped, so a script never drops the old key early.
+    sys.exit(asyncio.run(_rotate(args.dry_run)))
 
 
 if __name__ == "__main__":
