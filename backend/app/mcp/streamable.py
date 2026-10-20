@@ -44,6 +44,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.body_limit import BodyTooLargeError
 from app.core.deps import get_db
 from app.database import AsyncSessionLocal
 from app.mcp.audit import emit_audit
@@ -380,6 +381,8 @@ async def remote_mcp_post(
     """JSON-RPC over POST — primary message channel for desktop MCP clients."""
     try:
         body = await request.json()
+    except BodyTooLargeError:
+        raise  # a 413 from the body-size limit, not a parse failure
     except Exception:
         # Auth already passed via the Depends, so org/token are known —
         # record the parse failure so probing leaves a forensic trail.
