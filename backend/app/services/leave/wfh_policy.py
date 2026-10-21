@@ -25,8 +25,9 @@ from collections.abc import Mapping
 from decimal import Decimal
 
 from app.models.leave_policy import WfhApproval
+from app.services.leave.monthly_limit import Month, first_month_over
 
-Month = tuple[int, int]
+__all__ = ["Month", "auto_days_left", "needs_approval"]
 
 
 def needs_approval(
@@ -41,10 +42,7 @@ def needs_approval(
         return False
     if mode == WfhApproval.REQUIRED:
         return True
-    limit = Decimal(allowance)
-    return any(
-        already.get(month, Decimal("0")) + days > limit for month, days in requested.items()
-    )
+    return first_month_over(Decimal(allowance), already=already, requested=requested) is not None
 
 
 def auto_days_left(mode: WfhApproval, allowance: int, used_this_month: Decimal) -> int | None:

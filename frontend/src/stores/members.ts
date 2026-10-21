@@ -106,6 +106,16 @@ export const useMembersStore = defineStore('members', () => {
     }
   }
 
+  /** Ids of the roles the caller may give someone (the server's grant ceiling). */
+  async function fetchAssignableRoleIds(): Promise<string[]> {
+    try {
+      const { data } = await api.get<string[]>('/v1/roles/assignable')
+      return data
+    } catch {
+      return []
+    }
+  }
+
   async function fetchPermissions(): Promise<void> {
     try {
       const { data } = await api.get('/v1/permissions')
@@ -310,6 +320,7 @@ export const useMembersStore = defineStore('members', () => {
     error,
     fetchMembers,
     fetchRoles,
+    fetchAssignableRoleIds,
     fetchPermissions,
     addMember,
     toggleMemberStatus,

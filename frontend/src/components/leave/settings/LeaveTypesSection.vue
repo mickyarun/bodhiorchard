@@ -23,6 +23,9 @@
     caption="What people on this policy can request, and how many days they get each leave year."
   >
     <template v-if="store.types.length" #actions>
+      <v-btn v-if="!hasPeriodLeave(store.types)" variant="text" prepend-icon="mdi-water-outline" @click="addPeriodLeave">
+        Add period leave
+      </v-btn>
       <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="edit(null)">Add leave type</v-btn>
     </template>
     <AppCallout v-if="store.typesError" variant="error" class="mb-4">{{ store.typesError }}</AppCallout>
@@ -34,6 +37,7 @@
     >
       <template #actions>
         <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" @click="edit(null)">Add leave type</v-btn>
+        <v-btn variant="text" prepend-icon="mdi-water-outline" @click="addPeriodLeave">Add period leave</v-btn>
       </template>
     </LeaveEmptyState>
     <template v-else>
@@ -53,7 +57,7 @@
         </v-expand-transition>
       </div>
     </template>
-    <LeaveTypeDialog v-model="dialogOpen" :policy-id="policy.id" :policy-name="policy.name" :type="editing" />
+    <LeaveTypeDialog v-model="dialogOpen" :policy-id="policy.id" :policy-name="policy.name" :type="editing" :preset="preset" />
   </LeaveSectionCard>
 </template>
 
@@ -64,20 +68,33 @@ import LeaveEmptyState from '@/components/leave/settings/LeaveEmptyState.vue'
 import LeaveSectionCard from '@/components/leave/settings/LeaveSectionCard.vue'
 import LeaveTypeDialog from '@/components/leave/settings/LeaveTypeDialog.vue'
 import LeaveTypeTable from '@/components/leave/settings/LeaveTypeTable.vue'
+import { usePermissions } from '@/composables/usePermissions'
 import { useLeavePolicyConfigStore } from '@/stores/leavePolicyConfig'
-import type { LeaveTypeRead, PolicyRead } from '@/types/leavePolicy'
+import type { LeaveTypeRead, LeaveTypeWrite, PolicyRead } from '@/types/leavePolicy'
 import { splitLeaveTypes } from '@/utils/leavePolicyDisplay'
+import { hasPeriodLeave, periodLeave } from '@/utils/leaveTypeDraft'
 
 const props = defineProps<{ policy: PolicyRead }>()
 
 const store = useLeavePolicyConfigStore()
+const { canApproveLeave } = usePermissions()
 const dialogOpen = ref(false)
 const editing = ref<LeaveTypeRead | null>(null)
+const preset = ref<LeaveTypeWrite | null>(null)
 const showOff = ref(false)
 const groups = computed(() => splitLeaveTypes(store.types))
 
 function edit(type: LeaveTypeRead | null): void {
   editing.value = type
+  preset.value = null
+  dialogOpen.value = true
+}
+
+/** Opens the dialog filled in for period leave; HR reviews and saves it. */
+function addPeriodLeave(): void {
+  editing.value = null
+  // Only approvers may make a type approve itself; others add it to be approved.
+  preset.value = { ...periodLeave(), auto_approve: canApproveLeave.value }
   dialogOpen.value = true
 }
 

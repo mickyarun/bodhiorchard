@@ -60,6 +60,8 @@ class Balance(BaseModel):
     used: Decimal
     pending: Decimal
     available: Decimal | None
+    # At most this many days in a calendar month (unused days lapse); None = no limit.
+    monthly_limit_days: Decimal | None = None
 
 
 class OptionalHolidayBalance(BaseModel):

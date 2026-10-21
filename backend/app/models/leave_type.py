@@ -19,10 +19,11 @@ from decimal import Decimal
 from enum import StrEnum
 
 from sqlalchemy import Boolean, Enum, ForeignKey, Numeric, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
+from app.models.employee_profile import Gender
 
 
 class LeaveAccrual(StrEnum):
@@ -69,6 +70,19 @@ class LeaveType(BaseModel):
         default=LeaveAccrual.UPFRONT,
         server_default=LeaveAccrual.UPFRONT.value,
     )
+    # Only people whose profile gender is one of these can see and request
+    # it (period leave: female). NULL = everyone on the policy.
+    eligible_genders: Mapped[list[Gender] | None] = mapped_column(
+        ARRAY(Enum(Gender, name="employee_gender", values_callable=_values, create_type=False)),
+        nullable=True,
+    )
+    # Approved as soon as it's sent; the managers get a heads-up instead.
+    auto_approve: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    # At most this many days in any calendar month; unused days don't carry
+    # over. NULL = no monthly limit.
+    monthly_limit_days: Mapped[Decimal | None] = mapped_column(Numeric(3, 1), nullable=True)
     # A palette slot ("swatch-1" … "swatch-7"); only HR and the requester see it.
     color_key: Mapped[str] = mapped_column(String(20), nullable=False, default="swatch-1")
     is_active: Mapped[bool] = mapped_column(

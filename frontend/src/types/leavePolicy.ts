@@ -27,6 +27,7 @@ import type {
   PersonRef,
   WfhApproval,
 } from '@/types/leave'
+import type { Gender } from '@/types/employee'
 
 export type ProrationMethod = 'none' | 'daily' | 'monthly'
 export type AllocationRounding =
@@ -74,6 +75,12 @@ export interface LeaveTypeWrite {
   /** Unused days are paid out when someone leaves. */
   is_encashable: boolean
   counts_toward_warning: boolean
+  /** Only these profile genders see and request it; null = everyone on the policy. */
+  eligible_genders: Gender[] | null
+  /** Approved as soon as it's sent; managers get a heads-up. */
+  auto_approve: boolean
+  /** At most this many days in a calendar month, with no carry-over; null = no limit. */
+  monthly_limit_days: Decimalish | null
   color_key: string
   is_active: boolean
 }

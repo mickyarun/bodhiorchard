@@ -64,10 +64,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
-import { usePermissions } from '@/composables/usePermissions'
-import { useAuthStore } from '@/stores/auth'
 import { useMembersStore } from '@/stores/members'
-import { grantableRoles, roleLabel, temporaryPassword } from '@/utils/inviteNewHire'
+import { offeredRoles, roleLabel, temporaryPassword } from '@/utils/inviteNewHire'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{
@@ -80,18 +78,15 @@ const FIELD = { variant: 'outlined', density: 'compact', hideDetails: 'auto' } a
 const DEFAULT_ROLE = 'sales'
 
 const members = useMembersStore()
-const authStore = useAuthStore()
-const { isOrgOwner } = usePermissions()
 const name = ref('')
 const email = ref('')
 const roleId = ref<string | null>(null)
 const password = ref('')
 const saving = ref(false)
 const error = ref('')
+const assignable = ref<string[]>([])
 
-const roles = computed(() =>
-  grantableRoles(members.roles, authStore.user?.permissions ?? [], isOrgOwner.value),
-)
+const roles = computed(() => offeredRoles(members.roles, assignable.value))
 const roleHint = computed(
   () => roles.value.find(r => r.id === roleId.value)?.description ?? 'Decides what they can open.',
 )
@@ -107,7 +102,8 @@ watch(
     email.value = ''
     password.value = temporaryPassword()
     error.value = ''
-    await members.fetchRoles()
+    const [, ids] = await Promise.all([members.fetchRoles(), members.fetchAssignableRoleIds()])
+    assignable.value = ids
     roleId.value = roles.value.find(r => r.name === DEFAULT_ROLE)?.id ?? null
   },
 )

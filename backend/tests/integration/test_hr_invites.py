@@ -54,7 +54,16 @@ async def test_hr_invites_a_new_hire_who_must_set_their_own_password(
     async with pg_session_factory() as db:
         user = await db.get(User, uuid.UUID(created.json()["id"]))
         assert user is not None and user.must_change_password is True
-    # HR can't hand out engineering access, with a role or by leaving it out.
+    # HR onboards engineers too, with a role or none...
     for email, role in (("dev@acme.dev", "developer"), ("norole@acme.dev", None)):
+        made = await client.post("/api/v1/members", json=invite(email, role), headers=headers)
+        assert made.status_code == 201, (role, made.text)
+    # ...but never anyone who could manage members, roles or settings.
+    for email, role in (("admin@acme.dev", "admin"), ("mgr@acme.dev", "manager")):
         refused = await client.post("/api/v1/members", json=invite(email, role), headers=headers)
         assert refused.status_code == 403, (role, refused.text)
+    # The invite dialog offers exactly what the server allows.
+    assignable = (await client.get("/api/v1/roles/assignable", headers=headers)).json()
+    offered = {name for name, rid in roles.items() if rid in assignable}
+    assert {"developer", "qa", "pm", "tech_lead", "hr", "sales"} <= offered
+    assert not offered & {"admin", "manager", "org_owner"}

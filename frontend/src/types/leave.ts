@@ -81,6 +81,8 @@ export interface Balance {
   used: Decimalish
   pending: Decimalish
   available: Decimalish | null
+  /** At most this many days in a calendar month (unused days lapse); null = no limit. */
+  monthly_limit_days?: Decimalish | null
 }
 
 export interface OptionalHolidayBalance {

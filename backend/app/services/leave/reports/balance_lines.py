@@ -45,6 +45,7 @@ from app.services.leave.calendar_math import (
     leave_year_bounds,
     leave_year_by_label,
 )
+from app.services.leave.eligibility import usable_types
 from app.services.leave.policies import today_for
 from app.services.leave.reports.population import Person
 
@@ -110,7 +111,7 @@ async def balance_lines(
         # bookable now, with leave booked ahead counted in its own month.
         on = day_in_year(today_for(p.policy), year)
         lines = []
-        for t in types.get(p.policy.id, []):
+        for t in usable_types(types.get(p.policy.id, []), p.profile):
             stored, adjustments = ledger.get((p.user_id, t.id, year.label), (None, ZERO))
             lines.append(
                 build_line(

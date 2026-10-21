@@ -28,6 +28,7 @@ from app.schemas.leave_views import ApprovalCount, ApprovalPage, ApprovalQuery, 
 from app.services.leave.approvals_view import approval_count, approval_items
 from app.services.leave.lifecycle import decide
 from app.services.leave.notify import stage_decision
+from app.services.leave.type_privacy import sees_restricted
 from app.services.leave.views import request_reads
 
 router = APIRouter(tags=["leave"])
@@ -85,6 +86,7 @@ async def _decide(
         viewer=current_user.id,
         today=datetime.now(UTC).date(),
         private_ok=lambda _r: True,
+        sees_restricted=sees_restricted(perms),
     )
     return reads[0]
 

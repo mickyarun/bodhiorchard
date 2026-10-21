@@ -31,6 +31,7 @@ from app.schemas.leave_views import CalendarEntry, CalendarRead
 from app.services.leave.permissions import APPROVE
 from app.services.leave.policies import resolve_member_policy
 from app.services.leave.summary import holiday_schema
+from app.services.leave.type_privacy import sees_restricted, shown
 
 
 async def calendar_view(
@@ -45,12 +46,14 @@ async def calendar_view(
 
     Leave type and reason are included only for the requester, their
     managers and HR. Everyone else sees "on leave" — the response carries
-    no field a client could use to infer sick leave.
+    no field a client could use to infer sick leave. A gender-limited type
+    (period leave) is named to managers only if they see personal details.
     """
     requests = await LeaveRequestRepository(db, org_id=org_id).calendar(start, end, viewer)
     edges = await EmployeeReportingManagerRepository(db, org_id=org_id).reporting_edges()
     reports = {who for who, boss in edges if boss == viewer}
     hr = perms.has(APPROVE)
+    sees = sees_restricted(perms)
     names = await UserRepository(db).get_names_by_ids({r.user_id for r in requests})
     types = await LeaveTypeRepository(db, org_id=org_id).by_ids(
         {r.leave_type_id for r in requests if r.leave_type_id}
@@ -62,6 +65,8 @@ async def calendar_view(
     for r in requests:
         private = hr or r.user_id == viewer or r.user_id in reports
         leave_type = types.get(r.leave_type_id) if private and r.leave_type_id else None
+        if not shown(leave_type, sees_all=sees or r.user_id == viewer):
+            leave_type = None
         entries.append(
             CalendarEntry(
                 request_id=r.id,

@@ -21,14 +21,14 @@
       <span class="text-body-2 font-weight-medium d-block">{{ label }}</span>
       <span v-if="description" class="text-caption text-medium-emphasis d-block">{{ description }}</span>
     </label>
-    <v-switch :id="id" v-model="value" color="primary" density="compact" hide-details inset />
+    <v-switch :id="id" v-model="value" :disabled="disabled" color="primary" density="compact" hide-details inset />
   </div>
 </template>
 
 <script setup lang="ts">
 import { useId } from 'vue'
 
-defineProps<{ label: string; description?: string }>()
+defineProps<{ label: string; description?: string; disabled?: boolean }>()
 const value = defineModel<boolean>({ required: true })
 
 const id = useId()

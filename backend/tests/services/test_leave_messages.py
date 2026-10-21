@@ -20,6 +20,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from app.models.leave_request import LeaveKind, LeaveStatus
+from app.schemas.leave import HighLeave
 from app.services.leave.messages import (
     compose_decision_message,
     compose_request_message,
@@ -62,6 +63,19 @@ def test_auto_approved_wfh_reads_as_fyi() -> None:
     assert (
         text == "Ravi is working from home Mon 19 Oct (0.5 days). It was approved automatically."
     )
+
+
+def test_auto_approved_leave_never_names_the_type() -> None:
+    one_day = _request(end_date=date(2026, 10, 19), days=Decimal("1"))
+    text = compose_request_message("Asha", one_day, auto_approved=True)  # type: ignore[arg-type]
+    assert text == "Asha is on leave Mon 19 Oct (1 day)."
+
+
+def test_auto_approved_heads_up_keeps_the_high_leave_line() -> None:
+    high = HighLeave(level="notice", taken=Decimal("16"), notice_days=15, warning_days=18)
+    one_day = _request(end_date=date(2026, 10, 19), days=Decimal("1"))
+    text = compose_request_message("Asha", one_day, auto_approved=True, high_leave=high)  # type: ignore[arg-type]
+    assert text.endswith("(heads-up at 15).")
 
 
 def test_decision_message() -> None:

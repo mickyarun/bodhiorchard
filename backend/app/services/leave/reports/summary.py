@@ -45,6 +45,7 @@ from app.services.leave.reports.attribution import InRange, Span, within
 from app.services.leave.reports.balance_lines import balance_lines
 from app.services.leave.reports.population import Person, people, scoped_ids
 from app.services.leave.reports.type_columns import type_columns
+from app.services.leave.type_privacy import shown, visible
 
 REQUEST_CAP = 20_000
 ZERO = Decimal("0")
@@ -76,6 +77,17 @@ async def _in_range(
             holidays=holidays[r.policy_id],
         )
     return out
+
+
+async def _hidden_types(
+    db: AsyncSession, org_id: uuid.UUID, requests: Sequence[LeaveRequest], sees_all: bool
+) -> set[uuid.UUID]:
+    """Ids of the requests' types the viewer may not see."""
+    if sees_all:
+        return set()
+    ids = {r.leave_type_id for r in requests if r.leave_type_id}
+    types = await LeaveTypeRepository(db, org_id=org_id).by_ids(ids)
+    return {i for i, t in types.items() if not shown(t, sees_all=False)}
 
 
 async def _types(
@@ -119,7 +131,10 @@ async def summary_report(
         raise LeaveInvalidError("Too much leave in this range. Narrow the dates or filters.")
     persons = await people(db, org_id, ids, f, requesters={r.user_id for r in requests})
     wanted = {p.user_id for p in persons}
-    requests = [r for r in requests if r.user_id in wanted]
+    # A hidden type's days are left out of every figure, totals included:
+    # otherwise total minus the visible columns would give them away.
+    hidden = await _hidden_types(db, org_id, requests, scope.sees_restricted)
+    requests = [r for r in requests if r.user_id in wanted and r.leave_type_id not in hidden]
     parts = await _in_range(db, org_id, requests, f)
     sums: dict[uuid.UUID, dict[str, Decimal]] = defaultdict(lambda: defaultdict(lambda: ZERO))
     by_type: dict[uuid.UUID, dict[uuid.UUID, Decimal]] = defaultdict(
@@ -157,7 +172,13 @@ async def summary_report(
         if (level := assess(policy_of[user], days)) is not None
     }
     used = {t for per in by_type.values() for t in per}
-    columns = type_columns(await _types(db, org_id, persons, used))
+    # Hidden types get no column, and no "left" figure.
+    types = visible(
+        await _types(db, org_id, persons, used), lambda t: t, sees_all=scope.sees_restricted
+    )
+    columns = type_columns(types)
+    shown_ids = set(columns.key_of)
+    left = {user: {t: d for t, d in per.items() if t in shown_ids} for user, per in left.items()}
     return SummaryReport(
         start=f.start,
         end=f.end,

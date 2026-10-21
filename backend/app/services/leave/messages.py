@@ -56,8 +56,14 @@ def compose_request_message(
     when = f"{format_range(request.start_date, request.end_date)} ({days_text(request.days)})"
     what = _KIND_LABEL[request.kind]
     if auto_approved:
-        return f"{name} is working from home {when}. It was approved automatically."
-    text = f"{name} requested {what} {when}."
+        if request.kind == LeaveKind.WFH:
+            text = f"{name} is working from home {when}. It was approved automatically."
+        else:
+            # Only a gender-limited type approves itself today, so "approved
+            # automatically" would say which one: plain "on leave" instead.
+            text = f"{name} is on leave {when}."
+    else:
+        text = f"{name} requested {what} {when}."
     return f"{text} {high_leave_line(high_leave)}" if high_leave else text
 
 

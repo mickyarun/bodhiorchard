@@ -26,7 +26,8 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.leave_policy import LeavePolicy
-from app.models.leave_request import HalfDay, LeaveRequest
+from app.models.leave_request import HalfDay, LeaveKind, LeaveRequest
+from app.models.leave_type import LeaveType
 from app.models.policy_holiday import PolicyHoliday
 from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.leave_type import LeaveTypeRepository
@@ -34,7 +35,10 @@ from app.schemas.leave import HighLeave, LeaveProblem, LeaveRequestCreate, Probl
 from app.services.leave.approvers import Approvers
 from app.services.leave.balances import balances_for, find_line
 from app.services.leave.calendar_math import leave_year_bounds
+from app.services.leave.eligibility import can_use
 from app.services.leave.loss_of_pay import split_paid
+from app.services.leave.month_usage import booked_by_month, requested_by_month
+from app.services.leave.monthly_limit import first_month_over, limit_message
 from app.services.leave.optional_holidays import pick_optional_holiday
 from app.services.leave.policies import MemberPolicy
 
@@ -53,6 +57,8 @@ class Evaluation:
     # Days the balance doesn't cover; they're taken as loss of pay.
     lop_days: Decimal = ZERO
     holiday: PolicyHoliday | None = None
+    # The leave type asked for, once it's known to be usable.
+    leave_type: LeaveType | None = None
     auto_approved: bool = False
     approvers: Approvers = field(default_factory=lambda: Approvers(managers=[]))
     problems: list[LeaveProblem] = field(default_factory=list)
@@ -145,6 +151,11 @@ async def apply_balance(
     if leave_type is None or leave_type.policy_id != policy.id or not leave_type.is_active:
         result.problem("inactive_type", "That leave type isn't available on your policy.")
         return
+    if not can_use(leave_type, member.profile):
+        # Same answer as a type that doesn't exist: don't confirm it's there.
+        result.problem("inactive_type", "That leave type isn't available on your policy.")
+        return
+    result.leave_type = leave_type
     year = leave_year_bounds(result.start, policy.year_start_month)
     lines = await balances_for(
         db,
@@ -159,3 +170,26 @@ async def apply_balance(
     line = find_line(lines, leave_type_id)
     result.balance_before = line.available if line else None
     _paid, result.lop_days = split_paid(result.days, result.balance_before)
+
+
+async def check_monthly_limit(
+    db: AsyncSession,
+    policy: LeavePolicy,
+    user_id: uuid.UUID,
+    half_day: HalfDay,
+    result: Evaluation,
+) -> None:
+    """Refuse days past the type's monthly limit; unused days don't carry over."""
+    leave_type = result.leave_type
+    if leave_type is None or leave_type.monthly_limit_days is None:
+        return
+    limit = leave_type.monthly_limit_days
+    booked = await booked_by_month(
+        db, policy, user_id, result.start, result.end,
+        kind=LeaveKind.LEAVE, leave_type_id=leave_type.id,
+    )  # fmt: skip
+    requested = await requested_by_month(db, policy, result.start, result.end, half_day)
+    month = first_month_over(limit, already=booked, requested=requested)
+    if month is not None:
+        message = limit_message(leave_type.name, limit, month, booked.get(month, ZERO))
+        result.problem("monthly_limit", message)

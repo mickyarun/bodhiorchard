@@ -29,6 +29,12 @@ feature permissions stay freely assignable):
   reset password, merge) whose escalation permissions you hold yourself.
   Only the owner acts on the owner.
 
+Whoever may invite (``team:invite``) also counts as holding engineering
+access for both rules: HR can invite engineers, and, holding the matching
+route permission, act on members whose only extra access is engineering
+(e.g. deactivate them when they leave). Roles that manage members, roles
+or settings stay out of reach.
+
 Same layering as :mod:`app.services.role_validation`: pure predicates
 first, thin HTTP wrappers after.
 """
@@ -40,7 +46,11 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permission_deps import PermissionSet, permissions_for_role
-from app.core.permissions import ESCALATION_PERMISSION_IDS, SENSITIVE_PERMISSION_IDS
+from app.core.permissions import (
+    ESCALATION_PERMISSION_IDS,
+    SENSITIVE_PERMISSION_IDS,
+    WORKSPACE_ENGINEERING,
+)
 from app.models.role import Role, RoleScopeType
 from app.models.user import User
 from app.repositories.permission import PermissionRepository
@@ -48,12 +58,21 @@ from app.repositories.role import ORG_OWNER_ROLE_NAME
 
 logger = structlog.get_logger(__name__)
 
+INVITE = "team:invite"
+
+
+# Entry to the engineering workspace gives no power over people or access,
+# so whoever may invite members may hand it out: HR onboards engineers too.
+# Roles that can manage members, roles or settings stay out of their reach.
+GRANTABLE_BY_INVITERS = frozenset({WORKSPACE_ENGINEERING})
+
 
 def ungrantable(actor: PermissionSet, requested: set[str]) -> set[str]:
     """Escalation permissions in ``requested`` that the actor doesn't hold."""
     if actor.is_owner:
         return set()
-    return (requested & ESCALATION_PERMISSION_IDS) - actor.ids
+    held = actor.ids | (GRANTABLE_BY_INVITERS if INVITE in actor.ids else frozenset())
+    return (requested & ESCALATION_PERMISSION_IDS) - held
 
 
 def is_owner_role(role: Role | None) -> bool:
@@ -116,6 +135,18 @@ async def assert_can_assign_role(
     role_perms = await permissions_for_role(db, role.id if role is not None else None)
     assert_can_grant(actor, role_perms)
     return role_perms
+
+
+async def assignable_role_ids(
+    db: AsyncSession, actor: PermissionSet, roles: list[Role]
+) -> list[uuid.UUID]:
+    """The roles in ``roles`` the actor may give someone else, by the rules above."""
+    return [
+        role.id
+        for role in roles
+        if (actor.is_owner or not is_owner_role(role))
+        and not ungrantable(actor, await permissions_for_role(db, role.id))
+    ]
 
 
 async def assert_can_manage_role(

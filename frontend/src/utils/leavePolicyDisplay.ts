@@ -13,10 +13,12 @@
 // limitations under the License.
 
 /** Pure text helpers for the leave settings screens. */
+import type { Gender } from '@/types/employee'
 import type { HolidaySource } from '@/types/leave'
 import type { HolidayAdminRead, LeaveTypeRead, PolicyRead, PolicyWrite } from '@/types/leavePolicy'
 import { pluralDays, SWATCH_KEYS, toNumberOrNull } from '@/utils/leave'
 import { MONTH_NAMES, WEEKDAY_SHORT } from '@/utils/leaveDates'
+import { GENDER_LABELS } from '@/utils/employee'
 
 /** Shared props for every settings form field. */
 export const FIELD_PROPS = { variant: 'outlined', density: 'comfortable', hideDetails: 'auto' } as const
@@ -108,6 +110,23 @@ export function allowanceLabel(type: Pick<LeaveTypeRead, 'annual_quota_days' | '
   const quota = toNumberOrNull(type.annual_quota_days)
   if (quota === null) return 'Unlimited'
   return type.accrual === 'monthly' ? `${pluralDays(quota)}, earned monthly` : pluralDays(quota)
+}
+
+/** "Female", "Female, Non-binary": who a gender-limited type is for. */
+export function gendersLabel(genders: readonly Gender[]): string {
+  return genders.map(g => GENDER_LABELS[g]).join(', ')
+}
+
+/** Short tags for a type's special rules, e.g. ["Women only", "Auto-approved", "1 day a month"]. */
+export function typeRuleTags(
+  type: Pick<LeaveTypeRead, 'eligible_genders' | 'auto_approve' | 'monthly_limit_days'>,
+): string[] {
+  const tags: string[] = []
+  if (type.eligible_genders) tags.push(`${gendersLabel(type.eligible_genders)} only`)
+  if (type.auto_approve) tags.push('Auto-approved')
+  const perMonth = toNumberOrNull(type.monthly_limit_days)
+  if (perMonth !== null) tags.push(`${pluralDays(perMonth)} a month`)
+  return tags
 }
 
 /** Active types first as given, switched-off ones apart. */

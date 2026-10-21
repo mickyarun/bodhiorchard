@@ -22,7 +22,7 @@
       <div class="d-flex align-start ga-2 pa-6 pb-2">
         <div class="flex-grow-1">
           <h2 class="text-h6 font-weight-bold">{{ type ? 'Edit leave type' : 'Add leave type' }}</h2>
-          <p class="text-body-2 text-medium-emphasis">Applies to everyone on {{ policyName }}.</p>
+          <p class="text-body-2 text-medium-emphasis">Applies to {{ draft.eligible_genders ? `people recorded as ${gendersLabel(draft.eligible_genders)}` : 'everyone' }} on {{ policyName }}.</p>
         </div>
         <v-btn icon="mdi-close" variant="text" size="small" aria-label="Close" @click="close" />
       </div>
@@ -47,6 +47,11 @@
           <div class="group" role="group" :aria-labelledby="ids.allowance">
             <div :id="ids.allowance" class="group__title text-overline text-medium-emphasis">Allowance</div>
             <LeaveTypeAllowanceField v-model:unlimited="unlimited" v-model:days="quota" v-model:accrual="draft.accrual" />
+          </div>
+          <div class="group" role="group" :aria-labelledby="ids.access">
+            <div :id="ids.access" class="group__title text-overline text-medium-emphasis">Who &amp; approval</div>
+            <LeaveTypeAccessFields v-model:genders="draft.eligible_genders" v-model:auto-approve="draft.auto_approve" v-model:monthly-limit="draft.monthly_limit_days" />
+            <p v-if="autoProblem" class="text-caption text-error mt-1">{{ autoProblem }}</p>
           </div>
           <div class="group" role="group" :aria-labelledby="ids.appearance">
             <div :id="ids.appearance" class="group__title text-overline text-medium-emphasis">Appearance &amp; status</div>
@@ -80,68 +85,64 @@ import { computed, ref, useId, watch } from 'vue'
 import { useDisplay } from 'vuetify'
 import AppCallout from '@/components/common/AppCallout.vue'
 import LeaveSwitchRow from '@/components/leave/settings/LeaveSwitchRow.vue'
+import LeaveTypeAccessFields from '@/components/leave/settings/LeaveTypeAccessFields.vue'
 import LeaveTypeAllowanceField from '@/components/leave/settings/LeaveTypeAllowanceField.vue'
 import LeaveTypeColorPicker from '@/components/leave/settings/LeaveTypeColorPicker.vue'
+import { usePermissions } from '@/composables/usePermissions'
 import { useLeavePolicyConfigStore } from '@/stores/leavePolicyConfig'
 import type { LeaveTypeRead, LeaveTypeWrite } from '@/types/leavePolicy'
-import { codeFromName, SWATCH_KEYS, toNumberOrNull } from '@/utils/leave'
-import { FIELD_PROPS } from '@/utils/leavePolicyDisplay'
+import { codeFromName, toNumberOrNull } from '@/utils/leave'
+import { FIELD_PROPS, gendersLabel } from '@/utils/leavePolicyDisplay'
+import { blankType, draftFromType, validMonthlyLimit } from '@/utils/leaveTypeDraft'
 
 const props = defineProps<{
   modelValue: boolean
   policyId: string
   policyName: string
   type: LeaveTypeRead | null
+  /** A new type's starting values (e.g. period leave); blank when absent. */
+  preset?: LeaveTypeWrite | null
 }>()
 const emit = defineEmits<(e: 'update:modelValue', value: boolean) => void>()
 
 const DEFAULT_QUOTA = 12
-const ids = { basics: useId(), allowance: useId(), appearance: useId() }
+const ids = { basics: useId(), allowance: useId(), access: useId(), appearance: useId() }
 const store = useLeavePolicyConfigStore()
+const { canApproveLeave } = usePermissions()
 const { xs } = useDisplay()
-const draft = ref<LeaveTypeWrite>(blank())
+const draft = ref<LeaveTypeWrite>(blankType())
 const quota = ref<number | null>(DEFAULT_QUOTA)
 const unlimited = ref(false)
 const codeTouched = ref(false)
 const saving = ref(false)
 const error = ref('')
 
+const autoProblem = computed(() => {
+  if (!draft.value.auto_approve) return ''
+  if (!canApproveLeave.value) return 'Only people who approve leave can change a type that approves itself.'
+  return unlimited.value ? 'A type that approves itself needs a yearly allowance, so extra days still go to a manager.' : ''
+})
+
 const valid = computed(
   () =>
     !!draft.value.name.trim() &&
     !!draft.value.code.trim() &&
-    (unlimited.value || (typeof quota.value === 'number' && quota.value >= 0 && quota.value <= 365)),
+    (unlimited.value || (typeof quota.value === 'number' && quota.value >= 0 && quota.value <= 365)) &&
+    validMonthlyLimit(draft.value.monthly_limit_days) &&
+    (draft.value.eligible_genders === null || draft.value.eligible_genders.length > 0) &&
+    !autoProblem.value,
 )
-
-function blank(): LeaveTypeWrite {
-  return {
-    name: '',
-    code: '',
-    annual_quota_days: null,
-    accrual: 'upfront',
-    is_paid: true,
-    is_encashable: false,
-    counts_toward_warning: true,
-    color_key: SWATCH_KEYS[0],
-    is_active: true,
-  }
-}
-
-function fromType(type: LeaveTypeRead): LeaveTypeWrite {
-  const { id: _id, policy_id: _policy, ...write } = type
-  return write
-}
 
 watch(
   () => props.modelValue,
   open => {
     if (!open) return
-    const type = props.type
-    draft.value = type ? fromType(type) : blank()
-    const current = type ? toNumberOrNull(type.annual_quota_days) : DEFAULT_QUOTA
-    unlimited.value = !!type && current === null
+    const start = props.type ? draftFromType(props.type) : (props.preset ?? blankType())
+    draft.value = { ...start }
+    const current = props.type || props.preset ? toNumberOrNull(start.annual_quota_days) : DEFAULT_QUOTA
+    unlimited.value = !!props.type && current === null
     quota.value = current ?? DEFAULT_QUOTA
-    codeTouched.value = !!type
+    codeTouched.value = !!props.type || !!props.preset
     error.value = ''
   },
 )

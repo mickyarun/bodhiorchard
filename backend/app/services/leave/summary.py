@@ -58,6 +58,7 @@ def balance_schema(line: BalanceLine) -> Balance:
         used=line.used,
         pending=line.pending,
         available=line.available,
+        monthly_limit_days=t.monthly_limit_days,
     )
 
 

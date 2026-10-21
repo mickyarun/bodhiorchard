@@ -20,14 +20,14 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1._leave_admin import load_policy
-from app.core.deps import get_db, require_permissions
+from app.core.deps import PermissionSet, get_db, get_permission_set, require_permissions
 from app.models.leave_type import LeaveType
 from app.models.user import User
 from app.repositories.leave_type import LeaveTypeRepository
 from app.schemas.leave_policy import LeaveTypeRead, LeaveTypeWrite
 from app.services.leave import type_admin
 from app.services.leave.errors import LeaveNotFoundError
-from app.services.leave.permissions import CONFIGURE
+from app.services.leave.permissions import APPROVE, CONFIGURE
 
 router = APIRouter(tags=["leave-admin"])
 
@@ -43,6 +43,9 @@ def _read(t: LeaveType) -> LeaveTypeRead:
         is_paid=t.is_paid,
         is_encashable=t.is_encashable,
         counts_toward_warning=t.counts_toward_warning,
+        eligible_genders=t.eligible_genders,
+        auto_approve=t.auto_approve,
+        monthly_limit_days=t.monthly_limit_days,
         color_key=t.color_key,
         is_active=t.is_active,
     )
@@ -69,11 +72,15 @@ async def create_type(
     policy_id: uuid.UUID,
     body: LeaveTypeWrite,
     current_user: User = Depends(require_permissions(CONFIGURE)),
+    perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> LeaveTypeRead:
     """Add a leave type to a policy."""
     policy = await load_policy(db, current_user.org_id, policy_id)
-    return _read(await type_admin.create_type(db, policy, current_user.id, body))
+    created = await type_admin.create_type(
+        db, policy, current_user.id, body, may_approve=perms.has(APPROVE)
+    )
+    return _read(created)
 
 
 @router.put("/types/{type_id}", response_model=LeaveTypeRead)
@@ -81,11 +88,14 @@ async def update_type(
     type_id: uuid.UUID,
     body: LeaveTypeWrite,
     current_user: User = Depends(require_permissions(CONFIGURE)),
+    perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> LeaveTypeRead:
     """Edit a type. Quota changes apply to years not yet allocated."""
     leave_type = await LeaveTypeRepository(db, org_id=current_user.org_id).get_by_id(type_id)
     if leave_type is None:
         raise LeaveNotFoundError("Leave type not found.")
-    await type_admin.update_type(db, leave_type, current_user.id, body)
+    await type_admin.update_type(
+        db, leave_type, current_user.id, body, may_approve=perms.has(APPROVE)
+    )
     return _read(leave_type)

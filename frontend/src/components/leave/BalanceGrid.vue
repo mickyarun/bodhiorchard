@@ -35,7 +35,7 @@ import {
   swatchColor,
   toNumber,
 } from '@/utils/leave'
-import { bookedAheadNote, earningCaption } from '@/utils/leaveAccrual'
+import { bookedAheadNote, earningCaption, monthlyLimitNote } from '@/utils/leaveAccrual'
 
 const props = defineProps<{
   balances: Balance[]
@@ -62,7 +62,7 @@ function leaveCard(balance: Balance) {
       caption: meter
         ? (earningCaption(balance) ?? balanceCaption(balance))
         : `${pluralDays(toNumber(balance.used))} taken`,
-      note: bookedAheadNote(balance),
+      note: monthlyLimitNote(balance) || bookedAheadNote(balance),
       tag: highlight ? 'This request' : balance.is_paid ? '' : 'Unpaid',
       highlight,
     },

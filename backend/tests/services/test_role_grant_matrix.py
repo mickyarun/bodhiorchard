@@ -54,10 +54,13 @@ def test_admin_cannot_create_hr() -> None:
     assert not _can_assign("admin", "hr")
 
 
-def test_hr_assigns_people_roles_but_not_engineering() -> None:
-    assert _can_assign("hr", "sales")
-    assert _can_assign("hr", "hr")
-    assert not _can_assign("hr", "developer")
+def test_hr_assigns_every_role_but_admin_level_ones() -> None:
+    # HR invites, so it can hand out engineering access...
+    for role in ("sales", "hr", "developer", "qa", "pm", "tech_lead", "designer"):
+        assert _can_assign("hr", role), role
+    # ...but never a role that manages members, roles or settings.
+    for role in ("admin", "manager", "org_owner"):
+        assert not _can_assign("hr", role), role
 
 
 @pytest.mark.parametrize("role", sorted(ROLES))

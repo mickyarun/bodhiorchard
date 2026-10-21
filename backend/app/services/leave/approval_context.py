@@ -26,6 +26,7 @@ from datetime import date
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.leave_type import LeaveType
 from app.repositories.leave_report import LeaveReportRepository
 from app.repositories.leave_type import LeaveTypeRepository
 from app.schemas.leave_report_filters import PeopleFilters
@@ -35,6 +36,7 @@ from app.services.leave.policies import today_for
 from app.services.leave.reports.balance_lines import balance_lines, leave_year_for
 from app.services.leave.reports.population import people
 from app.services.leave.summary import balance_schema
+from app.services.leave.type_privacy import shown, visible
 
 
 @dataclass(frozen=True)
@@ -47,11 +49,18 @@ class RequesterContext:
 
 
 async def requester_context(
-    db: AsyncSession, org_id: uuid.UUID, user_ids: Collection[uuid.UUID], today: date
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    user_ids: Collection[uuid.UUID],
+    today: date,
+    *,
+    sees_all: bool,
 ) -> RequesterContext:
     """Balances by type and the last leave taken, for each requester.
 
     ``today`` is only the fallback for someone with no policy at all.
+    Gender-limited types are left out unless ``sees_all``
+    (:mod:`app.services.leave.type_privacy`).
     """
     if not user_ids:
         return RequesterContext()
@@ -65,13 +74,17 @@ async def requester_context(
     )
     return RequesterContext(
         balances={
-            user: [balance_schema(line) for line in mine.lines] for user, mine in balances.items()
+            user: [
+                balance_schema(line)
+                for line in visible(mine.lines, lambda line: line.leave_type, sees_all=sees_all)
+            ]
+            for user, mine in balances.items()
         },
         years={user: mine.year.label for user, mine in balances.items()},
         last_leave={
             r.user_id: LastLeave(
-                leave_type=types[r.leave_type_id].name
-                if r.leave_type_id and r.leave_type_id in types
+                leave_type=_type_name(types.get(r.leave_type_id), sees_all)
+                if r.leave_type_id
                 else None,
                 start_date=r.start_date,
                 end_date=r.end_date,
@@ -80,3 +93,7 @@ async def requester_context(
             for r in last
         },
     )
+
+
+def _type_name(leave_type: LeaveType | None, sees_all: bool) -> str | None:
+    return leave_type.name if leave_type and shown(leave_type, sees_all=sees_all) else None
