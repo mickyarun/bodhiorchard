@@ -58,6 +58,7 @@ from app.api.v1.leave import router as leave_router
 from app.api.v1.leave_approvals import router as leave_approvals_router
 from app.api.v1.leave_balances import router as leave_balances_router
 from app.api.v1.leave_calendar import router as leave_calendar_router
+from app.api.v1.leave_calendar_sync import router as leave_calendar_sync_router
 from app.api.v1.leave_digest import router as leave_digest_router
 from app.api.v1.leave_history import router as leave_history_router
 from app.api.v1.leave_holidays import router as leave_holidays_router
@@ -136,6 +137,7 @@ for leave_part in (
     leave_types_router,
     leave_holidays_router,
     leave_digest_router,
+    leave_calendar_sync_router,
     leave_reports_router,
     leave_reports_export_router,
     leave_history_router,

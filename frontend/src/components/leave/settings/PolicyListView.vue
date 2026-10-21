@@ -14,11 +14,12 @@
  * limitations under the License.
  -->
 
-<!-- Settings → Leave → Policies: the Slack settings, then every policy as
+<!-- Settings → Leave → Policies: the Slack and Google Calendar settings, then every policy as
      a card. Making one the default and deleting live in each card's menu. -->
 <template>
   <section aria-label="Policies">
     <SlackLeaveCard />
+    <GoogleCalendarCard />
     <AppCallout v-if="actionError" variant="error" class="mb-4">{{ actionError }}</AppCallout>
     <AppCallout v-if="store.defaultPolicy" variant="info" class="mb-4">
       <strong>{{ store.defaultPolicy.name }}</strong> is the default policy. Anyone you haven't
@@ -60,6 +61,7 @@ import AppCallout from '@/components/common/AppCallout.vue'
 import LeaveEmptyState from '@/components/leave/settings/LeaveEmptyState.vue'
 import PolicyCard from '@/components/leave/settings/PolicyCard.vue'
 import SlackLeaveCard from '@/components/leave/settings/SlackLeaveCard.vue'
+import GoogleCalendarCard from '@/components/leave/settings/GoogleCalendarCard.vue'
 import ConfirmDialog from '@/components/settings/code/ConfirmDialog.vue'
 import { useLeavePoliciesStore } from '@/stores/leavePolicies'
 import type { PolicyRead } from '@/types/leavePolicy'

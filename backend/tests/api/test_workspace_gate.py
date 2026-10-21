@@ -40,6 +40,7 @@ SHARED_MODULES = frozenset(
         "app.api.v1.leave_approvals",
         "app.api.v1.leave_balances",
         "app.api.v1.leave_calendar",
+        "app.api.v1.leave_calendar_sync",
         "app.api.v1.leave_digest",
         "app.api.v1.leave_history",
         "app.api.v1.leave_holidays",
