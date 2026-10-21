@@ -15,10 +15,11 @@
  -->
 
 <!-- Balance cards for every leave type, plus optional holidays when the
-     policy gives any. Used on Leave home and the profile Leave tab. -->
+     policy gives any. Used on Leave home, the profile Leave tab and, compact,
+     on approval cards (with the requested type highlighted). -->
 <template>
-  <div class="balance-grid">
-    <BalanceCard v-for="card in cards" :key="card.key" v-bind="card.props" />
+  <div class="balance-grid" :class="{ 'balance-grid--compact': compact }">
+    <BalanceCard v-for="card in cards" :key="card.key" v-bind="card.props" :compact="compact" />
   </div>
 </template>
 
@@ -40,11 +41,15 @@ const props = defineProps<{
   optional?: OptionalHolidayBalance | null
   /** Loss-of-pay days this leave year; a card shows when there are any. */
   lopDays?: Decimalish | null
+  compact?: boolean
+  /** A leave type to mark, e.g. the one being requested. */
+  highlightTypeId?: string | null
 }>()
 
 function leaveCard(balance: Balance) {
   const meter = meterPercents(balance)
   const available = toNumber(balance.available)
+  const highlight = balance.leave_type.id === props.highlightTypeId
   return {
     key: balance.leave_type.id,
     props: {
@@ -54,7 +59,8 @@ function leaveCard(balance: Balance) {
       unit: meter ? (available === 1 ? 'day left' : 'days left') : '',
       meter,
       caption: meter ? balanceCaption(balance) : `${pluralDays(toNumber(balance.used))} taken`,
-      tag: balance.is_paid ? '' : 'Unpaid',
+      tag: highlight ? 'This request' : balance.is_paid ? '' : 'Unpaid',
+      highlight,
     },
   }
 }
@@ -75,6 +81,7 @@ function optionalCard(optional: OptionalHolidayBalance) {
           ? `${optional.used} used · ${optional.pending} pending`
           : `${optional.used} used`,
       tag: '',
+      highlight: false,
     },
   }
 }
@@ -90,6 +97,7 @@ function lopCard(days: number) {
       meter: null,
       caption: 'Leave past your balance this year',
       tag: 'Unpaid',
+      highlight: false,
     },
   }
 }
@@ -108,5 +116,9 @@ const cards = computed(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
+}
+.balance-grid--compact {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
 }
 </style>

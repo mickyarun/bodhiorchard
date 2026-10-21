@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.models.leave_request import HalfDay, LeaveKind, LeaveStatus
 from app.schemas.leave import HolidayRead, LeaveRequestRead, LeaveTypeBrief, PersonRef
+from app.schemas.leave_summary import Balance
 
 
 class AlsoOut(BaseModel):
@@ -33,8 +34,21 @@ class AlsoOut(BaseModel):
     end_date: date
 
 
+class LastLeave(BaseModel):
+    """The requester's most recent approved leave that has started."""
+
+    leave_type: str | None
+    start_date: date
+    end_date: date
+    days: Decimal
+
+
 class ApprovalItem(BaseModel):
-    """One request in the approvals queue."""
+    """One request in the approvals queue.
+
+    ``balances``, ``balance_year`` and ``last_leave`` are filled for pending
+    requests only: they help decide, and are history once decided.
+    """
 
     request: LeaveRequestRead
     route: Literal["manager", "hr_queue", "hr_override"]
@@ -42,6 +56,9 @@ class ApprovalItem(BaseModel):
     department: str | None
     balance_after: Decimal | None
     also_out: list[AlsoOut]
+    balances: list[Balance] = []
+    balance_year: int | None = None
+    last_leave: LastLeave | None = None
 
 
 class DecisionBody(BaseModel):

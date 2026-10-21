@@ -36,10 +36,12 @@ from app.repositories.leave_request_filter import RequestFilter
 from app.repositories.leave_type import LeaveTypeRepository
 from app.schemas.leave_report_filters import SummaryFilters
 from app.schemas.leave_reports import NamedRef, SummaryReport, SummaryRow
+from app.services.leave.calendar_math import leave_year_bounds
 from app.services.leave.errors import LeaveInvalidError
 from app.services.leave.policies import mandatory_holidays
 from app.services.leave.report_scope import ReportScope
 from app.services.leave.reports.attribution import InRange, Span, within
+from app.services.leave.reports.balance_lines import balance_lines
 from app.services.leave.reports.population import Person, people, scoped_ids
 
 REQUEST_CAP = 20_000
@@ -136,6 +138,14 @@ async def summary_report(
             row["lop"] += part.lop_days
             if r.leave_type_id is not None:
                 by_type[r.user_id][r.leave_type_id] += part.days
+    # "Left" is for the leave year the range ends in, on each member's policy.
+    balances = await balance_lines(
+        db, org_id, persons, lambda policy: leave_year_bounds(f.end, policy.year_start_month)
+    )
+    left = {
+        user: {line.leave_type.id: line.available for line in mine.lines}
+        for user, mine in balances.items()
+    }
     used = {t for per in by_type.values() for t in per}
     types = await _types(db, org_id, persons, used)
     names = {p.policy.id: p.policy.name for p in persons if p.policy}
@@ -147,6 +157,7 @@ async def summary_report(
             SummaryRow(
                 **p.columns.model_dump(),
                 leave_by_type=dict(by_type.get(p.user_id, {})),
+                left_by_type=left.get(p.user_id, {}),
                 leave_days=sums[p.user_id]["leave"],
                 lop_days=sums[p.user_id]["lop"],
                 wfh_days=sums[p.user_id]["wfh"],

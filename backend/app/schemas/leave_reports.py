@@ -50,6 +50,9 @@ class SummaryRow(PersonColumns):
     """Approved days taken in the range, plus what is still pending."""
 
     leave_by_type: dict[uuid.UUID, Decimal]
+    # Days left per type in the leave year the range ends in, pending counted;
+    # None = no limit. Types not on the member's policy are absent.
+    left_by_type: dict[uuid.UUID, Decimal | None]
     leave_days: Decimal
     lop_days: Decimal
     wfh_days: Decimal
@@ -96,6 +99,7 @@ class BalanceRow(PersonColumns):
     """One member's numbers for one leave type. None = no limit."""
 
     leave_year: int
+    leave_type_id: uuid.UUID
     leave_type: str
     allocated: Decimal | None
     adjustments: Decimal

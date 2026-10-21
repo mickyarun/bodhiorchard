@@ -17,8 +17,14 @@
 <!-- One balance tile: a big number, a thin meter (used solid, pending
      lighter) and a caption. Presentational; BalanceGrid maps data in. -->
 <template>
-  <v-card color="surface" rounded="lg" class="pa-4 balance-card">
-    <div class="d-flex align-center ga-2 mb-3">
+  <v-card
+    :color="compact ? undefined : 'surface'"
+    :variant="compact ? 'flat' : undefined"
+    rounded="lg"
+    class="balance-card"
+    :class="[compact ? 'pa-3 balance-card--compact' : 'pa-4', { 'balance-card--highlight': highlight }]"
+  >
+    <div class="d-flex align-center ga-2" :class="compact ? 'mb-2' : 'mb-3'">
       <span class="balance-card__dot" :style="{ background: tone }" aria-hidden="true" />
       <span class="text-body-2 font-weight-medium text-truncate">{{ title }}</span>
       <v-chip v-if="tag" size="x-small" variant="tonal" class="ml-auto">{{ tag }}</v-chip>
@@ -50,6 +56,9 @@ const props = defineProps<{
   meter: { used: number; pending: number } | null
   caption: string
   tag?: string
+  /** Smaller, tinted tile for use inside another card. */
+  compact?: boolean
+  highlight?: boolean
 }>()
 
 const tone = computed(() => `rgb(var(--v-theme-${props.color}))`)
@@ -73,6 +82,16 @@ const tone = computed(() => `rgb(var(--v-theme-${props.color}))`)
   border-radius: 999px;
   overflow: hidden;
   background: rgba(var(--v-theme-on-surface), 0.08);
+}
+.balance-card--compact {
+  background: rgba(var(--v-theme-on-surface), 0.04);
+}
+.balance-card--compact .balance-card__value {
+  font-size: 22px;
+}
+.balance-card--highlight {
+  box-shadow: inset 0 0 0 1.5px rgb(var(--v-theme-primary));
+  background: rgba(var(--v-theme-primary), 0.06);
 }
 .balance-card__pending {
   opacity: 0.4;

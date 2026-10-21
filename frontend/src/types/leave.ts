@@ -173,6 +173,18 @@ export interface ApprovalItem {
   department: string | null
   balance_after: Decimalish | null
   also_out: AlsoOut[]
+  /** The requester's balances this leave year (pending only; empty once decided). */
+  balances: Balance[]
+  balance_year: number | null
+  last_leave: LastLeave | null
+}
+
+/** The requester's most recent approved leave that has started. */
+export interface LastLeave {
+  leave_type: string | null
+  start_date: string
+  end_date: string
+  days: Decimalish
 }
 
 export interface ApprovalCount {

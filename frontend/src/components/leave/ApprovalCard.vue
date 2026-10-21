@@ -14,7 +14,9 @@
  * limitations under the License.
  -->
 
-<!-- One request in the approvals queue. Rejecting asks for a note. -->
+<!-- One request in the approvals queue: the request, the requester's
+     balances by type (requested type highlighted), their last leave and who
+     else is out. Rejecting asks for a note. -->
 <template>
   <v-card color="surface" rounded="lg" class="pa-5">
     <div class="d-flex align-start justify-space-between ga-3 flex-wrap">
@@ -36,9 +38,20 @@
     </div>
     <p v-if="request.reason" class="text-body-2 mt-2 reason">“{{ request.reason }}”</p>
 
-    <div v-if="strip.length" class="strip mt-3 text-caption">
-      <span v-for="line in strip" :key="line">{{ line }}</span>
-    </div>
+    <AppCallout v-if="lop" variant="warning" class="mt-3">
+      {{ lop }} of this request {{ toNumber(request.lop_days) === 1 ? 'is' : 'are' }} loss of pay:
+      not enough {{ requestTypeLabel(request) }} left.
+    </AppCallout>
+
+    <template v-if="request.kind === 'leave' && item.balances.length">
+      <div class="d-flex align-baseline flex-wrap ga-2 mt-4 mb-2">
+        <span class="section-label">Balances · leave year {{ item.balance_year }}</span>
+        <span class="text-caption text-medium-emphasis">{{ balanceNote }}</span>
+      </div>
+      <BalanceGrid :balances="item.balances" compact :highlight-type-id="inBalanceYear ? request.leave_type?.id : null" />
+    </template>
+
+    <ApprovalFacts :item="item" class="mt-3" />
 
     <div v-if="request.status !== 'pending'" class="d-flex align-center flex-wrap ga-2 mt-3">
       <LeaveStatusChip :status="request.status" />
@@ -85,19 +98,19 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
+import ApprovalFacts from '@/components/leave/ApprovalFacts.vue'
+import BalanceGrid from '@/components/leave/BalanceGrid.vue'
 import LeaveStatusChip from '@/components/leave/LeaveStatusChip.vue'
 import { useLeaveApprovalsStore } from '@/stores/leaveApprovals'
 import type { ApprovalItem } from '@/types/leave'
+import { otherYearBalanceAfter } from '@/utils/approvalFacts'
 import {
-  firstName,
-  formatDays,
   HALF_DAY_LABELS,
   lopLabel,
   pluralDays,
   requestTypeLabel,
   ROUTE_TAGS,
   toNumber,
-  toNumberOrNull,
 } from '@/utils/leave'
 import { formatDayRange } from '@/utils/leaveDates'
 
@@ -114,20 +127,17 @@ const role = computed(() =>
   [props.item.designation, props.item.department].filter(Boolean).join(' · '),
 )
 
-const strip = computed(() => {
-  const lines: string[] = []
-  const lop = lopLabel(props.item.request.lop_days)
-  if (lop) lines.push(`${lop[0].toUpperCase()}${lop.slice(1)}`)
-  const after = toNumberOrNull(props.item.balance_after)
-  if (after !== null) lines.push(`Balance after: ${formatDays(after)}`)
-  if (props.item.also_out.length) {
-    const names = props.item.also_out.map(
-      o => `${firstName(o.name)} (${formatDayRange(o.start_date, o.end_date)})`,
-    )
-    lines.push(`Also out: ${names.join(', ')}`)
-  }
-  return lines
-})
+// Tiles show the current leave year; a request priced on another year
+// isn't in them, so it isn't highlighted or called "included".
+const inBalanceYear = computed(() => otherYearBalanceAfter(props.item) === null)
+const balanceNote = computed(() =>
+  inBalanceYear.value
+    ? 'Pending requests, this one included, are counted.'
+    : 'Pending requests are counted. This request falls in another leave year.',
+)
+
+// "3 days", from "3 days loss of pay".
+const lop = computed(() => lopLabel(request.value.lop_days).replace(/ loss of pay$/, ''))
 
 async function decide(action: 'approve' | 'reject'): Promise<void> {
   busy.value = true
@@ -156,12 +166,11 @@ async function decide(action: 'approve' | 'reject'): Promise<void> {
 .reason {
   color: rgba(var(--v-theme-on-surface), 0.78);
 }
-.strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: rgba(var(--v-theme-on-surface), 0.04);
+.section-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: var(--tracking-label, 0.08em);
+  text-transform: uppercase;
+  color: rgba(var(--v-theme-on-surface), 0.7);
 }
 </style>

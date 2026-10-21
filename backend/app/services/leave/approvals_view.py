@@ -15,7 +15,8 @@
 """The approvals queue: what the caller can decide, with context.
 
 Every lookup is batched per page: approvers, profiles, the reporting
-graph, balance-after and who else is out, so the query count doesn't grow
+graph, balance-after, who else is out, and each requester's balances and
+last leave, so the query count doesn't grow
 with the queue.
 """
 
@@ -34,6 +35,7 @@ from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.leave_request_filter import RequestFilter
 from app.repositories.user import UserRepository
 from app.schemas.leave_views import AlsoOut, ApprovalCount, ApprovalFilters, ApprovalItem
+from app.services.leave.approval_context import RequesterContext, requester_context
 from app.services.leave.approvers import Approvers, approvers_for_many, route_for
 from app.services.leave.balance_after import balances_after
 from app.services.leave.permissions import APPROVE
@@ -101,13 +103,9 @@ async def approval_items(
     """
     allowed, approvers, edges = await _decidable(db, org_id, actor, perms, status, filters)
     requests = [r for r, _ in allowed]
+    today = datetime.now(UTC).date()
     reads = await request_reads(
-        db,
-        org_id,
-        requests,
-        viewer=actor,
-        today=datetime.now(UTC).date(),
-        private_ok=lambda _r: True,
+        db, org_id, requests, viewer=actor, today=today, private_ok=lambda _r: True
     )
     profiles = await EmployeeProfileRepository(db, org_id=org_id).by_users(
         {r.user_id for r in requests}
@@ -115,6 +113,8 @@ async def approval_items(
     pending = status == "pending"
     after = await balances_after(db, org_id, requests) if pending else {}
     also = await _also_out(db, org_id, actor, perms, requests, approvers, edges) if pending else {}
+    users = {r.user_id for r in requests}
+    context = await requester_context(db, org_id, users, today) if pending else RequesterContext()
     items = []
     for (request, route), read in zip(allowed, reads, strict=True):
         profile = profiles.get(request.user_id)
@@ -126,6 +126,9 @@ async def approval_items(
                 department=profile.department if profile else None,
                 balance_after=after.get(request.id),
                 also_out=also.get(request.id, []),
+                balances=context.balances.get(request.user_id, []),
+                balance_year=context.years.get(request.user_id),
+                last_leave=context.last_leave.get(request.user_id),
             )
         )
     return items

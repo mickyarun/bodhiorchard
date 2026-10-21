@@ -19,15 +19,16 @@ org too, and its department or office must never leak into this one.
 """
 
 import uuid
-from collections.abc import Collection
+from collections import defaultdict
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.employee_profile import EmployeeProfile
-from app.models.leave_request import LeaveRequest
+from app.models.leave_request import LeaveKind, LeaveRequest, LeaveStatus
 from app.models.user import OrgToUser, User
 from app.repositories.base import BaseRepository
 from app.repositories.leave_request_filter import RequestFilter, apply_filter
@@ -126,4 +127,46 @@ class LeaveReportRepository(BaseRepository[LeaveRequest]):
         )
         if user_ids is not None:
             stmt = stmt.where(User.id.in_(user_ids))
+        return list((await self._db.execute(stmt)).scalars().all())
+
+    async def with_profile(self, user_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """Which of ``user_ids`` have an employee profile in this org."""
+        if not user_ids:
+            return set()
+        stmt = select(EmployeeProfile.user_id).where(
+            EmployeeProfile.org_id == self._org_id, EmployeeProfile.user_id.in_(user_ids)
+        )
+        return set((await self._db.execute(stmt)).scalars().all())
+
+    async def last_taken(self, cutoffs: Mapping[uuid.UUID, date]) -> list[LeaveRequest]:
+        """Each member's most recent approved leave starting by their own cutoff.
+
+        ``cutoffs`` maps member to "today" on their policy, so a leave that
+        started today locally counts even before it is today in UTC.
+        """
+        if not cutoffs:
+            return []
+        by_day: dict[date, set[uuid.UUID]] = defaultdict(set)
+        for user_id, day in cutoffs.items():
+            by_day[day].add(user_id)
+        started = or_(
+            *(
+                and_(LeaveRequest.user_id.in_(users), LeaveRequest.start_date <= day)
+                for day, users in by_day.items()
+            )
+        )
+        stmt = (
+            self._scoped(select(LeaveRequest))
+            .where(
+                started,
+                LeaveRequest.kind == LeaveKind.LEAVE,
+                LeaveRequest.status == LeaveStatus.APPROVED,
+            )
+            .distinct(LeaveRequest.user_id)
+            .order_by(
+                LeaveRequest.user_id,
+                LeaveRequest.start_date.desc(),
+                LeaveRequest.created_at.desc(),
+            )
+        )
         return list((await self._db.execute(stmt)).scalars().all())

@@ -115,8 +115,13 @@ async def people(
     if filters.department or filters.office_id or other_policy:
         return out
     known = {person.user_id for person in out}
-    unprofiled = await LeaveReportRepository(db, org_id=org_id).members_without_profile(ids)
-    extra = [u for u in {*unprofiled, *requesters} if u not in known and (ids is None or u in ids)]
+    report_repo = LeaveReportRepository(db, org_id=org_id)
+    unprofiled = await report_repo.members_without_profile(ids)
+    # A requester with a profile here was left out by a filter above (say,
+    # another policy); only those with none follow the default policy.
+    loose = set(requesters) - known
+    loose -= await report_repo.with_profile(loose)
+    extra = [u for u in {*unprofiled, *loose} if u not in known and (ids is None or u in ids)]
     for user in await UserRepository(db).get_many_by_ids(extra):
         columns = PersonColumns(
             user_id=user.id,

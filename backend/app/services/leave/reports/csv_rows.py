@@ -14,7 +14,9 @@
 
 """Each report's CSV layout: a header and one list of cells per row."""
 
+import uuid
 from collections.abc import Sequence
+from decimal import Decimal
 
 from app.models.leave_request import HalfDay
 from app.schemas.leave_reports import (
@@ -22,9 +24,11 @@ from app.schemas.leave_reports import (
     PersonColumns,
     RegisterRow,
     SummaryReport,
+    SummaryRow,
 )
 from app.services.leave.reports.csv_export import Cell
 
+ZERO = Decimal("0")
 PERSON_HEADER = ["Employee", "Code", "Department", "Office", "Policy", "Manager", "Status"]
 
 
@@ -41,10 +45,18 @@ def _person(row: PersonColumns) -> list[Cell]:
     ]
 
 
+def _taken_and_left(row: SummaryRow, type_id: uuid.UUID) -> tuple[Cell, Cell]:
+    """Days taken in the range, and left in the year (blank if not on their policy)."""
+    if type_id not in row.left_by_type:
+        return row.leave_by_type.get(type_id), None
+    left = row.left_by_type[type_id]
+    return row.leave_by_type.get(type_id, ZERO), "No limit" if left is None else left
+
+
 def summary_rows(report: SummaryReport) -> tuple[list[str], list[list[Cell]]]:
     header = [
         *PERSON_HEADER,
-        *(t.name for t in report.leave_types),
+        *(f"{t.name} {part}" for t in report.leave_types for part in ("taken", "left")),
         "Leave days",
         "Loss of pay days",
         "WFH days",
@@ -54,7 +66,7 @@ def summary_rows(report: SummaryReport) -> tuple[list[str], list[list[Cell]]]:
     rows: list[list[Cell]] = [
         [
             *_person(r),
-            *(r.leave_by_type.get(t.id) for t in report.leave_types),
+            *(cell for t in report.leave_types for cell in _taken_and_left(r, t.id)),
             r.leave_days,
             r.lop_days,
             r.wfh_days,

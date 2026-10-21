@@ -36,6 +36,9 @@ export interface PersonColumns {
 
 export interface SummaryRow extends PersonColumns {
   leave_by_type: Record<string, Decimalish>
+  /** Days left per type in the leave year the range ends in (null: no limit);
+   *  a type missing here isn't on the member's policy. */
+  left_by_type: Record<string, Decimalish | null>
   leave_days: Decimalish
   lop_days: Decimalish
   wfh_days: Decimalish
@@ -77,6 +80,7 @@ export interface RegisterReport {
 
 export interface BalanceRow extends PersonColumns {
   leave_year: number
+  leave_type_id: string
   leave_type: string
   allocated: Decimalish | null
   adjustments: Decimalish

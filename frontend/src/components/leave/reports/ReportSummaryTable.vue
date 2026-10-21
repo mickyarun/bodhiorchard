@@ -14,12 +14,24 @@
  * limitations under the License.
  -->
 
-<!-- Employee-wise leave taken in the range, one column per leave type. -->
+<!-- Employee-wise leave taken in the range, one column per leave type, each
+     with what is left of that type in the leave year the range ends in. -->
 <template>
+  <p v-if="report?.leave_types.length" class="legend text-caption text-medium-emphasis">
+    Each leave type shows <strong>days taken</strong> in these dates, and below it the
+    <strong>days left</strong> in the leave year the dates end in (pending requests counted).
+    A dash means the type isn't on that person's policy.
+  </p>
   <v-data-table :headers="headers" :items="report?.rows ?? []" item-value="user_id" density="comfortable" :items-per-page="50">
     <template #[`item.name`]="{ item }"><ReportPersonCell :row="item" /></template>
     <template v-for="t in report?.leave_types ?? []" :key="t.id" #[`item.type_${t.id}`]="{ item }">
-      {{ days(item.leave_by_type[t.id]) }}
+      <template v-if="t.id in item.left_by_type">
+        <div class="taken">{{ formatDays(toNumber(item.leave_by_type[t.id])) }}</div>
+        <div class="left text-caption" :class="leftTone(item.left_by_type[t.id])">
+          {{ leftLabel(item.left_by_type[t.id]) }}
+        </div>
+      </template>
+      <template v-else>{{ days(item.leave_by_type[t.id]) }}</template>
     </template>
     <template #[`item.leave_days`]="{ item }">{{ days(item.leave_days) }}</template>
     <template #[`item.lop_days`]="{ item }">
@@ -58,6 +70,15 @@ const headers = computed(() => [
   { title: 'Pending', key: 'pending_days', value: (r: { pending_days: Decimalish }) => toNumber(r.pending_days), ...NUMBER },
 ])
 
+function leftLabel(value: Decimalish | null | undefined): string {
+  return value === null || value === undefined ? 'no limit' : `${formatDays(toNumber(value))} left`
+}
+
+function leftTone(value: Decimalish | null | undefined): string {
+  if (value === null || value === undefined) return 'text-medium-emphasis'
+  return toNumber(value) <= 0 ? 'text-warning' : 'text-medium-emphasis'
+}
+
 function days(value: Decimalish | undefined): string {
   const n = toNumber(value)
   return n ? formatDays(n) : '–'
@@ -67,6 +88,16 @@ function days(value: Decimalish | undefined): string {
 <style scoped>
 /* Many type columns: keep headers on one line and let the table scroll. */
 :deep(th) {
+  white-space: nowrap;
+}
+.legend {
+  padding: 12px 16px 0;
+  margin: 0;
+}
+.taken {
+  font-weight: 600;
+}
+.left {
   white-space: nowrap;
 }
 </style>
