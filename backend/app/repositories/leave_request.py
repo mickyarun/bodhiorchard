@@ -90,8 +90,9 @@ class LeaveRequestRepository(BaseRepository[LeaveRequest]):
         end: date,
         *,
         kinds: Collection[LeaveKind] | None = None,
+        leave_type_id: uuid.UUID | None = None,
     ) -> list[LeaveRequest]:
-        """Pending or approved requests overlapping ``start..end``."""
+        """Pending or approved requests overlapping ``start..end`` (of one type, if given)."""
         stmt = self._scoped(
             select(LeaveRequest).where(
                 LeaveRequest.status.in_(ACTIVE),
@@ -103,6 +104,8 @@ class LeaveRequestRepository(BaseRepository[LeaveRequest]):
             stmt = stmt.where(LeaveRequest.user_id.in_(user_ids))
         if kinds is not None:
             stmt = stmt.where(LeaveRequest.kind.in_(kinds))
+        if leave_type_id is not None:
+            stmt = stmt.where(LeaveRequest.leave_type_id == leave_type_id)
         result = await self._db.execute(stmt.order_by(LeaveRequest.start_date))
         return list(result.scalars().all())
 

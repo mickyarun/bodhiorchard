@@ -30,6 +30,7 @@ from app.services.leave.balances import BalanceLine
 from app.services.leave.report_scope import ReportScope
 from app.services.leave.reports.balance_lines import balance_lines, leave_year_for
 from app.services.leave.reports.population import people, scoped_ids
+from app.services.leave.type_privacy import visible
 
 
 def encashable(line: BalanceLine) -> Decimal | None:
@@ -46,7 +47,10 @@ def encashable(line: BalanceLine) -> Decimal | None:
 async def balance_report(
     db: AsyncSession, org_id: uuid.UUID, scope: ReportScope, f: BalanceFilters
 ) -> BalanceReport:
-    """One row per member per active leave type on their policy."""
+    """One row per member per active leave type on their policy.
+
+    Gender-limited types are left out for everyone unless the scope may see them.
+    """
     ids = await scoped_ids(db, org_id, scope, f)
     persons = await people(db, org_id, ids, f)
     balances = await balance_lines(db, org_id, persons, leave_year_for(f.year))
@@ -55,7 +59,7 @@ async def balance_report(
         mine = balances.get(p.user_id)
         if mine is None:
             continue
-        for line in mine.lines:
+        for line in visible(mine.lines, lambda x: x.leave_type, sees_all=scope.sees_restricted):
             rows.append(
                 BalanceRow(
                     **p.columns.model_dump(),

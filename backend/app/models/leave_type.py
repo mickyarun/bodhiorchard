@@ -19,10 +19,11 @@ from decimal import Decimal
 from enum import StrEnum
 
 from sqlalchemy import Boolean, Enum, ForeignKey, Numeric, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
+from app.models.employee_profile import Gender
 
 
 class LeaveAccrual(StrEnum):
@@ -32,14 +33,6 @@ class LeaveAccrual(StrEnum):
     UPFRONT = "upfront"
     # An equal part on the 1st of each month: 18 a year is 1.5 a month.
     MONTHLY = "monthly"
-
-
-class LeaveEligibility(StrEnum):
-    """Who on the policy can see and request the type."""
-
-    EVERYONE = "everyone"
-    # People whose profile gender is female (e.g. period leave).
-    WOMEN = "women"
 
 
 def _values(enum: type[StrEnum]) -> list[str]:
@@ -77,11 +70,11 @@ class LeaveType(BaseModel):
         default=LeaveAccrual.UPFRONT,
         server_default=LeaveAccrual.UPFRONT.value,
     )
-    eligibility: Mapped[LeaveEligibility] = mapped_column(
-        Enum(LeaveEligibility, name="leave_eligibility", values_callable=_values),
-        nullable=False,
-        default=LeaveEligibility.EVERYONE,
-        server_default=LeaveEligibility.EVERYONE.value,
+    # Only people whose profile gender is one of these can see and request
+    # it (period leave: female). NULL = everyone on the policy.
+    eligible_genders: Mapped[list[Gender] | None] = mapped_column(
+        ARRAY(Enum(Gender, name="employee_gender", values_callable=_values, create_type=False)),
+        nullable=True,
     )
     # Approved as soon as it's sent; the managers get a heads-up instead.
     auto_approve: Mapped[bool] = mapped_column(

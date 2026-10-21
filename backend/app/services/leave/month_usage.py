@@ -54,12 +54,10 @@ async def booked_by_month(
     first, last = month_span(start, end)
     holidays = await mandatory_holidays(db, policy, first, last)
     requests = await LeaveRequestRepository(db, org_id=policy.org_id).active_between(
-        [user_id], first, last, kinds=[kind]
+        [user_id], first, last, kinds=[kind], leave_type_id=leave_type_id
     )
     used: dict[Month, Decimal] = {}
     for req in requests:
-        if leave_type_id is not None and req.leave_type_id != leave_type_id:
-            continue
         for month, days in days_by_month(
             req.start_date,
             req.end_date,

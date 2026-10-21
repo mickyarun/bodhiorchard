@@ -20,13 +20,12 @@ from types import SimpleNamespace
 import pytest
 
 from app.models.employee_profile import Gender
-from app.models.leave_type import LeaveEligibility
 from app.services.leave.eligibility import can_use, usable_types
 from app.services.leave.monthly_limit import first_month_over, limit_message
 
 D = Decimal
-WOMEN = SimpleNamespace(eligibility=LeaveEligibility.WOMEN)
-EVERYONE = SimpleNamespace(eligibility=LeaveEligibility.EVERYONE)
+WOMEN = SimpleNamespace(eligible_genders=[Gender.FEMALE])
+EVERYONE = SimpleNamespace(eligible_genders=None)
 
 
 @pytest.mark.parametrize(
@@ -68,3 +67,9 @@ def test_limit_message() -> None:
         limit_message("Period leave", D(1), (2026, 10), D(0))
         == "Period leave is 1 day a month. Pick fewer days in October."
     )
+
+
+def test_a_type_can_cover_several_genders() -> None:
+    both = SimpleNamespace(eligible_genders=[Gender.FEMALE, Gender.NON_BINARY])
+    assert can_use(both, SimpleNamespace(gender=Gender.NON_BINARY)) is True  # type: ignore[arg-type]
+    assert can_use(both, SimpleNamespace(gender=Gender.MALE)) is False  # type: ignore[arg-type]

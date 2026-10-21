@@ -19,7 +19,7 @@ import type { LeaveTypeRead } from '@/types/leavePolicy'
 import { monthlyLimitNote } from '@/utils/leaveAccrual'
 import { changeLines } from '@/utils/leaveConfigHistory'
 import { typeRuleTags } from '@/utils/leavePolicyDisplay'
-import { blankType, draftFromType, hasWomenOnlyType, periodLeave, validMonthlyLimit } from '@/utils/leaveTypeDraft'
+import { blankType, draftFromType, hasPeriodLeave, periodLeave, validMonthlyLimit } from '@/utils/leaveTypeDraft'
 
 const read = (over: Partial<LeaveTypeRead> = {}): LeaveTypeRead => ({
   ...blankType(),
@@ -36,7 +36,7 @@ describe('leave type drafts', () => {
     expect(period).toMatchObject({
       name: 'Period leave',
       annual_quota_days: 12,
-      eligibility: 'women',
+      eligible_genders: ['female'],
       auto_approve: true,
       monthly_limit_days: 1,
       counts_toward_warning: false,
@@ -51,22 +51,24 @@ describe('leave type drafts', () => {
     expect(draft).not.toHaveProperty('policy_id')
   })
 
-  it('knows when a policy already has a women-only type', () => {
-    expect(hasWomenOnlyType([read()])).toBe(false)
-    expect(hasWomenOnlyType([read(), read({ eligibility: 'women' })])).toBe(true)
+  it('knows when a policy already has period leave, switched off too', () => {
+    expect(hasPeriodLeave([read()])).toBe(false)
+    // Maternity leave is gender-limited too, but isn't period leave.
+    expect(hasPeriodLeave([read({ code: 'ML', eligible_genders: ['female'] })])).toBe(false)
+    expect(hasPeriodLeave([read({ code: 'PERIOD', is_active: false })])).toBe(true)
   })
 })
 
 describe('type rule tags and history', () => {
   it('lists only the special rules', () => {
     expect(typeRuleTags(read())).toEqual([])
-    expect(typeRuleTags(read({ ...periodLeave() }))).toEqual(['Women only', 'Auto-approved', '1 day a month'])
+    expect(typeRuleTags(read({ ...periodLeave() }))).toEqual(['Female only', 'Auto-approved', '1 day a month'])
   })
 
   it('reads the new fields in the change log', () => {
     expect(
-      changeLines({ eligibility: ['everyone', 'women'], auto_approve: [false, true], monthly_limit_days: [null, '1.0'] }),
-    ).toEqual(['Who can use it: everyone → women only', 'Approved automatically: no → yes', 'Most days in a month: 1'])
+      changeLines({ eligible_genders: [null, ['female', 'non_binary']], auto_approve: [false, true], monthly_limit_days: [null, '1.0'] }),
+    ).toEqual(['Who can use it: Female, Non-binary only', 'Approved automatically: no → yes', 'Most days in a month: 1'])
   })
 })
 
@@ -87,5 +89,11 @@ describe('validMonthlyLimit', () => {
     expect(validMonthlyLimit(0)).toBe(false)
     expect(validMonthlyLimit(0.25)).toBe(false)
     expect(validMonthlyLimit(40)).toBe(false)
+    expect(validMonthlyLimit(0.75)).toBe(false)
+    expect(validMonthlyLimit(1.25)).toBe(false)
+    expect(validMonthlyLimit(0.5)).toBe(true)
+    expect(validMonthlyLimit(31)).toBe(true)
+    expect(validMonthlyLimit(31.5)).toBe(false)
+    expect(validMonthlyLimit('abc')).toBe(false)
   })
 })

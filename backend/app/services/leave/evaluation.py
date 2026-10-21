@@ -121,4 +121,7 @@ async def evaluate(
             "Nobody can approve this yet: you have no manager and no one else has the HR role. "
             "Ask the org owner to set your manager or give someone the HR role.",
         )
+    # Something to fix first: don't also promise it will be approved.
+    if result.problems:
+        result.auto_approved = False
     return result

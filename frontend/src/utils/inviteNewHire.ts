@@ -13,28 +13,16 @@
 // limitations under the License.
 
 /** Helpers for HR inviting a new hire: which roles to offer, and a temporary password. */
-import type { PermissionItem, RoleOption } from '@/stores/members'
-
-/** The API sends permission keys as ``resource_id``; older code reads ``resourceId``. */
-function permissionKey(permission: PermissionItem): string {
-  const raw = permission as PermissionItem & { resource_id?: string }
-  return raw.resource_id ?? raw.resourceId
-}
+import type { RoleOption } from '@/stores/members'
 
 /**
- * Roles the inviter can hand out: never the owner role, and only roles whose
- * permissions they hold themselves (the server refuses anything wider, so
- * offering it would only end in an error). The owner can give any other role.
+ * The roles the inviter may hand out, in list order. The server decides
+ * (``GET /roles/assignable``, the same grant ceiling the invite enforces),
+ * so the picker never offers a role that would only end in an error.
  */
-export function grantableRoles(
-  roles: readonly RoleOption[],
-  mine: readonly string[],
-  isOwner: boolean,
-): RoleOption[] {
-  const held = new Set(mine)
-  return roles.filter(
-    role => role.name !== 'org_owner' && (isOwner || role.permissions.every(p => held.has(permissionKey(p)))),
-  )
+export function offeredRoles(roles: readonly RoleOption[], assignable: readonly string[]): RoleOption[] {
+  const allowed = new Set(assignable)
+  return roles.filter(role => allowed.has(role.id))
 }
 
 /** "sales" → "Sales", "tech_lead" → "Tech lead", "hr" → "HR". */

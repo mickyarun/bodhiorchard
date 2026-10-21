@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import uuid
 from datetime import timedelta
 from decimal import Decimal
 
@@ -25,7 +24,7 @@ from httpx import AsyncClient
 
 from app.models.employee_profile import Gender
 from app.models.leave_request import ApprovalMode, LeaveStatus
-from app.models.leave_type import LeaveEligibility, LeaveType
+from app.models.leave_type import LeaveType
 from app.repositories.employee_profile import EmployeeProfileRepository
 from app.services.leave.errors import LeaveConflictError
 from app.services.leave.lifecycle import submit
@@ -40,44 +39,28 @@ from tests.integration.leave_support import (
     report_to,
     setup_org,
 )
+from tests.integration.period_support import add_period_leave
 
 pytestmark = pytest.mark.integration
 LEAVE = "/api/v1/leave"
 
 
-async def _period_leave(factory: Factory, org: uuid.UUID, woman: uuid.UUID) -> uuid.UUID:
-    """Adds period leave to the default policy and marks ``woman`` as female."""
-    async with factory() as db:
-        policy = await ensure_default_policy(db, org)
-        period = LeaveType(
-            org_id=org, policy_id=policy.id, name="Period leave", code="PERIOD",
-            annual_quota_days=Decimal("12"), eligibility=LeaveEligibility.WOMEN,
-            auto_approve=True, monthly_limit_days=Decimal("1"), counts_toward_warning=False,
-        )  # fmt: skip
-        db.add(period)
-        profile = await EmployeeProfileRepository(db, org_id=org).get_by_user(woman)
-        assert profile is not None
-        profile.gender = Gender.FEMALE
-        await db.commit()
-        return period.id
-
-
 async def test_only_women_see_and_can_request_it(pg_session_factory: Factory) -> None:
     org, (woman, man), _casual = await setup_org(pg_session_factory, "Asha", "Ravi")
-    period = await _period_leave(pg_session_factory, org, woman)
+    period = await add_period_leave(pg_session_factory, org, woman)
     mon = month_mondays()[0]
     async with pg_session_factory() as db:
         hers = await build_summary(db, org, woman, None)
         his = await build_summary(db, org, man, None)
         assert "Period leave" in {b.leave_type.name for b in hers.balances}
         assert "Period leave" not in {b.leave_type.name for b in his.balances}
-        with pytest.raises(LeaveConflictError, match="isn't available to you"):
+        with pytest.raises(LeaveConflictError, match="isn't available on your policy"):
             await submit(db, org, man, leave_body(period, mon, mon))
 
 
 async def test_approved_at_once_even_with_no_manager(pg_session_factory: Factory) -> None:
     org, (woman,), _casual = await setup_org(pg_session_factory, "Asha")
-    period = await _period_leave(pg_session_factory, org, woman)
+    period = await add_period_leave(pg_session_factory, org, woman)
     mon = month_mondays()[0]
     async with pg_session_factory() as db:
         request, _ = await submit(db, org, woman, leave_body(period, mon, mon))
@@ -91,7 +74,7 @@ async def test_one_day_a_month_and_unused_days_do_not_carry(
     pg_session_factory: Factory,
 ) -> None:
     org, (woman,), _casual = await setup_org(pg_session_factory, "Asha")
-    period = await _period_leave(pg_session_factory, org, woman)
+    period = await add_period_leave(pg_session_factory, org, woman)
     first, second, _third = month_mondays()
     async with pg_session_factory() as db:
         # Two days at once is over the limit, even with nothing booked yet.
@@ -105,7 +88,7 @@ async def test_one_day_a_month_and_unused_days_do_not_carry(
         next_month = month_mondays(3)
         await submit(db, org, woman, leave_body(period, next_month[0], next_month[0]))
         await db.commit()
-        with pytest.raises(LeaveConflictError):
+        with pytest.raises(LeaveConflictError, match="already have 1 day booked"):
             await submit(db, org, woman, leave_body(period, next_month[1], next_month[1]))
 
 
@@ -122,7 +105,7 @@ async def test_hr_sets_it_up_over_the_api(
         await db.commit()
     body = {
         "name": "Period leave", "code": "PERIOD", "annual_quota_days": "12",
-        "eligibility": "women", "auto_approve": True, "monthly_limit_days": "1",
+        "eligible_genders": ["female"], "auto_approve": True, "monthly_limit_days": "1",
         "counts_toward_warning": False,
     }  # fmt: skip
     created = await client.post(
@@ -130,7 +113,7 @@ async def test_hr_sets_it_up_over_the_api(
     )
     assert created.status_code == 201, created.text
     period = created.json()
-    assert period["eligibility"] == "women" and period["auto_approve"] is True
+    assert period["eligible_genders"] == ["female"] and period["auto_approve"] is True
     assert Decimal(period["monthly_limit_days"]) == 1
     mon = month_mondays()[0]
     sent = await client.post(
@@ -153,7 +136,7 @@ async def test_hr_sets_it_up_over_the_api(
 async def test_unpaid_days_still_go_to_a_manager(pg_session_factory: Factory) -> None:
     org, (woman, mgr), _casual = await setup_org(pg_session_factory, "Asha", "Mgr")
     await report_to(pg_session_factory, org, woman, mgr)
-    period = await _period_leave(pg_session_factory, org, woman)
+    period = await add_period_leave(pg_session_factory, org, woman)
     async with pg_session_factory() as db:
         leave_type = await db.get(LeaveType, period)
         assert leave_type is not None

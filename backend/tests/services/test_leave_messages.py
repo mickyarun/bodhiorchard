@@ -67,7 +67,7 @@ def test_auto_approved_wfh_reads_as_fyi() -> None:
 def test_auto_approved_leave_never_names_the_type() -> None:
     one_day = _request(end_date=date(2026, 10, 19), days=Decimal("1"))
     text = compose_request_message("Asha", one_day, auto_approved=True)  # type: ignore[arg-type]
-    assert text == "Asha is on leave Mon 19 Oct (1 day). It was approved automatically."
+    assert text == "Asha is on leave Mon 19 Oct (1 day)."
 
 
 def test_auto_approved_heads_up_keeps_the_high_leave_line() -> None:

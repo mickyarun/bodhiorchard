@@ -36,6 +36,7 @@ from app.services.leave.member_balances import (
     require_member,
 )
 from app.services.leave.permissions import CONFIGURE
+from app.services.leave.type_privacy import sees_restricted
 
 router = APIRouter(tags=["leave"])
 
@@ -50,7 +51,9 @@ async def get_member_balances(
 ) -> MemberBalances:
     """Balances and ledger: for the member, their managers, and HR."""
     await _require_balance_access(db, current_user, perms, user_id)
-    return await member_balances(db, current_user.org_id, user_id, year)
+    return await member_balances(
+        db, current_user.org_id, user_id, year, sees_restricted=_sees(current_user, perms, user_id)
+    )
 
 
 async def _require_balance_access(
@@ -66,6 +69,11 @@ async def _require_balance_access(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="You can't see this person's balances."
         )
+
+
+def _sees(current_user: User, perms: PermissionSet, user_id: uuid.UUID) -> bool:
+    """Gender-limited types: shown to the member and to those who see personal details."""
+    return current_user.id == user_id or sees_restricted(perms)
 
 
 def _change(
@@ -97,7 +105,13 @@ async def adjust_balance(
     await _require_balance_access(db, current_user, perms, user_id)
     change = _change(current_user, perms, user_id, body.leave_type_id, body.leave_year)
     label = await adjustments.adjust(db, change, body.days, body.note)
-    return await member_balances(db, current_user.org_id, user_id, label)
+    return await member_balances(
+        db,
+        current_user.org_id,
+        user_id,
+        label,
+        sees_restricted=_sees(current_user, perms, user_id),
+    )
 
 
 @router.post("/balances/{user_id}/recalculate", response_model=RecalculateResult)
@@ -116,5 +130,11 @@ async def recalculate_allocation(
         frozen=result.frozen,
         recalculated=result.recalculated,
         correction=result.correction,
-        balances=await member_balances(db, current_user.org_id, user_id, result.leave_year),
+        balances=await member_balances(
+            db,
+            current_user.org_id,
+            user_id,
+            result.leave_year,
+            sees_restricted=_sees(current_user, perms, user_id),
+        ),
     )

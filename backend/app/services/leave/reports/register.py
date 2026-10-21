@@ -34,6 +34,7 @@ from app.services.leave.calendar_math import leave_year_bounds, leave_year_by_la
 from app.services.leave.policies import resolve_member_policy, today_for
 from app.services.leave.report_scope import ReportScope
 from app.services.leave.reports.population import people, scoped_ids
+from app.services.leave.type_privacy import shown
 
 REGISTER_CAP = 5_000
 UNKNOWN_NAME = "Unknown"
@@ -42,7 +43,16 @@ UNKNOWN_NAME = "Unknown"
 async def register_report(
     db: AsyncSession, org_id: uuid.UUID, scope: ReportScope, f: RegisterFilters
 ) -> RegisterReport:
-    """Requests in the range within ``scope``, by start date; at most REGISTER_CAP."""
+    """Requests in the range within ``scope``, by start date; at most REGISTER_CAP.
+
+    Gender-limited types show as plain leave unless the scope may see them;
+    filtering on one then finds nothing (it would list who took it).
+    """
+    type_repo = LeaveTypeRepository(db, org_id=org_id)
+    if f.leave_type_id and not scope.sees_restricted:
+        asked = await type_repo.get_by_id(f.leave_type_id)
+        if asked is not None and not shown(asked, sees_all=False):
+            return RegisterReport(rows=[], truncated=False)
     ids = await scoped_ids(db, org_id, scope, f)
     if f.department or f.office_id:
         place = PeopleFilters(department=f.department, office_id=f.office_id)
@@ -63,13 +73,13 @@ async def register_report(
     names = await UserRepository(db).get_names_by_ids(
         users | {r.decided_by for r in requests if r.decided_by}
     )
-    types = await LeaveTypeRepository(db, org_id=org_id).by_ids(
-        {r.leave_type_id for r in requests if r.leave_type_id}
-    )
+    types = await type_repo.by_ids({r.leave_type_id for r in requests if r.leave_type_id})
     rows = []
     for r in requests:
         profile = profiles.get(r.user_id)
         leave_type = types.get(r.leave_type_id) if r.leave_type_id else None
+        if not shown(leave_type, sees_all=scope.sees_restricted):
+            leave_type = None
         rows.append(
             RegisterRow(
                 request_id=r.id,
@@ -100,6 +110,7 @@ async def member_history(
     user_id: uuid.UUID,
     year: int | None,
     *,
+    sees_restricted: bool,
     kind: LeaveKind | None = None,
     status: LeaveStatus | None = None,
 ) -> RegisterReport:
@@ -111,4 +122,5 @@ async def member_history(
         else leave_year_bounds(today_for(policy), policy.year_start_month)
     )
     filters = RegisterFilters(start=bounds.start, end=bounds.end, kind=kind, status=status)
-    return await register_report(db, org_id, ReportScope(frozenset({user_id})), filters)
+    scope = ReportScope(frozenset({user_id}), sees_restricted)
+    return await register_report(db, org_id, scope, filters)

@@ -152,7 +152,8 @@ async def apply_balance(
         result.problem("inactive_type", "That leave type isn't available on your policy.")
         return
     if not can_use(leave_type, member.profile):
-        result.problem("not_eligible", "That leave type isn't available to you.")
+        # Same answer as a type that doesn't exist: don't confirm it's there.
+        result.problem("inactive_type", "That leave type isn't available on your policy.")
         return
     result.leave_type = leave_type
     year = leave_year_bounds(result.start, policy.year_start_month)

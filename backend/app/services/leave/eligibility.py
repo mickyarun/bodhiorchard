@@ -14,23 +14,24 @@
 
 """Who on a policy can see and request a leave type (pure).
 
-A type for women only (period leave) is hidden from everyone else: it's
-not on their balance cards or in their request dialog, and a request for
-it is refused. Someone with no gender on their profile can't use it until
-HR fills it in.
+A type limited to some genders (period leave: female) is hidden from
+everyone else: it's not on their balance cards or in their request
+dialog, and a request for it is refused. Someone with no gender on their
+profile can't use it until HR fills it in.
 """
 
 from collections.abc import Iterable
 
-from app.models.employee_profile import EmployeeProfile, Gender
-from app.models.leave_type import LeaveEligibility, LeaveType
+from app.models.employee_profile import EmployeeProfile
+from app.models.leave_type import LeaveType
 
 
 def can_use(leave_type: LeaveType, profile: EmployeeProfile | None) -> bool:
     """True if this person may see and request ``leave_type``."""
-    if leave_type.eligibility == LeaveEligibility.EVERYONE:
+    allowed = leave_type.eligible_genders
+    if allowed is None:
         return True
-    return profile is not None and profile.gender == Gender.FEMALE
+    return profile is not None and profile.gender in allowed
 
 
 def usable_types(types: Iterable[LeaveType], profile: EmployeeProfile | None) -> list[LeaveType]:

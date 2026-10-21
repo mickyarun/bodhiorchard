@@ -23,7 +23,7 @@
     caption="What people on this policy can request, and how many days they get each leave year."
   >
     <template v-if="store.types.length" #actions>
-      <v-btn v-if="!hasWomenOnlyType(store.types)" variant="text" prepend-icon="mdi-water-outline" @click="addPeriodLeave">
+      <v-btn v-if="!hasPeriodLeave(store.types)" variant="text" prepend-icon="mdi-water-outline" @click="addPeriodLeave">
         Add period leave
       </v-btn>
       <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="edit(null)">Add leave type</v-btn>
@@ -71,7 +71,7 @@ import LeaveTypeTable from '@/components/leave/settings/LeaveTypeTable.vue'
 import { useLeavePolicyConfigStore } from '@/stores/leavePolicyConfig'
 import type { LeaveTypeRead, LeaveTypeWrite, PolicyRead } from '@/types/leavePolicy'
 import { splitLeaveTypes } from '@/utils/leavePolicyDisplay'
-import { hasWomenOnlyType, periodLeave } from '@/utils/leaveTypeDraft'
+import { hasPeriodLeave, periodLeave } from '@/utils/leaveTypeDraft'
 
 const props = defineProps<{ policy: PolicyRead }>()
 

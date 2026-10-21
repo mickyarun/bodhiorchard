@@ -20,12 +20,22 @@
   <div class="access">
     <div class="who">
       <span class="text-body-2 font-weight-medium">Who can use it</span>
-      <AppPillToggle v-model="eligibility" :options="WHO" aria-label="Who can use it" />
+      <AppPillToggle v-model="mode" :options="WHO" aria-label="Who can use it" />
     </div>
+    <v-chip-group v-if="genders" v-model="genders" multiple column selected-class="text-primary" aria-label="Genders">
+      <v-chip v-for="option in GENDERS" :key="option.value" :value="option.value" filter variant="outlined" size="small">
+        {{ option.label }}
+      </v-chip>
+    </v-chip-group>
     <p class="text-caption text-medium-emphasis">
-      {{ eligibility === 'women' ? "Only people whose profile gender is Female see it. Set gender on each person's Personal tab." : 'Everyone on the policy.' }}
+      {{ genders ? whoHint : 'Everyone on the policy.' }}
     </p>
-    <LeaveSwitchRow v-model="autoApprove" label="Approve automatically" description="Approved as soon as it's sent, unless it would be unpaid. Managers get a heads-up." />
+    <LeaveSwitchRow
+      v-model="autoApprove"
+      :disabled="!canApprove"
+      label="Approve automatically"
+      :description="canApprove ? 'Approved as soon as it\'s sent, unless it would be unpaid. Managers get a heads-up.' : 'Only people who approve leave can switch this on.'"
+    />
     <LeaveSwitchRow v-model="limited" label="Limit days per month" description="Unused days don't carry into the next month." />
     <v-text-field
       v-if="limited"
@@ -46,18 +56,39 @@
 import { computed } from 'vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import LeaveSwitchRow from '@/components/leave/settings/LeaveSwitchRow.vue'
-import type { Decimalish, LeaveEligibility } from '@/types/leave'
+import { usePermissions } from '@/composables/usePermissions'
+import type { Gender } from '@/types/employee'
+import type { Decimalish } from '@/types/leave'
+import { GENDER_LABELS } from '@/utils/employee'
 import { toNumberOrNull } from '@/utils/leave'
-import { FIELD_PROPS } from '@/utils/leavePolicyDisplay'
+import { FIELD_PROPS, gendersLabel } from '@/utils/leavePolicyDisplay'
 
-const eligibility = defineModel<LeaveEligibility>('eligibility', { required: true })
+type Who = 'everyone' | 'some'
+
+const genders = defineModel<Gender[] | null>('genders', { required: true })
 const autoApprove = defineModel<boolean>('autoApprove', { required: true })
 const monthlyLimit = defineModel<Decimalish | null>('monthlyLimit', { required: true })
 
-const WHO: { label: string; value: LeaveEligibility }[] = [
+const { canApproveLeave: canApprove } = usePermissions()
+
+const WHO: { label: string; value: Who }[] = [
   { label: 'Everyone', value: 'everyone' },
-  { label: 'Women only', value: 'women' },
+  { label: 'Some genders', value: 'some' },
 ]
+const GENDERS = (Object.keys(GENDER_LABELS) as Gender[]).map(value => ({ value, label: GENDER_LABELS[value] }))
+
+const mode = computed<Who>({
+  get: () => (genders.value ? 'some' : 'everyone'),
+  set: value => {
+    genders.value = value === 'some' ? ['female'] : null
+  },
+})
+
+const whoHint = computed(() =>
+  genders.value?.length
+    ? `Only people whose profile gender is ${gendersLabel(genders.value)} see it. Set gender on each person's Personal tab.`
+    : 'Pick at least one.',
+)
 
 const limited = computed<boolean>({
   get: () => monthlyLimit.value !== null,

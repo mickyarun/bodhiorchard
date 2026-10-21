@@ -51,7 +51,7 @@ function type(overrides: Partial<LeaveTypeRead> = {}): LeaveTypeRead {
     accrual: 'upfront',
     is_encashable: false,
     counts_toward_warning: true,
-    eligibility: 'everyone',
+    eligible_genders: null,
     auto_approve: false,
     monthly_limit_days: null,
     is_paid: true,

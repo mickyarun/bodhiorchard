@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.permission_deps import PermissionSet
 from app.models.user import User
 from app.repositories.leave_ledger import LeaveLedgerRepository
+from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.user import UserRepository
 from app.schemas.leave import PersonRef
 from app.schemas.leave_policy import LedgerEntryRead, MemberBalances
@@ -30,6 +31,7 @@ from app.services.leave.errors import LeaveNotFoundError
 from app.services.leave.policies import resolve_member_policy, today_for
 from app.services.leave.report_scope import may_view_member_leave
 from app.services.leave.summary import balance_schema, year_schema
+from app.services.leave.type_privacy import is_restricted, visible
 
 
 async def require_member(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> None:
@@ -50,9 +52,18 @@ async def may_view_balances(
 
 
 async def member_balances(
-    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, year_label: int | None
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    year_label: int | None,
+    *,
+    sees_restricted: bool,
 ) -> MemberBalances:
-    """A member's balances and ledger for one leave year (the current one by default)."""
+    """A member's balances and ledger for one leave year (the current one by default).
+
+    Gender-limited types, and their ledger rows, are left out unless
+    ``sees_restricted`` (:mod:`app.services.leave.type_privacy`).
+    """
     member = await resolve_member_policy(db, org_id, user_id)
     policy = member.policy
     today = today_for(policy)
@@ -69,7 +80,14 @@ async def member_balances(
         year=year,
         on=day_in_year(today, year),
     )
+    if not sees_restricted:
+        lines = [line for line in lines if not is_restricted(line.leave_type)]
     entries = await LeaveLedgerRepository(db, org_id=org_id).list_for(user_id, year.label)
+    if not sees_restricted:
+        types = await LeaveTypeRepository(db, org_id=org_id).by_ids(
+            {e.leave_type_id for e in entries}
+        )
+        entries = visible(entries, lambda e: types.get(e.leave_type_id), sees_all=False)
     names = await UserRepository(db).get_names_by_ids(
         {user_id} | {e.created_by for e in entries if e.created_by}
     )

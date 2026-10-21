@@ -34,14 +34,31 @@ from app.repositories.leave_type import LeaveTypeRepository
 from app.schemas.leave_policy import LeaveTypeWrite
 from app.services.leave import config_audit
 from app.services.leave.calendar_math import leave_year_bounds
-from app.services.leave.errors import LeaveConflictError
+from app.services.leave.errors import LeaveConflictError, LeaveForbiddenError
 from app.services.leave.policies import today_for
+
+# Only people who approve leave may set up leave that needs nobody's approval:
+# otherwise a policy admin could book themselves leave no one ever decides.
+AUTO_APPROVE_DENIED = (
+    "Only people who approve leave can make a type approve itself. Ask HR or the org owner."
+)
+
+
+def _check_auto_approve(body: LeaveTypeWrite, may_approve: bool) -> None:
+    if body.auto_approve and not may_approve:
+        raise LeaveForbiddenError(AUTO_APPROVE_DENIED)
 
 
 async def create_type(
-    db: AsyncSession, policy: LeavePolicy, actor_id: uuid.UUID, body: LeaveTypeWrite
+    db: AsyncSession,
+    policy: LeavePolicy,
+    actor_id: uuid.UUID,
+    body: LeaveTypeWrite,
+    *,
+    may_approve: bool,
 ) -> LeaveType:
     """Add a leave type to a policy."""
+    _check_auto_approve(body, may_approve)
     repo = LeaveTypeRepository(db, org_id=policy.org_id)
     if await repo.code_taken(policy.id, body.code, exclude=None):
         raise LeaveConflictError(f"The code {body.code} is already used on this policy.")
@@ -59,9 +76,19 @@ async def create_type(
 
 
 async def update_type(
-    db: AsyncSession, leave_type: LeaveType, actor_id: uuid.UUID, body: LeaveTypeWrite
+    db: AsyncSession,
+    leave_type: LeaveType,
+    actor_id: uuid.UUID,
+    body: LeaveTypeWrite,
+    *,
+    may_approve: bool,
 ) -> None:
-    """Edit a type's name, code, quota, colour or active flag."""
+    """Edit a type's name, code, quota, colour or active flag.
+
+    A type that approves itself can only be edited by someone who approves
+    leave: raising its allowance is as good as approving the extra days.
+    """
+    _check_auto_approve(body, may_approve)
     repo = LeaveTypeRepository(db, org_id=leave_type.org_id)
     if await repo.code_taken(leave_type.policy_id, body.code, exclude=leave_type.id):
         raise LeaveConflictError(f"The code {body.code} is already used on this policy.")

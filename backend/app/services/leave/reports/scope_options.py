@@ -27,6 +27,7 @@ from app.services.leave.policies import today_for
 from app.services.leave.report_scope import ReportScope
 from app.services.leave.reports.population import people
 from app.services.leave.reports.summary import type_refs
+from app.services.leave.type_privacy import visible
 
 
 async def scope_options(
@@ -39,7 +40,11 @@ async def scope_options(
     per_policy = await LeaveTypeRepository(db, org_id=org_id).list_for_policies(
         policies, active_only=True
     )
-    types = [t for per in per_policy.values() for t in per]
+    types = visible(
+        (t for per in per_policy.values() for t in per),
+        lambda t: t,
+        sees_all=scope.sees_restricted,
+    )
     names = {pid: policy.name for pid, policy in policies.items()}
     return ReportScopeRead(
         all=scope.is_all,

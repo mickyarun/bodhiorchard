@@ -45,6 +45,7 @@ from app.services.leave.reports.attribution import InRange, Span, within
 from app.services.leave.reports.balance_lines import balance_lines
 from app.services.leave.reports.population import Person, people, scoped_ids
 from app.services.leave.reports.type_columns import type_columns
+from app.services.leave.type_privacy import visible
 
 REQUEST_CAP = 20_000
 ZERO = Decimal("0")
@@ -157,7 +158,16 @@ async def summary_report(
         if (level := assess(policy_of[user], days)) is not None
     }
     used = {t for per in by_type.values() for t in per}
-    columns = type_columns(await _types(db, org_id, persons, used))
+    # Hidden types get no column; their days still count in the leave total.
+    types = visible(
+        await _types(db, org_id, persons, used), lambda t: t, sees_all=scope.sees_restricted
+    )
+    columns = type_columns(types)
+    shown_ids = set(columns.key_of)
+    by_type = {
+        user: {t: d for t, d in per.items() if t in shown_ids} for user, per in by_type.items()
+    }
+    left = {user: {t: d for t, d in per.items() if t in shown_ids} for user, per in left.items()}
     return SummaryReport(
         start=f.start,
         end=f.end,

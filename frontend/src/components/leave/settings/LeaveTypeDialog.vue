@@ -22,7 +22,7 @@
       <div class="d-flex align-start ga-2 pa-6 pb-2">
         <div class="flex-grow-1">
           <h2 class="text-h6 font-weight-bold">{{ type ? 'Edit leave type' : 'Add leave type' }}</h2>
-          <p class="text-body-2 text-medium-emphasis">Applies to {{ draft.eligibility === 'women' ? 'women' : 'everyone' }} on {{ policyName }}.</p>
+          <p class="text-body-2 text-medium-emphasis">Applies to {{ draft.eligible_genders ? `people recorded as ${gendersLabel(draft.eligible_genders)}` : 'everyone' }} on {{ policyName }}.</p>
         </div>
         <v-btn icon="mdi-close" variant="text" size="small" aria-label="Close" @click="close" />
       </div>
@@ -50,7 +50,10 @@
           </div>
           <div class="group" role="group" :aria-labelledby="ids.access">
             <div :id="ids.access" class="group__title text-overline text-medium-emphasis">Who &amp; approval</div>
-            <LeaveTypeAccessFields v-model:eligibility="draft.eligibility" v-model:auto-approve="draft.auto_approve" v-model:monthly-limit="draft.monthly_limit_days" />
+            <LeaveTypeAccessFields v-model:genders="draft.eligible_genders" v-model:auto-approve="draft.auto_approve" v-model:monthly-limit="draft.monthly_limit_days" />
+            <p v-if="draft.auto_approve && unlimited" class="text-caption text-error mt-1">
+              A type that approves itself needs a yearly allowance, so extra days still go to a manager.
+            </p>
           </div>
           <div class="group" role="group" :aria-labelledby="ids.appearance">
             <div :id="ids.appearance" class="group__title text-overline text-medium-emphasis">Appearance &amp; status</div>
@@ -90,7 +93,7 @@ import LeaveTypeColorPicker from '@/components/leave/settings/LeaveTypeColorPick
 import { useLeavePolicyConfigStore } from '@/stores/leavePolicyConfig'
 import type { LeaveTypeRead, LeaveTypeWrite } from '@/types/leavePolicy'
 import { codeFromName, toNumberOrNull } from '@/utils/leave'
-import { FIELD_PROPS } from '@/utils/leavePolicyDisplay'
+import { FIELD_PROPS, gendersLabel } from '@/utils/leavePolicyDisplay'
 import { blankType, draftFromType, validMonthlyLimit } from '@/utils/leaveTypeDraft'
 
 const props = defineProps<{
@@ -119,7 +122,9 @@ const valid = computed(
     !!draft.value.name.trim() &&
     !!draft.value.code.trim() &&
     (unlimited.value || (typeof quota.value === 'number' && quota.value >= 0 && quota.value <= 365)) &&
-    validMonthlyLimit(draft.value.monthly_limit_days),
+    validMonthlyLimit(draft.value.monthly_limit_days) &&
+    (draft.value.eligible_genders === null || draft.value.eligible_genders.length > 0) &&
+    !(draft.value.auto_approve && unlimited.value),
 )
 
 watch(

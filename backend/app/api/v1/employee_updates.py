@@ -56,6 +56,11 @@ OFFICE_CONSTRAINT = "fk_employee_profiles_office"
 router = APIRouter(tags=["employees"])
 
 OWN_WORK = "You can't change your own work details or managers. Ask another HR member."
+# Gender decides who can use some leave types (period leave), so it's guarded
+# like work details: nobody sets their own and with it their own entitlement.
+OWN_GENDER = (
+    "You can't change your own gender here: it decides which leave you get. Ask another HR member."
+)
 
 
 @router.put("/{user_id}/name", response_model=EmployeeRead)
@@ -145,9 +150,12 @@ async def update_personal(
     perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> EmployeeRead:
-    """Replace the personal details (HR)."""
+    """Replace the personal details (HR). Not your own gender, unless you're the owner."""
     org_id = current_user.org_id
     profile, user = await load_record(db, org_id, user_id)
+    own = user_id == current_user.id and not perms.is_owner
+    if own and body.gender != profile.gender:
+        raise forbid(OWN_GENDER)
     for field, value in body.model_dump().items():
         setattr(profile, field, value)
     await db.flush()

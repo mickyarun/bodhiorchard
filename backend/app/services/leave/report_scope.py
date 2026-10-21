@@ -29,6 +29,7 @@ from app.models.user import User
 from app.services.leave.approvers import reports_of
 from app.services.leave.errors import LeaveForbiddenError
 from app.services.leave.permissions import APPROVE, REPORTS
+from app.services.leave.type_privacy import sees_restricted
 
 NO_REPORTS = "You can see leave reports for your direct reports, and you have none."
 
@@ -38,6 +39,8 @@ class ReportScope:
     """Everyone (``user_ids`` None) or a fixed set of members."""
 
     user_ids: frozenset[uuid.UUID] | None
+    # May see gender-limited leave types (:mod:`app.services.leave.type_privacy`).
+    sees_restricted: bool = False
 
     @property
     def is_all(self) -> bool:
@@ -48,8 +51,8 @@ class ReportScope:
         if user_id is None:
             return self
         if self.user_ids is None or user_id in self.user_ids:
-            return ReportScope(frozenset({user_id}))
-        return ReportScope(frozenset())
+            return ReportScope(frozenset({user_id}), self.sees_restricted)
+        return ReportScope(frozenset(), self.sees_restricted)
 
     def allows(self, user_id: uuid.UUID) -> bool:
         return self.user_ids is None or user_id in self.user_ids
@@ -57,12 +60,13 @@ class ReportScope:
 
 async def report_scope(db: AsyncSession, viewer: User, perms: PermissionSet) -> ReportScope:
     """The members ``viewer`` may report on; LeaveForbiddenError if nobody."""
+    sees = sees_restricted(perms)
     if perms.has(REPORTS):
-        return ReportScope(None)
+        return ReportScope(None, sees)
     reports = await reports_of(db, viewer.org_id, viewer.id)
     if not reports:
         raise LeaveForbiddenError(NO_REPORTS)
-    return ReportScope(frozenset(reports))
+    return ReportScope(frozenset(reports), sees)
 
 
 async def may_view_member_leave(

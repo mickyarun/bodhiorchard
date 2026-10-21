@@ -34,8 +34,6 @@ export type HolidaySource = 'manual' | 'imported'
 export type ApprovalRoute = 'manager' | 'hr_queue' | 'hr_override'
 /** When a year's allowance becomes usable: all on day one, or a part each month. */
 export type LeaveAccrual = 'upfront' | 'monthly'
-/** Who on the policy can see and request a type: women only = profile gender Female. */
-export type LeaveEligibility = 'everyone' | 'women'
 export type RequestScope = 'upcoming' | 'past' | 'all'
 export type SwatchKey = `swatch-${1 | 2 | 3 | 4 | 5 | 6 | 7}`
 

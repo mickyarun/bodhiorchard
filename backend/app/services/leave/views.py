@@ -30,6 +30,7 @@ from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.policy_holiday import PolicyHolidayRepository
 from app.repositories.user import UserRepository
 from app.schemas.leave import LeaveRequestRead, LeaveTypeBrief, PersonRef
+from app.services.leave.type_privacy import shown
 
 
 def can_cancel(request: LeaveRequest, viewer: uuid.UUID, today: date) -> bool:
@@ -49,8 +50,13 @@ async def request_reads(
     viewer: uuid.UUID,
     today: date,
     private_ok: Callable[[LeaveRequest], bool],
+    sees_restricted: bool = False,
 ) -> list[LeaveRequestRead]:
-    """Responses for ``requests`` with names, types and holidays resolved."""
+    """Responses for ``requests`` with names, types and holidays resolved.
+
+    A gender-limited type (period leave) is named only to its requester, or
+    when ``sees_restricted`` (see :mod:`app.services.leave.type_privacy`).
+    """
     people = {r.user_id for r in requests} | {r.decided_by for r in requests if r.decided_by}
     names = await UserRepository(db).get_names_by_ids(people)
     types = await LeaveTypeRepository(db, org_id=org_id).by_ids(
@@ -63,6 +69,8 @@ async def request_reads(
     for r in requests:
         private = private_ok(r)
         leave_type = types.get(r.leave_type_id) if r.leave_type_id and private else None
+        if not shown(leave_type, sees_all=sees_restricted or r.user_id == viewer):
+            leave_type = None
         holiday = holidays.get(r.holiday_id) if r.holiday_id else None
         out.append(
             LeaveRequestRead(

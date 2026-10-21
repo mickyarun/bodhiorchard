@@ -30,6 +30,7 @@ from app.services.leave.report_scope import may_view_member_leave
 from app.services.leave.reports.csv_export import csv_filename, to_csv
 from app.services.leave.reports.csv_rows import register_rows
 from app.services.leave.reports.register import member_history
+from app.services.leave.type_privacy import sees_restricted
 
 router = APIRouter(tags=["leave"])
 
@@ -47,7 +48,15 @@ async def _history(
     await require_member(db, viewer.org_id, user_id)
     if not await may_view_member_leave(db, viewer, perms, user_id):
         raise LeaveForbiddenError("You can't see this person's leave.")
-    return await member_history(db, viewer.org_id, user_id, year, kind=kind, status=status)
+    return await member_history(
+        db,
+        viewer.org_id,
+        user_id,
+        year,
+        sees_restricted=sees_restricted(perms) or viewer.id == user_id,
+        kind=kind,
+        status=status,
+    )
 
 
 @router.get("/history/{user_id}", response_model=RegisterReport)

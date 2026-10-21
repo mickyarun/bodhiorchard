@@ -31,6 +31,7 @@ from app.services.role_grants import (
     assert_can_grant,
     assert_can_grant_permission_ids,
     assert_can_manage_role,
+    assignable_role_ids,
     log_sensitive_grant,
 )
 from app.services.role_validation import (
@@ -80,6 +81,17 @@ async def list_roles(
 ) -> list[RoleRead]:
     """List all active roles (system + this org's custom roles)."""
     return await RoleRepository(db, org_id=user.org_id).read_active()
+
+
+@router.get("/roles/assignable", response_model=list[uuid.UUID])
+async def list_assignable_roles(
+    user: User = Depends(require_permissions("team:view")),
+    perms: PermissionSet = Depends(get_permission_set),
+    db: AsyncSession = Depends(get_db),
+) -> list[uuid.UUID]:
+    """Ids of the active roles the caller may give someone (the grant ceiling's answer)."""
+    roles = await RoleRepository(db, org_id=user.org_id).list_active()
+    return await assignable_role_ids(db, perms, roles)
 
 
 @router.get("/roles/{role_id}", response_model=RoleRead)

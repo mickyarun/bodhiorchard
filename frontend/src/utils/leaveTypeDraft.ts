@@ -28,7 +28,7 @@ export function blankType(): LeaveTypeWrite {
     is_paid: true,
     is_encashable: false,
     counts_toward_warning: true,
-    eligibility: 'everyone',
+    eligible_genders: null,
     auto_approve: false,
     monthly_limit_days: null,
     color_key: SWATCH_KEYS[0],
@@ -49,7 +49,7 @@ export function periodLeave(): LeaveTypeWrite {
     name: 'Period leave',
     code: 'PERIOD',
     annual_quota_days: 12,
-    eligibility: 'women',
+    eligible_genders: ['female'],
     auto_approve: true,
     monthly_limit_days: 1,
     // Separate from other leave: it shouldn't push anyone toward the warning.
@@ -66,7 +66,8 @@ export function validMonthlyLimit(value: Decimalish | null): boolean {
   return days >= 0.5 && days <= 31 && Number.isInteger(days * 2)
 }
 
-/** True once a policy has a women-only type, so the shortcut can step aside. */
-export function hasWomenOnlyType(types: LeaveTypeRead[]): boolean {
-  return types.some(t => t.eligibility === 'women')
+/** True once a policy has period leave (on or off), so the shortcut steps aside. */
+export function hasPeriodLeave(types: LeaveTypeRead[]): boolean {
+  const code = periodLeave().code
+  return types.some(t => t.code === code)
 }

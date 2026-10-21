@@ -15,31 +15,18 @@
 import { describe, expect, it } from 'vitest'
 
 import type { RoleOption } from '@/stores/members'
-import { grantableRoles, roleLabel, temporaryPassword } from '@/utils/inviteNewHire'
+import { offeredRoles, roleLabel, temporaryPassword } from '@/utils/inviteNewHire'
 
-function role(name: string, keys: string[]): RoleOption {
-  return {
-    id: name, name, description: null, scopeType: 'SYSTEM', baseRoleId: null, baseRoleName: null,
-    // The API's own shape: resource_id, not resourceId.
-    permissions: keys.map(k => ({ resource_id: k }) as unknown as RoleOption['permissions'][number]),
-  }
+function role(name: string): RoleOption {
+  return { id: name, name, description: null, scopeType: 'SYSTEM', baseRoleId: null, baseRoleName: null, permissions: [] }
 }
 
-const ROLES = [
-  role('org_owner', []),
-  role('sales', []),
-  role('hr', ['leave:approve', 'employees:manage', 'team:invite']),
-  role('developer', ['workspace:engineering', 'buds:edit']),
-]
+const ROLES = ['admin', 'sales', 'hr', 'developer'].map(role)
 
-describe('grantableRoles', () => {
-  it('offers HR only roles within its own permissions, never the owner role', () => {
-    const hr = ['leave:approve', 'employees:manage', 'team:invite', 'team:view']
-    expect(grantableRoles(ROLES, hr, false).map(r => r.name)).toEqual(['sales', 'hr'])
-  })
-
-  it('lets the owner give any role but owner', () => {
-    expect(grantableRoles(ROLES, [], true).map(r => r.name)).toEqual(['sales', 'hr', 'developer'])
+describe('offeredRoles', () => {
+  it('offers only what the server says the inviter may give, in list order', () => {
+    expect(offeredRoles(ROLES, ['developer', 'sales', 'hr']).map(r => r.name)).toEqual(['sales', 'hr', 'developer'])
+    expect(offeredRoles(ROLES, [])).toEqual([])
   })
 })
 

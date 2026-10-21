@@ -40,6 +40,7 @@ from app.services.leave.approvers import Approvers, approvers_for_many, route_fo
 from app.services.leave.balance_after import balances_after
 from app.services.leave.high_leave import for_requests
 from app.services.leave.permissions import APPROVE
+from app.services.leave.type_privacy import sees_restricted
 from app.services.leave.views import request_reads
 
 DECIDED_WINDOW = timedelta(days=90)
@@ -119,8 +120,15 @@ async def approval_items(
     allowed = found.allowed
     requests = [r for r, _ in allowed]
     today = datetime.now(UTC).date()
+    sees = sees_restricted(perms)
     reads = await request_reads(
-        db, org_id, requests, viewer=actor, today=today, private_ok=lambda _r: True
+        db,
+        org_id,
+        requests,
+        viewer=actor,
+        today=today,
+        private_ok=lambda _r: True,
+        sees_restricted=sees,
     )
     profiles = await EmployeeProfileRepository(db, org_id=org_id).by_users(
         {r.user_id for r in requests}
@@ -133,7 +141,11 @@ async def approval_items(
         else {}
     )
     users = {r.user_id for r in requests}
-    context = await requester_context(db, org_id, users, today) if pending else RequesterContext()
+    context = (
+        await requester_context(db, org_id, users, today, sees_all=sees)
+        if pending
+        else RequesterContext()
+    )
     high = await for_requests(db, org_id, requests) if pending else {}
     items = []
     for (request, route), read in zip(allowed, reads, strict=True):

@@ -20,8 +20,9 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.models.employee_profile import Gender
 from app.models.leave_policy import AllocationRounding, ProrationMethod, WfhApproval
-from app.models.leave_type import LeaveAccrual, LeaveEligibility
+from app.models.leave_type import LeaveAccrual
 from app.models.policy_holiday import HolidayKind, HolidaySource
 from app.schemas.leave import PersonRef
 from app.schemas.leave_summary import Balance, LeaveYear
@@ -96,8 +97,8 @@ class LeaveTypeWrite(BaseModel):
     is_paid: bool = True
     is_encashable: bool = False
     counts_toward_warning: bool = True
-    # Who on the policy can see and request it.
-    eligibility: LeaveEligibility = LeaveEligibility.EVERYONE
+    # Only these profile genders can see and request it; None = everyone.
+    eligible_genders: list[Gender] | None = None
     auto_approve: bool = False
     # At most this many days in a calendar month, with no carry-over; None = no limit.
     monthly_limit_days: Decimal | None = Field(None, ge=0.5, le=31, decimal_places=1)
@@ -108,6 +109,29 @@ class LeaveTypeWrite(BaseModel):
     @classmethod
     def _code(cls, value: str) -> str:
         return value.strip().upper()
+
+    @field_validator("eligible_genders")
+    @classmethod
+    def _genders(cls, value: list[Gender] | None) -> list[Gender] | None:
+        if value is None:
+            return None
+        if not value:
+            raise ValueError("Pick at least one gender, or let everyone use it.")
+        return sorted(set(value))
+
+    @field_validator("monthly_limit_days")
+    @classmethod
+    def _half_days(cls, value: Decimal | None) -> Decimal | None:
+        if value is not None and (value * 2) % 1:
+            raise ValueError("Use whole or half days, e.g. 1 or 1.5.")
+        return value
+
+    @model_validator(mode="after")
+    def _auto_needs_allowance(self) -> "LeaveTypeWrite":
+        # Unlimited leave that approves itself would need nobody's say at all.
+        if self.auto_approve and self.annual_quota_days is None:
+            raise ValueError("A type that approves itself needs a yearly allowance.")
+        return self
 
 
 class LeaveTypeRead(LeaveTypeWrite):
