@@ -14,8 +14,9 @@
 """What an approver sees under a Slack prompt, so they can decide there.
 
 Leave: the requester's balances and their last leave, from the same
-builder as the approvals page. WFH: how many WFH days they'll have with
-this one (its month and the leave year) and their last few.
+builder as the approvals page, without gender-limited types. WFH: how
+many WFH days they'll have with this one (its month and the leave year)
+and their last few.
 """
 
 import uuid
@@ -53,7 +54,10 @@ async def prompt_context(db: AsyncSession, org_id: uuid.UUID, request: LeaveRequ
 async def _leave_lines(db: AsyncSession, org_id: uuid.UUID, request: LeaveRequest) -> list[str]:
     policy = (await policy_for_request(db, org_id, request)).policy
     user = request.user_id
-    context = await requester_context(db, org_id, {user}, today_for(policy))
+    # The same DM goes to every approver, so gender-limited types (period
+    # leave) are never named here: only people who see personal details may
+    # see them, in the app (see type_privacy).
+    context = await requester_context(db, org_id, {user}, today_for(policy), sees_all=False)
     lines = [
         balances_line(context.balances.get(user, [])),
         last_leave_line(context.last_leave.get(user)),

@@ -1,8 +1,8 @@
 """slack status links
 
-Revision ID: c37d7c64ffba
-Revises: d7b6c4e34bbd
-Create Date: 2026-10-21 16:52:49.737679
+Revision ID: 7b7768ab8522
+Revises: 8061506e5a5b
+Create Date: 2026-10-21 17:09:50.112880
 
 """
 
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "c37d7c64ffba"
-down_revision: str | None = "d7b6c4e34bbd"
+revision: str = "7b7768ab8522"
+down_revision: str | None = "8061506e5a5b"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
