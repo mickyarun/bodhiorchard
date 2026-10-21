@@ -22,9 +22,14 @@
         <h1 class="text-h5 font-weight-bold bo-display">Employees</h1>
         <p class="text-body-2 text-medium-emphasis">{{ countLabel }}</p>
       </div>
-      <v-btn v-if="canManageEmployees" color="primary" prepend-icon="mdi-plus" @click="adding = true">
-        Add employee
-      </v-btn>
+      <div class="d-flex flex-wrap ga-2">
+        <v-btn v-if="canInviteMembers" variant="tonal" color="primary" prepend-icon="mdi-account-plus-outline" @click="inviting = true">
+          Invite new hire
+        </v-btn>
+        <v-btn v-if="canManageEmployees" color="primary" prepend-icon="mdi-plus" @click="addEmployee(null)">
+          Add employee
+        </v-btn>
+      </div>
     </div>
 
     <div class="d-flex flex-wrap ga-3 mb-4">
@@ -99,7 +104,8 @@
       </v-table>
     </v-card>
 
-    <AddEmployeeDialog v-model="adding" />
+    <AddEmployeeDialog v-model="adding" :preselect-user-id="preselect" />
+    <InviteNewHireDialog v-model="inviting" @invited="invited" />
   </div>
 </template>
 
@@ -108,6 +114,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AppCallout from '@/components/common/AppCallout.vue'
 import AddEmployeeDialog from '@/components/people/AddEmployeeDialog.vue'
+import InviteNewHireDialog from '@/components/people/InviteNewHireDialog.vue'
 import EmployeeStatusChip from '@/components/people/EmployeeStatusChip.vue'
 import { useDebounced } from '@/composables/useDebounced'
 import { usePermissions } from '@/composables/usePermissions'
@@ -117,7 +124,19 @@ import { selectItems, STATUS_LABELS, workplaceLabel } from '@/utils/employee'
 
 const store = useEmployeesStore()
 const router = useRouter()
-const { canManageEmployees } = usePermissions()
+const { canManageEmployees, canInviteMembers } = usePermissions()
+const inviting = ref(false)
+const preselect = ref<string | null>(null)
+
+function addEmployee(userId: string | null): void {
+  preselect.value = userId
+  adding.value = true
+}
+
+/** A new hire's account exists: go straight on to their employee record. */
+function invited(userId: string): void {
+  if (canManageEmployees.value) addEmployee(userId)
+}
 
 const STATUS_ITEMS = selectItems(STATUS_LABELS)
 const search = ref('')

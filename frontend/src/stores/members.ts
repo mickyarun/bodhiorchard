@@ -136,15 +136,17 @@ export const useMembersStore = defineStore('members', () => {
     roleId?: string
     avatarUrl?: string
     githubUsername?: string
-  }): Promise<boolean> {
+    /** The password is temporary: they choose their own at first sign-in. */
+    mustChangePassword?: boolean
+  }): Promise<Member | null> {
     error.value = null
     try {
-      const { data } = await api.post('/v1/members', payload)
+      const { data } = await api.post<Member>('/v1/members', payload)
       members.value.push(data)
-      return true
+      return data
     } catch (err) {
       error.value = extractApiError(err, 'Failed to add member.')
-      return false
+      return null
     }
   }
 

@@ -48,6 +48,8 @@ export function usePermissions() {
     hasAnyPermission('employees:view', 'employees:manage'),
   )
   const canManageEmployees = computed(() => hasPermission('employees:manage'))
+  /** HR invites new hires from the Employees page (no engineering access needed). */
+  const canInviteMembers = computed(() => hasPermission('team:invite'))
   const canSeeEmployeeDocuments = computed(() => hasPermission('employees:documents'))
   // Leave: approving anyone's requests (HR), and configuring policies,
   // types, holidays and balances.
@@ -109,6 +111,7 @@ export function usePermissions() {
     canAccessEngineering,
     canViewEmployees,
     canManageEmployees,
+    canInviteMembers,
     canSeeEmployeeDocuments,
     canApproveLeave,
     canConfigureLeave,

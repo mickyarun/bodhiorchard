@@ -14,8 +14,9 @@
  * limitations under the License.
  -->
 
-<!-- Create an employee record for an existing member. New hires are
-     invited from Members first; this picks from members without a record. -->
+<!-- Create an employee record for an existing member: picks from members
+     without a record. New hires are invited first (Invite new hire), which
+     opens this with them already picked. -->
 <template>
   <v-dialog :model-value="modelValue" max-width="480" @update:model-value="emit('update:modelValue', $event)">
     <v-card class="pa-0">
@@ -65,7 +66,7 @@ import { useEmployeesStore } from '@/stores/employees'
 import type { EmployeeWork } from '@/types/employee'
 import { blankToNull, EMPLOYMENT_TYPE_LABELS, selectItems } from '@/utils/employee'
 
-const props = defineProps<{ modelValue: boolean }>()
+const props = defineProps<{ modelValue: boolean; preselectUserId?: string | null }>()
 const emit = defineEmits<(e: 'update:modelValue', value: boolean) => void>()
 
 const store = useEmployeesStore()
@@ -88,7 +89,7 @@ const EMPTY: EmployeeWork = {
 const candidatesHint = computed(() => {
   if (store.candidatesState === 'error') return "Couldn't load members. Close and try again."
   if (store.candidatesState === 'loaded' && store.candidates.length === 0) {
-    return 'Every member already has a record. Invite new hires from Members first.'
+    return 'Every member already has a record. Use Invite new hire to add someone new.'
   }
   return ''
 })
@@ -101,7 +102,7 @@ watch(
   () => props.modelValue,
   open => {
     if (!open) return
-    userId.value = null
+    userId.value = props.preselectUserId ?? null
     work.value = { ...EMPTY }
     error.value = ''
     void store.fetchCandidates()

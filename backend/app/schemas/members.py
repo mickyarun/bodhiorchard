@@ -56,6 +56,9 @@ class AddMemberRequest(BaseModel):
     role_id: uuid.UUID | None = Field(None, alias="roleId")
     avatar_url: str | None = Field(None, alias="avatarUrl", max_length=500)
     github_username: str | None = Field(None, alias="githubUsername", max_length=100)
+    # The password is a temporary one the inviter shares (HR inviting a new
+    # hire): make them choose their own at first sign-in.
+    must_change_password: bool = Field(False, alias="mustChangePassword")
 
     model_config = {"populate_by_name": True}
 

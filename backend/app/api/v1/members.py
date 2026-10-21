@@ -142,6 +142,7 @@ async def add_member(
         password_hash=hash_password(body.password),
         avatar_url=body.avatar_url,
         github_username=body.github_username,
+        must_change_password=body.must_change_password,
     )
     created = await user_repo.create(new_user)
 
