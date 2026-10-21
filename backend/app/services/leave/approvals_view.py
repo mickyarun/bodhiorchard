@@ -33,6 +33,7 @@ from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.employee_reporting_manager import EmployeeReportingManagerRepository
 from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.leave_request_filter import RequestFilter
+from app.repositories.leave_type import LeaveTypeRepository
 from app.schemas.leave_views import ApprovalCount, ApprovalFilters, ApprovalItem, ApprovalPage
 from app.services.leave.also_out import also_out
 from app.services.leave.approval_context import RequesterContext, requester_context
@@ -40,7 +41,7 @@ from app.services.leave.approvers import Approvers, approvers_for_many, route_fo
 from app.services.leave.balance_after import balances_after
 from app.services.leave.high_leave import for_requests
 from app.services.leave.permissions import APPROVE
-from app.services.leave.type_privacy import sees_restricted
+from app.services.leave.type_privacy import sees_restricted, shown
 from app.services.leave.views import request_reads
 
 DECIDED_WINDOW = timedelta(days=90)
@@ -60,6 +61,15 @@ class Decidable:
     truncated: bool = False
 
 
+async def _hidden_type(
+    db: AsyncSession, org_id: uuid.UUID, perms: PermissionSet, type_id: uuid.UUID | None
+) -> bool:
+    if type_id is None or sees_restricted(perms):
+        return False
+    leave_type = await LeaveTypeRepository(db, org_id=org_id).get_by_id(type_id)
+    return not shown(leave_type, sees_all=False)
+
+
 async def _decidable(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -75,6 +85,9 @@ async def _decidable(
         # Narrows only: someone outside the caller's scope stays out.
         scope = {filters.user_id} if scope is None else scope & {filters.user_id}
     if scope is not None and not scope:
+        return Decidable([], {}, edges)
+    if filters is not None and await _hidden_type(db, org_id, perms, filters.leave_type_id):
+        # Filtering on a type the caller can't see would list who took it.
         return Decidable([], {}, edges)
     narrow = (
         RequestFilter(
@@ -150,6 +163,10 @@ async def approval_items(
     items = []
     for (request, route), read in zip(allowed, reads, strict=True):
         profile = profiles.get(request.user_id)
+        # A hidden type's balance would match none of the lines shown beside it.
+        hidden = request.leave_type_id is not None and read.leave_type is None
+        if hidden:
+            after.pop(request.id, None)
         items.append(
             ApprovalItem(
                 request=read,

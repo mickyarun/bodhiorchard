@@ -50,6 +50,7 @@ from app.services.leave.policies import (
     resolve_member_policy,
     today_for,
 )
+from app.services.leave.type_privacy import shown
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,9 @@ class BalanceChange:
     user_id: uuid.UUID
     leave_type_id: uuid.UUID
     leave_year: int | None
+    # May see gender-limited types (:mod:`app.services.leave.type_privacy`);
+    # without it they act as if not on the policy, so they can't be probed.
+    sees_restricted: bool
 
 
 @dataclass(frozen=True)
@@ -155,7 +159,8 @@ async def _prepare(
     leave_type = await LeaveTypeRepository(db, org_id=change.org_id).get_by_id(
         change.leave_type_id
     )
-    if leave_type is None or leave_type.policy_id != policy.id:
+    hidden = leave_type is not None and not shown(leave_type, sees_all=change.sees_restricted)
+    if leave_type is None or leave_type.policy_id != policy.id or hidden:
         raise LeaveInvalidError("That leave type isn't on this person's policy.")
     year = (
         leave_year_by_label(change.leave_year, policy.year_start_month)

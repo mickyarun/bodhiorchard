@@ -51,9 +51,7 @@
           <div class="group" role="group" :aria-labelledby="ids.access">
             <div :id="ids.access" class="group__title text-overline text-medium-emphasis">Who &amp; approval</div>
             <LeaveTypeAccessFields v-model:genders="draft.eligible_genders" v-model:auto-approve="draft.auto_approve" v-model:monthly-limit="draft.monthly_limit_days" />
-            <p v-if="draft.auto_approve && unlimited" class="text-caption text-error mt-1">
-              A type that approves itself needs a yearly allowance, so extra days still go to a manager.
-            </p>
+            <p v-if="autoProblem" class="text-caption text-error mt-1">{{ autoProblem }}</p>
           </div>
           <div class="group" role="group" :aria-labelledby="ids.appearance">
             <div :id="ids.appearance" class="group__title text-overline text-medium-emphasis">Appearance &amp; status</div>
@@ -90,6 +88,7 @@ import LeaveSwitchRow from '@/components/leave/settings/LeaveSwitchRow.vue'
 import LeaveTypeAccessFields from '@/components/leave/settings/LeaveTypeAccessFields.vue'
 import LeaveTypeAllowanceField from '@/components/leave/settings/LeaveTypeAllowanceField.vue'
 import LeaveTypeColorPicker from '@/components/leave/settings/LeaveTypeColorPicker.vue'
+import { usePermissions } from '@/composables/usePermissions'
 import { useLeavePolicyConfigStore } from '@/stores/leavePolicyConfig'
 import type { LeaveTypeRead, LeaveTypeWrite } from '@/types/leavePolicy'
 import { codeFromName, toNumberOrNull } from '@/utils/leave'
@@ -109,6 +108,7 @@ const emit = defineEmits<(e: 'update:modelValue', value: boolean) => void>()
 const DEFAULT_QUOTA = 12
 const ids = { basics: useId(), allowance: useId(), access: useId(), appearance: useId() }
 const store = useLeavePolicyConfigStore()
+const { canApproveLeave } = usePermissions()
 const { xs } = useDisplay()
 const draft = ref<LeaveTypeWrite>(blankType())
 const quota = ref<number | null>(DEFAULT_QUOTA)
@@ -117,6 +117,12 @@ const codeTouched = ref(false)
 const saving = ref(false)
 const error = ref('')
 
+const autoProblem = computed(() => {
+  if (!draft.value.auto_approve) return ''
+  if (!canApproveLeave.value) return 'Only people who approve leave can change a type that approves itself.'
+  return unlimited.value ? 'A type that approves itself needs a yearly allowance, so extra days still go to a manager.' : ''
+})
+
 const valid = computed(
   () =>
     !!draft.value.name.trim() &&
@@ -124,7 +130,7 @@ const valid = computed(
     (unlimited.value || (typeof quota.value === 'number' && quota.value >= 0 && quota.value <= 365)) &&
     validMonthlyLimit(draft.value.monthly_limit_days) &&
     (draft.value.eligible_genders === null || draft.value.eligible_genders.length > 0) &&
-    !(draft.value.auto_approve && unlimited.value),
+    !autoProblem.value,
 )
 
 watch(

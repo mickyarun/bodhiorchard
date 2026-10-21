@@ -57,6 +57,7 @@ def _change(
         user_id=user,
         leave_type_id=type_id,
         leave_year=year,
+        sees_restricted=False,
     )
 
 

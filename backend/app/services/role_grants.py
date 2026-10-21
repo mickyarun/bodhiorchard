@@ -29,6 +29,12 @@ feature permissions stay freely assignable):
   reset password, merge) whose escalation permissions you hold yourself.
   Only the owner acts on the owner.
 
+Whoever may invite (``team:invite``) also counts as holding engineering
+access for both rules: HR can invite engineers, and, holding the matching
+route permission, act on members whose only extra access is engineering
+(e.g. deactivate them when they leave). Roles that manage members, roles
+or settings stay out of reach.
+
 Same layering as :mod:`app.services.role_validation`: pure predicates
 first, thin HTTP wrappers after.
 """

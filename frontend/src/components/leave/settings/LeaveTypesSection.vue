@@ -68,6 +68,7 @@ import LeaveEmptyState from '@/components/leave/settings/LeaveEmptyState.vue'
 import LeaveSectionCard from '@/components/leave/settings/LeaveSectionCard.vue'
 import LeaveTypeDialog from '@/components/leave/settings/LeaveTypeDialog.vue'
 import LeaveTypeTable from '@/components/leave/settings/LeaveTypeTable.vue'
+import { usePermissions } from '@/composables/usePermissions'
 import { useLeavePolicyConfigStore } from '@/stores/leavePolicyConfig'
 import type { LeaveTypeRead, LeaveTypeWrite, PolicyRead } from '@/types/leavePolicy'
 import { splitLeaveTypes } from '@/utils/leavePolicyDisplay'
@@ -76,6 +77,7 @@ import { hasPeriodLeave, periodLeave } from '@/utils/leaveTypeDraft'
 const props = defineProps<{ policy: PolicyRead }>()
 
 const store = useLeavePolicyConfigStore()
+const { canApproveLeave } = usePermissions()
 const dialogOpen = ref(false)
 const editing = ref<LeaveTypeRead | null>(null)
 const preset = ref<LeaveTypeWrite | null>(null)
@@ -91,7 +93,8 @@ function edit(type: LeaveTypeRead | null): void {
 /** Opens the dialog filled in for period leave; HR reviews and saves it. */
 function addPeriodLeave(): void {
   editing.value = null
-  preset.value = periodLeave()
+  // Only approvers may make a type approve itself; others add it to be approved.
+  preset.value = { ...periodLeave(), auto_approve: canApproveLeave.value }
   dialogOpen.value = true
 }
 

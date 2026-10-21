@@ -98,6 +98,9 @@ async def test_managers_see_plain_leave_everywhere_hr_and_she_see_the_type(
     assert [row["leave_type"] for row in history.json()["rows"]] == [None]
     summary = await client.get(f"{LEAVE}/reports/summary", params=span, headers=as_user(mgr, org))
     assert PERIOD not in {t["name"] for t in summary.json()["leave_types"]}
+    # Left out of the totals too, or total minus the columns would give it away.
+    [hers] = [r for r in summary.json()["rows"] if r["user_id"] == str(woman)]
+    assert float(hers["leave_days"]) == 0
     hr_summary = await client.get(
         f"{LEAVE}/reports/summary", params=span, headers=as_user(hr, org)
     )
@@ -143,3 +146,22 @@ async def test_nobody_but_the_owner_changes_their_own_gender(
         f"/api/v1/employees/{hr}/personal", json=body, headers=as_user(other_hr, org)
     )
     assert theirs.status_code == 200, theirs.text
+
+
+async def test_balance_tools_act_as_if_the_hidden_type_were_not_there(
+    client: AsyncClient, pg_session_factory: Factory
+) -> None:
+    org, woman, mgr, _hr, period = await _booked(client, pg_session_factory)
+    # An admin manager configures leave but doesn't see personal details.
+    await give_role(pg_session_factory, org, mgr, "admin")
+    headers = as_user(mgr, org)
+    body = {"leave_type_id": str(period)}
+    recalc = await client.post(f"{LEAVE}/balances/{woman}/recalculate", json=body, headers=headers)
+    adjust = await client.post(
+        f"{LEAVE}/balances/{woman}/adjust",
+        json={**body, "days": "1", "note": "probe"},
+        headers=headers,
+    )
+    for response in (recalc, adjust):
+        assert response.status_code != 200
+        assert "isn't on this person's policy" in response.text

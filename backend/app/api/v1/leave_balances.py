@@ -90,6 +90,7 @@ def _change(
         user_id=user_id,
         leave_type_id=type_id,
         leave_year=year,
+        sees_restricted=sees_restricted(perms),
     )
 
 

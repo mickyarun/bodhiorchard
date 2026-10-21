@@ -115,6 +115,7 @@ async def test_hr_top_up_covers_earlier_loss_of_pay(pg_session_factory: Factory)
             user_id=emp,
             leave_type_id=casual,
             leave_year=None,
+            sees_restricted=False,
         )
         await adjustments.adjust(db, change, D(1), "Carry forward")
         await db.commit()
