@@ -14,8 +14,6 @@
 
 """Organization member listing and role assignment endpoints."""
 
-import secrets
-import string
 import uuid
 
 import structlog
@@ -31,7 +29,6 @@ from app.core.deps import (
     require_permissions,
 )
 from app.core.security import hash_password
-from app.models.organization import Organization
 from app.models.user import OrgToUser, User, UserRole
 from app.repositories.developer_xp import DeveloperXPRepository, RewardEventRepository
 from app.repositories.organization import OrganizationRepository
@@ -54,6 +51,11 @@ from app.services.employees.merge import (
     transfer_employee_record,
 )
 from app.services.identity_takeover import assert_can_act_as
+from app.services.member_credentials import (
+    login_url,
+    send_credentials_slack,
+    set_temporary_password,
+)
 from app.services.role_grants import (
     assert_can_assign_role,
     assert_can_manage_member,
@@ -372,21 +374,6 @@ async def toggle_member_status(
     return _user_to_member(user)
 
 
-def _generate_password(length: int = 12) -> str:
-    """Generate a secure random password with mixed characters."""
-    alphabet = string.ascii_letters + string.digits + "!@#$%&*"
-    while True:
-        password = "".join(secrets.choice(alphabet) for _ in range(length))
-        # Ensure at least one of each category
-        if (
-            any(c.islower() for c in password)
-            and any(c.isupper() for c in password)
-            and any(c.isdigit() for c in password)
-            and any(c in "!@#$%&*" for c in password)
-        ):
-            return password
-
-
 @router.post(
     "/members/{user_id}/set-password",
     response_model=SetPasswordResponse,
@@ -423,9 +410,7 @@ async def set_member_password(
     # A temporary password lets the caller sign in as the target.
     await assert_can_act_as(db, actor=perms, target=user, org_id=org.id)
 
-    password = _generate_password()
-    user.password_hash = hash_password(password)
-    user.must_change_password = True
+    password = set_temporary_password(user)
     await db.flush()
 
     logger.info(
@@ -440,68 +425,14 @@ async def set_member_password(
     slack_error: str | None = None
 
     if send_via == "slack":
-        slack_sent, slack_error = await _send_credentials_slack(org, user, password)
-
-    from app.config import settings
-
-    login_url = settings.frontend_url.rstrip("/") + "/login"
+        slack_sent, slack_error = await send_credentials_slack(org, user, password)
 
     return SetPasswordResponse(
         password=password,
-        loginUrl=login_url,
+        loginUrl=login_url(),
         slackSent=slack_sent,
         slackError=slack_error,
     )
-
-
-async def _send_credentials_slack(
-    org: Organization,
-    user: User,
-    password: str,
-) -> tuple[bool, str | None]:
-    """Send login credentials to a user via Slack DM.
-
-    Returns:
-        Tuple of (sent, error_detail).
-    """
-    if not user.slack_id:
-        return False, "This member has no linked Slack account."
-
-    from app.core.encryption import decrypt_secret
-    from app.services.slack_client import chat_post_message, conversations_open
-
-    if not org.slack_bot_token:
-        return False, "Slack is not configured for this organization."
-
-    bot_token = decrypt_secret(org.slack_bot_token)
-    if not bot_token:
-        return False, "Slack token decryption failed. Check your encryption key."
-
-    dm_channel = await conversations_open(bot_token, user.slack_id)
-    if not dm_channel:
-        return False, "Failed to open DM channel with this member."
-
-    from app.config import settings
-
-    login_url = settings.frontend_url.rstrip("/") + "/login"
-
-    message = (
-        f"Hi {user.name}! Your login credentials have been set up.\n\n"
-        f"*Email:* `{user.email}`\n"
-        f"*Temporary Password:* `{password}`\n\n"
-        f"Log in here: {login_url}\n"
-        f"You will be asked to change your password on first login."
-    )
-
-    result = await chat_post_message(bot_token, dm_channel, message)
-    if result is None:
-        return False, "Failed to send Slack DM."
-
-    logger.info(
-        "credentials_sent_via_slack",
-        user_id=str(user.id),
-    )
-    return True, None
 
 
 @router.patch(

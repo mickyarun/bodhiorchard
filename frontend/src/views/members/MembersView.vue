@@ -892,6 +892,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { credentialsMailto } from '@/utils/credentialsMail'
 import { useRoute, useRouter } from 'vue-router'
 import { useMembersStore, type Member, type RoleOption } from '@/stores/members'
 import { useSettingsStore } from '@/stores/settings'
@@ -1129,16 +1130,12 @@ const slackEnabled = computed(() => !!settingsStore.connections.slack?.enabled)
 
 const mailtoLink = computed(() => {
   if (!setPasswordMember.value || !generatedPassword.value) return ''
-  const subject = encodeURIComponent('Your login credentials')
-  const body = encodeURIComponent(
-    `Hi ${setPasswordMember.value.name},\n\n` +
-    `Your login credentials:\n` +
-    `Email: ${setPasswordMember.value.email}\n` +
-    `Temporary Password: ${generatedPassword.value}\n\n` +
-    `Log in here: ${generatedLoginUrl.value}\n` +
-    `You will be asked to change your password on first login.`
-  )
-  return `mailto:${setPasswordMember.value.email}?subject=${subject}&body=${body}`
+  return credentialsMailto({
+    name: setPasswordMember.value.name,
+    email: setPasswordMember.value.email,
+    password: generatedPassword.value,
+    loginUrl: generatedLoginUrl.value,
+  })
 })
 
 function openSetPassword(member: Member) {

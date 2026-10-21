@@ -18,8 +18,14 @@ import uuid
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
+from typing import Any
 
+import pytest
+
+from app.models.leave_request import LeaveKind
 from app.schemas.leave_views import LastLeave
+from app.services.leave import slack_context
+from app.services.leave.approval_context import RequesterContext
 from app.services.leave.approval_lines import (
     balances_line,
     last_leave_line,
@@ -114,3 +120,23 @@ def test_context_sits_between_text_and_buttons_and_is_escaped() -> None:
 def test_no_context_block_without_lines() -> None:
     blocks = approval_blocks("Ravi requested leave", uuid.uuid4(), "https://app")
     assert [b["type"] for b in blocks] == ["section", "actions"]
+
+
+async def test_slack_prompts_never_ask_for_gender_limited_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One DM goes to every approver alike, so period leave is never named in it."""
+    seen: dict[str, Any] = {}
+
+    async def policy_for_request(*_a: Any) -> SimpleNamespace:
+        return SimpleNamespace(policy=SimpleNamespace(timezone="UTC"))
+
+    async def requester_context(*_a: Any, **kwargs: Any) -> RequesterContext:
+        seen.update(kwargs)
+        return RequesterContext()
+
+    monkeypatch.setattr(slack_context, "policy_for_request", policy_for_request)
+    monkeypatch.setattr(slack_context, "requester_context", requester_context)
+    request = SimpleNamespace(kind=LeaveKind.LEAVE, user_id=uuid.uuid4())
+    await slack_context.prompt_context(None, uuid.uuid4(), request)  # type: ignore[arg-type]
+    assert seen == {"sees_all": False}

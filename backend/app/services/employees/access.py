@@ -18,6 +18,7 @@ import uuid
 from dataclasses import dataclass
 
 from app.core.permission_deps import PermissionSet
+from app.services.identity_takeover import HR_RECORD_ACCESS
 
 VIEW = "employees:view"
 MANAGE = "employees:manage"
@@ -33,6 +34,9 @@ class EmployeeAccess:
     edit_personal: bool
     edit_managers: bool
     edit_name: bool
+    # Generate or reset their sign-in password (never your own: use the
+    # normal change-password screen for that).
+    reset_password: bool
 
 
 def access_for(perms: PermissionSet, actor_id: uuid.UUID, subject_id: uuid.UUID) -> EmployeeAccess:
@@ -54,4 +58,6 @@ def access_for(perms: PermissionSet, actor_id: uuid.UUID, subject_id: uuid.UUID)
         edit_personal=manage,
         edit_managers=edit_own_work,
         edit_name=is_self or manage,
+        # The takeover guard's own bar for anyone with a record (HR or owner).
+        reset_password=perms.has_all(HR_RECORD_ACCESS) and not is_self,
     )

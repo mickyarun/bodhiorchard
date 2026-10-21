@@ -35,7 +35,6 @@ from app.core.deps import (
 from app.core.security import (
     create_access_token,
     create_refresh_token,
-    hash_password,
     verify_password,
     verify_token,
 )
@@ -49,6 +48,7 @@ from app.schemas.auth import (
     TokenResponse,
 )
 from app.schemas.user import UserRead
+from app.services.member_credentials import chose_password, note_own_password
 
 router = APIRouter(tags=["auth"])
 
@@ -94,6 +94,7 @@ async def login(
             detail="Invalid credentials",
         )
 
+    note_own_password(user)
     token_data = {"sub": str(user.id), "org_id": str(org.id)}
     access_token = create_access_token(data=token_data)
     refresh_token = create_refresh_token(data=token_data)
@@ -121,8 +122,7 @@ async def change_password(
     Returns:
         Success message.
     """
-    current_user.password_hash = hash_password(body.new_password)
-    current_user.must_change_password = False
+    chose_password(current_user, body.new_password)
     await db.flush()
     return {"detail": "Password changed successfully."}
 
@@ -166,6 +166,8 @@ async def refresh(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
+    # Someone already signed in before this column existed gets it here.
+    note_own_password(user)
 
     # Preserve org_id from the refresh token (not from User — User has no org_id column)
     org_id = payload.get("org_id")

@@ -128,6 +128,7 @@ class EmployeeAccessRead(BaseModel):
     edit_personal: bool
     edit_managers: bool
     edit_name: bool
+    reset_password: bool
 
 
 class EmployeeRead(BaseModel):

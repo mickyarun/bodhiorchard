@@ -91,8 +91,14 @@ export interface EmployeeRecord {
   managers: ManagerRef[]
   /** Only present for HR, the owner and the employee themself. */
   personal: EmployeePersonal | null
-  /** edit_name: HR, or the person themself. */
-  access: { edit_work: boolean; edit_personal: boolean; edit_managers: boolean; edit_name: boolean }
+  /** edit_name: HR, or the person themself. reset_password: HR, never on their own record. */
+  access: {
+    edit_work: boolean
+    edit_personal: boolean
+    edit_managers: boolean
+    edit_name: boolean
+    reset_password: boolean
+  }
   /** Set after a move to "exited": was the account deactivated too? */
   access_revoked: boolean | null
 }

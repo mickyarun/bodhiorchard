@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import HTTPException, status
@@ -188,6 +189,7 @@ async def setup_init_org(req: InitOrgRequest, db: AsyncSession) -> InitOrgResult
         email=req.admin.email,
         name=req.admin.name,
         password_hash=hash_password(req.admin.password),
+        password_set_at=datetime.now(UTC),
     )
     db.add(user)
     await db.flush()

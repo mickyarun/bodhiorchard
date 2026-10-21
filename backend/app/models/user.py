@@ -15,10 +15,11 @@
 """User and organization membership models."""
 
 import uuid
+from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -74,6 +75,13 @@ class User(BaseModel):
     )
     must_change_password: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
+    )
+    # When they chose their own password or first signed in with one. NULL
+    # for accounts made by import or from GitHub (a random password nobody
+    # knows) and while on a temporary password someone else set: HR then
+    # offers "Generate password" rather than "Reset password".
+    password_set_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     slack_id: Mapped[str | None] = mapped_column(String(50), nullable=True)

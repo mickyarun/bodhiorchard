@@ -45,6 +45,7 @@ from app.api.v1.claude import router as claude_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.design_system import router as design_system_router
 from app.api.v1.employee_documents import router as employee_documents_router
+from app.api.v1.employee_login import router as employee_login_router
 from app.api.v1.employee_sensitive import router as employee_sensitive_router
 from app.api.v1.employee_updates import router as employee_updates_router
 from app.api.v1.employees import router as employees_router
@@ -125,6 +126,7 @@ for employee_part in (
     employee_updates_router,
     employee_sensitive_router,
     employee_documents_router,
+    employee_login_router,
 ):
     api_router.include_router(
         employee_part, prefix="/api/v1/employees", dependencies=PEOPLE_NO_STORE

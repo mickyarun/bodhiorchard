@@ -40,7 +40,16 @@
     </AppCallout>
 
     <template v-else-if="record">
-      <EmployeeHeaderCard :record="record" />
+      <EmployeeHeaderCard :record="record">
+        <template #actions>
+          <EmployeePasswordButton
+            v-if="record.access.reset_password"
+            :key="record.user_id"
+            :user-id="record.user_id"
+            :name="record.name"
+          />
+        </template>
+      </EmployeeHeaderCard>
       <v-tabs v-model="tab" color="primary" density="compact" slider-color="primary" class="mb-4">
         <v-tab v-if="record.personal" value="personal">Personal</v-tab>
         <v-tab value="employment">Employment</v-tab>
@@ -78,6 +87,7 @@ import AppCallout from '@/components/common/AppCallout.vue'
 import BankIdsTab from '@/components/people/BankIdsTab.vue'
 import DocumentsTab from '@/components/people/DocumentsTab.vue'
 import EmployeeHeaderCard from '@/components/people/EmployeeHeaderCard.vue'
+import EmployeePasswordButton from '@/components/people/EmployeePasswordButton.vue'
 import EmploymentTab from '@/components/people/EmploymentTab.vue'
 import MemberLeaveTab from '@/components/leave/MemberLeaveTab.vue'
 import PersonalTab from '@/components/people/PersonalTab.vue'
