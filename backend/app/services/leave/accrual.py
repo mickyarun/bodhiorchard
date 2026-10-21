@@ -21,13 +21,13 @@ over a full year is 1.5 a month, and a prorated 9 for someone who joined
 in July is the same 1.5 a month over six months.
 
 What can be booked from a day (:func:`usable_from`) is the smallest
-headroom at any later month start, so leave booked ahead uses that
-month's allowance, not an earlier one's, and the order people book in
-never changes what is paid.
+headroom at the end of any month from then on, so leave booked ahead uses
+its own month's allowance, not an earlier one's, and the order people
+book in never changes what is paid.
 """
 
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, timedelta
 from decimal import ROUND_FLOOR, Decimal
 from typing import NamedTuple
 
@@ -98,18 +98,17 @@ def usable_from(
     """Days that can still be booked starting ``on`` without overdrawing any later month.
 
     The headroom at a day is what is earned by then, plus adjustments, less
-    the paid days of leave starting by then. It is checked on ``on``, each
-    later month start and the year's last day, and the smallest wins. For an
-    upfront type that is always the year end: allocation + adjustments −
+    the paid days of leave starting by then. Earned only rises on the 1st,
+    so a month is tightest on its last day: the headroom is checked at the
+    end of ``on``'s month and of every later one, and the smallest wins. For
+    an upfront type that is always the year end: allocation + adjustments −
     everything booked.
     """
-    checkpoints = [on, *_month_starts_after(on, year_end), year_end]
     return min(
         earned_by(allocated, accrual, effective_from, year_start, year_end, day)
         + adjustments
         - sum((b.days for b in bookings if b.start <= day), ZERO)
-        for day in checkpoints
-        if day >= on
+        for day in _month_ends_from(on, year_end)
     )
 
 
@@ -118,13 +117,13 @@ def taken_by(bookings: Sequence[Booking], on: date) -> Decimal:
     return sum((b.days for b in bookings if b.approved and b.start <= on), ZERO)
 
 
-def _month_starts_after(on: date, year_end: date) -> list[date]:
-    """The 1st of each month after ``on``'s, up to ``year_end``'s month."""
-    starts: list[date] = []
+def _month_ends_from(on: date, year_end: date) -> list[date]:
+    """The last day of ``on``'s month and of each later one, ending on ``year_end``."""
+    ends: list[date] = []
     year, month = on.year, on.month
     while True:
         year, month = (year + 1, 1) if month == 12 else (year, month + 1)
-        first = date(year, month, 1)
-        if first > year_end:
-            return starts
-        starts.append(first)
+        end = min(date(year, month, 1) - timedelta(days=1), year_end)
+        ends.append(end)
+        if end >= year_end:
+            return ends

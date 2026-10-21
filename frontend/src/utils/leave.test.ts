@@ -74,12 +74,18 @@ describe('balances', () => {
 
   it('draws a monthly type against what is earned so far', () => {
     // 3 used of 6 earned (of 12 for the year): the bar is half full.
-    const monthly = balance({ accrual: 'monthly', earned: '6', used: '3', pending: '0' })
+    const monthly = balance({ accrual: 'monthly', earned: '6', used: '3', pending: '0', available: '3' })
     expect(meterPercents(monthly)).toEqual({ used: 50, pending: 0 })
   })
 
+  it('keeps the bar in step with days left when leave is booked ahead', () => {
+    // March: 4.5 earned, 10 days approved for December, 4.5 still bookable.
+    const ahead = balance({ accrual: 'monthly', earned: '4.5', used: '10', pending: '0', available: '4.5' })
+    expect(meterPercents(ahead)).toEqual({ used: 0, pending: 0 })
+  })
+
   it('caps the meter at 100 when over-used', () => {
-    const over = meterPercents(balance({ used: '14', pending: '2' }))
+    const over = meterPercents(balance({ used: '14', pending: '2', available: '-4' }))
     expect(over).toEqual({ used: 100, pending: 0 })
   })
 

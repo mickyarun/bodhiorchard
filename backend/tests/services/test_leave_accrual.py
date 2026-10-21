@@ -100,3 +100,20 @@ def test_taken_counts_only_approved_leave_that_has_started() -> None:
         (date(2026, 12, 7), "10", True),
     )
     assert taken_by(bookings, date(2026, 10, 21)) == Decimal("2")
+
+
+@pytest.mark.parametrize("late_first", [True, False])
+def test_two_bookings_in_one_month_share_that_months_allowance(late_first: bool) -> None:
+    # By February 3 days are earned. 3 days on the 20th and 1 on the 10th
+    # need 4: whichever is booked second gets only what is left.
+    late, early = (date(2026, 2, 20), "3"), (date(2026, 2, 10), "1")
+    first, second = (late, early) if late_first else (early, late)
+    paid_first = min(Decimal(first[1]), usable(first[0], []))
+    after_first = booked((first[0], str(paid_first), True))
+    paid_second = min(Decimal(second[1]), usable(second[0], after_first))
+    assert paid_first + paid_second == 3
+
+
+def test_leave_on_the_1st_counts_that_months_share() -> None:
+    assert usable(date(2026, 3, 1), []) == Decimal("4.5")
+    assert usable(date(2026, 3, 1), booked((date(2026, 3, 1), "4.5", False))) == 0
