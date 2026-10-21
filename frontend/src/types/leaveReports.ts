@@ -34,7 +34,14 @@ export interface PersonColumns {
   is_active: boolean
 }
 
+/** A summary column: every leave type with this name, across policies. */
+export interface TypeColumn {
+  key: string
+  name: string
+}
+
 export interface SummaryRow extends PersonColumns {
+  /** Keyed by TypeColumn.key. */
   leave_by_type: Record<string, Decimalish>
   /** Days left per type in the leave year the range ends in (null: no limit);
    *  a type missing here isn't on the member's policy. */
@@ -49,7 +56,7 @@ export interface SummaryRow extends PersonColumns {
 export interface SummaryReport {
   start: string
   end: string
-  leave_types: NamedRef[]
+  leave_types: TypeColumn[]
   rows: SummaryRow[]
 }
 

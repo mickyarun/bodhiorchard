@@ -18,22 +18,24 @@
      with what is left of that type in the leave year the range ends in. -->
 <template>
   <p v-if="report?.leave_types.length" class="legend text-caption text-medium-emphasis">
-    Each leave type shows <strong>days taken</strong> in these dates, and below it the
-    <strong>days left</strong> in the leave year the dates end in (pending requests counted).
-    A dash means the type isn't on that person's policy.
+    <strong>Total taken</strong> is all approved leave in these dates. The columns after it
+    split that total by leave type, as set up on each person's policy: each shows
+    <strong>days taken</strong>, and below it the <strong>days left</strong> in the leave year
+    the dates end in (pending requests counted). A dash means the type isn't on that person's
+    policy.
   </p>
   <v-data-table :headers="headers" :items="report?.rows ?? []" item-value="user_id" density="comfortable" :items-per-page="50">
     <template #[`item.name`]="{ item }"><ReportPersonCell :row="item" /></template>
-    <template v-for="t in report?.leave_types ?? []" :key="t.id" #[`item.type_${t.id}`]="{ item }">
-      <template v-if="t.id in item.left_by_type">
-        <div class="taken">{{ formatDays(toNumber(item.leave_by_type[t.id])) }}</div>
-        <div class="left text-caption" :class="leftTone(item.left_by_type[t.id])">
-          {{ leftLabel(item.left_by_type[t.id]) }}
+    <template v-for="(t, i) in report?.leave_types ?? []" :key="t.key" #[`item.type_${i}`]="{ item }">
+      <template v-if="t.key in item.left_by_type">
+        <div class="taken">{{ formatDays(toNumber(item.leave_by_type[t.key])) }}</div>
+        <div class="left text-caption" :class="leftTone(item.left_by_type[t.key])">
+          {{ leftLabel(item.left_by_type[t.key]) }}
         </div>
       </template>
-      <template v-else>{{ days(item.leave_by_type[t.id]) }}</template>
+      <template v-else>{{ days(item.leave_by_type[t.key]) }}</template>
     </template>
-    <template #[`item.leave_days`]="{ item }">{{ days(item.leave_days) }}</template>
+    <template #[`item.leave_days`]="{ item }"><span class="taken">{{ days(item.leave_days) }}</span></template>
     <template #[`item.lop_days`]="{ item }">
       <span :class="{ 'text-warning': toNumber(item.lop_days) > 0 }">{{ days(item.lop_days) }}</span>
     </template>
@@ -56,14 +58,13 @@ const props = defineProps<{ report: SummaryReport | null }>()
 const NUMBER = { align: 'end', sortable: true } as const
 const headers = computed(() => [
   { title: 'Employee', key: 'name', sortable: true },
-  { title: 'Office', key: 'office' },
-  ...(props.report?.leave_types ?? []).map(t => ({
+  { title: 'Total taken', key: 'leave_days', value: (r: { leave_days: Decimalish }) => toNumber(r.leave_days), ...NUMBER },
+  ...(props.report?.leave_types ?? []).map((t, i) => ({
     title: t.name,
-    key: `type_${t.id}`,
-    value: (row: { leave_by_type: Record<string, Decimalish> }) => toNumber(row.leave_by_type[t.id]),
+    key: `type_${i}`,
+    value: (row: { leave_by_type: Record<string, Decimalish> }) => toNumber(row.leave_by_type[t.key]),
     ...NUMBER,
   })),
-  { title: 'Leave days', key: 'leave_days', value: (r: { leave_days: Decimalish }) => toNumber(r.leave_days), ...NUMBER },
   { title: 'Loss of pay', key: 'lop_days', value: (r: { lop_days: Decimalish }) => toNumber(r.lop_days), ...NUMBER },
   { title: 'WFH', key: 'wfh_days', value: (r: { wfh_days: Decimalish }) => toNumber(r.wfh_days), ...NUMBER },
   { title: 'Optional', key: 'optional_holidays', ...NUMBER },

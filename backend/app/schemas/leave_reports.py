@@ -49,10 +49,11 @@ class PersonColumns(BaseModel):
 class SummaryRow(PersonColumns):
     """Approved days taken in the range, plus what is still pending."""
 
-    leave_by_type: dict[uuid.UUID, Decimal]
+    # Keyed by TypeColumn.key: one column per leave-type name across policies.
+    leave_by_type: dict[str, Decimal]
     # Days left per type in the leave year the range ends in, pending counted;
     # None = no limit. Types not on the member's policy are absent.
-    left_by_type: dict[uuid.UUID, Decimal | None]
+    left_by_type: dict[str, Decimal | None]
     leave_days: Decimal
     lop_days: Decimal
     wfh_days: Decimal
@@ -60,10 +61,17 @@ class SummaryRow(PersonColumns):
     pending_days: Decimal
 
 
+class TypeColumn(BaseModel):
+    """A summary column: every leave type with this name, whatever its policy."""
+
+    key: str
+    name: str
+
+
 class SummaryReport(BaseModel):
     start: date
     end: date
-    leave_types: list[NamedRef]
+    leave_types: list[TypeColumn]
     rows: list[SummaryRow]
 
 

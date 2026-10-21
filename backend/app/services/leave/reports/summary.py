@@ -43,6 +43,7 @@ from app.services.leave.report_scope import ReportScope
 from app.services.leave.reports.attribution import InRange, Span, within
 from app.services.leave.reports.balance_lines import balance_lines
 from app.services.leave.reports.population import Person, people, scoped_ids
+from app.services.leave.reports.type_columns import type_columns
 
 REQUEST_CAP = 20_000
 ZERO = Decimal("0")
@@ -147,17 +148,16 @@ async def summary_report(
         for user, mine in balances.items()
     }
     used = {t for per in by_type.values() for t in per}
-    types = await _types(db, org_id, persons, used)
-    names = {p.policy.id: p.policy.name for p in persons if p.policy}
+    columns = type_columns(await _types(db, org_id, persons, used))
     return SummaryReport(
         start=f.start,
         end=f.end,
-        leave_types=type_refs(types, names),
+        leave_types=columns.refs,
         rows=[
             SummaryRow(
                 **p.columns.model_dump(),
-                leave_by_type=dict(by_type.get(p.user_id, {})),
-                left_by_type=left.get(p.user_id, {}),
+                leave_by_type=columns.taken(by_type.get(p.user_id, {})),
+                left_by_type=columns.left(left.get(p.user_id, {})),
                 leave_days=sums[p.user_id]["leave"],
                 lop_days=sums[p.user_id]["lop"],
                 wfh_days=sums[p.user_id]["wfh"],

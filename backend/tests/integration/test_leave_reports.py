@@ -88,7 +88,8 @@ async def test_summary_splits_leave_at_the_range_and_puts_loss_of_pay_last(
     june = (await client.get(f"{LEAVE}/reports/summary", params=JUNE, headers=hr)).json()
     emp = next(r for r in june["rows"] if r["name"] == "Emp")
     assert Decimal(emp["leave_days"]) == 3 and Decimal(emp["lop_days"]) == 2
-    assert Decimal(emp["leave_by_type"][str(casual)]) == 3
+    [column] = [c["key"] for c in june["leave_types"] if c["name"] == "Casual"]
+    assert Decimal(emp["leave_by_type"][column]) == 3
     assert (Decimal(emp["wfh_days"]), Decimal(emp["pending_days"])) == (1, 1)
     may = {"start": "2026-05-01", "end": "2026-05-31"}
     emp_may = next(

@@ -31,6 +31,7 @@ from sqlalchemy import select
 from app.models.employee_profile import EmployeeProfile
 from app.models.leave_policy import LeavePolicy
 from app.models.leave_request import LeaveStatus
+from app.models.leave_type import LeaveType
 from app.services.leave.policies import ensure_default_policy, today_for
 from tests.integration.leave_support import (
     Factory,
@@ -81,9 +82,11 @@ async def test_summary_left_matches_the_balances_report(
     hr = as_user(hr_id, org)
     summary = await _get(client, "reports/summary", hr, **WHOLE_YEAR)
     row = next(r for r in summary["rows"] if r["user_id"] == str(emp))
-    assert Decimal(row["leave_by_type"][str(casual)]) == 2
+    [column] = summary["leave_types"]
+    assert column["name"] == "Casual"
+    assert Decimal(row["leave_by_type"][column["key"]]) == 2
     balances = await _get(client, "reports/balances", hr, user_id=str(emp))
-    left = Decimal(row["left_by_type"][str(casual)])
+    left = Decimal(row["left_by_type"][column["key"]])
     assert left == Decimal(balances["rows"][0]["available"]) == 2
     r = await client.get(f"{LEAVE}/reports/summary.csv", params=WHOLE_YEAR, headers=hr)
     table = list(csv.reader(io.StringIO(r.content.decode("utf-8-sig"))))
@@ -112,13 +115,22 @@ async def test_approval_cards_show_every_balance_and_the_last_leave(
 async def test_a_policy_filter_keeps_other_policies_leave_out(
     client: AsyncClient, pg_session_factory: Factory
 ) -> None:
-    org, _hr, _mgr, emp, _casual = await _team(pg_session_factory)
-    hr = as_user(_hr, org)
+    org, hr_id, _mgr, emp, _casual = await _team(pg_session_factory)
+    hr = as_user(hr_id, org)
     async with pg_session_factory() as db:
         default = (await ensure_default_policy(db, org)).id
         uk = LeavePolicy(org_id=org, name="UK", timezone="Europe/London")
         db.add(uk)
         await db.flush()
+        db.add(
+            LeaveType(
+                org_id=org,
+                policy_id=uk.id,
+                name="casual ",
+                code="CL",
+                annual_quota_days=Decimal("9"),
+            )
+        )
         profile = (
             await db.execute(select(EmployeeProfile).where(EmployeeProfile.user_id == emp))
         ).scalar_one()
@@ -130,3 +142,11 @@ async def test_a_policy_filter_keeps_other_policies_leave_out(
     assert str(emp) not in [r["user_id"] for r in on_default["rows"]]
     on_uk = await _get(client, "reports/summary", hr, **WHOLE_YEAR, policy_id=str(uk_id))
     assert [r["user_id"] for r in on_uk["rows"]] == [str(emp)]
+    # Each policy's "Casual" shares one column; Emp's cell is their UK type,
+    # with the leave they took on the old policy still counted as taken.
+    everyone = await _get(client, "reports/summary", hr, **WHOLE_YEAR)
+    [column] = everyone["leave_types"]
+    by_name = {r["name"]: r for r in everyone["rows"]}
+    assert Decimal(by_name["Emp"]["leave_by_type"][column["key"]]) == 2
+    assert Decimal(by_name["Emp"]["left_by_type"][column["key"]]) == 9
+    assert Decimal(by_name["Mgr"]["left_by_type"][column["key"]]) == 5

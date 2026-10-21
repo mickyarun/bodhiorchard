@@ -15,7 +15,7 @@
  -->
 
 <!-- Who a report row is about: name (a link to their record for those who
-     can open it), code and department. -->
+     can open it), then code, department and office. -->
 <template>
   <div>
     <router-link
@@ -35,10 +35,18 @@ import { computed } from 'vue'
 import { usePermissions } from '@/composables/usePermissions'
 
 const props = defineProps<{
-  row: { user_id: string; name: string; employee_code: string | null; department: string | null }
+  row: {
+    user_id: string
+    name: string
+    employee_code: string | null
+    department: string | null
+    office?: string | null
+  }
 }>()
 const { canViewEmployees } = usePermissions()
-const caption = computed(() => [props.row.employee_code, props.row.department].filter(Boolean).join(' · '))
+const caption = computed(() =>
+  [props.row.employee_code, props.row.department, props.row.office].filter(Boolean).join(' · '),
+)
 </script>
 
 <style scoped>
