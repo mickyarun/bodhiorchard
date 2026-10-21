@@ -465,3 +465,38 @@ async def test_supervisor_spawns_one_consumer_per_member(
     assert len(spawned) == 2
     assert (org_id, repo_id_a) in spawned
     assert (org_id, repo_id_b) in spawned
+
+
+# --- Blocking read vs the client's socket timeout ---------------------------
+
+
+def test_xread_blocks_well_inside_the_socket_timeout() -> None:
+    """An idle XREADGROUP must return before the socket times out.
+
+    With the block equal to the timeout (as redis-py 8's 5 s default met a
+    5 s block), every idle read raised TimeoutError and logged a traceback.
+    """
+    assert mod.xread_block_ms() <= mod.settings.redis.socket_timeout * 1000 / 2
+
+
+def test_xread_block_shrinks_with_a_short_socket_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mod.settings.redis, "socket_timeout", 1.0)
+    assert mod.xread_block_ms() == 500
+
+
+async def test_consumer_reads_with_the_bounded_block() -> None:
+    redis = MagicMock()
+    redis.xgroup_create = AsyncMock()
+    stop = asyncio.Event()
+
+    async def _read(**kwargs: Any) -> list[Any]:
+        stop.set()
+        return []
+
+    redis.xreadgroup = AsyncMock(side_effect=_read)
+    await mod._consume_stream(
+        redis=redis, org_id=uuid.uuid4(), repo_id=uuid.uuid4(), handler=AsyncMock(), stop=stop
+    )
+    assert redis.xreadgroup.await_args.kwargs["block"] == mod.xread_block_ms()

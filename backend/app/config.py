@@ -162,6 +162,11 @@ class RedisConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="", env_file=".env", extra="ignore")
 
     redis_url: str = Field(default="redis://localhost:6379", alias="REDIS_URL")
+    # Seconds a command may wait for its reply. Set explicitly: redis-py's
+    # default has changed between majors. Commands that block on purpose
+    # (XREADGROUP in the PR-merge worker) must ask for less than this.
+    socket_timeout: float = Field(default=5.0, gt=0, alias="REDIS_SOCKET_TIMEOUT")
+    socket_connect_timeout: float = Field(default=5.0, gt=0, alias="REDIS_CONNECT_TIMEOUT")
 
 
 class WebSocketConfig(BaseSettings):

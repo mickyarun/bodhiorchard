@@ -76,6 +76,7 @@ import structlog
 from redis.asyncio import Redis
 from redis.exceptions import ResponseError
 
+from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models.webhook_log import WebhookDeliveryStatus, WebhookLog
 from app.repositories.webhook_log import WebhookLogRepository
@@ -112,11 +113,17 @@ lives in Postgres, not the message."""
 
 # --- Tunables ---------------------------------------------------------------
 
-# Block on XREADGROUP for this many ms before checking the stop event.
-# Shorter = faster shutdown; longer = less Redis traffic at idle. A
-# few seconds is the sweet spot — backend shutdown isn't latency-
-# critical and Redis idle-traffic at this rate is negligible.
-XREAD_BLOCK_MS = 5000
+# Block on XREADGROUP for at most this many ms before checking the stop
+# event. Shorter = faster shutdown; longer = less Redis traffic at idle.
+# The read must also end well inside the client's socket timeout, or an
+# idle stream turns into a TimeoutError on every loop: see xread_block_ms.
+XREAD_BLOCK_MS = 2000
+
+
+def xread_block_ms() -> int:
+    """How long XREADGROUP blocks: XREAD_BLOCK_MS, but at most half the socket timeout."""
+    return min(XREAD_BLOCK_MS, int(settings.redis.socket_timeout * 1000 / 2))
+
 
 # Supervisor polls the registry at this cadence. New streams (first
 # webhook for a never-seen-before (org, repo)) take this long to spawn
@@ -460,7 +467,7 @@ async def _consume_stream(
                 consumername=CONSUMER_NAME,
                 streams={key: ">"},
                 count=1,
-                block=XREAD_BLOCK_MS,
+                block=xread_block_ms(),
             )
         except Exception:
             logger.exception("pr_merge_consumer_xread_failed", stream=key)

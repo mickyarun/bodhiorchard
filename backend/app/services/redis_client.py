@@ -28,6 +28,8 @@ from typing import Any, cast
 import structlog
 from redis.asyncio import Redis
 
+from app.config import settings
+
 logger = structlog.get_logger(__name__)
 
 _redis: Redis | None = None
@@ -47,12 +49,12 @@ async def get_redis() -> Redis | None:
         return None
 
     if _redis is None:
-        from app.config import settings
-
         try:
             _redis = Redis.from_url(
                 settings.redis.redis_url,
                 decode_responses=True,
+                socket_timeout=settings.redis.socket_timeout,
+                socket_connect_timeout=settings.redis.socket_connect_timeout,
             )
             # redis-py types ping() as Awaitable[bool] | bool depending on
             # client mode; the async client always returns the Awaitable
