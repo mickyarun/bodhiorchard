@@ -96,6 +96,14 @@ export interface PersonRef {
   name: string
 }
 
+/** Leave taken this leave year against the policy's heads-up / warning lines. */
+export interface HighLeave {
+  level: 'notice' | 'warning'
+  taken: Decimalish
+  notice_days: number | null
+  warning_days: number | null
+}
+
 export interface LeaveSummary {
   policy: PolicyBrief
   leave_year: LeaveYear
@@ -108,6 +116,7 @@ export interface LeaveSummary {
   routes_to_hr: boolean
   /** Remote people have no WFH option. */
   work_arrangement: WorkArrangement
+  high_leave: HighLeave | null
 }
 
 export interface LeaveRequestCreate {
@@ -141,6 +150,8 @@ export interface LeavePreview {
   approvers: PersonRef[]
   routes_to_hr: boolean
   problems: LeaveProblem[]
+  /** With this request counted. */
+  high_leave: HighLeave | null
 }
 
 export interface LeaveRequestRead {
@@ -184,6 +195,8 @@ export interface ApprovalItem {
   balances: Balance[]
   balance_year: number | null
   last_leave: LastLeave | null
+  /** This request included; pending only. */
+  high_leave: HighLeave | null
 }
 
 /** The requester's most recent approved leave that has started. */

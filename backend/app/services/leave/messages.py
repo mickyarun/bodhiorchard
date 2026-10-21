@@ -21,6 +21,7 @@ from datetime import date
 from decimal import Decimal
 
 from app.models.leave_request import LeaveKind, LeaveRequest, LeaveStatus
+from app.schemas.leave import HighLeave
 
 _KIND_LABEL = {
     LeaveKind.LEAVE: "leave",
@@ -43,13 +44,26 @@ def _days(days: Decimal) -> str:
     return f"{value} day" if days == 1 else f"{value} days"
 
 
-def compose_request_message(name: str, request: LeaveRequest, *, auto_approved: bool) -> str:
+def compose_request_message(
+    name: str, request: LeaveRequest, *, auto_approved: bool, high_leave: HighLeave | None = None
+) -> str:
     """Approver-facing text for a new request (no type, no reason)."""
     when = f"{format_range(request.start_date, request.end_date)} ({_days(request.days)})"
     what = _KIND_LABEL[request.kind]
     if auto_approved:
         return f"{name} is working from home {when}. It was approved automatically."
-    return f"{name} requested {what} {when}."
+    text = f"{name} requested {what} {when}."
+    return f"{text} {high_leave_line(high_leave)}" if high_leave else text
+
+
+def high_leave_line(high: HighLeave) -> str:
+    """Approvers' line, e.g. With this, they've taken 16 days this year (heads-up at 15)."""
+    taken = _days(high.taken)
+    if high.level == "warning":
+        return (
+            f"With this, they've taken {taken} this year, past the {high.warning_days}-day line."
+        )
+    return f"With this, they've taken {taken} this year (heads-up at {high.notice_days})."
 
 
 def already_decided_message(request: LeaveRequest, decider: str | None) -> str:

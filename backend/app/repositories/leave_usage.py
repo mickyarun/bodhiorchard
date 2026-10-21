@@ -151,3 +151,28 @@ class LeaveUsageRepository(BaseRepository[LeaveRequest]):
             .group_by(LeaveRequest.user_id, LeaveRequest.start_date)
         )
         return [(user, day, lop) for user, day, lop in (await self._db.execute(stmt)).all()]
+
+    async def days_taken(
+        self,
+        user_ids: Collection[uuid.UUID],
+        type_ids: Collection[uuid.UUID],
+        start: date,
+        end: date,
+    ) -> dict[uuid.UUID, Decimal]:
+        """Active leave days per member starting in ``start..end``, loss of pay
+        included: time away, not what the balance paid for (see PAID_DAYS)."""
+        if not user_ids or not type_ids:
+            return {}
+        stmt = self._scoped(
+            select(LeaveRequest.user_id, func.sum(LeaveRequest.days))
+            .where(
+                LeaveRequest.user_id.in_(user_ids),
+                LeaveRequest.leave_type_id.in_(type_ids),
+                LeaveRequest.kind == LeaveKind.LEAVE,
+                LeaveRequest.status.in_(ACTIVE),
+                LeaveRequest.start_date >= start,
+                LeaveRequest.start_date <= end,
+            )
+            .group_by(LeaveRequest.user_id)
+        )
+        return {user: days for user, days in (await self._db.execute(stmt)).all()}

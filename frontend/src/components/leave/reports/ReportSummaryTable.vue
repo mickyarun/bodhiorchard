@@ -35,7 +35,17 @@
       </template>
       <template v-else>{{ days(item.leave_by_type[t.key]) }}</template>
     </template>
-    <template #[`item.leave_days`]="{ item }"><span class="taken">{{ days(item.leave_days) }}</span></template>
+    <template #[`item.leave_days`]="{ item }">
+      <div class="taken">{{ days(item.leave_days) }}</div>
+      <div
+        v-if="item.high_leave"
+        class="left text-caption"
+        :class="item.high_leave.level === 'warning' ? 'text-warning' : 'text-info'"
+        :title="highLeaveForOthers(item.high_leave, item.name)"
+      >
+        <v-icon icon="mdi-alert-circle-outline" size="12" /> {{ highLeaveShort(item.high_leave) }}
+      </div>
+    </template>
     <template #[`item.lop_days`]="{ item }">
       <span :class="{ 'text-warning': toNumber(item.lop_days) > 0 }">{{ days(item.lop_days) }}</span>
     </template>
@@ -51,6 +61,7 @@ import { computed } from 'vue'
 import ReportPersonCell from '@/components/leave/reports/ReportPersonCell.vue'
 import type { Decimalish } from '@/types/leave'
 import type { SummaryReport } from '@/types/leaveReports'
+import { highLeaveForOthers, highLeaveShort } from '@/utils/highLeave'
 import { formatDays, toNumber } from '@/utils/leave'
 
 const props = defineProps<{ report: SummaryReport | null }>()

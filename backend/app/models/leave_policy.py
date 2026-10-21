@@ -112,6 +112,11 @@ class LeavePolicy(BaseModel):
     wfh_monthly_auto_days: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     backdate_limit_days: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=7)
     optional_holiday_quota: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    # Days of leave in a leave year after which requests carry a heads-up,
+    # then a firmer warning: for unlimited leave, where no balance says
+    # "that's enough". NULL = no warning. Types opt out (e.g. sick leave).
+    leave_notice_days: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    leave_warning_days: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     proration_method: Mapped[ProrationMethod] = mapped_column(
         Enum(ProrationMethod, name="leave_proration_method", values_callable=_enum_values),
         nullable=False,

@@ -38,6 +38,7 @@ from app.services.leave.also_out import also_out
 from app.services.leave.approval_context import RequesterContext, requester_context
 from app.services.leave.approvers import Approvers, approvers_for_many, route_for
 from app.services.leave.balance_after import balances_after
+from app.services.leave.high_leave import for_requests
 from app.services.leave.permissions import APPROVE
 from app.services.leave.views import request_reads
 
@@ -133,6 +134,7 @@ async def approval_items(
     )
     users = {r.user_id for r in requests}
     context = await requester_context(db, org_id, users, today) if pending else RequesterContext()
+    high = await for_requests(db, org_id, requests) if pending else {}
     items = []
     for (request, route), read in zip(allowed, reads, strict=True):
         profile = profiles.get(request.user_id)
@@ -148,6 +150,7 @@ async def approval_items(
                 balances=context.balances.get(request.user_id, []),
                 balance_year=context.years.get(request.user_id),
                 last_leave=context.last_leave.get(request.user_id),
+                high_leave=high.get(request.id),
             )
         )
     return ApprovalPage(items=items, truncated=found.truncated)

@@ -100,6 +100,7 @@ async def preview_request(
         approvers=[PersonRef(user_id=u, name=n) for u, n in result.approvers.managers],
         routes_to_hr=result.approvers.routes_to_hr,
         problems=result.problems,
+        high_leave=result.high_leave,
     )
 
 
@@ -125,6 +126,7 @@ async def create_request(
         requester_name=current_user.name,
         targets=targets,
         auto_approved=auto,
+        high_leave=result.high_leave,
     )
     # Commit, then tell people: nobody hears about a request that rolled back.
     await db.commit()

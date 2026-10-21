@@ -38,6 +38,7 @@ from app.services.leave.calendar_math import (
     leave_year_bounds,
     leave_year_by_label,
 )
+from app.services.leave.high_leave import assess, taken_this_year
 from app.services.leave.optional_holidays import optional_holiday_use
 from app.services.leave.policies import resolve_member_policy, today_for
 from app.services.leave.wfh_policy import auto_days_left
@@ -111,6 +112,9 @@ async def build_summary(
     )
     approvers = await approvers_for(db, org_id, user_id)
     lop = await LeaveUsageRepository(db, org_id=org_id).lop_total(user_id, year.start, year.end)
+    on = day_in_year(today, year)
+    taken = (await taken_this_year(db, [(user_id, policy)], on)).get(user_id)
+    high_leave = assess(policy, taken) if taken is not None else None
     return LeaveSummary(
         policy=policy_brief(policy),
         leave_year=year_schema(year),
@@ -126,6 +130,7 @@ async def build_summary(
             policy.wfh_approval, policy.wfh_monthly_auto_days, used_now or Decimal("0")
         ),
         lop_days=lop,
+        high_leave=high_leave,
         approvers=[PersonRef(user_id=uid, name=name) for uid, name in approvers.managers],
         routes_to_hr=approvers.routes_to_hr,
         work_arrangement=member.profile.work_arrangement

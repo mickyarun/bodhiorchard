@@ -21,7 +21,13 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from app.models.leave_request import HalfDay, LeaveKind, LeaveStatus
-from app.schemas.leave import HolidayRead, LeaveRequestRead, LeaveTypeBrief, PersonRef
+from app.schemas.leave import (
+    HighLeave,
+    HolidayRead,
+    LeaveRequestRead,
+    LeaveTypeBrief,
+    PersonRef,
+)
 from app.schemas.leave_summary import Balance
 
 
@@ -62,6 +68,8 @@ class ApprovalItem(BaseModel):
     balances: list[Balance] = []
     balance_year: int | None = None
     last_leave: LastLeave | None = None
+    # Leave taken this year (this request included) past the policy's lines.
+    high_leave: HighLeave | None = None
 
 
 class ApprovalPage(BaseModel):

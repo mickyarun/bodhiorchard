@@ -21,7 +21,7 @@ from decimal import Decimal
 from pydantic import BaseModel
 
 from app.models.leave_request import ApprovalMode, HalfDay, LeaveKind, LeaveStatus
-from app.schemas.leave import PersonRef
+from app.schemas.leave import HighLeave, PersonRef
 
 
 class NamedRef(BaseModel):
@@ -55,6 +55,9 @@ class SummaryRow(PersonColumns):
     # None = no limit. Types not on the member's policy are absent.
     left_by_type: dict[str, Decimal | None]
     leave_days: Decimal
+    # Leave taken in the leave year the range ends in, past the policy's
+    # heads-up / warning lines; None below them or on a policy without lines.
+    high_leave: HighLeave | None = None
     lop_days: Decimal
     wfh_days: Decimal
     optional_holidays: Decimal

@@ -14,8 +14,8 @@
  * limitations under the License.
  -->
 
-<!-- A policy's rules: work week, leave year, work from home and new
-     joiners. One draft for all of them, saved together from the bar that
+<!-- A policy's rules: work week, leave year, work from home, the
+     high-leave warning and new joiners. One draft for all of them, saved together from the bar that
      appears once something changes. -->
 <template>
   <section aria-label="Rules">
@@ -27,6 +27,10 @@
       :locked="policy.has_requests"
     />
     <WfhCard v-model:approval="draft.wfh_approval" v-model:monthly-auto-days="draft.wfh_monthly_auto_days" />
+    <HighLeaveCard
+      v-model:notice-days="draft.leave_notice_days"
+      v-model:warning-days="draft.leave_warning_days"
+    />
     <NewJoinersCard
       v-model:method="draft.proration_method"
       v-model:cutoff-day="draft.proration_cutoff_day"
@@ -52,6 +56,7 @@
 <script setup lang="ts">
 import { ref, toRef } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
+import HighLeaveCard from '@/components/leave/settings/HighLeaveCard.vue'
 import LeaveYearCard from '@/components/leave/settings/LeaveYearCard.vue'
 import NewJoinersCard from '@/components/leave/settings/NewJoinersCard.vue'
 import PolicySaveBar from '@/components/leave/settings/PolicySaveBar.vue'

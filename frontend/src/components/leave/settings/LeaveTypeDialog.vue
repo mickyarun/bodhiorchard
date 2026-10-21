@@ -52,11 +52,8 @@
             <div :id="ids.appearance" class="group__title text-overline text-medium-emphasis">Appearance &amp; status</div>
             <LeaveTypeColorPicker v-model="draft.color_key" :name="draft.name" class="mb-3" />
             <LeaveSwitchRow v-model="draft.is_paid" label="Paid leave" />
-            <LeaveSwitchRow
-              v-model="draft.is_encashable"
-              label="Encashable at exit"
-              description="Unused days are paid out when someone leaves."
-            />
+            <LeaveSwitchRow v-model="draft.is_encashable" label="Encashable at exit" description="Unused days are paid out when someone leaves." />
+            <LeaveSwitchRow v-model="draft.counts_toward_warning" label="Counts toward the high-leave warning" description="Off for sick leave, usually. The lines are set in Rules." />
             <LeaveSwitchRow
               v-if="type"
               v-model="draft.is_active"
@@ -124,14 +121,15 @@ function blank(): LeaveTypeWrite {
     accrual: 'upfront',
     is_paid: true,
     is_encashable: false,
+    counts_toward_warning: true,
     color_key: SWATCH_KEYS[0],
     is_active: true,
   }
 }
 
 function fromType(type: LeaveTypeRead): LeaveTypeWrite {
-  const { name, code, annual_quota_days, accrual, is_paid, is_encashable, color_key, is_active } = type
-  return { name, code, annual_quota_days, accrual, is_paid, is_encashable, color_key, is_active }
+  const { id: _id, policy_id: _policy, ...write } = type
+  return write
 }
 
 watch(

@@ -30,7 +30,7 @@ from app.models.leave_request import HalfDay, LeaveRequest
 from app.models.policy_holiday import PolicyHoliday
 from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.leave_type import LeaveTypeRepository
-from app.schemas.leave import LeaveProblem, LeaveRequestCreate, ProblemCode
+from app.schemas.leave import HighLeave, LeaveProblem, LeaveRequestCreate, ProblemCode
 from app.services.leave.approvers import Approvers
 from app.services.leave.balances import balances_for, find_line
 from app.services.leave.calendar_math import leave_year_bounds
@@ -56,6 +56,8 @@ class Evaluation:
     auto_approved: bool = False
     approvers: Approvers = field(default_factory=lambda: Approvers(managers=[]))
     problems: list[LeaveProblem] = field(default_factory=list)
+    # Leave taken this year with this request, against the policy's lines.
+    high_leave: HighLeave | None = None
 
     @property
     def balance_after(self) -> Decimal | None:

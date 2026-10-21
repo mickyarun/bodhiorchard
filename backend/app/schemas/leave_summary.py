@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from app.models.employee_profile import WorkArrangement
 from app.models.leave_policy import WfhApproval
 from app.models.leave_type import LeaveAccrual
-from app.schemas.leave import HolidayRead, LeaveTypeBrief, PersonRef
+from app.schemas.leave import HighLeave, HolidayRead, LeaveTypeBrief, PersonRef
 
 
 class LeaveYear(BaseModel):
@@ -82,6 +82,8 @@ class LeaveSummary(BaseModel):
     wfh_auto_days_left_this_month: int | None
     # Leave days this leave year (approved or pending) past the balance.
     lop_days: Decimal
+    # Leave taken this leave year against the policy's heads-up / warning lines.
+    high_leave: HighLeave | None = None
     approvers: list[PersonRef]
     # True when no active manager is set: requests go to HR.
     routes_to_hr: bool

@@ -122,6 +122,20 @@ class LeaveProblem(BaseModel):
     message: str
 
 
+class HighLeave(BaseModel):
+    """Leave taken this leave year against the policy's heads-up and warning lines.
+
+    ``level`` is "notice" once ``taken`` reaches the heads-up line and
+    "warning" once it reaches the warning line. Only for policies that set
+    them (usually unlimited leave) and leave types that count toward them.
+    """
+
+    level: Literal["notice", "warning"]
+    taken: Decimal
+    notice_days: int | None
+    warning_days: int | None
+
+
 class LeavePreview(BaseModel):
     """What a request would cost, before sending it."""
 
@@ -135,6 +149,8 @@ class LeavePreview(BaseModel):
     approvers: list[PersonRef]
     routes_to_hr: bool
     problems: list[LeaveProblem]
+    # With this request counted; None when no line is reached.
+    high_leave: HighLeave | None = None
 
 
 class LeaveRequestRead(BaseModel):

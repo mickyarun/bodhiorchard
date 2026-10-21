@@ -38,6 +38,7 @@ from app.schemas.leave_report_filters import SummaryFilters
 from app.schemas.leave_reports import NamedRef, SummaryReport, SummaryRow
 from app.services.leave.calendar_math import leave_year_bounds
 from app.services.leave.errors import LeaveInvalidError
+from app.services.leave.high_leave import assess, taken_this_year
 from app.services.leave.policies import mandatory_holidays
 from app.services.leave.report_scope import ReportScope
 from app.services.leave.reports.attribution import InRange, Span, within
@@ -147,6 +148,14 @@ async def summary_report(
         user: {line.leave_type.id: line.available for line in mine.lines}
         for user, mine in balances.items()
     }
+    # Heads-up / warning per person, for the leave year the range ends in.
+    taken = await taken_this_year(db, [(p.user_id, p.policy) for p in persons if p.policy], f.end)
+    policy_of = {p.user_id: p.policy for p in persons if p.policy}
+    high = {
+        user: level
+        for user, days in taken.items()
+        if (level := assess(policy_of[user], days)) is not None
+    }
     used = {t for per in by_type.values() for t in per}
     columns = type_columns(await _types(db, org_id, persons, used))
     return SummaryReport(
@@ -159,6 +168,7 @@ async def summary_report(
                 leave_by_type=columns.taken(by_type.get(p.user_id, {})),
                 left_by_type=columns.left(left.get(p.user_id, {})),
                 leave_days=sums[p.user_id]["leave"],
+                high_leave=high.get(p.user_id),
                 lop_days=sums[p.user_id]["lop"],
                 wfh_days=sums[p.user_id]["wfh"],
                 optional_holidays=sums[p.user_id]["optional"],
