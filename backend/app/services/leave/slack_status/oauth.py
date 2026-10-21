@@ -22,6 +22,7 @@ token (and a login token from passing as it).
 import contextlib
 import time
 import uuid
+from dataclasses import dataclass
 from urllib.parse import urlencode
 
 import httpx
@@ -29,7 +30,9 @@ import jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.encryption import encrypt_secret
+from app.core.encryption import decrypt_secret, encrypt_secret
+from app.models.slack_status_link import SlackStatusLink
+from app.repositories.slack_status_accounts import SlackStatusAccountRepository
 from app.repositories.slack_status_link import SlackStatusLinkRepository
 from app.repositories.user import UserRepository
 from app.services.leave.slack_status.settings import StatusClient, redirect_url
@@ -88,22 +91,50 @@ class WrongSlackAccountError(Exception):
     """Approved from a Slack account that isn't the member's linked one."""
 
 
+@dataclass(frozen=True)
+class Connected:
+    """A kept connection: whether another org had the account, and tokens to hand back.
+
+    The caller revokes ``stale_tokens`` only after committing, so a failed
+    save never leaves the other org holding an already-revoked token.
+    """
+
+    moved: bool
+    stale_tokens: list[str]
+
+
 async def complete(
     db: AsyncSession, client: StatusClient, org_id: uuid.UUID, user_id: uuid.UUID, code: str
-) -> None:
+) -> Connected:
     """Exchange the code and keep the member's token (encrypted).
 
     Only for the member's own linked Slack account: otherwise someone could
     start the flow and get a colleague to approve it, and their leave would
     then show on the colleague's status.
+
+    A Slack account has one status, so one org drives it: if another org
+    was, it's handed over here. Otherwise the two would overwrite and clear
+    each other's status.
     """
     grant = await exchange_code(client.client_id, client.client_secret, code, redirect_url())
     member = await UserRepository(db).get_by_id_in_org(user_id, org_id)
     if member is None or not member.slack_id or member.slack_id != grant.slack_user_id:
-        # Best effort: the member should still hear it was the wrong account.
+        # Nothing was saved, so it goes back now. Best effort: the member
+        # should still hear it was the wrong account.
         with contextlib.suppress(SlackUserApiError, httpx.HTTPError):
             await revoke(grant.token)
         raise WrongSlackAccountError
+    accounts = SlackStatusAccountRepository(db)
+    others = await accounts.links_elsewhere(grant.slack_user_id, org_id)
+    await accounts.remove_elsewhere(grant.slack_user_id, org_id)
     await SlackStatusLinkRepository(db, org_id=org_id).save(
-        user_id, grant.slack_user_id, encrypt_secret(grant.token)
+        user_id, grant.team_id, grant.slack_user_id, encrypt_secret(grant.token)
     )
+    return Connected(moved=bool(others), stale_tokens=_stale(others, grant.token))
+
+
+def _stale(others: list[SlackStatusLink], kept: str) -> list[str]:
+    """The other orgs' tokens to revoke. Two orgs on one Slack app get the same
+    token back for the same person: that one is the one we keep, never revoked."""
+    tokens = {decrypt_secret(other.token) for other in others}
+    return sorted(token for token in tokens if token and token != kept)

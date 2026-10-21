@@ -99,7 +99,8 @@ async def exchange_code(client_id: str, client_secret: str, code: str, redirect:
         with contextlib.suppress(SlackUserApiError, httpx.HTTPError):
             await revoke(str(user["access_token"]))
         raise SlackUserApiError("token_rotation_on")
-    team = body.get("team") or {}
+    # Enterprise Grid: the enterprise, whose members share one status everywhere.
+    team = body.get("enterprise") or body.get("team") or {}
     return UserGrant(str(user["id"]), str(user["access_token"]), str(team.get("id", "")))
 
 

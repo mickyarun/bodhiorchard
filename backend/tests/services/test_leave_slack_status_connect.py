@@ -20,7 +20,9 @@ from typing import Any
 
 import pytest
 
-from app.services.leave.slack_status import oauth
+from app.core.encryption import encrypt_secret
+from app.services import slack_user_api
+from app.services.leave.slack_status import apply, oauth
 from app.services.leave.slack_status.oauth import WrongSlackAccountError, complete
 from app.services.leave.slack_status.settings import StatusClient
 from app.services.slack_user_api import SlackUserApiError, UserGrant
@@ -50,12 +52,26 @@ def slack(monkeypatch: pytest.MonkeyPatch) -> Recorder:
         def __init__(self, *_a: Any, **_k: Any) -> None:
             pass
 
-        async def save(self, user_id: uuid.UUID, slack_user_id: str, _token: str) -> None:
+        async def save(
+            self, user_id: uuid.UUID, _team: str, slack_user_id: str, _token: str
+        ) -> None:
             rec.saved.append((user_id, slack_user_id))
 
     monkeypatch.setattr(oauth, "exchange_code", exchange)
     monkeypatch.setattr(oauth, "revoke", revoke)
+
+    class Accounts:
+        def __init__(self, *_a: Any) -> None:
+            pass
+
+        async def links_elsewhere(self, *_a: Any) -> list[object]:
+            return []
+
+        async def remove_elsewhere(self, *_a: Any) -> int:
+            return 0
+
     monkeypatch.setattr(oauth, "SlackStatusLinkRepository", Links)
+    monkeypatch.setattr(oauth, "SlackStatusAccountRepository", Accounts)
     return rec
 
 
@@ -72,7 +88,9 @@ def _member(monkeypatch: pytest.MonkeyPatch, slack_id: str | None) -> None:
 
 async def test_own_account_is_kept(slack: Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
     _member(monkeypatch, "U_ME")
-    await complete(None, CLIENT, ORG, USER, "code")  # type: ignore[arg-type]
+    connected = await complete(None, CLIENT, ORG, USER, "code")  # type: ignore[arg-type]
+    assert connected.moved is False
+    assert connected.stale_tokens == []
     assert slack.saved == [(USER, "U_ME")]
     assert slack.revoked == []
 
@@ -86,3 +104,64 @@ async def test_another_account_is_refused_and_handed_back(
         await complete(None, CLIENT, ORG, USER, "code")  # type: ignore[arg-type]
     assert slack.saved == []
     assert slack.revoked == ["xoxp-1"]
+
+
+class FakeLinks:
+    removed: list[uuid.UUID] = []
+
+    def __init__(self, *_a: Any, **_k: Any) -> None:
+        pass
+
+    async def remove(self, user_id: uuid.UUID) -> bool:
+        FakeLinks.removed.append(user_id)
+        return True
+
+
+@pytest.mark.parametrize(
+    ("reachable", "keep_to_retry", "dropped"),
+    [
+        (True, True, True),
+        (False, True, False),  # someone who left: keep it, clear it next tick
+        (False, False, True),  # an explicit disconnect: drop it anyway
+    ],
+)
+async def test_forget_keeps_the_link_to_retry_only_when_asked(
+    monkeypatch: pytest.MonkeyPatch, reachable: bool, keep_to_retry: bool, dropped: bool
+) -> None:
+    FakeLinks.removed = []
+
+    async def clear(*_a: Any) -> bool:
+        return reachable
+
+    monkeypatch.setattr(apply, "clear", clear)
+    monkeypatch.setattr(apply, "SlackStatusLinkRepository", FakeLinks)
+    link = SimpleNamespace(org_id=ORG, user_id=USER, token=encrypt_secret("xoxp-1"))
+    token = await apply.forget(None, link, keep_to_retry=keep_to_retry)  # type: ignore[arg-type]
+    assert (token == "xoxp-1") is dropped
+    assert (FakeLinks.removed == [USER]) is dropped
+
+
+async def test_enterprise_id_wins_over_the_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
+    body = {
+        "ok": True,
+        "authed_user": {"id": "W1", "access_token": "xoxp-1"},
+        "team": {"id": "T1"},
+        "enterprise": {"id": "E1"},
+    }
+
+    class Client:
+        def __init__(self, **_k: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> "Client":
+            return self
+
+        async def __aexit__(self, *_a: Any) -> None:
+            return None
+
+        async def post(self, *_a: Any, **_k: Any) -> Any:
+            return SimpleNamespace(json=lambda: body)
+
+    monkeypatch.setattr(slack_user_api.httpx, "AsyncClient", Client)
+    grant = await slack_user_api.exchange_code("id", "secret", "code", "https://cb")
+    assert grant.team_id == "E1"

@@ -17,7 +17,7 @@
 import uuid
 from datetime import date
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import Select, delete, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,9 +34,14 @@ class SlackStatusLinkRepository(BaseRepository[SlackStatusLink]):
         super().__init__(SlackStatusLink, db, org_id=org_id)
         self._org = org_id
 
-    async def save(self, user_id: uuid.UUID, slack_user_id: str, token: str) -> None:
+    async def save(self, user_id: uuid.UUID, team_id: str, slack_user_id: str, token: str) -> None:
         """Store (or replace) a member's encrypted token; they'll be refreshed next tick."""
-        values = {"slack_user_id": slack_user_id, "token": token, "refreshed_on": None}
+        values = {
+            "slack_team_id": team_id,
+            "slack_user_id": slack_user_id,
+            "token": token,
+            "refreshed_on": None,
+        }
         await self._db.execute(
             insert(SlackStatusLink)
             .values(id=uuid.uuid4(), org_id=self._org, user_id=user_id, **values)
@@ -59,19 +64,27 @@ class SlackStatusLinkRepository(BaseRepository[SlackStatusLink]):
         )
         return rowcount(result) > 0
 
-    async def all_links(self) -> list[SlackStatusLink]:
-        """Every connected member still active in the org (a removed member is skipped)."""
-        stmt = (
-            self._scoped(select(SlackStatusLink))
-            .join(
-                OrgToUser,
-                (OrgToUser.user_id == SlackStatusLink.user_id)
-                & (OrgToUser.org_id == SlackStatusLink.org_id),
+    def _members(self, *, current: bool) -> Select[tuple[SlackStatusLink]]:
+        """Links whose member is (or, ``current=False``, no longer is) active here."""
+        member = (
+            select(OrgToUser.id)
+            .join(User, User.id == OrgToUser.user_id)
+            .where(
+                OrgToUser.org_id == SlackStatusLink.org_id,
+                OrgToUser.user_id == SlackStatusLink.user_id,
+                User.is_active.is_(True),
             )
-            .join(User, User.id == SlackStatusLink.user_id)
-            .where(User.is_active.is_(True))
+            .exists()
         )
-        return list((await self._db.execute(stmt)).scalars().all())
+        return self._scoped(select(SlackStatusLink)).where(member if current else ~member)
+
+    async def all_links(self) -> list[SlackStatusLink]:
+        """Every connected member still active in the org."""
+        return list((await self._db.execute(self._members(current=True))).scalars().all())
+
+    async def departed_links(self) -> list[SlackStatusLink]:
+        """Links of people removed from the org (or deactivated): to clear and forget."""
+        return list((await self._db.execute(self._members(current=False))).scalars().all())
 
     async def mark_refreshed(self, user_id: uuid.UUID, day: date) -> None:
         """Note the local date a member's status was last set for."""

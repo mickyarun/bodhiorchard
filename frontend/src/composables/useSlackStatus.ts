@@ -33,6 +33,10 @@ export interface SlackStatusMine {
 /** What happened when Slack sent the member back (?slackStatus=…). */
 const OUTCOMES: Record<string, { ok: boolean; text: string }> = {
   connected: { ok: true, text: 'Connected. Your Slack status will show WFH and leave days.' },
+  moved: {
+    ok: true,
+    text: 'Connected. Your Slack status now follows your leave here instead of your other team (one Slack account can only follow one).',
+  },
   cancelled: { ok: false, text: 'You cancelled in Slack, so nothing changed.' },
   expired: { ok: false, text: 'That link expired. Try connecting again.' },
   wrong_account: {

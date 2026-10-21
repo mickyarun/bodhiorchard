@@ -22,7 +22,9 @@ network errors are retried next pass; anything else waits for tomorrow,
 so one broken account isn't retried (and logged) every minute.
 """
 
+import contextlib
 import uuid
+from collections.abc import Iterable
 from datetime import UTC, date, datetime, time
 
 import httpx
@@ -45,7 +47,13 @@ from app.services.leave.slack_status.plan import (
     status_for,
 )
 from app.services.leave.slack_status.settings import load_client
-from app.services.slack_user_api import SlackStatus, SlackUserApiError, get_status, set_status
+from app.services.slack_user_api import (
+    SlackStatus,
+    SlackUserApiError,
+    get_status,
+    revoke,
+    set_status,
+)
 
 logger = structlog.get_logger(__name__)
 # Slack's answers for a token that will never work again.
@@ -88,9 +96,36 @@ async def refresh(
     await _put(db, link, wanted, day)
 
 
-async def clear(db: AsyncSession, link: SlackStatusLink) -> None:
-    """Take our status off (disconnecting, or the feature switched off)."""
-    await _put(db, link, NO_STATUS, None)
+async def clear(db: AsyncSession, link: SlackStatusLink) -> bool:
+    """Take our status off (feature switched off); False if Slack should be retried."""
+    return await _put(db, link, NO_STATUS, None)
+
+
+async def forget(db: AsyncSession, link: SlackStatusLink, *, keep_to_retry: bool) -> str | None:
+    """Clear our status and drop the link; returns the token to :func:`hand_back`.
+
+    For a member who disconnects (``keep_to_retry=False``: drop it anyway)
+    or leaves the org (``True``: if Slack couldn't be reached, keep the link
+    so the next pass clears the status instead of leaving "On leave" up).
+    The token is read first: clearing may already have dropped a dead one.
+    The caller commits, then hands the token back, so a failed commit
+    never leaves a row whose token is already revoked.
+    """
+    token = decrypt_secret(link.token)
+    if not await clear(db, link) and keep_to_retry:
+        return None
+    await SlackStatusLinkRepository(db, org_id=link.org_id).remove(link.user_id)
+    return token or None
+
+
+async def hand_back(tokens: Iterable[str]) -> None:
+    """Revoke tokens we no longer keep (after the commit that dropped them).
+
+    Already revoked, or Slack is down: we've forgotten them, which is what matters.
+    """
+    for token in tokens:
+        with contextlib.suppress(SlackUserApiError, httpx.HTTPError):
+            await revoke(token)
 
 
 async def _wanted(
@@ -110,7 +145,8 @@ async def _wanted(
 
 async def _put(
     db: AsyncSession, link: SlackStatusLink, wanted: SlackStatus, day: date | None
-) -> None:
+) -> bool:
+    """Make Slack show ``wanted``; False when it's worth retrying soon."""
     links = SlackStatusLinkRepository(db, org_id=link.org_id)
     ids = {"org_id": str(link.org_id), "user_id": str(link.user_id)}
     try:
@@ -122,12 +158,13 @@ async def _put(
         if exc.code in DEAD_TOKEN:
             logger.info("slack_status_token_dead", error=exc.code, **ids)
             await links.remove(link.user_id)
-            return
+            return True
         logger.warning("slack_status_failed", error=exc.code, **ids)
         if exc.code in _RETRY_SOON:
-            return
+            return False
     except httpx.HTTPError as exc:
         logger.warning("slack_status_unreachable", error=str(exc), **ids)
-        return
+        return False
     if day is not None:
         await links.mark_refreshed(link.user_id, day)
+    return True

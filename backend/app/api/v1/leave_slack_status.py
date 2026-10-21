@@ -14,14 +14,10 @@
 
 """Slack status on WFH and leave days: HR's settings and each member's own link."""
 
-import contextlib
-
-import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
-from app.core.encryption import decrypt_secret
 from app.models.user import User
 from app.repositories.slack_status_link import SlackStatusLinkRepository
 from app.schemas.leave_slack_status import (
@@ -32,11 +28,10 @@ from app.schemas.leave_slack_status import (
 )
 from app.services.background import spawn
 from app.services.leave.permissions import CONFIGURE
-from app.services.leave.slack_status.apply import clear
+from app.services.leave.slack_status.apply import forget, hand_back
 from app.services.leave.slack_status.oauth import authorize_url
 from app.services.leave.slack_status.scheduler import clear_all
 from app.services.leave.slack_status.settings import load_client, load_settings, save_settings
-from app.services.slack_user_api import SlackUserApiError, revoke
 
 router = APIRouter(tags=["leave"])
 
@@ -108,9 +103,7 @@ async def disconnect_my_slack_status(
     link = await links.for_user(current_user.id)
     if link is None:
         return
-    await clear(db, link)
-    await links.remove(current_user.id)
+    token = await forget(db, link, keep_to_retry=False)
     await db.commit()
-    # Already revoked, or Slack is down: we've forgotten it, which is what matters.
-    with contextlib.suppress(SlackUserApiError, httpx.HTTPError):
-        await revoke(decrypt_secret(link.token))
+    if token:
+        await hand_back([token])

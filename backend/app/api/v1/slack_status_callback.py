@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.deps import get_db
 from app.services.background import spawn
-from app.services.leave.slack_status.apply import refresh_member
+from app.services.leave.slack_status.apply import hand_back, refresh_member
 from app.services.leave.slack_status.oauth import (
     InvalidStateError,
     WrongSlackAccountError,
@@ -64,7 +64,7 @@ async def slack_status_callback(
     if not client.ready or not code:
         return _back("failed")
     try:
-        await complete(db, client, org_id, user_id, code)
+        connected = await complete(db, client, org_id, user_id, code)
     except WrongSlackAccountError:
         return _back("wrong_account")
     except SlackUserApiError as exc:
@@ -74,5 +74,6 @@ async def slack_status_callback(
         logger.warning("slack_status_connect_failed", org_id=str(org_id), error=str(exc))
         return _back("failed")
     await db.commit()
+    await hand_back(connected.stale_tokens)
     spawn(refresh_member(org_id, user_id))
-    return _back("connected")
+    return _back("moved" if connected.moved else "connected")

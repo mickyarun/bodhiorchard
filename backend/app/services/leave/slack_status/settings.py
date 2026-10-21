@@ -25,9 +25,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.encryption import decrypt_secret, encrypt_secret
 from app.repositories.organization import OrganizationRepository
+from app.repositories.slack_status_accounts import STATUS_SECTION
 from app.schemas.leave_slack_status import SlackStatusSettings, SlackStatusUpdate
 
-CONFIG_KEY = "slack_status"
+CONFIG_KEY = STATUS_SECTION
 CALLBACK_PATH = "/api/v1/slack/status/callback"
 
 
