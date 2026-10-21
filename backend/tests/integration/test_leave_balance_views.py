@@ -98,8 +98,10 @@ async def test_approval_cards_show_every_balance_and_the_last_leave(
     client: AsyncClient, pg_session_factory: Factory
 ) -> None:
     org, _hr, mgr, _emp, casual = await _team(pg_session_factory)
-    [item] = await _get(client, "approvals", as_user(mgr, org))
+    [item] = (await _get(client, "approvals", as_user(mgr, org)))["items"]
     assert item["balance_year"] in {YEAR - 1, YEAR}
+    # The pending request is this leave year: the card's figure and tiles agree.
+    assert item["balance_after_year"] == item["balance_year"]
     [line] = item["balances"]
     assert line["leave_type"]["id"] == str(casual)
     numbers = [Decimal(line[k]) for k in ("used", "pending", "available")]
@@ -108,7 +110,7 @@ async def test_approval_cards_show_every_balance_and_the_last_leave(
     today = await _policy_today(pg_session_factory, org)
     assert (last["leave_type"], last["start_date"]) == ("Casual", today.isoformat())
     # Decided requests are history: no balances or last leave.
-    decided = await _get(client, "approvals", as_user(mgr, org), status="decided")
+    decided = (await _get(client, "approvals", as_user(mgr, org), status="decided"))["items"]
     assert all(not d["balances"] and d["last_leave"] is None for d in decided)
 
 

@@ -41,7 +41,7 @@ QUEUE = "/api/v1/leave/approvals"
 async def _queue(client: AsyncClient, user: uuid.UUID, org: uuid.UUID) -> list[dict[str, Any]]:
     response = await client.get(QUEUE, headers=as_user(user, org))
     assert response.status_code == 200, response.text
-    return list(response.json())
+    return list(response.json()["items"])
 
 
 async def test_each_approver_sees_only_what_they_can_decide(

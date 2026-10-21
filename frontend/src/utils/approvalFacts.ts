@@ -43,16 +43,15 @@ export function lastLeaveLine(last: LastLeave, today: Date): string {
   ].join(' · ')
 }
 
+/** Whether the request falls in the leave year the balance tiles show. */
+export function inBalanceYear(item: ApprovalItem): boolean {
+  return item.balance_after_year === null || item.balance_after_year === item.balance_year
+}
+
 /**
- * Days left after approval when that differs from the tile for the
- * requested type: the tiles show the current leave year, while
- * `balance_after` is priced on the request's own year.
+ * Days left after approval when the request is in another leave year than
+ * the tiles (the requester's current one), so no tile shows it.
  */
 export function otherYearBalanceAfter(item: ApprovalItem): number | null {
-  const after = toNumberOrNull(item.balance_after)
-  const typeId = item.request.leave_type?.id
-  if (after === null || !typeId) return null
-  const tile = item.balances.find(b => b.leave_type.id === typeId)
-  if (!tile) return after
-  return toNumberOrNull(tile.available) === after ? null : after
+  return inBalanceYear(item) ? null : toNumberOrNull(item.balance_after)
 }

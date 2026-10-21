@@ -51,6 +51,18 @@ export async function extractBlobApiError(err: unknown, fallback: string): Promi
 }
 
 /**
+ * FastAPI's 422 body: a list of ``{ loc, msg, ... }``. Pydantic prefixes a
+ * validator's own message with "Value error, "; the rest is for people.
+ */
+function validationMessages(detail: unknown[]): string {
+  const messages = detail
+    .map(item => (item && typeof item === 'object' && 'msg' in item ? String(item.msg) : ''))
+    .map(msg => msg.replace(/^Value error, /, ''))
+    .filter(Boolean)
+  return [...new Set(messages)].join(' ')
+}
+
+/**
  * Coerce a FastAPI ``detail`` field to a string. Handles the legacy
  * shape (plain string) and the typed envelope used by Phase J's
  * credential validation (``{ error: "...", message: "..." }``) so
@@ -60,6 +72,10 @@ export async function extractBlobApiError(err: unknown, fallback: string): Promi
 function stringifyDetail(detail: unknown): string {
   if (!detail) return ''
   if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    const messages = validationMessages(detail)
+    if (messages) return messages
+  }
   if (typeof detail === 'object') {
     try {
       return JSON.stringify(detail)

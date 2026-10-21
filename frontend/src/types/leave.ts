@@ -172,6 +172,8 @@ export interface ApprovalItem {
   designation: string | null
   department: string | null
   balance_after: Decimalish | null
+  /** The leave year `balance_after` is for: the request's own. */
+  balance_after_year: number | null
   also_out: AlsoOut[]
   /** The requester's balances this leave year (pending only; empty once decided). */
   balances: Balance[]
@@ -190,6 +192,14 @@ export interface LastLeave {
 export interface ApprovalCount {
   pending: number
   is_approver: boolean
+  /** Someone reports to the caller, so they can see reports on them. */
+  has_reports: boolean
+}
+
+/** The queue; `truncated` when older decisions were left out. */
+export interface ApprovalPage {
+  items: ApprovalItem[]
+  truncated: boolean
 }
 
 /** `leave_type` / `reason` are only set for HR, the requester and managers. */

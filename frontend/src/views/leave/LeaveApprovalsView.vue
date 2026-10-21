@@ -44,7 +44,7 @@
     </div>
 
     <AppCallout v-if="showLimitHint" variant="info" class="mb-4">
-      Showing the latest {{ DECIDED_LIMIT }} decisions.
+      Showing the latest {{ store.items.length }} decisions.
       {{ dated ? 'Narrow the dates or filters to see the rest.' : 'Pick dates to find older ones.' }}
     </AppCallout>
     <div class="d-flex flex-column ga-3">
@@ -60,9 +60,11 @@ import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import ApprovalCard from '@/components/leave/ApprovalCard.vue'
 import ApprovalFilters from '@/components/leave/ApprovalFilters.vue'
 import { useDebounced } from '@/composables/useDebounced'
-import { type ApprovalTab, DECIDED_LIMIT, useLeaveApprovalsStore } from '@/stores/leaveApprovals'
+import { type ApprovalTab, useLeaveApprovalsStore } from '@/stores/leaveApprovals'
 
 const store = useLeaveApprovalsStore()
+// Before the filter bar sets up, so it never shows another viewer's picks.
+store.forgetPreviousViewer()
 const TABS: { label: string; value: ApprovalTab }[] = [
   { label: 'Pending', value: 'pending' },
   { label: 'Decided', value: 'decided' },
@@ -75,9 +77,7 @@ const emptyTitle = computed(() => {
 })
 // The cap applies with or without dates; dates only lift the 90-day window.
 const dated = computed(() => !!(store.filters.start || store.filters.end))
-const showLimitHint = computed(
-  () => store.status === 'decided' && store.items.length >= DECIDED_LIMIT,
-)
+const showLimitHint = computed(() => store.status === 'decided' && store.truncated)
 
 // One request per settled change, not one per keystroke in a custom date.
 const query = ref('')

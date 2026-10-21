@@ -23,6 +23,7 @@ policy approval re-checks it against.
 import uuid
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,16 +43,27 @@ ZERO = Decimal("0")
 UsageKey = tuple[uuid.UUID, uuid.UUID, int]
 
 
+@dataclass(frozen=True)
+class AfterApproval:
+    """Days left once approved (None: no limit), in the request's own leave year."""
+
+    days: Decimal | None
+    year: int
+
+
 async def balances_after(
     db: AsyncSession, org_id: uuid.UUID, requests: Sequence[LeaveRequest]
-) -> dict[uuid.UUID, Decimal | None]:
-    """``{request_id: days left once approved}``; None for unlimited or non-leave.
+) -> dict[uuid.UUID, AfterApproval]:
+    """``{request_id: days left once approved}`` for priced leave requests.
+
+    WFH, optional holidays and requests whose type or policy is gone are
+    left out; an unlimited type gets ``days=None``.
 
     Pending days already count against the balance, so this is simply the
     available balance for the request's type and leave year.
     """
     priced = [r for r in requests if r.kind == LeaveKind.LEAVE and r.leave_type_id is not None]
-    out: dict[uuid.UUID, Decimal | None] = {r.id: None for r in requests}
+    out: dict[uuid.UUID, AfterApproval] = {}
     if not priced:
         return out
     users = {r.user_id for r in priced}
@@ -71,7 +83,10 @@ async def balances_after(
     for request in priced:
         leave_type = types.get(request.leave_type_id) if request.leave_type_id else None
         year = years.get(request.id)
-        if leave_type is None or leave_type.annual_quota_days is None or year is None:
+        if leave_type is None or year is None:
+            continue
+        if leave_type.annual_quota_days is None:
+            out[request.id] = AfterApproval(days=None, year=year.label)
             continue
         key = (request.user_id, leave_type.id, year.label)
         allocated, adjustments = ledger.get(key, (None, ZERO))
@@ -83,7 +98,9 @@ async def balances_after(
                 year.end,
                 proration_rule(policies[request.policy_id]),
             )
-        out[request.id] = allocated + adjustments - usage.get(key, ZERO)
+        out[request.id] = AfterApproval(
+            days=allocated + adjustments - usage.get(key, ZERO), year=year.label
+        )
     return out
 
 

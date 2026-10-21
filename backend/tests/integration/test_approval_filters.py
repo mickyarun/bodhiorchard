@@ -22,6 +22,7 @@ import pytest
 from httpx import AsyncClient
 
 from app.models.leave_request import LeaveKind, LeaveStatus
+from app.services.leave import approvals_view
 from tests.integration.leave_support import (
     Factory,
     add_request,
@@ -38,7 +39,7 @@ QUEUE = "/api/v1/leave/approvals"
 async def names(client: AsyncClient, headers: dict[str, str], **params: str) -> list[str]:
     r = await client.get(QUEUE, params=params, headers=headers)
     assert r.status_code == 200, r.text
-    return sorted(item["request"]["user"]["name"] for item in r.json())
+    return sorted(item["request"]["user"]["name"] for item in r.json()["items"])
 
 
 async def test_filters_narrow_the_queue_but_not_the_count(
@@ -85,3 +86,28 @@ async def test_a_date_range_reaches_decisions_older_than_90_days(
     assert await names(client, hr, status="decided") == []
     dated = {"status": "decided", "start": "2024-01-01", "end": "2024-01-31"}
     assert await names(client, hr, **dated) == ["Emp"]
+
+
+async def test_the_decided_list_says_when_older_decisions_were_cut(
+    client: AsyncClient, pg_session_factory: Factory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    org, (hr_id, emp, mgr), casual = await setup_org(pg_session_factory, "Hr", "Emp", "Mgr")
+    await give_role(pg_session_factory, org, hr_id, "hr")
+    await report_to(pg_session_factory, org, emp, mgr)
+    for day in (5, 6):
+        await add_request(
+            pg_session_factory, org, emp, date(2030, 1, day), date(2030, 1, day), "1",
+            type_id=casual, decided_by=hr_id, decided_at=datetime(2030, 1, 1, tzinfo=UTC),
+        )  # fmt: skip
+    dated = {"status": "decided", "start": "2030-01-01", "end": "2030-01-31"}
+    hr = as_user(hr_id, org)
+    monkeypatch.setattr(approvals_view, "DECIDED_LIMIT", 2)
+    assert (await client.get(QUEUE, params=dated, headers=hr)).json()["truncated"] is True
+    monkeypatch.setattr(approvals_view, "DECIDED_LIMIT", 3)
+    assert (await client.get(QUEUE, params=dated, headers=hr)).json()["truncated"] is False
+    # Only someone with reports can see reports on them.
+    counts = {
+        who: (await client.get(f"{QUEUE}/count", headers=as_user(who, org))).json()["has_reports"]
+        for who in (hr_id, mgr, emp)
+    }
+    assert counts == {hr_id: False, mgr: True, emp: False}

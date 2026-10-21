@@ -44,6 +44,19 @@ export const RANGE_LABELS: Record<RangePreset, string> = {
   custom: 'Custom',
 }
 
+/**
+ * What's wrong with a picked range, or null. The server still checks
+ * everything (including the longest range it accepts); this only stops an
+ * obviously broken request while someone is typing a custom date.
+ */
+export function rangeProblem(range: DateRange, required: boolean): string | null {
+  if (required && (!range.start || !range.end)) return 'Pick both a start and an end date.'
+  if (range.start && range.end && range.end < range.start) {
+    return 'The end date must be on or after the start date.'
+  }
+  return null
+}
+
 function at(year: number, month: number, day: number): string {
   return toIsoDate(new Date(year, month, day))
 }

@@ -122,8 +122,10 @@ class LeaveRequestRepository(BaseRepository[LeaveRequest]):
         user_ids: Collection[uuid.UUID] | None,
         since: datetime | None,
         filters: RequestFilter | None = None,
+        *,
+        limit: int,
     ) -> list[LeaveRequest]:
-        """Requests decided by a person (since ``since``), newest first; at most 200."""
+        """Requests decided by a person (since ``since``), newest first; at most ``limit``."""
         stmt = self._scoped(
             select(LeaveRequest).where(
                 LeaveRequest.status.in_((LeaveStatus.APPROVED, LeaveStatus.REJECTED)),
@@ -135,7 +137,7 @@ class LeaveRequestRepository(BaseRepository[LeaveRequest]):
         stmt = apply_filter(stmt, filters)
         if user_ids is not None:
             stmt = stmt.where(LeaveRequest.user_id.in_(user_ids))
-        result = await self._db.execute(stmt.order_by(LeaveRequest.decided_at.desc()).limit(200))
+        result = await self._db.execute(stmt.order_by(LeaveRequest.decided_at.desc()).limit(limit))
         return list(result.scalars().all())
 
     async def calendar(self, start: date, end: date, viewer: uuid.UUID) -> list[LeaveRequest]:

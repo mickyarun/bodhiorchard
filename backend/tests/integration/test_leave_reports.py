@@ -148,6 +148,14 @@ async def test_register_and_csv_exports(client: AsyncClient, pg_session_factory:
         f"{LEAVE}/reports/summary", params={"start": "2026-06-30", "end": "2026-06-01"}, headers=hr
     )
     assert bad.status_code == 422
+    # Years the calendar maths can't represent are refused, not a 500.
+    for path, params in (
+        ("balances", {"year": "9999"}),
+        ("balances.csv", {"year": "0"}),
+        ("summary", {"start": "9999-12-01", "end": "9999-12-31"}),
+    ):
+        out = await client.get(f"{LEAVE}/reports/{path}", params=params, headers=hr)
+        assert out.status_code == 422, (path, out.text)
 
 
 async def test_balances_report_matches_the_member_balances(

@@ -54,7 +54,8 @@ const facts = computed(() => {
   }
   const after = otherYearBalanceAfter(props.item)
   if (after !== null) {
-    list.push({ label: 'Left after this', icon: 'mdi-scale-balance', text: `${formatDays(after)} in its leave year` })
+    const year = props.item.balance_after_year
+    list.push({ label: 'Left after this', icon: 'mdi-scale-balance', text: `${formatDays(after)} in leave year ${year}` })
   }
   if (props.item.also_out.length) {
     const names = props.item.also_out.map(o => `${firstName(o.name)} (${formatDayRange(o.start_date, o.end_date)})`)

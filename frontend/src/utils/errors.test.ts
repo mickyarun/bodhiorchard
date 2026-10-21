@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { describe, expect, it } from 'vitest'
-import { extractBlobApiError } from './errors'
+import { extractApiError, extractBlobApiError } from './errors'
 
 const blobError = (status: number, body: unknown, type = 'application/json') => ({
   response: { status, data: new Blob([JSON.stringify(body)], { type }) },
@@ -33,5 +33,21 @@ describe('extractBlobApiError', () => {
   it('still handles a normal JSON error', async () => {
     const err = { response: { status: 404, data: { detail: 'Not found.' } } }
     expect(await extractBlobApiError(err, 'fallback')).toBe('Not found.')
+  })
+})
+
+describe('extractApiError', () => {
+  it("reads FastAPI's validation list as plain sentences", () => {
+    const detail = [
+      { type: 'value_error', loc: ['query'], msg: 'Value error, Pick a range of a year or less.' },
+      { type: 'missing', loc: ['query', 'start'], msg: 'Field required' },
+    ]
+    const err = { response: { status: 422, data: { detail } } }
+    expect(extractApiError(err, 'fallback')).toBe('Pick a range of a year or less. Field required')
+  })
+
+  it('falls back to JSON for a list without messages', () => {
+    const err = { response: { status: 400, data: { detail: [{ code: 1 }] } } }
+    expect(extractApiError(err, 'fallback')).toBe('[{"code":1}]')
   })
 })

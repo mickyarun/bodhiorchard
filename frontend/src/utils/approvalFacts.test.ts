@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ApprovalItem, Balance } from '@/types/leave'
-import { lastLeaveLine, otherYearBalanceAfter, timeAgo } from '@/utils/approvalFacts'
+import { inBalanceYear, lastLeaveLine, otherYearBalanceAfter, timeAgo } from '@/utils/approvalFacts'
 
 // Wednesday 21 October 2026, mid-morning local time.
 const TODAY = new Date(2026, 9, 21, 10, 30)
@@ -45,28 +45,33 @@ describe('lastLeaveLine', () => {
   })
 })
 
-function item(balanceAfter: string | null, available: string | null): ApprovalItem {
+function item(balanceAfter: string | null, afterYear: number | null): ApprovalItem {
   const type = { id: 't1', name: 'Casual', code: 'CL', color_key: 'swatch-1' }
   const balance: Balance = {
-    leave_type: type, is_paid: true, allocated: '12', adjustments: '0', used: '0', pending: '3', available,
+    leave_type: type, is_paid: true, allocated: '12', adjustments: '0', used: '0', pending: '3', available: '9',
   }
   return {
     request: { leave_type: type } as ApprovalItem['request'],
     route: 'manager', designation: null, department: null, also_out: [],
-    balance_after: balanceAfter, balances: [balance], balance_year: 2026, last_leave: null,
+    balance_after: balanceAfter, balance_after_year: afterYear,
+    balances: [balance], balance_year: 2026, last_leave: null,
   }
 }
 
 describe('otherYearBalanceAfter', () => {
-  it('stays quiet when the tile already shows the balance after approval', () => {
-    expect(otherYearBalanceAfter(item('9', '9'))).toBeNull()
+  it('stays quiet when the request is in the year the tiles show', () => {
+    expect(inBalanceYear(item('9', 2026))).toBe(true)
+    expect(otherYearBalanceAfter(item('9', 2026))).toBeNull()
   })
 
-  it('shows the figure when the request is priced on another leave year', () => {
-    expect(otherYearBalanceAfter(item('12', '9'))).toBe(12)
+  it("goes by the request's leave year, not by comparing numbers", () => {
+    // Next year's balance happens to equal this year's: still another year.
+    expect(inBalanceYear(item('9', 2027))).toBe(false)
+    expect(otherYearBalanceAfter(item('9', 2027))).toBe(9)
   })
 
-  it('has nothing to say for unlimited types', () => {
-    expect(otherYearBalanceAfter(item(null, null))).toBeNull()
+  it('has nothing to say for unlimited types or requests without a figure', () => {
+    expect(otherYearBalanceAfter(item(null, 2027))).toBeNull()
+    expect(inBalanceYear(item(null, null))).toBe(true)
   })
 })

@@ -48,7 +48,7 @@
         <span class="section-label">Balances · leave year {{ item.balance_year }}</span>
         <span class="text-caption text-medium-emphasis">{{ balanceNote }}</span>
       </div>
-      <BalanceGrid :balances="item.balances" compact :highlight-type-id="inBalanceYear ? request.leave_type?.id : null" />
+      <BalanceGrid :balances="item.balances" compact :highlight-type-id="sameYear ? request.leave_type?.id : null" />
     </template>
 
     <ApprovalFacts :item="item" class="mt-3" />
@@ -103,7 +103,7 @@ import BalanceGrid from '@/components/leave/BalanceGrid.vue'
 import LeaveStatusChip from '@/components/leave/LeaveStatusChip.vue'
 import { useLeaveApprovalsStore } from '@/stores/leaveApprovals'
 import type { ApprovalItem } from '@/types/leave'
-import { otherYearBalanceAfter } from '@/utils/approvalFacts'
+import { inBalanceYear } from '@/utils/approvalFacts'
 import {
   HALF_DAY_LABELS,
   lopLabel,
@@ -129,9 +129,9 @@ const role = computed(() =>
 
 // Tiles show the current leave year; a request priced on another year
 // isn't in them, so it isn't highlighted or called "included".
-const inBalanceYear = computed(() => otherYearBalanceAfter(props.item) === null)
+const sameYear = computed(() => inBalanceYear(props.item))
 const balanceNote = computed(() =>
-  inBalanceYear.value
+  sameYear.value
     ? 'Pending requests, this one included, are counted.'
     : 'Pending requests are counted. This request falls in another leave year.',
 )

@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import PermissionSet, get_current_user, get_db, get_permission_set
 from app.models.user import User
 from app.schemas.leave import LeaveRequestRead
-from app.schemas.leave_views import ApprovalCount, ApprovalItem, ApprovalQuery, DecisionBody
+from app.schemas.leave_views import ApprovalCount, ApprovalPage, ApprovalQuery, DecisionBody
 from app.services.leave.approvals_view import approval_count, approval_items
 from app.services.leave.lifecycle import decide
 from app.services.leave.notify import stage_decision
@@ -33,13 +33,13 @@ from app.services.leave.views import request_reads
 router = APIRouter(tags=["leave"])
 
 
-@router.get("/approvals", response_model=list[ApprovalItem])
+@router.get("/approvals", response_model=ApprovalPage)
 async def list_approvals(
     query: Annotated[ApprovalQuery, Query()],
     current_user: User = Depends(get_current_user),
     perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
-) -> list[ApprovalItem]:
+) -> ApprovalPage:
     """Requests the caller can decide, or decided (last 90 days unless dates are given)."""
     return await approval_items(
         db, current_user.org_id, current_user.id, perms, query.status, query

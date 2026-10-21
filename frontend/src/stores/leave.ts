@@ -40,7 +40,7 @@ export const useLeaveStore = defineStore('leave', () => {
   const requestsLoading = ref(false)
   const requestsError = ref('')
   const scope = ref<RequestScope>('upcoming')
-  const approvalCount = ref<ApprovalCount>({ pending: 0, is_approver: false })
+  const approvalCount = ref<ApprovalCount>({ pending: 0, is_approver: false, has_reports: false })
   // Latest requests fetch; a slower, older scope never overwrites a newer one.
   let requestsCall = 0
 
@@ -112,7 +112,7 @@ export const useLeaveStore = defineStore('leave', () => {
     try {
       approvalCount.value = (await api.get<ApprovalCount>('/v1/leave/approvals/count')).data
     } catch {
-      approvalCount.value = { pending: 0, is_approver: false }
+      approvalCount.value = { pending: 0, is_approver: false, has_reports: false }
     }
   }
 

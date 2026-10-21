@@ -21,7 +21,7 @@ with the queue.
 """
 
 import uuid
-from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -33,8 +33,8 @@ from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.employee_reporting_manager import EmployeeReportingManagerRepository
 from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.leave_request_filter import RequestFilter
-from app.repositories.user import UserRepository
-from app.schemas.leave_views import AlsoOut, ApprovalCount, ApprovalFilters, ApprovalItem
+from app.schemas.leave_views import ApprovalCount, ApprovalFilters, ApprovalItem, ApprovalPage
+from app.services.leave.also_out import also_out
 from app.services.leave.approval_context import RequesterContext, requester_context
 from app.services.leave.approvers import Approvers, approvers_for_many, route_for
 from app.services.leave.balance_after import balances_after
@@ -42,7 +42,20 @@ from app.services.leave.permissions import APPROVE
 from app.services.leave.views import request_reads
 
 DECIDED_WINDOW = timedelta(days=90)
+# The newest decisions shown; past this the page says so and asks for dates.
+DECIDED_LIMIT = 200
 Route = Literal["manager", "hr_queue", "hr_override"]
+
+
+@dataclass(frozen=True)
+class Decidable:
+    """Requests the caller can act on, with what was loaded to decide that."""
+
+    allowed: list[tuple[LeaveRequest, Route]]
+    approvers: dict[uuid.UUID, Approvers]
+    edges: list[tuple[uuid.UUID, uuid.UUID]]
+    # More decisions matched than DECIDED_LIMIT; older ones were left out.
+    truncated: bool = False
 
 
 async def _decidable(
@@ -52,9 +65,7 @@ async def _decidable(
     perms: PermissionSet,
     status: Literal["pending", "decided"],
     filters: ApprovalFilters | None = None,
-) -> tuple[
-    list[tuple[LeaveRequest, Route]], dict[uuid.UUID, Approvers], list[tuple[uuid.UUID, uuid.UUID]]
-]:
+) -> Decidable:
     repo = LeaveRequestRepository(db, org_id=org_id)
     edges = await EmployeeReportingManagerRepository(db, org_id=org_id).reporting_edges()
     scope = None if perms.has(APPROVE) else {who for who, boss in edges if boss == actor}
@@ -62,7 +73,7 @@ async def _decidable(
         # Narrows only: someone outside the caller's scope stays out.
         scope = {filters.user_id} if scope is None else scope & {filters.user_id}
     if scope is not None and not scope:
-        return [], {}, edges
+        return Decidable([], {}, edges)
     narrow = (
         RequestFilter(
             start=filters.start,
@@ -78,7 +89,7 @@ async def _decidable(
     requests = (
         await repo.list_pending(scope, narrow)
         if status == "pending"
-        else await repo.list_decided(scope, since, narrow)
+        else await repo.list_decided(scope, since, narrow, limit=DECIDED_LIMIT)
     )
     approvers = await approvers_for_many(db, org_id, {r.user_id for r in requests})
     allowed: list[tuple[LeaveRequest, Route]] = []
@@ -86,7 +97,9 @@ async def _decidable(
         route = route_for(actor, perms, request.user_id, approvers[request.user_id])
         if route is not None:
             allowed.append((request, route))
-    return allowed, approvers, edges
+    # Counted before routing drops any (e.g. the caller's own requests).
+    truncated = status == "decided" and len(requests) >= DECIDED_LIMIT
+    return Decidable(allowed, approvers, edges, truncated)
 
 
 async def approval_items(
@@ -96,12 +109,13 @@ async def approval_items(
     perms: PermissionSet,
     status: Literal["pending", "decided"],
     filters: ApprovalFilters | None = None,
-) -> list[ApprovalItem]:
+) -> ApprovalPage:
     """Requests the caller may decide (or decided recently), optionally filtered.
 
     The nav count (:func:`approval_count`) stays unfiltered.
     """
-    allowed, approvers, edges = await _decidable(db, org_id, actor, perms, status, filters)
+    found = await _decidable(db, org_id, actor, perms, status, filters)
+    allowed = found.allowed
     requests = [r for r, _ in allowed]
     today = datetime.now(UTC).date()
     reads = await request_reads(
@@ -112,7 +126,11 @@ async def approval_items(
     )
     pending = status == "pending"
     after = await balances_after(db, org_id, requests) if pending else {}
-    also = await _also_out(db, org_id, actor, perms, requests, approvers, edges) if pending else {}
+    also = (
+        await also_out(db, org_id, actor, perms, requests, found.approvers, found.edges)
+        if pending
+        else {}
+    )
     users = {r.user_id for r in requests}
     context = await requester_context(db, org_id, users, today) if pending else RequesterContext()
     items = []
@@ -124,65 +142,25 @@ async def approval_items(
                 route=route,
                 designation=profile.designation if profile else None,
                 department=profile.department if profile else None,
-                balance_after=after.get(request.id),
+                balance_after=after[request.id].days if request.id in after else None,
+                balance_after_year=after[request.id].year if request.id in after else None,
                 also_out=also.get(request.id, []),
                 balances=context.balances.get(request.user_id, []),
                 balance_year=context.years.get(request.user_id),
                 last_leave=context.last_leave.get(request.user_id),
             )
         )
-    return items
-
-
-async def _also_out(
-    db: AsyncSession,
-    org_id: uuid.UUID,
-    actor: uuid.UUID,
-    perms: PermissionSet,
-    requests: Sequence[LeaveRequest],
-    approvers: dict[uuid.UUID, Approvers],
-    edges: Sequence[tuple[uuid.UUID, uuid.UUID]],
-) -> dict[uuid.UUID, list[AlsoOut]]:
-    """Teammates out on any of each request's days, in one query; no types.
-
-    A teammate shares one of the requester's managers. A manager only sees
-    their own reports here (not another manager's team they happen to
-    share a report with); HR sees the whole team.
-    """
-    own_reports = None if perms.has(APPROVE) else {who for who, boss in edges if boss == actor}
-    teams: dict[uuid.UUID, set[uuid.UUID]] = {}
-    for request in requests:
-        bosses = approvers[request.user_id].manager_ids
-        team = {who for who, boss in edges if boss in bosses} - {request.user_id}
-        teams[request.id] = team if own_reports is None else team & own_reports
-    everyone = set().union(*teams.values()) if teams else set()
-    if not everyone:
-        return {}
-    clashes = await LeaveRequestRepository(db, org_id=org_id).active_between(
-        everyone, min(r.start_date for r in requests), max(r.end_date for r in requests)
-    )
-    names = await UserRepository(db).get_names_by_ids({c.user_id for c in clashes})
-    return {
-        request.id: [
-            AlsoOut(
-                name=names.get(c.user_id, "Someone"),
-                kind=c.kind,
-                start_date=c.start_date,
-                end_date=c.end_date,
-            )
-            for c in clashes
-            if c.user_id in teams[request.id]
-            and c.start_date <= request.end_date
-            and c.end_date >= request.start_date
-        ]
-        for request in requests
-    }
+    return ApprovalPage(items=items, truncated=found.truncated)
 
 
 async def approval_count(
     db: AsyncSession, org_id: uuid.UUID, actor: uuid.UUID, perms: PermissionSet
 ) -> ApprovalCount:
     """Pending requests the caller can act on, for the nav badge (no extras)."""
-    allowed, _, edges = await _decidable(db, org_id, actor, perms, "pending")
-    is_approver = perms.has(APPROVE) or any(boss == actor for _, boss in edges)
-    return ApprovalCount(pending=len(allowed), is_approver=is_approver)
+    found = await _decidable(db, org_id, actor, perms, "pending")
+    has_reports = any(boss == actor for _, boss in found.edges)
+    return ApprovalCount(
+        pending=len(found.allowed),
+        is_approver=perms.has(APPROVE) or has_reports,
+        has_reports=has_reports,
+    )

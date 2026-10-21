@@ -97,6 +97,7 @@ watch(
   },
 )
 watch(settled, () => {
+  exportError.value = ''
   if (!store.noAccess) void store.fetch()
 })
 

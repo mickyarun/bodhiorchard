@@ -49,7 +49,7 @@
     </template>
   </v-list-item>
   <v-list-item
-    v-if="canViewLeaveReports || leaveStore.approvalCount.is_approver"
+    v-if="canViewLeaveReports || leaveStore.approvalCount.has_reports"
     prepend-icon="mdi-file-chart-outline"
     title="Leave reports"
     to="/leave/reports"

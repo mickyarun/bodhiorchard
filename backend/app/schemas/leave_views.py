@@ -55,10 +55,20 @@ class ApprovalItem(BaseModel):
     designation: str | None
     department: str | None
     balance_after: Decimal | None
+    # The leave year balance_after is for: the request's own, which may not
+    # be ``balance_year`` (the requester's current one).
+    balance_after_year: int | None = None
     also_out: list[AlsoOut]
     balances: list[Balance] = []
     balance_year: int | None = None
     last_leave: LastLeave | None = None
+
+
+class ApprovalPage(BaseModel):
+    """The queue, and whether the decided list hit its cap (older ones left out)."""
+
+    items: list[ApprovalItem]
+    truncated: bool
 
 
 class DecisionBody(BaseModel):
@@ -73,6 +83,8 @@ class ApprovalCount(BaseModel):
     pending: int
     # Whether the caller approves anything at all (shows the nav item).
     is_approver: bool
+    # Whether anyone reports to the caller (they can see reports on them).
+    has_reports: bool
 
 
 class CalendarEntry(BaseModel):

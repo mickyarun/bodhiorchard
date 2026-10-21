@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { presetRange } from '@/utils/leaveRanges'
+import { presetRange, rangeProblem } from '@/utils/leaveRanges'
 
 // Wednesday 20 May 2026, local time.
 const TODAY = new Date(2026, 4, 20)
@@ -41,5 +41,17 @@ describe('presetRange', () => {
   it('keeps the current range for custom', () => {
     const current = { start: '2026-02-03', end: '2026-02-09' }
     expect(presetRange('custom', TODAY, current)).toBe(current)
+  })
+})
+
+describe('rangeProblem', () => {
+  it('needs both dates only when the range is required', () => {
+    expect(rangeProblem({ start: '2026-06-01', end: '' }, true)).toMatch(/both/)
+    expect(rangeProblem({ start: '2026-06-01', end: '' }, false)).toBeNull()
+  })
+
+  it('refuses an end before the start', () => {
+    expect(rangeProblem({ start: '2026-06-10', end: '2026-06-01' }, false)).toMatch(/on or after/)
+    expect(rangeProblem({ start: '2026-06-01', end: '2026-06-01' }, true)).toBeNull()
   })
 })

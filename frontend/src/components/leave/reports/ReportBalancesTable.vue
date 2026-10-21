@@ -16,7 +16,7 @@
 
 <!-- Balances per member and leave type for a leave year. -->
 <template>
-  <v-data-table :headers="HEADERS" :items="rows" density="comfortable" :items-per-page="50">
+  <v-data-table item-value="key" :headers="HEADERS" :items="rows" density="comfortable" :items-per-page="50">
     <template #[`item.name`]="{ item }"><ReportPersonCell :row="item" /></template>
     <template #[`item.allocated`]="{ item }">{{ limit(item.allocated) }}</template>
     <template #[`item.used`]="{ item }">{{ formatDays(toNumber(item.used)) }}</template>
@@ -41,7 +41,10 @@ import type { BalanceReport } from '@/types/leaveReports'
 import { formatDays, toNumber, toNumberOrNull } from '@/utils/leave'
 
 const props = defineProps<{ report: BalanceReport | null }>()
-const rows = computed(() => (props.report?.rows ?? []).map((r, i) => ({ ...r, key: `${r.user_id}-${i}` })))
+// One row per member per leave type.
+const rows = computed(() =>
+  (props.report?.rows ?? []).map(r => ({ ...r, key: `${r.user_id}:${r.leave_type_id}` })),
+)
 
 const HEADERS = [
   { title: 'Employee', key: 'name', sortable: true },

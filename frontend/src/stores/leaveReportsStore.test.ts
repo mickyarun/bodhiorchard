@@ -117,6 +117,20 @@ describe('fetch', () => {
   })
 })
 
+describe('fetch with a broken custom range', () => {
+  it("explains the problem and doesn't call the API", async () => {
+    const store = useLeaveReportsStore()
+    Object.assign(store.filters, { start: '2026-06-10', end: '2026-06-01' })
+    await store.fetch()
+    expect(store.error).toMatch(/on or after/)
+    expect(get).not.toHaveBeenCalled()
+    store.report = 'balances'
+    get.mockResolvedValueOnce({ data: { rows: [] } })
+    await store.fetch()
+    expect(store.error).toBe('')
+  })
+})
+
 describe('setPreset', () => {
   it('keeps the current range when switching to custom', () => {
     const store = useLeaveReportsStore()

@@ -32,7 +32,7 @@ import type {
 } from '@/types/leaveReports'
 import { filenameFrom, saveBlob } from '@/utils/download'
 import { extractApiError, extractBlobApiError } from '@/utils/errors'
-import { presetRange, type RangePreset } from '@/utils/leaveRanges'
+import { presetRange, rangeProblem, type RangePreset } from '@/utils/leaveRanges'
 
 const PEOPLE = ['user_id', 'department', 'office_id', 'policy_id', 'manager_id'] as const
 /** The filters each report takes; the rest stay out of its query string. */
@@ -66,6 +66,11 @@ export function outOfScope(filters: ReportFilters, scope: ReportScope): (keyof R
     const value = filters[key]
     return typeof value === 'string' && value !== '' && !offered[key]?.has(value)
   })
+}
+
+/** A date problem the report can't be fetched with; balances take a year, not dates. */
+export function filtersProblem(name: ReportName, filters: ReportFilters): string | null {
+  return name === 'balances' ? null : rangeProblem(filters, true)
 }
 
 export const useLeaveReportsStore = defineStore('leaveReports', () => {
@@ -120,8 +125,12 @@ export const useLeaveReportsStore = defineStore('leaveReports', () => {
   async function fetch(): Promise<void> {
     const current = ++call
     const name = report.value
+    error.value = filtersProblem(name, filters) ?? ''
+    if (error.value) {
+      loading.value = false
+      return
+    }
     loading.value = true
-    error.value = ''
     try {
       const { data } = await api.get(`/v1/leave/reports/${name}`, {
         params: reportParams(name, filters),
@@ -140,6 +149,8 @@ export const useLeaveReportsStore = defineStore('leaveReports', () => {
   /** Download the current report as CSV; returns an error message or null. */
   async function exportCsv(): Promise<string | null> {
     const name = report.value
+    const problem = filtersProblem(name, filters)
+    if (problem) return problem
     exporting.value = true
     try {
       const response = await api.get<Blob>(`/v1/leave/reports/${name}.csv`, {

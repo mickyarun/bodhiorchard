@@ -20,11 +20,14 @@ Each report validates only the filters it uses, so none are silently ignored.
 import uuid
 from datetime import date, timedelta
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.leave_request import LeaveKind, LeaveStatus
 
 MAX_RANGE = timedelta(days=366)
+# The leave years the other leave endpoints accept; dates outside them would
+# overflow the calendar maths (a leave year ends in the following year).
+FIRST_YEAR, LAST_YEAR = 2000, 2100
 
 
 class PeopleFilters(BaseModel):
@@ -51,6 +54,8 @@ class RangeFilters(PeopleFilters):
             raise ValueError("The end date must be on or after the start date.")
         if self.end - self.start >= MAX_RANGE:
             raise ValueError("Pick a range of a year or less.")
+        if self.start.year < FIRST_YEAR or self.end.year > LAST_YEAR:
+            raise ValueError(f"Pick dates between {FIRST_YEAR} and {LAST_YEAR}.")
         return self
 
 
@@ -69,4 +74,4 @@ class RegisterFilters(RangeFilters):
 class BalanceFilters(PeopleFilters):
     """Balances for a leave year (each member's own policy's year)."""
 
-    year: int | None = None
+    year: int | None = Field(None, ge=FIRST_YEAR, le=LAST_YEAR)
