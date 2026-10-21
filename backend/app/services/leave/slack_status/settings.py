@@ -28,7 +28,6 @@ from app.repositories.organization import OrganizationRepository
 from app.repositories.slack_status_accounts import STATUS_SECTION
 from app.schemas.leave_slack_status import SlackStatusSettings, SlackStatusUpdate
 
-CONFIG_KEY = STATUS_SECTION
 CALLBACK_PATH = "/api/v1/slack/status/callback"
 
 
@@ -52,7 +51,7 @@ def redirect_url() -> str:
 
 
 def _section(config: dict[str, Any] | None) -> dict[str, Any]:
-    raw = (config or {}).get(CONFIG_KEY)
+    raw = (config or {}).get(STATUS_SECTION)
     return raw if isinstance(raw, dict) else {}
 
 
@@ -88,5 +87,5 @@ async def save_settings(
         encrypt_secret(update.client_secret) if update.client_secret else raw.get("client_secret")
     )
     section = {"enabled": update.enabled, "client_id": update.client_id, "client_secret": secret}
-    await repo.set_config_section(org_id, CONFIG_KEY, section)
+    await repo.set_config_section(org_id, STATUS_SECTION, section)
     return await load_settings(db, org_id)

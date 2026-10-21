@@ -36,10 +36,12 @@ class SlackStatusUpdate(BaseModel):
 
 
 class SlackStatusMine(BaseModel):
-    """What the member sees: whether it's offered and whether they're connected."""
+    """What the member sees: offered? connected? and can they connect at all
+    (their Slack account must be linked to their profile first)?"""
 
     available: bool
     connected: bool
+    linked: bool
 
 
 class SlackStatusConnect(BaseModel):

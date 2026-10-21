@@ -170,7 +170,8 @@ def stage_decision(
         category=NotificationCategory.LEAVE_UPDATES,
         slack_text=f"{escape(message)} <{settings.frontend_url}/leave|See details>",
         refresh_request_id=request.id,
-        sync_request_id=request.id,
+        # A rejected request never had events or a status to take off.
+        sync_request_id=request.id if request.status == LeaveStatus.APPROVED else None,
     )
     return _stage(
         db,
@@ -190,5 +191,7 @@ def after_cancel(org_id: uuid.UUID, request: LeaveRequest) -> Notice:
         category=NotificationCategory.LEAVE_APPROVALS,
         slack_text="",
         refresh_request_id=request.id,
-        sync_request_id=request.id,
+        # Only an approved request (decided, or approved automatically) has
+        # anything on the calendar or Slack; cancelling a pending one doesn't.
+        sync_request_id=request.id if request.decided_at is not None else None,
     )

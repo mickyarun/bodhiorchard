@@ -28,6 +28,8 @@ export interface SlackStatusSettings {
 export interface SlackStatusMine {
   available: boolean
   connected: boolean
+  // Their Slack account is linked to their profile (needed to connect).
+  linked: boolean
 }
 
 /** What happened when Slack sent the member back (?slackStatus=…). */

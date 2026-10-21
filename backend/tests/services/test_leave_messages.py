@@ -25,6 +25,7 @@ from app.services.leave.messages import (
     compose_request_message,
     format_range,
 )
+from app.services.leave.notify import after_cancel
 
 
 def _request(**overrides: object) -> SimpleNamespace:
@@ -66,3 +67,11 @@ def test_auto_approved_wfh_reads_as_fyi() -> None:
 def test_decision_message() -> None:
     text = compose_decision_message(_request(status=LeaveStatus.REJECTED), "Priya")  # type: ignore[arg-type]
     assert text == "Your request for leave Mon 19 – Wed 21 Oct was rejected by Priya."
+
+
+def test_decisions_only_resync_requests_that_were_approved() -> None:
+    pending_cancelled = _request(status=LeaveStatus.CANCELLED, decided_at=None)
+    approved_cancelled = _request(status=LeaveStatus.CANCELLED, decided_at=date(2026, 10, 1))
+    org = uuid.uuid4()
+    assert after_cancel(org, pending_cancelled).sync_request_id is None  # type: ignore[arg-type]
+    assert after_cancel(org, approved_cancelled).sync_request_id is not None  # type: ignore[arg-type]

@@ -73,7 +73,9 @@ async def get_my_slack_status(
     link = await SlackStatusLinkRepository(db, org_id=current_user.org_id).for_user(
         current_user.id
     )
-    return SlackStatusMine(available=client.ready, connected=link is not None)
+    return SlackStatusMine(
+        available=client.ready, connected=link is not None, linked=bool(current_user.slack_id)
+    )
 
 
 @router.post("/slack-status/me/connect", response_model=SlackStatusConnect)

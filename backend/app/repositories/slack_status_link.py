@@ -15,9 +15,9 @@
 """Members who let Bodhiorchard set their Slack status."""
 
 import uuid
-from datetime import date
+from datetime import datetime
 
-from sqlalchemy import Select, delete, select, update
+from sqlalchemy import Select, delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,7 +40,7 @@ class SlackStatusLinkRepository(BaseRepository[SlackStatusLink]):
             "slack_team_id": team_id,
             "slack_user_id": slack_user_id,
             "token": token,
-            "refreshed_on": None,
+            "next_refresh_at": None,
         }
         await self._db.execute(
             insert(SlackStatusLink)
@@ -86,10 +86,18 @@ class SlackStatusLinkRepository(BaseRepository[SlackStatusLink]):
         """Links of people removed from the org (or deactivated): to clear and forget."""
         return list((await self._db.execute(self._members(current=False))).scalars().all())
 
-    async def mark_refreshed(self, user_id: uuid.UUID, day: date) -> None:
-        """Note the local date a member's status was last set for."""
+    async def due_links(self, now: datetime) -> list[SlackStatusLink]:
+        """Current members whose status is due (never set, or past their local midnight)."""
+        due = or_(
+            SlackStatusLink.next_refresh_at.is_(None), SlackStatusLink.next_refresh_at <= now
+        )
+        stmt = self._members(current=True).where(due)
+        return list((await self._db.execute(stmt)).scalars().all())
+
+    async def mark_refreshed(self, user_id: uuid.UUID, next_at: datetime) -> None:
+        """Note that a member's status is set until ``next_at`` (their next local midnight)."""
         await self._db.execute(
             update(SlackStatusLink)
             .where(SlackStatusLink.org_id == self._org, SlackStatusLink.user_id == user_id)
-            .values(refreshed_on=day)
+            .values(next_refresh_at=next_at)
         )

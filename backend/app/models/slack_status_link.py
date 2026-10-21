@@ -21,9 +21,9 @@ by one org at a time: connecting it in another org hands it over.
 """
 
 import uuid
-from datetime import date
+from datetime import datetime
 
-from sqlalchemy import Date, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -50,5 +50,8 @@ class SlackStatusLink(BaseModel):
     slack_user_id: Mapped[str] = mapped_column(String(32), nullable=False)
     # Encrypted with the app's key (users.profile:read/write only).
     token: Mapped[str] = mapped_column(Text, nullable=False)
-    # The member's local date their status was last brought up to date.
-    refreshed_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # When their status is next due: their next local midnight once set for
+    # the day; None = now (just connected). Lets an idle tick be one query.
+    next_refresh_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )

@@ -25,7 +25,7 @@ so one broken account isn't retried (and logged) every minute.
 import contextlib
 import uuid
 from collections.abc import Iterable
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 
 import httpx
 import structlog
@@ -47,6 +47,7 @@ from app.services.leave.slack_status.plan import (
     status_for,
 )
 from app.services.leave.slack_status.settings import load_client
+from app.services.quiz_schedule_math import resolve_zone
 from app.services.slack_user_api import (
     SlackStatus,
     SlackUserApiError,
@@ -93,7 +94,10 @@ async def refresh(
 ) -> None:
     """Set ``link``'s member's status for ``day`` (their local date) and note it."""
     wanted = await _wanted(db, link, policy, day) if enabled else NO_STATUS
-    await _put(db, link, wanted, day)
+    next_midnight = datetime.combine(
+        day + timedelta(days=1), time(0), resolve_zone(policy.timezone)
+    )
+    await _put(db, link, wanted, next_midnight)
 
 
 async def clear(db: AsyncSession, link: SlackStatusLink) -> bool:
@@ -144,7 +148,7 @@ async def _wanted(
 
 
 async def _put(
-    db: AsyncSession, link: SlackStatusLink, wanted: SlackStatus, day: date | None
+    db: AsyncSession, link: SlackStatusLink, wanted: SlackStatus, next_at: datetime | None
 ) -> bool:
     """Make Slack show ``wanted``; False when it's worth retrying soon."""
     links = SlackStatusLinkRepository(db, org_id=link.org_id)
@@ -165,6 +169,6 @@ async def _put(
     except httpx.HTTPError as exc:
         logger.warning("slack_status_unreachable", error=str(exc), **ids)
         return False
-    if day is not None:
-        await links.mark_refreshed(link.user_id, day)
+    if next_at is not None:
+        await links.mark_refreshed(link.user_id, next_at)
     return True

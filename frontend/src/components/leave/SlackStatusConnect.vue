@@ -22,7 +22,11 @@
     {{ outcome.text }}
   </AppCallout>
   <AppCallout v-if="status.error.value" variant="error" class="mb-4">{{ status.error.value }}</AppCallout>
-  <AppCallout v-if="mine?.available && !mine.connected" variant="info" class="mb-6">
+  <AppCallout v-if="mine?.available && !mine.connected && !mine.linked" variant="info" class="mb-6">
+    Your Slack status can show WFH and leave days once your Slack account is linked to your
+    profile. Ask HR to link it.
+  </AppCallout>
+  <AppCallout v-else-if="mine?.available && !mine.connected" variant="info" class="mb-6">
     Show "Working from home" and "On leave" as your Slack status on those days. It's cleared
     automatically, and never says the type of leave.
     <template #actions>

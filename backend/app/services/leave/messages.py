@@ -39,16 +39,21 @@ def format_range(start: date, end: date) -> str:
     return f"{start:%a} {start.day} {start:%b} – {end:%a} {end.day} {end:%b}"
 
 
-def _days(days: Decimal) -> str:
-    value = f"{days.normalize():f}"
-    return f"{value} day" if days == 1 else f"{value} days"
+def number(value: Decimal) -> str:
+    """ "4", "10.5": no trailing zeros, no exponent."""
+    return f"{value.normalize():f}"
+
+
+def days_text(days: Decimal) -> str:
+    """ "1 day", "2.5 days"."""
+    return f"{number(days)} day" if days == 1 else f"{number(days)} days"
 
 
 def compose_request_message(
     name: str, request: LeaveRequest, *, auto_approved: bool, high_leave: HighLeave | None = None
 ) -> str:
     """Approver-facing text for a new request (no type, no reason)."""
-    when = f"{format_range(request.start_date, request.end_date)} ({_days(request.days)})"
+    when = f"{format_range(request.start_date, request.end_date)} ({days_text(request.days)})"
     what = _KIND_LABEL[request.kind]
     if auto_approved:
         return f"{name} is working from home {when}. It was approved automatically."
@@ -58,7 +63,7 @@ def compose_request_message(
 
 def high_leave_line(high: HighLeave) -> str:
     """Approvers' line, e.g. With this, they've taken 16 days this year (heads-up at 15)."""
-    taken = _days(high.taken)
+    taken = days_text(high.taken)
     if high.level == "warning":
         return (
             f"With this, they've taken {taken} this year, past the {high.warning_days}-day line."

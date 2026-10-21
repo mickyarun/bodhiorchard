@@ -15,8 +15,9 @@
 
 A 60-second tick like the daily post. Orgs that switched status on get it
 set (a bot token isn't needed: members connect with their own). Each
-member's "today" comes from their policy's timezone, and ``refreshed_on``
-makes it once a day per member, catching up after a restart. Slack clears
+member's "today" comes from their policy's timezone, and ``next_refresh_at``
+(their next local midnight) makes it once a day per member, catching up
+after a restart, with an idle org costing one query a tick. Slack clears
 statuses on its own at their expiration, so there's nothing to undo at
 the end of the day.
 
@@ -27,7 +28,7 @@ forgotten on the next tick, so an ex-member's token isn't kept.
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import date
+from datetime import UTC, date, datetime
 from functools import partial
 
 import structlog
@@ -67,7 +68,11 @@ async def _org_pass(org_id: uuid.UUID, *, enabled: bool) -> None:
     async with AsyncSessionLocal() as db:
         links = SlackStatusLinkRepository(db, org_id=org_id)
         departed = [link.user_id for link in await links.departed_links()]
-        due = await _due_today(db, org_id, await links.all_links()) if enabled else []
+        due = (
+            await _with_policies(db, org_id, await links.due_links(datetime.now(UTC)))
+            if enabled
+            else []
+        )
     for user_id in departed:
         await _member(org_id, user_id, _forget_departed, "slack_status_forget_failed")
     for user_id, policy, day in due:
@@ -92,10 +97,10 @@ async def _clear(db: AsyncSession, link: SlackStatusLink) -> str | None:
     return None
 
 
-async def _due_today(
+async def _with_policies(
     db: AsyncSession, org_id: uuid.UUID, links: list[SlackStatusLink]
 ) -> list[tuple[uuid.UUID, LeavePolicy, date]]:
-    """Members not yet set for their local today, with their policy and that date."""
+    """Due members with their policy and local today (nothing loaded when nobody's due)."""
     if not links:
         return []
     profiles = await EmployeeProfileRepository(db, org_id=org_id).by_users(
@@ -108,9 +113,7 @@ async def _due_today(
         profile = profiles.get(link.user_id)
         policy_id = profile.leave_policy_id if profile else None
         policy = policies.get(policy_id, default) if policy_id else default
-        day = today_for(policy)
-        if link.refreshed_on != day:
-            due.append((link.user_id, policy, day))
+        due.append((link.user_id, policy, today_for(policy)))
     return due
 
 

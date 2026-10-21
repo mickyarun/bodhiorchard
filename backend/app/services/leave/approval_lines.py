@@ -25,24 +25,22 @@ from decimal import Decimal
 from app.models.leave_request import LeaveRequest
 from app.schemas.leave_summary import Balance
 from app.schemas.leave_views import LastLeave
-from app.services.leave.messages import format_range
-
-
-def num(value: Decimal) -> str:
-    """ "4", "10.5": no trailing zeros, no exponent."""
-    return f"{value.normalize():f}"
+from app.services.leave.messages import days_text, format_range, number
 
 
 def format_balance(balance: Balance) -> str:
-    """One leave type's figure for an approver: "Casual 4 of 12 left" or "Unpaid 3 taken".
+    """One leave type's figure for an approver: "Casual 4 of 12 left", "Unpaid 3 taken"
+    or "Casual overdrawn by 2" (after a downward adjustment, say).
 
     Pending days aren't shown: a pending figure on one type would hint at
     which type this request is.
     """
     name = balance.leave_type.name
     if balance.available is None or balance.allocated is None:
-        return f"{name} {num(balance.used)} taken"
-    return f"{name} {num(balance.available)} of {num(balance.allocated)} left"
+        return f"{name} {number(balance.used)} taken"
+    if balance.available < 0:
+        return f"{name} overdrawn by {number(-balance.available)}"
+    return f"{name} {number(balance.available)} of {number(balance.allocated)} left"
 
 
 def _worth_showing(balance: Balance) -> bool:
@@ -60,15 +58,14 @@ def last_leave_line(last: LastLeave | None) -> str | None:
     """ "Last leave: Mon 6 – Tue 7 Oct (2 days)" — dates only, never the type."""
     if last is None:
         return None
-    days = "day" if last.days == 1 else "days"
-    return f"Last leave: {format_range(last.start_date, last.end_date)} ({num(last.days)} {days})"
+    return f"Last leave: {format_range(last.start_date, last.end_date)} ({days_text(last.days)})"
 
 
 def wfh_usage_line(month: date, month_days: Decimal, year_days: Decimal) -> str:
     """ "With this, 4 WFH days in Oct and 22 this leave year." (approved + pending)."""
     return (
-        f"With this, {num(month_days)} WFH {'day' if month_days == 1 else 'days'} "
-        f"in {month:%b} and {num(year_days)} this leave year."
+        f"With this, {number(month_days)} WFH {'day' if month_days == 1 else 'days'} "
+        f"in {month:%b} and {number(year_days)} this leave year."
     )
 
 

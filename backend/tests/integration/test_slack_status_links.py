@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -91,3 +92,18 @@ async def test_connecting_in_a_second_org_takes_the_account_over(
     # Handed back only after the commit, and never the token we're keeping
     # (two orgs on one Slack app get the same one).
     assert connected.stale_tokens == ([] if same_app else ["xoxp-old"])
+
+
+async def test_only_members_past_their_next_refresh_are_due(pg_session_factory: Factory) -> None:
+    org, (new, done, stale), _ = await setup_org(pg_session_factory, "new", "done", "stale")
+    for user, slack in ((new, "UN"), (done, "UD"), (stale, "US")):
+        await _link(pg_session_factory, org, user, f"{slack}{uuid.uuid4().hex[:6]}", "xoxp")
+    now = datetime.now(UTC)
+    async with pg_session_factory() as db:
+        links = SlackStatusLinkRepository(db, org_id=org)
+        await links.mark_refreshed(done, now + timedelta(hours=5))
+        await links.mark_refreshed(stale, now - timedelta(minutes=1))
+        await db.commit()
+    async with pg_session_factory() as db:
+        due = await SlackStatusLinkRepository(db, org_id=org).due_links(now)
+    assert {link.user_id for link in due} == {new, stale}
