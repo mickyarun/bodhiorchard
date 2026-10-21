@@ -42,6 +42,7 @@ from app.services.leave.calendar_sync.sync import sync_request
 from app.services.leave.messages import compose_decision_message, compose_request_message
 from app.services.leave.slack_blocks import escape
 from app.services.leave.slack_prompts import refresh_prompts, send_prompts
+from app.services.leave.slack_status.apply import refresh_after_change
 from app.services.notifications import NotificationCategory
 from app.services.slack_dm import send_dm
 
@@ -61,7 +62,7 @@ class Notice:
     prompt_request_id: uuid.UUID | None = None
     # Afterwards, swap earlier prompts for this request to its outcome.
     refresh_request_id: uuid.UUID | None = None
-    # Bring the requester's Google Calendar in line with this request.
+    # Bring the requester's Google Calendar and Slack status in line with it.
     sync_request_id: uuid.UUID | None = None
 
     def send(self) -> None:
@@ -78,6 +79,7 @@ class Notice:
             spawn(refresh_prompts(self.org_id, self.refresh_request_id))
         if self.sync_request_id:
             spawn(sync_request(self.org_id, self.sync_request_id))
+            spawn(refresh_after_change(self.org_id, self.sync_request_id))
 
 
 def _stage(

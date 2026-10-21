@@ -42,6 +42,7 @@
       </div>
     </div>
 
+    <SlackStatusConnect />
     <v-progress-linear v-if="store.summaryLoading && !summary" indeterminate color="primary" class="mb-4" />
     <AppCallout v-if="store.summaryError" variant="error" class="mb-4">{{ store.summaryError }}</AppCallout>
 
@@ -82,6 +83,7 @@ import AppCallout from '@/components/common/AppCallout.vue'
 import BalanceGrid from '@/components/leave/BalanceGrid.vue'
 import LeaveRequestDialog from '@/components/leave/LeaveRequestDialog.vue'
 import MyRequestsTable from '@/components/leave/MyRequestsTable.vue'
+import SlackStatusConnect from '@/components/leave/SlackStatusConnect.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useLeaveStore } from '@/stores/leave'
 import type { LeaveKind } from '@/types/leave'

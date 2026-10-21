@@ -35,6 +35,7 @@ from app.core.event_loop import configure_event_loop_policy
 from app.core.logging import setup_logging
 from app.core.middleware import RequestLoggingMiddleware
 from app.services.leave.digest_scheduler import run_forever as run_leave_digest
+from app.services.leave.slack_status.scheduler import run_forever as run_slack_status
 from app.services.mcp_audit_cleanup import run_forever as run_audit_cleanup
 from app.services.minigame_nudge import run_forever as run_minigame_nudge
 from app.services.pr_merge_worker import WorkerPool, start_pr_merge_workers
@@ -286,6 +287,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # 8g. Daily who's-out Slack post — 60s tick, at most one post per org-day.
     leave_digest_task = asyncio.create_task(run_leave_digest())
+    # 8h. Slack status ("Working from home" / "On leave") at the start of
+    # each connected member's day — 60s tick, once per member-day.
+    slack_status_task = asyncio.create_task(run_slack_status())
 
     # 9. PR-merge Redis-stream worker pool. One consumer per
     # (org, repo) stream; supervisor task spawns consumers lazily as
@@ -326,6 +330,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     quiz_batch_task.cancel()
     quiz_scheduler_task.cancel()
     leave_digest_task.cancel()
+    slack_status_task.cancel()
     quiz_rollup_task.cancel()
     if pr_merge_pool is not None:
         await pr_merge_pool.stop()

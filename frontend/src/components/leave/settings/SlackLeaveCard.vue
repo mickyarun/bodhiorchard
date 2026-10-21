@@ -14,8 +14,8 @@
  * limitations under the License.
  -->
 
-<!-- Settings → Leave: the daily who's-out post, and how approvers decide
-     from Slack. Org-wide, above the policy list. -->
+<!-- Settings → Leave: the daily who's-out post, how approvers decide from
+     Slack, and people's Slack status. Org-wide, above the policy list. -->
 <template>
   <v-card color="surface" border rounded="lg" class="pa-6 mb-6">
     <div class="d-flex align-center ga-3 mb-5">
@@ -75,12 +75,16 @@
       Slack app's settings, turn on <strong>Interactivity</strong> and set the Request URL to:
     </p>
     <code class="request-url">{{ requestUrl }}</code>
+
+    <v-divider class="my-6" />
+    <SlackStatusSettings />
   </v-card>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
+import SlackStatusSettings from '@/components/leave/settings/SlackStatusSettings.vue'
 import { useDigestSettings } from '@/composables/useDigestSettings'
 
 const field = { variant: 'outlined', density: 'comfortable', hideDetails: 'auto' } as const

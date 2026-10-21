@@ -114,6 +114,7 @@ from app.models.scan_run_enums import (
     StepStatus,
 )
 from app.models.skill_profile import SkillProfile
+from app.models.slack_status_link import SlackStatusLink
 from app.models.standup import StandupReport
 from app.models.team import Team, TeamMember, TeamRepo, TeamStatus
 from app.models.tracked_repository import RepoStatus, TrackedRepository
@@ -167,6 +168,7 @@ __all__ = [
     "LeavePolicy",
     "LeaveRequest",
     "LeaveSlackPrompt",
+    "SlackStatusLink",
     "LeaveType",
     "PolicyHoliday",
     "BugComment",
