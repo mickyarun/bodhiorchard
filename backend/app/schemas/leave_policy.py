@@ -18,7 +18,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.leave_policy import AllocationRounding, ProrationMethod, WfhApproval
 from app.models.leave_type import LeaveAccrual
@@ -41,6 +41,9 @@ class PolicyWrite(BaseModel):
     wfh_monthly_auto_days: int = Field(0, ge=0, le=31)
     backdate_limit_days: int = Field(7, ge=0, le=365)
     optional_holiday_quota: int = Field(0, ge=0, le=60)
+    # Heads-up, then warning, after this many days of leave in a year.
+    leave_notice_days: int | None = Field(None, ge=1, le=365)
+    leave_warning_days: int | None = Field(None, ge=1, le=365)
     proration_method: ProrationMethod = ProrationMethod.DAILY
     proration_cutoff_day: int = Field(15, ge=1, le=31)
     allocation_rounding: AllocationRounding = AllocationRounding.NEAREST_HALF
@@ -65,6 +68,13 @@ class PolicyWrite(BaseModel):
             raise ValueError("Choose a timezone, e.g. Asia/Kolkata.")
         return checked
 
+    @model_validator(mode="after")
+    def _warning_after_notice(self) -> "PolicyWrite":
+        notice, warning = self.leave_notice_days, self.leave_warning_days
+        if notice is not None and warning is not None and warning < notice:
+            raise ValueError("The warning should come at or after the heads-up.")
+        return self
+
 
 class PolicyRead(PolicyWrite):
     """A policy with its id and how many employees follow it."""
@@ -85,6 +95,7 @@ class LeaveTypeWrite(BaseModel):
     accrual: LeaveAccrual = LeaveAccrual.UPFRONT
     is_paid: bool = True
     is_encashable: bool = False
+    counts_toward_warning: bool = True
     color_key: str = Field("swatch-1", pattern=r"^swatch-[1-7]$")
     is_active: bool = True
 

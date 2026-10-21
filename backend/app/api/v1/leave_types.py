@@ -42,6 +42,7 @@ def _read(t: LeaveType) -> LeaveTypeRead:
         accrual=t.accrual,
         is_paid=t.is_paid,
         is_encashable=t.is_encashable,
+        counts_toward_warning=t.counts_toward_warning,
         color_key=t.color_key,
         is_active=t.is_active,
     )

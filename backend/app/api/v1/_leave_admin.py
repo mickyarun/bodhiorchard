@@ -48,6 +48,8 @@ async def policy_read(db: AsyncSession, policy: LeavePolicy) -> PolicyRead:
         wfh_monthly_auto_days=policy.wfh_monthly_auto_days,
         backdate_limit_days=policy.backdate_limit_days,
         optional_holiday_quota=policy.optional_holiday_quota,
+        leave_notice_days=policy.leave_notice_days,
+        leave_warning_days=policy.leave_warning_days,
         proration_method=policy.proration_method,
         proration_cutoff_day=policy.proration_cutoff_day,
         allocation_rounding=policy.allocation_rounding,

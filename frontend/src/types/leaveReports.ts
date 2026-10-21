@@ -13,7 +13,7 @@
 // limitations under the License.
 
 /** Leave reports (mirrors backend app/schemas/leave_reports.py). Never reasons. */
-import type { Decimalish, HalfDay, LeaveKind, LeaveStatus, PersonRef } from '@/types/leave'
+import type { Decimalish, HalfDay, HighLeave, LeaveKind, LeaveStatus, PersonRef } from '@/types/leave'
 
 export type ReportName = 'summary' | 'register' | 'balances'
 
@@ -47,6 +47,8 @@ export interface SummaryRow extends PersonColumns {
    *  a type missing here isn't on the member's policy. */
   left_by_type: Record<string, Decimalish | null>
   leave_days: Decimalish
+  /** Past the policy's heads-up / warning lines for the year; null below. */
+  high_leave: HighLeave | null
   lop_days: Decimalish
   wfh_days: Decimalish
   optional_holidays: Decimalish

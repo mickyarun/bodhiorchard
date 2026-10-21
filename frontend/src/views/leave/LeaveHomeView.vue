@@ -46,6 +46,9 @@
     <AppCallout v-if="store.summaryError" variant="error" class="mb-4">{{ store.summaryError }}</AppCallout>
 
     <template v-if="summary">
+      <AppCallout v-if="summary.high_leave" :variant="highLeaveVariant(summary.high_leave)" class="mb-4">
+        {{ highLeaveForSelf(summary.high_leave, false) }}
+      </AppCallout>
       <AppCallout v-if="!summary.balances.length && canConfigureLeave" variant="info" class="mb-6">
         No leave types yet. Add them so people can request leave.
         <template #actions>
@@ -82,6 +85,7 @@ import MyRequestsTable from '@/components/leave/MyRequestsTable.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useLeaveStore } from '@/stores/leave'
 import type { LeaveKind } from '@/types/leave'
+import { highLeaveForSelf, highLeaveVariant } from '@/utils/highLeave'
 import { joinWithAnd } from '@/utils/leave'
 import { formatLeaveYear } from '@/utils/leaveDates'
 

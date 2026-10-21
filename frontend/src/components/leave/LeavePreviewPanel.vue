@@ -29,6 +29,9 @@
       </div>
       <div v-if="balanceLine" class="text-body-2 mt-1">{{ balanceLine }}</div>
       <AppCallout v-if="lopLine" variant="warning" class="mt-2">{{ lopLine }}</AppCallout>
+      <AppCallout v-if="preview.high_leave" :variant="highLeaveVariant(preview.high_leave)" class="mt-2">
+        {{ highLeaveForSelf(preview.high_leave, true) }}
+      </AppCallout>
       <div v-if="approval" class="text-body-2 text-medium-emphasis mt-1">{{ approval }}</div>
       <AppCallout v-if="preview.problems.length" variant="error" class="mt-3">
         <div v-for="problem in preview.problems" :key="problem.code">{{ problem.message }}</div>
@@ -42,6 +45,7 @@
 import { computed } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import type { LeaveKind, LeavePreview, PolicyBrief } from '@/types/leave'
+import { highLeaveForSelf, highLeaveVariant } from '@/utils/highLeave'
 import {
   approvalLine,
   excludedSummary,

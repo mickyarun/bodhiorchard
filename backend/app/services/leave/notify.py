@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.leave_request import LeaveRequest, LeaveStatus
 from app.models.notification import Notification, NotificationType
+from app.schemas.leave import HighLeave
 from app.services.background import spawn
 from app.services.event_bus import publish
 from app.services.leave.messages import compose_decision_message, compose_request_message
@@ -120,9 +121,12 @@ def stage_new_request(
     requester_name: str,
     targets: set[uuid.UUID],
     auto_approved: bool,
+    high_leave: HighLeave | None = None,
 ) -> Notice:
     """Approvers (or HR) hear about a request; an FYI if it was auto-approved."""
-    message = compose_request_message(requester_name, request, auto_approved=auto_approved)
+    message = compose_request_message(
+        requester_name, request, auto_approved=auto_approved, high_leave=high_leave
+    )
     link = "/leave/team" if auto_approved else "/leave/approvals"
     notice = Notice(
         org_id=org_id,

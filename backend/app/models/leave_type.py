@@ -55,6 +55,10 @@ class LeaveType(BaseModel):
     # NULL = no limit (e.g. unpaid leave).
     annual_quota_days: Mapped[Decimal | None] = mapped_column(Numeric(5, 1), nullable=True)
     is_paid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Counts toward the policy's high-leave heads-up and warning.
+    counts_toward_warning: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     # Unused days are paid out when someone leaves (their full and final).
     is_encashable: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"

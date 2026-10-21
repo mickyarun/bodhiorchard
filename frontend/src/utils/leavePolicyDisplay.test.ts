@@ -50,6 +50,7 @@ function type(overrides: Partial<LeaveTypeRead> = {}): LeaveTypeRead {
     annual_quota_days: '12',
     accrual: 'upfront',
     is_encashable: false,
+    counts_toward_warning: true,
     is_paid: true,
     color_key: 'swatch-1',
     is_active: true,

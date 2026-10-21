@@ -58,6 +58,11 @@
               description="Unused days are paid out when someone leaves."
             />
             <LeaveSwitchRow
+              v-model="draft.counts_toward_warning"
+              label="Counts toward the high-leave warning"
+              description="Off for sick leave, usually. The lines are set in Rules."
+            />
+            <LeaveSwitchRow
               v-if="type"
               v-model="draft.is_active"
               label="Available to request"
@@ -124,14 +129,15 @@ function blank(): LeaveTypeWrite {
     accrual: 'upfront',
     is_paid: true,
     is_encashable: false,
+    counts_toward_warning: true,
     color_key: SWATCH_KEYS[0],
     is_active: true,
   }
 }
 
 function fromType(type: LeaveTypeRead): LeaveTypeWrite {
-  const { name, code, annual_quota_days, accrual, is_paid, is_encashable, color_key, is_active } = type
-  return { name, code, annual_quota_days, accrual, is_paid, is_encashable, color_key, is_active }
+  const { id: _id, policy_id: _policy, ...write } = type
+  return write
 }
 
 watch(

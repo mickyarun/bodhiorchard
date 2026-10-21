@@ -42,6 +42,9 @@
       {{ lop }} of this request {{ toNumber(request.lop_days) === 1 ? 'is' : 'are' }} loss of pay:
       not enough {{ requestTypeLabel(request) }} left.
     </AppCallout>
+    <AppCallout v-if="item.high_leave" :variant="highLeaveVariant(item.high_leave)" class="mt-3">
+      {{ highLeaveForOthers(item.high_leave, firstName(request.user.name)) }}
+    </AppCallout>
 
     <template v-if="request.kind === 'leave' && item.balances.length">
       <div class="d-flex align-baseline flex-wrap ga-2 mt-4 mb-2">
@@ -105,6 +108,7 @@ import { useLeaveApprovalsStore } from '@/stores/leaveApprovals'
 import type { ApprovalItem } from '@/types/leave'
 import { inBalanceYear } from '@/utils/approvalFacts'
 import {
+  firstName,
   HALF_DAY_LABELS,
   lopLabel,
   pluralDays,
@@ -112,6 +116,7 @@ import {
   ROUTE_TAGS,
   toNumber,
 } from '@/utils/leave'
+import { highLeaveForOthers, highLeaveVariant } from '@/utils/highLeave'
 import { formatDayRange } from '@/utils/leaveDates'
 
 const props = defineProps<{ item: ApprovalItem }>()

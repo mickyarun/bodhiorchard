@@ -49,6 +49,9 @@ export interface PolicyWrite {
   wfh_monthly_auto_days: number
   backdate_limit_days: number
   optional_holiday_quota: number
+  /** Heads-up, then warning, after this many days of leave a year (null = off). */
+  leave_notice_days: number | null
+  leave_warning_days: number | null
   proration_method: ProrationMethod
   /** Monthly proration: joining on or before this day counts the month. */
   proration_cutoff_day: number
@@ -70,6 +73,7 @@ export interface LeaveTypeWrite {
   is_paid: boolean
   /** Unused days are paid out when someone leaves. */
   is_encashable: boolean
+  counts_toward_warning: boolean
   color_key: string
   is_active: boolean
 }

@@ -54,7 +54,7 @@ function item(balanceAfter: string | null, afterYear: number | null): ApprovalIt
     request: { leave_type: type } as ApprovalItem['request'],
     route: 'manager', designation: null, department: null, also_out: [],
     balance_after: balanceAfter, balance_after_year: afterYear,
-    balances: [balance], balance_year: 2026, last_leave: null,
+    balances: [balance], balance_year: 2026, last_leave: null, high_leave: null,
   }
 }
 

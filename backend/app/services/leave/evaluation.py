@@ -37,6 +37,7 @@ from app.services.leave.evaluation_steps import (
     apply_optional_holiday,
     check_overlap,
 )
+from app.services.leave.high_leave import with_request
 from app.services.leave.policies import MemberPolicy, mandatory_holidays, today_for
 from app.services.leave.wfh_usage import wfh_auto_approved
 
@@ -97,6 +98,9 @@ async def evaluate(
     await check_overlap(db, policy.org_id, user_id, result, body.half_day)
     if body.kind == LeaveKind.LEAVE and body.leave_type_id is not None:
         await apply_balance(db, member, user_id, body.leave_type_id, result, persist)
+        result.high_leave = await with_request(
+            db, policy, user_id, body.leave_type_id, result.start, result.days
+        )
     if body.kind == LeaveKind.WFH:
         result.auto_approved = await wfh_auto_approved(
             db, member.policy, user_id, result.start, result.end, body.half_day
