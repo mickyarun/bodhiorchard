@@ -46,12 +46,17 @@
           </div>
           <div class="group" role="group" :aria-labelledby="ids.allowance">
             <div :id="ids.allowance" class="group__title text-overline text-medium-emphasis">Allowance</div>
-            <LeaveTypeAllowanceField v-model:unlimited="unlimited" v-model:days="quota" />
+            <LeaveTypeAllowanceField v-model:unlimited="unlimited" v-model:days="quota" v-model:accrual="draft.accrual" />
           </div>
           <div class="group" role="group" :aria-labelledby="ids.appearance">
             <div :id="ids.appearance" class="group__title text-overline text-medium-emphasis">Appearance &amp; status</div>
             <LeaveTypeColorPicker v-model="draft.color_key" :name="draft.name" class="mb-3" />
             <LeaveSwitchRow v-model="draft.is_paid" label="Paid leave" />
+            <LeaveSwitchRow
+              v-model="draft.is_encashable"
+              label="Encashable at exit"
+              description="Unused days are paid out when someone leaves."
+            />
             <LeaveSwitchRow
               v-if="type"
               v-model="draft.is_active"
@@ -112,12 +117,21 @@ const valid = computed(
 )
 
 function blank(): LeaveTypeWrite {
-  return { name: '', code: '', annual_quota_days: null, is_paid: true, color_key: SWATCH_KEYS[0], is_active: true }
+  return {
+    name: '',
+    code: '',
+    annual_quota_days: null,
+    accrual: 'upfront',
+    is_paid: true,
+    is_encashable: false,
+    color_key: SWATCH_KEYS[0],
+    is_active: true,
+  }
 }
 
 function fromType(type: LeaveTypeRead): LeaveTypeWrite {
-  const { name, code, annual_quota_days, is_paid, color_key, is_active } = type
-  return { name, code, annual_quota_days, is_paid, color_key, is_active }
+  const { name, code, annual_quota_days, accrual, is_paid, is_encashable, color_key, is_active } = type
+  return { name, code, annual_quota_days, accrual, is_paid, is_encashable, color_key, is_active }
 }
 
 watch(
@@ -150,6 +164,8 @@ async function submit(): Promise<void> {
     name: draft.value.name.trim(),
     code: draft.value.code.trim().toUpperCase(),
     annual_quota_days: unlimited.value ? null : quota.value,
+    // An unlimited type has nothing to release month by month.
+    accrual: unlimited.value ? 'upfront' : draft.value.accrual,
   }
   error.value = (await store.saveType(props.policyId, body, props.type?.id ?? null)) ?? ''
   saving.value = false

@@ -32,6 +32,8 @@ export type WfhApproval = 'required' | 'auto' | 'auto_within_allowance'
 export type HolidayKind = 'mandatory' | 'optional'
 export type HolidaySource = 'manual' | 'imported'
 export type ApprovalRoute = 'manager' | 'hr_queue' | 'hr_override'
+/** When a year's allowance becomes usable: all on day one, or a part each month. */
+export type LeaveAccrual = 'upfront' | 'monthly'
 export type RequestScope = 'upcoming' | 'past' | 'all'
 export type SwatchKey = `swatch-${1 | 2 | 3 | 4 | 5 | 6 | 7}`
 
@@ -71,7 +73,10 @@ export interface PolicyBrief {
 export interface Balance {
   leave_type: LeaveTypeBrief
   is_paid: boolean
+  accrual: LeaveAccrual
   allocated: Decimalish | null
+  /** Of `allocated`, what is released so far (all of it when upfront). */
+  earned: Decimalish | null
   adjustments: Decimalish
   used: Decimalish
   pending: Decimalish

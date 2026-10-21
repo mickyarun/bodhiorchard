@@ -38,7 +38,9 @@ function balance(overrides: Partial<Balance> = {}): Balance {
   return {
     leave_type: casual,
     is_paid: true,
+    accrual: 'upfront',
     allocated: '12.0',
+    earned: '12.0',
     adjustments: '0',
     used: '3.0',
     pending: '1.0',

@@ -108,7 +108,7 @@ def register_rows(rows: Sequence[RegisterRow]) -> tuple[list[str], list[list[Cel
 def balance_rows(report: BalanceReport) -> tuple[list[str], list[list[Cell]]]:
     header = [
         *PERSON_HEADER,
-        "Leave year", "Leave type", "Allocated", "Adjustments", "Used", "Pending",
+        "Leave year", "Leave type", "Allocated", "Earned so far", "Adjustments", "Used", "Pending",
         "Available", "Encashable at exit", "Loss of pay days (year)",
     ]  # fmt: skip
     return header, [
@@ -117,6 +117,7 @@ def balance_rows(report: BalanceReport) -> tuple[list[str], list[list[Cell]]]:
             r.leave_year,
             r.leave_type,
             "No limit" if r.allocated is None else r.allocated,
+            "No limit" if r.earned is None else r.earned,
             r.adjustments,
             r.used,
             r.pending,

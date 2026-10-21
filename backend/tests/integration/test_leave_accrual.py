@@ -110,5 +110,7 @@ async def test_the_balances_report_shows_what_is_encashable_at_exit(
         month = today_for((await resolve_member_policy(db, org, emp)).policy).month
     # Nothing used: everything earned so far would be paid out.
     assert D(row["encashable"]) == D(row["available"]) == D("0.1") * month
+    assert (D(row["allocated"]), D(row["earned"])) == (QUOTA, D("0.1") * month)
     csv = await client.get("/api/v1/leave/reports/balances.csv", headers=as_user(hr, org))
-    assert "Encashable at exit" in csv.content.decode("utf-8-sig").splitlines()[0]
+    header = csv.content.decode("utf-8-sig").splitlines()[0]
+    assert "Earned so far" in header and "Encashable at exit" in header

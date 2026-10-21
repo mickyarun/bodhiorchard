@@ -45,6 +45,13 @@ describe('changeLines', () => {
     ])
   })
 
+  it('names how a type is given and whether it is encashable', () => {
+    expect(changeLines({ accrual: ['upfront', 'monthly'], is_encashable: [false, true] })).toEqual([
+      'Given: all at once → monthly',
+      'Encashable at exit: no → yes',
+    ])
+  })
+
   it('ignores fields that are not changes, like assigned ids', () => {
     expect(changeLines({ user_ids: ['a', 'b'], assigned: 2 })).toEqual([])
   })

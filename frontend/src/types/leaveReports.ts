@@ -90,10 +90,14 @@ export interface BalanceRow extends PersonColumns {
   leave_type_id: string
   leave_type: string
   allocated: Decimalish | null
+  /** Of `allocated`, what is released by today (all of it when upfront). */
+  earned: Decimalish | null
   adjustments: Decimalish
   used: Decimalish
   pending: Decimalish
   available: Decimalish | null
+  /** Unused days paid out at exit, as of today; null when the type isn't encashable. */
+  encashable: Decimalish | null
   lop_days: Decimalish
 }
 

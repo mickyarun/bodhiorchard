@@ -103,10 +103,11 @@ export function deleteBlocker(policy: PolicyRead): string | null {
   return null
 }
 
-/** "12 days" or "Unlimited". */
-export function allowanceLabel(type: Pick<LeaveTypeRead, 'annual_quota_days'>): string {
+/** "12 days", "18 days, earned monthly" or "Unlimited". */
+export function allowanceLabel(type: Pick<LeaveTypeRead, 'annual_quota_days' | 'accrual'>): string {
   const quota = toNumberOrNull(type.annual_quota_days)
-  return quota === null ? 'Unlimited' : pluralDays(quota)
+  if (quota === null) return 'Unlimited'
+  return type.accrual === 'monthly' ? `${pluralDays(quota)}, earned monthly` : pluralDays(quota)
 }
 
 /** Active types first as given, switched-off ones apart. */

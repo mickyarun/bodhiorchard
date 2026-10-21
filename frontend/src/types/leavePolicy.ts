@@ -22,6 +22,7 @@ import type {
   Decimalish,
   HolidayKind,
   HolidaySource,
+  LeaveAccrual,
   LeaveYear,
   PersonRef,
   WfhApproval,
@@ -65,7 +66,10 @@ export interface LeaveTypeWrite {
   name: string
   code: string
   annual_quota_days: Decimalish | null
+  accrual: LeaveAccrual
   is_paid: boolean
+  /** Unused days are paid out when someone leaves. */
+  is_encashable: boolean
   color_key: string
   is_active: boolean
 }

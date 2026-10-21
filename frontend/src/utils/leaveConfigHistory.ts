@@ -34,7 +34,9 @@ const FIELD_LABELS: Record<string, string> = {
   allocation_rounding: 'Rounding',
   code: 'Code',
   annual_quota_days: 'Yearly quota',
+  accrual: 'Given',
   is_paid: 'Paid',
+  is_encashable: 'Encashable at exit',
   color_key: 'Colour',
   is_active: 'Active',
   is_default: 'Default policy',
@@ -46,6 +48,7 @@ function formatValue(field: string, value: unknown): string {
     return value.map(day => WEEKDAY_SHORT[Number(day)] ?? String(day)).join(', ')
   }
   if (field === 'year_start_month') return MONTH_NAMES[Number(value) - 1] ?? String(value)
+  if (field === 'accrual') return value === 'upfront' ? 'all at once' : String(value)
   if (typeof value === 'boolean') return value ? 'yes' : 'no'
   // Decimals arrive as strings ("7.0"); show them as numbers ("7").
   if (typeof value === 'string' && NUMERIC.test(value)) return String(Number(value))

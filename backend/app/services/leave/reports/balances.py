@@ -59,6 +59,7 @@ async def balance_report(
                     leave_type_id=line.leave_type.id,
                     leave_type=line.leave_type.name,
                     allocated=line.allocated,
+                    earned=line.earned,
                     adjustments=line.adjustments,
                     used=line.used,
                     pending=line.pending,

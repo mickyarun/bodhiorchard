@@ -48,6 +48,8 @@ function type(overrides: Partial<LeaveTypeRead> = {}): LeaveTypeRead {
     name: 'Casual',
     code: 'CL',
     annual_quota_days: '12',
+    accrual: 'upfront',
+    is_encashable: false,
     is_paid: true,
     color_key: 'swatch-1',
     is_active: true,
@@ -114,6 +116,9 @@ describe('leave types', () => {
     expect(allowanceLabel(type())).toBe('12 days')
     expect(allowanceLabel(type({ annual_quota_days: '0.5' }))).toBe('0.5 days')
     expect(allowanceLabel(type({ annual_quota_days: null }))).toBe('Unlimited')
+    expect(allowanceLabel(type({ annual_quota_days: '18', accrual: 'monthly' }))).toBe(
+      '18 days, earned monthly',
+    )
   })
 
   it('keeps switched-off types apart', () => {

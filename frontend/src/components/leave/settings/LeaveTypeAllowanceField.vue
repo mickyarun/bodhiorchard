@@ -14,8 +14,8 @@
  * limitations under the License.
  -->
 
-<!-- A leave type's allowance: a fixed number of days each leave year, or
-     unlimited (no balance is kept). -->
+<!-- A leave type's allowance: a fixed number of days each leave year, given
+     all at once or month by month, or unlimited (no balance is kept). -->
 <template>
   <div class="allowance">
     <AppPillToggle v-model="mode" :options="MODES" aria-label="Allowance" />
@@ -34,6 +34,13 @@
       <p class="text-caption text-medium-emphasis">
         New joiners get a share of this, set in Rules → New joiners.
       </p>
+      <div class="given">
+        <span class="text-body-2 font-weight-medium">Given</span>
+        <AppPillToggle v-model="accrual" :options="ACCRUALS" aria-label="Given" />
+      </div>
+      <p class="text-caption text-medium-emphasis">
+        {{ accrual === 'monthly' ? 'An equal part on the 1st of each month: 18 a year is 1.5 a month.' : 'The whole allowance is there from the first day of the leave year.' }}
+      </p>
     </template>
     <p v-else class="text-caption text-medium-emphasis">
       No balance is tracked. Requests still need approval.
@@ -44,16 +51,23 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
+import type { LeaveAccrual } from '@/types/leave'
 import { FIELD_PROPS } from '@/utils/leavePolicyDisplay'
 
 type Mode = 'fixed' | 'unlimited'
 
 const unlimited = defineModel<boolean>('unlimited', { required: true })
 const days = defineModel<number | null>('days', { required: true })
+const accrual = defineModel<LeaveAccrual>('accrual', { required: true })
 
 const MODES: { label: string; value: Mode }[] = [
   { label: 'Fixed', value: 'fixed' },
   { label: 'Unlimited', value: 'unlimited' },
+]
+
+const ACCRUALS: { label: string; value: LeaveAccrual }[] = [
+  { label: 'All at once', value: 'upfront' },
+  { label: 'Monthly', value: 'monthly' },
 ]
 
 const mode = computed<Mode>({
@@ -74,5 +88,10 @@ const mode = computed<Mode>({
 .days {
   width: 200px;
   flex: none;
+}
+.given {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 </style>

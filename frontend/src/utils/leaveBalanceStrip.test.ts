@@ -21,7 +21,9 @@ function balance(used: number, pending: number): Balance {
   return {
     leave_type: { id: 't1', name: 'Casual', code: 'CL', color_key: 'swatch-1' },
     is_paid: true,
+    accrual: 'upfront',
     allocated: 12,
+    earned: 12,
     adjustments: 0,
     used,
     pending,

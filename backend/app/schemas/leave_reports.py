@@ -110,6 +110,8 @@ class BalanceRow(PersonColumns):
     leave_type_id: uuid.UUID
     leave_type: str
     allocated: Decimal | None
+    # Of ``allocated``, what is released by today (all of it when upfront).
+    earned: Decimal | None
     adjustments: Decimal
     used: Decimal
     pending: Decimal
