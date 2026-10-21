@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""HR edits to employee records: work details, personal details, managers."""
+"""Edits to employee records: work details, personal details, managers (HR),
+and the person's name (HR, or the person themself)."""
 
 import uuid
 
@@ -21,12 +22,24 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1._employee_helpers import forbid, load_record
-from app.core.deps import PermissionSet, get_db, get_permission_set, require_permissions
+from app.core.deps import (
+    PermissionSet,
+    get_current_user,
+    get_db,
+    get_permission_set,
+    require_permissions,
+)
 from app.models.user import User
 from app.repositories.base import violated_constraint
 from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.employee_reporting_manager import EmployeeReportingManagerRepository
-from app.schemas.employee import EmployeePersonal, EmployeeRead, EmployeeWork, ManagersUpdate
+from app.schemas.employee import (
+    EmployeePersonal,
+    EmployeeRead,
+    EmployeeWork,
+    ManagersUpdate,
+    NameUpdate,
+)
 from app.services.employees.access import MANAGE, access_for
 from app.services.employees.lifecycle import apply_exit
 from app.services.employees.managers import (
@@ -43,6 +56,26 @@ OFFICE_CONSTRAINT = "fk_employee_profiles_office"
 router = APIRouter(tags=["employees"])
 
 OWN_WORK = "You can't change your own work details or managers. Ask another HR member."
+
+
+@router.put("/{user_id}/name", response_model=EmployeeRead)
+async def update_name(
+    user_id: uuid.UUID,
+    body: NameUpdate,
+    current_user: User = Depends(get_current_user),
+    perms: PermissionSet = Depends(get_permission_set),
+    db: AsyncSession = Depends(get_db),
+) -> EmployeeRead:
+    """Fix a person's name (theirs, or anyone's for HR). It's the account's
+    name, so it changes everywhere they appear."""
+    access = access_for(perms, current_user.id, user_id)
+    if not access.edit_name:
+        raise forbid("Only HR or the person themself can change their name.")
+    org_id = current_user.org_id
+    profile, user = await load_record(db, org_id, user_id)
+    user.name = body.name
+    await db.flush()
+    return await employee_read(db, org_id=org_id, profile=profile, user=user, access=access)
 
 
 @router.put("/{user_id}/work", response_model=EmployeeRead)
