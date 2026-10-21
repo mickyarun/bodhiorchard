@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from app.models.employee_profile import WorkArrangement
 from app.models.leave_policy import WfhApproval
+from app.models.leave_type import LeaveAccrual
 from app.schemas.leave import HolidayRead, LeaveTypeBrief, PersonRef
 
 
@@ -51,7 +52,10 @@ class Balance(BaseModel):
 
     leave_type: LeaveTypeBrief
     is_paid: bool
+    accrual: LeaveAccrual
     allocated: Decimal | None
+    # Of ``allocated``, what is released so far (all of it when upfront).
+    earned: Decimal | None
     adjustments: Decimal
     used: Decimal
     pending: Decimal

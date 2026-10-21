@@ -12,7 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Leave balances: allocation + adjustments − approved − pending.
+"""Leave balances: earned + adjustments − approved − pending.
+
+"Earned" is the allocation for an upfront type, or the part of it a monthly
+type has released by the day asked about (:mod:`app.services.leave.accrual`):
+a request is priced on its start date, a balance card on today.
 
 A year's allocation (:func:`app.services.leave.allocation.allocation_for_year`)
 is written to the ledger on the member's first submit or approval in that
@@ -22,6 +26,7 @@ year already in use. Until then it is worked out live from the policy.
 
 import uuid
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +37,7 @@ from app.models.leave_type import LeaveType
 from app.repositories.leave_ledger import LeaveLedgerRepository
 from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.leave_usage import LeaveUsageRepository
+from app.services.leave.accrual import earned_by
 from app.services.leave.allocation import ProrationRule, allocation_for_year
 from app.services.leave.calendar_math import LeaveYearBounds
 from app.services.leave.policies import effective_from
@@ -48,12 +54,22 @@ def proration_rule(policy: LeavePolicy) -> ProrationRule:
     )
 
 
+def day_in_year(day: date, year: LeaveYearBounds) -> date:
+    """``day`` moved into ``year``: a past year is read at its end, a future one at its start."""
+    return min(max(day, year.start), year.end)
+
+
 @dataclass(frozen=True)
 class BalanceLine:
-    """One leave type's numbers for one year. None = no limit."""
+    """One leave type's numbers for one year. None = no limit.
+
+    ``earned`` is how much of ``allocated`` is released by the day the line
+    was built for; the same as ``allocated`` for an upfront type.
+    """
 
     leave_type: LeaveType
     allocated: Decimal | None
+    earned: Decimal | None
     adjustments: Decimal
     used: Decimal
     pending: Decimal
@@ -61,9 +77,9 @@ class BalanceLine:
     @property
     def available(self) -> Decimal | None:
         """Days still free to request, counting pending requests as taken."""
-        if self.allocated is None:
+        if self.earned is None:
             return None
-        return self.allocated + self.adjustments - self.used - self.pending
+        return self.earned + self.adjustments - self.used - self.pending
 
 
 def build_line(
@@ -76,17 +92,25 @@ def build_line(
     profile: EmployeeProfile | None,
     year: LeaveYearBounds,
     rule: ProrationRule,
+    on: date,
 ) -> BalanceLine:
-    """One type's balance; a year with no stored allocation gets one worked out live."""
+    """One type's balance as of ``on``; an unstored allocation is worked out live."""
     quota = leave_type.annual_quota_days
     allocated = stored
+    joined = effective_from(profile)
     if quota is None:
         allocated = None
     elif stored is None:
-        allocated = allocation_for_year(quota, effective_from(profile), year.start, year.end, rule)
+        allocated = allocation_for_year(quota, joined, year.start, year.end, rule)
+    earned = (
+        None
+        if allocated is None
+        else earned_by(allocated, leave_type.accrual, joined, year.start, year.end, on)
+    )
     return BalanceLine(
         leave_type=leave_type,
         allocated=allocated,
+        earned=earned,
         adjustments=adjustments,
         used=used,
         pending=pending,
@@ -100,9 +124,13 @@ async def balances_for(
     profile: EmployeeProfile | None,
     user_id: uuid.UUID,
     year: LeaveYearBounds,
+    on: date,
     persist_type_id: uuid.UUID | None = None,
 ) -> list[BalanceLine]:
-    """Balances for every active leave type on ``policy``.
+    """Balances for every active leave type on ``policy``, as of ``on``.
+
+    ``on`` matters only for monthly types: a request passes its start date
+    (what will have been earned by then), a balance page passes today.
 
     A year with no allocation yet gets one computed from the current quota
     and proration rule. Only ``persist_type_id`` (the type a real submit or
@@ -139,6 +167,7 @@ async def balances_for(
             profile=profile,
             year=year,
             rule=rule,
+            on=on,
         )
         for t in types
     ]

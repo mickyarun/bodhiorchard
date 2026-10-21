@@ -32,7 +32,7 @@ from app.schemas.leave_summary import (
     PolicyBrief,
 )
 from app.services.leave.approvers import approvers_for
-from app.services.leave.balances import BalanceLine, balances_for
+from app.services.leave.balances import BalanceLine, balances_for, day_in_year
 from app.services.leave.calendar_math import (
     LeaveYearBounds,
     leave_year_bounds,
@@ -50,7 +50,9 @@ def balance_schema(line: BalanceLine) -> Balance:
     return Balance(
         leave_type=LeaveTypeBrief(id=t.id, name=t.name, code=t.code, color_key=t.color_key),
         is_paid=t.is_paid,
+        accrual=t.accrual,
         allocated=line.allocated,
+        earned=line.earned,
         adjustments=line.adjustments,
         used=line.used,
         pending=line.pending,
@@ -96,7 +98,12 @@ async def build_summary(
         else leave_year_bounds(today, policy.year_start_month)
     )
     lines = await balances_for(
-        db, policy=policy, profile=member.profile, user_id=user_id, year=year
+        db,
+        policy=policy,
+        profile=member.profile,
+        user_id=user_id,
+        year=year,
+        on=day_in_year(today, year),
     )
     optional = await optional_holiday_use(db, policy, user_id, year.start)
     used_now = (await wfh_days_by_month(db, policy, user_id, today, today)).get(

@@ -33,7 +33,7 @@ from app.models.leave_request import LeaveStatus
 from app.repositories.leave_ledger import LeaveLedgerRepository
 from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.leave_usage import LeaveUsageRepository
-from app.services.leave.balances import BalanceLine, build_line, proration_rule
+from app.services.leave.balances import BalanceLine, build_line, day_in_year, proration_rule
 from app.services.leave.calendar_math import (
     LeaveYearBounds,
     leave_year_bounds,
@@ -100,6 +100,8 @@ async def balance_lines(
         if p.policy is None:
             continue
         year, rule = years[p.policy.id], proration_rule(p.policy)
+        # Monthly types show what is earned by today (a past year: all of it).
+        on = day_in_year(today_for(p.policy), year)
         lines = []
         for t in types.get(p.policy.id, []):
             stored, adjustments = ledger.get((p.user_id, t.id, year.label), (None, ZERO))
@@ -114,6 +116,7 @@ async def balance_lines(
                     profile=p.profile,
                     year=year,
                     rule=rule,
+                    on=on,
                 )  # fmt: skip
             )
         out[p.user_id] = PersonBalances(year=year, lines=lines, lop_days=lop[p.user_id])

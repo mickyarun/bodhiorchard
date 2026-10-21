@@ -39,7 +39,9 @@ def _read(t: LeaveType) -> LeaveTypeRead:
         name=t.name,
         code=t.code,
         annual_quota_days=t.annual_quota_days,
+        accrual=t.accrual,
         is_paid=t.is_paid,
+        is_encashable=t.is_encashable,
         color_key=t.color_key,
         is_active=t.is_active,
     )

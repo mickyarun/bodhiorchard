@@ -114,6 +114,9 @@ class BalanceRow(PersonColumns):
     used: Decimal
     pending: Decimal
     available: Decimal | None
+    # Unused days paid out at exit, as of today; None for a type that isn't
+    # encashable. Never below zero: overdrawn leave isn't owed back here.
+    encashable: Decimal | None
     lop_days: Decimal
 
 

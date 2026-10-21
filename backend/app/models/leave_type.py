@@ -16,12 +16,26 @@
 
 import uuid
 from decimal import Decimal
+from enum import StrEnum
 
-from sqlalchemy import Boolean, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import Boolean, Enum, ForeignKey, Numeric, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
+
+
+class LeaveAccrual(StrEnum):
+    """When a year's allowance becomes available to use."""
+
+    # All of it on the first day of the leave year (or of joining).
+    UPFRONT = "upfront"
+    # An equal part on the 1st of each month: 18 a year is 1.5 a month.
+    MONTHLY = "monthly"
+
+
+def _values(enum: type[StrEnum]) -> list[str]:
+    return [member.value for member in enum]
 
 
 class LeaveType(BaseModel):
@@ -41,6 +55,16 @@ class LeaveType(BaseModel):
     # NULL = no limit (e.g. unpaid leave).
     annual_quota_days: Mapped[Decimal | None] = mapped_column(Numeric(5, 1), nullable=True)
     is_paid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Unused days are paid out when someone leaves (their full and final).
+    is_encashable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    accrual: Mapped[LeaveAccrual] = mapped_column(
+        Enum(LeaveAccrual, name="leave_accrual", values_callable=_values),
+        nullable=False,
+        default=LeaveAccrual.UPFRONT,
+        server_default=LeaveAccrual.UPFRONT.value,
+    )
     # A palette slot ("swatch-1" … "swatch-7"); only HR and the requester see it.
     color_key: Mapped[str] = mapped_column(String(20), nullable=False, default="swatch-1")
     is_active: Mapped[bool] = mapped_column(

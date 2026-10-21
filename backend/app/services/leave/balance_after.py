@@ -34,6 +34,7 @@ from app.repositories.leave_ledger import LeaveLedgerRepository
 from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.leave_usage import LeaveUsageRepository
+from app.services.leave.accrual import earned_by
 from app.services.leave.allocation import allocation_for_year
 from app.services.leave.balances import proration_rule
 from app.services.leave.calendar_math import LeaveYearBounds, leave_year_bounds
@@ -90,16 +91,21 @@ async def balances_after(
             continue
         key = (request.user_id, leave_type.id, year.label)
         allocated, adjustments = ledger.get(key, (None, ZERO))
+        joined = effective_from(profiles.get(request.user_id))
         if allocated is None:
             allocated = allocation_for_year(
                 leave_type.annual_quota_days,
-                effective_from(profiles.get(request.user_id)),
+                joined,
                 year.start,
                 year.end,
                 proration_rule(policies[request.policy_id]),
             )
+        # As the request was priced: what is earned by the day it starts.
+        earned = earned_by(
+            allocated, leave_type.accrual, joined, year.start, year.end, request.start_date
+        )
         out[request.id] = AfterApproval(
-            days=allocated + adjustments - usage.get(key, ZERO), year=year.label
+            days=earned + adjustments - usage.get(key, ZERO), year=year.label
         )
     return out
 

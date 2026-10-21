@@ -150,6 +150,8 @@ async def apply_balance(
         profile=member.profile,
         user_id=user_id,
         year=year,
+        # Priced on what will have been earned by the day the leave starts.
+        on=result.start,
         persist_type_id=leave_type_id if persist else None,
     )
     line = find_line(lines, leave_type_id)

@@ -75,6 +75,7 @@ async def reprice(db: AsyncSession, member: MemberPolicy, request: LeaveRequest)
         profile=member.profile,
         user_id=request.user_id,
         year=year,
+        on=request.start_date,
         persist_type_id=request.leave_type_id,
     )
     line = find_line(lines, request.leave_type_id)

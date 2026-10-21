@@ -24,7 +24,7 @@ from app.repositories.leave_ledger import LeaveLedgerRepository
 from app.repositories.user import UserRepository
 from app.schemas.leave import PersonRef
 from app.schemas.leave_policy import LedgerEntryRead, MemberBalances
-from app.services.leave.balances import balances_for
+from app.services.leave.balances import balances_for, day_in_year
 from app.services.leave.calendar_math import leave_year_bounds, leave_year_by_label
 from app.services.leave.errors import LeaveNotFoundError
 from app.services.leave.policies import resolve_member_policy, today_for
@@ -55,13 +55,19 @@ async def member_balances(
     """A member's balances and ledger for one leave year (the current one by default)."""
     member = await resolve_member_policy(db, org_id, user_id)
     policy = member.policy
+    today = today_for(policy)
     year = (
         leave_year_by_label(year_label, policy.year_start_month)
         if year_label
-        else leave_year_bounds(today_for(policy), policy.year_start_month)
+        else leave_year_bounds(today, policy.year_start_month)
     )
     lines = await balances_for(
-        db, policy=policy, profile=member.profile, user_id=user_id, year=year
+        db,
+        policy=policy,
+        profile=member.profile,
+        user_id=user_id,
+        year=year,
+        on=day_in_year(today, year),
     )
     entries = await LeaveLedgerRepository(db, org_id=org_id).list_for(user_id, year.label)
     names = await UserRepository(db).get_names_by_ids(

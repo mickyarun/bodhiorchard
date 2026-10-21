@@ -109,7 +109,7 @@ def balance_rows(report: BalanceReport) -> tuple[list[str], list[list[Cell]]]:
     header = [
         *PERSON_HEADER,
         "Leave year", "Leave type", "Allocated", "Adjustments", "Used", "Pending",
-        "Available", "Loss of pay days (year)",
+        "Available", "Encashable at exit", "Loss of pay days (year)",
     ]  # fmt: skip
     return header, [
         [
@@ -121,6 +121,7 @@ def balance_rows(report: BalanceReport) -> tuple[list[str], list[list[Cell]]]:
             r.used,
             r.pending,
             "No limit" if r.available is None else r.available,
+            r.encashable,
             r.lop_days,
         ]
         for r in report.rows
