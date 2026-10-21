@@ -120,3 +120,28 @@ async def test_heads_up_then_warning_for_the_requester_approver_and_hr(
     # Someone below the lines has no flag.
     other = next(x for x in report.json()["rows"] if x["user_id"] == str(mgr))
     assert other["high_leave"] is None
+
+
+async def test_loss_of_pay_still_counts_as_leave_taken(
+    client: AsyncClient, pg_session_factory: Factory
+) -> None:
+    """A limited type that counts: days past the balance are unpaid but still time away."""
+    org, (emp,), casual = await setup_org(pg_session_factory, "Emp")
+    async with pg_session_factory() as db:
+        policy = await ensure_default_policy(db, org)
+        policy.leave_notice_days, policy.leave_warning_days = 3, 5
+        await db.commit()
+    year = future_monday().year
+    jan = date(year, 1, 5)
+    # 4 days on a 5-day casual allowance... then 3 more, 2 of them loss of pay.
+    await add_request(
+        pg_session_factory, org, emp, jan, jan + timedelta(days=3), "4", type_id=casual
+    )
+    feb = date(year, 2, 2)
+    await add_request(
+        pg_session_factory, org, emp, feb, feb + timedelta(days=2), "3", type_id=casual, lop="2"
+    )
+    async with pg_session_factory() as db:
+        summary = await build_summary(db, org, emp, year)
+    assert summary.high_leave is not None
+    assert (summary.high_leave.level, summary.high_leave.taken) == ("warning", D(7))

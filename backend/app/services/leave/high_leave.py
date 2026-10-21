@@ -18,8 +18,9 @@
 Unlimited leave has no balance to say "that's a lot", so a policy can set a
 heads-up line and a warning line (e.g. 15 and 18 days). Leave types count
 toward them unless switched off (sick leave usually is). Approved and pending
-days count, by the leave year their request starts in. Batched: one query
-per policy for any number of people.
+days count, loss of pay included (it's still time away), by the leave year
+their request starts in. Batched: one query per policy for any number of
+people, with the counted types loaded once per call.
 """
 
 import uuid
@@ -81,24 +82,27 @@ async def taken_this_year(
 
     Only members whose policy sets a line are in the result.
     """
-    policies = {policy.id: policy for _user, policy in members}
-    counted = await counted_type_ids(db, policies.values())
-    by_policy: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
+    counted = await counted_type_ids(db, {p.id: p for _u, p in members}.values())
+    return await _taken(db, members, on, counted)
+
+
+async def _taken(
+    db: AsyncSession,
+    members: Sequence[tuple[uuid.UUID, LeavePolicy]],
+    on: date,
+    counted: dict[uuid.UUID, set[uuid.UUID]],
+) -> dict[uuid.UUID, Decimal]:
+    by_policy: dict[uuid.UUID, tuple[LeavePolicy, list[uuid.UUID]]] = {}
     for user_id, policy in members:
         if policy.id in counted:
-            by_policy[policy.id].append(user_id)
+            by_policy.setdefault(policy.id, (policy, []))[1].append(user_id)
     out: dict[uuid.UUID, Decimal] = {}
-    for policy_id, user_ids in by_policy.items():
-        policy, type_ids = policies[policy_id], counted[policy_id]
+    for policy_id, (policy, user_ids) in by_policy.items():
         year = leave_year_bounds(on, policy.year_start_month)
-        totals = dict.fromkeys(user_ids, ZERO)
-        if type_ids:
-            rows = await LeaveUsageRepository(db, org_id=policy.org_id).leave_days_by_start(
-                user_ids, type_ids, year.start, year.end
-            )
-            for user_id, _type_id, _status, _start, days in rows:
-                totals[user_id] += days
-        out.update(totals)
+        days = await LeaveUsageRepository(db, org_id=policy.org_id).days_taken(
+            user_ids, counted[policy_id], year.start, year.end
+        )
+        out.update({user: days.get(user, ZERO) for user in user_ids})
     return out
 
 
@@ -110,11 +114,11 @@ async def with_request(
     start: date,
     days: Decimal,
 ) -> HighLeave | None:
-    """The level a new request would take someone to, if its type counts."""
-    counted = (await counted_type_ids(db, [policy])).get(policy.id, set())
-    if leave_type_id not in counted:
+    """The level a new request (all its days, loss of pay too) would take someone to."""
+    counted = await counted_type_ids(db, [policy])
+    if leave_type_id not in counted.get(policy.id, set()):
         return None
-    taken = (await taken_this_year(db, [(user_id, policy)], start)).get(user_id, ZERO)
+    taken = (await _taken(db, [(user_id, policy)], start, counted)).get(user_id, ZERO)
     return assess(policy, taken + days)
 
 
@@ -139,7 +143,7 @@ async def for_requests(
     for (policy_id, _label), group in groups.items():
         policy = policies[policy_id]
         members = [(r.user_id, policy) for r in group]
-        taken = await taken_this_year(db, members, group[0].start_date)
+        taken = await _taken(db, members, group[0].start_date, counted)
         for r in group:
             level = assess(policy, taken.get(r.user_id, ZERO))
             if level is not None:

@@ -52,16 +52,8 @@
             <div :id="ids.appearance" class="group__title text-overline text-medium-emphasis">Appearance &amp; status</div>
             <LeaveTypeColorPicker v-model="draft.color_key" :name="draft.name" class="mb-3" />
             <LeaveSwitchRow v-model="draft.is_paid" label="Paid leave" />
-            <LeaveSwitchRow
-              v-model="draft.is_encashable"
-              label="Encashable at exit"
-              description="Unused days are paid out when someone leaves."
-            />
-            <LeaveSwitchRow
-              v-model="draft.counts_toward_warning"
-              label="Counts toward the high-leave warning"
-              description="Off for sick leave, usually. The lines are set in Rules."
-            />
+            <LeaveSwitchRow v-model="draft.is_encashable" label="Encashable at exit" description="Unused days are paid out when someone leaves." />
+            <LeaveSwitchRow v-model="draft.counts_toward_warning" label="Counts toward the high-leave warning" description="Off for sick leave, usually. The lines are set in Rules." />
             <LeaveSwitchRow
               v-if="type"
               v-model="draft.is_active"
