@@ -21,6 +21,9 @@ describe('calendarTestMessage', () => {
     expect(calendarTestMessage({ ok: false, error: 'unauthorized_client', calendar: null })).toContain(
       'Domain-wide delegation',
     )
+    expect(calendarTestMessage({ ok: false, error: 'invalid_grant', calendar: null })).toContain(
+      "service account still exists",
+    )
     expect(calendarTestMessage({ ok: false, error: 'calendar_500', calendar: null })).toBe(
       'Google refused the request (calendar_500).',
     )

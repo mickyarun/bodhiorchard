@@ -38,7 +38,10 @@ const GOOGLE_ERRORS: Record<string, string> = {
   no_key: 'Upload the service account key first.',
   unauthorized_client:
     "Google hasn't allowed this service account to act for your users yet. In the Admin console, add its client ID under Domain-wide delegation with the calendar.events scope. It can take a few minutes to apply.",
-  invalid_grant: "Google doesn't recognise your email on this Workspace. Use a Workspace account to test.",
+  // Google says this both for an email outside the Workspace and for a key
+  // whose service account no longer exists (or was never real).
+  invalid_grant:
+    "Google refused to act for your email. Check you're signed in here with your Workspace account, and that the uploaded key's service account still exists.",
   invalid_key: "The saved key can't be used. Upload a fresh JSON key.",
   calendar_403: 'Google refused access to your calendar. Check that Calendar is turned on for your account.',
   calendar_404: "Google couldn't find your calendar.",
