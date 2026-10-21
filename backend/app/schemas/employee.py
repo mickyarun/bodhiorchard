@@ -127,6 +127,7 @@ class EmployeeAccessRead(BaseModel):
     edit_work: bool
     edit_personal: bool
     edit_managers: bool
+    edit_name: bool
 
 
 class EmployeeRead(BaseModel):
@@ -187,6 +188,20 @@ class ManagerInput(BaseModel):
 
     user_id: uuid.UUID
     is_primary: bool = False
+
+
+class NameUpdate(BaseModel):
+    """A person's name as everyone sees it: on leave, approvals, reports, Slack."""
+
+    name: str = Field(..., min_length=1, max_length=100)
+
+    @field_validator("name")
+    @classmethod
+    def _tidy(cls, value: str) -> str:
+        tidy = " ".join(value.split())
+        if not tidy:
+            raise ValueError("Enter a name.")
+        return tidy
 
 
 class ManagersUpdate(BaseModel):

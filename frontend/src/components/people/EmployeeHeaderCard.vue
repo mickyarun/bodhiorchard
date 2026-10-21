@@ -25,6 +25,14 @@
       <div class="flex-grow-1" style="min-width: 0">
         <div class="d-flex align-center ga-2 flex-wrap">
           <h1 class="text-h5 font-weight-bold bo-display">{{ record.name }}</h1>
+          <v-btn
+            v-if="record.access.edit_name"
+            icon="mdi-pencil-outline"
+            size="x-small"
+            variant="text"
+            aria-label="Edit name"
+            @click="editingName = true"
+          />
           <EmployeeStatusChip :status="record.work.status" show-active />
           <v-chip size="x-small" variant="tonal" label>
             {{ EMPLOYMENT_TYPE_LABELS[record.work.employment_type] }}
@@ -38,16 +46,19 @@
       </div>
       <slot name="actions" />
     </div>
+    <EditNameDialog v-model="editingName" :user-id="record.user_id" :current="record.name" />
   </v-card>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import EditNameDialog from '@/components/people/EditNameDialog.vue'
 import EmployeeStatusChip from '@/components/people/EmployeeStatusChip.vue'
 import type { EmployeeRecord } from '@/types/employee'
 import { EMPLOYMENT_TYPE_LABELS, formatDateOnly, workplaceLabel } from '@/utils/employee'
 
 const props = defineProps<{ record: EmployeeRecord }>()
+const editingName = ref(false)
 
 const initials = computed(
   () =>

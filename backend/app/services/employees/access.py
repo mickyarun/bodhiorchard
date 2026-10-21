@@ -32,6 +32,7 @@ class EmployeeAccess:
     edit_work: bool
     edit_personal: bool
     edit_managers: bool
+    edit_name: bool
 
 
 def access_for(perms: PermissionSet, actor_id: uuid.UUID, subject_id: uuid.UUID) -> EmployeeAccess:
@@ -40,7 +41,8 @@ def access_for(perms: PermissionSet, actor_id: uuid.UUID, subject_id: uuid.UUID)
     Work fields and managers are HR's to set, and not on your own record
     (except the owner): otherwise HR could reset their own joining date,
     which drives leave proration, or pick their own approver. Everyone can
-    see their own record, including personal fields.
+    see their own record, including personal fields. A name can be fixed by
+    the person themself or by HR (a sign-up handle like "kannan-atoa").
     """
     is_self = actor_id == subject_id
     manage = perms.has(MANAGE)
@@ -51,4 +53,5 @@ def access_for(perms: PermissionSet, actor_id: uuid.UUID, subject_id: uuid.UUID)
         edit_work=edit_own_work,
         edit_personal=manage,
         edit_managers=edit_own_work,
+        edit_name=is_self or manage,
     )

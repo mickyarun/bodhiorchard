@@ -156,6 +156,14 @@ export const useEmployeesStore = defineStore('employees', () => {
     )
   }
 
+  /** Fix a person's name (theirs, or anyone's for HR). */
+  async function updateName(userId: string, name: string): Promise<string | null> {
+    return save(
+      () => api.put<EmployeeRecord>(`/v1/employees/${userId}/name`, { name }),
+      "Couldn't save the name.",
+    )
+  }
+
   /** Show a leave policy change on the open record without reloading it. */
   function setLeavePolicy(userId: string, policy: EmployeeLeavePolicy): void {
     if (record.value?.user_id === userId) record.value = { ...record.value, leave_policy: policy }
@@ -177,6 +185,7 @@ export const useEmployeesStore = defineStore('employees', () => {
     updatePersonal,
     updateMyContact,
     updateManagers,
+    updateName,
     setLeavePolicy,
   }
 })

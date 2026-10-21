@@ -92,6 +92,7 @@ async def employee_read(
             edit_work=access.edit_work,
             edit_personal=access.edit_personal,
             edit_managers=access.edit_managers,
+            edit_name=access.edit_name,
         ),
         access_revoked=access_revoked,
     )
