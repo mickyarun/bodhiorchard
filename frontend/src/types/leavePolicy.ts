@@ -23,6 +23,7 @@ import type {
   HolidayKind,
   HolidaySource,
   LeaveAccrual,
+  LeaveEligibility,
   LeaveYear,
   PersonRef,
   WfhApproval,
@@ -74,6 +75,11 @@ export interface LeaveTypeWrite {
   /** Unused days are paid out when someone leaves. */
   is_encashable: boolean
   counts_toward_warning: boolean
+  eligibility: LeaveEligibility
+  /** Approved as soon as it's sent; managers get a heads-up. */
+  auto_approve: boolean
+  /** At most this many days in a calendar month, with no carry-over; null = no limit. */
+  monthly_limit_days: Decimalish | null
   color_key: string
   is_active: boolean
 }

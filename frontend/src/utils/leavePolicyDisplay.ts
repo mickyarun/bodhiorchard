@@ -110,6 +110,18 @@ export function allowanceLabel(type: Pick<LeaveTypeRead, 'annual_quota_days' | '
   return type.accrual === 'monthly' ? `${pluralDays(quota)}, earned monthly` : pluralDays(quota)
 }
 
+/** Short tags for a type's special rules, e.g. ["Women only", "Auto-approved", "1 day a month"]. */
+export function typeRuleTags(
+  type: Pick<LeaveTypeRead, 'eligibility' | 'auto_approve' | 'monthly_limit_days'>,
+): string[] {
+  const tags: string[] = []
+  if (type.eligibility === 'women') tags.push('Women only')
+  if (type.auto_approve) tags.push('Auto-approved')
+  const perMonth = toNumberOrNull(type.monthly_limit_days)
+  if (perMonth !== null) tags.push(`${pluralDays(perMonth)} a month`)
+  return tags
+}
+
 /** Active types first as given, switched-off ones apart. */
 export function splitLeaveTypes(types: readonly LeaveTypeRead[]): {
   active: LeaveTypeRead[]

@@ -33,7 +33,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.leave_request import LeaveRequest, LeaveStatus
+from app.models.leave_request import LeaveKind, LeaveRequest, LeaveStatus
 from app.models.notification import Notification, NotificationType
 from app.schemas.leave import HighLeave
 from app.services.background import spawn
@@ -113,6 +113,10 @@ def _stage(
     return notice
 
 
+def _auto_title(request: LeaveRequest) -> str:
+    return "Work from home" if request.kind == LeaveKind.WFH else "On leave"
+
+
 def stage_new_request(
     db: AsyncSession,
     *,
@@ -133,7 +137,7 @@ def stage_new_request(
         user_ids=set(targets),
         category=NotificationCategory.LEAVE_APPROVALS,
         # A request to decide gets buttons (and its own Open link); an FYI
-        # for an auto-approved WFH is a plain DM.
+        # for an auto-approved WFH or leave is a plain DM.
         slack_text=message
         if not auto_approved
         # Escaped: a name like "<https://evil|Open>" must not become a link.
@@ -144,7 +148,7 @@ def stage_new_request(
         db,
         notice,
         kind=NotificationType.LEAVE_REQUESTED,
-        title="Work from home" if auto_approved else "Request to review",
+        title=_auto_title(request) if auto_approved else "Request to review",
         message=message,
         link=link,
     )

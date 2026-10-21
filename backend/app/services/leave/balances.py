@@ -43,6 +43,7 @@ from app.repositories.leave_usage import LeaveUsageRepository
 from app.services.leave.accrual import Booking, earned_by, taken_by, usable_from
 from app.services.leave.allocation import ProrationRule, allocation_for_year
 from app.services.leave.calendar_math import LeaveYearBounds
+from app.services.leave.eligibility import usable_types
 from app.services.leave.policies import effective_from
 
 ZERO = Decimal("0")
@@ -140,7 +141,7 @@ async def balances_for(
     on: date,
     persist_type_id: uuid.UUID | None = None,
 ) -> list[BalanceLine]:
-    """Balances for every active leave type on ``policy``, as of ``on``.
+    """Balances for every active leave type on ``policy`` this person can use, as of ``on``.
 
     ``on`` is the day the balance is read for: a request passes its start
     date (what will have been earned by then, and what later months still
@@ -153,8 +154,9 @@ async def balances_for(
     queue — never lock in a year early.
     """
     org_id = policy.org_id
-    types = await LeaveTypeRepository(db, org_id=org_id).list_for_policy(
-        policy.id, active_only=True
+    types = usable_types(
+        await LeaveTypeRepository(db, org_id=org_id).list_for_policy(policy.id, active_only=True),
+        profile,
     )
     ledger = LeaveLedgerRepository(db, org_id=org_id)
     totals = await ledger.totals(user_id, year.label)

@@ -43,6 +43,9 @@ def _read(t: LeaveType) -> LeaveTypeRead:
         is_paid=t.is_paid,
         is_encashable=t.is_encashable,
         counts_toward_warning=t.counts_toward_warning,
+        eligibility=t.eligibility,
+        auto_approve=t.auto_approve,
+        monthly_limit_days=t.monthly_limit_days,
         color_key=t.color_key,
         is_active=t.is_active,
     )

@@ -35,6 +35,7 @@ from app.services.leave.evaluation_steps import (
     Evaluation,
     apply_balance,
     apply_optional_holiday,
+    check_monthly_limit,
     check_overlap,
 )
 from app.services.leave.high_leave import with_request
@@ -98,6 +99,12 @@ async def evaluate(
     await check_overlap(db, policy.org_id, user_id, result, body.half_day)
     if body.kind == LeaveKind.LEAVE and body.leave_type_id is not None:
         await apply_balance(db, member, user_id, body.leave_type_id, result, persist)
+        await check_monthly_limit(db, policy, user_id, body.half_day, result)
+        # A type set to approve itself (period leave): managers get a heads-up.
+        # Days past the balance would be unpaid, so those still go to a manager.
+        result.auto_approved = bool(
+            result.leave_type and result.leave_type.auto_approve and result.lop_days == ZERO
+        )
         result.high_leave = await with_request(
             db, policy, user_id, body.leave_type_id, result.start, result.days
         )

@@ -41,6 +41,9 @@
           <span class="dot" aria-hidden="true" :style="{ background: `rgb(var(--v-theme-${swatchColor(type.color_key)}))` }" />
           <span class="font-weight-medium">{{ type.name }}</span>
           <v-chip v-if="!type.is_active" size="x-small" variant="tonal" label class="ml-2">Off</v-chip>
+          <div v-if="typeRuleTags(type).length" class="tags">
+            <v-chip v-for="tag in typeRuleTags(type)" :key="tag" size="x-small" variant="outlined" label>{{ tag }}</v-chip>
+          </div>
         </td>
         <td>{{ allowanceLabel(type) }}</td>
         <td>
@@ -59,7 +62,7 @@
 <script setup lang="ts">
 import type { LeaveTypeRead } from '@/types/leavePolicy'
 import { swatchColor } from '@/utils/leave'
-import { allowanceLabel } from '@/utils/leavePolicyDisplay'
+import { allowanceLabel, typeRuleTags } from '@/utils/leavePolicyDisplay'
 
 defineProps<{ types: LeaveTypeRead[] }>()
 const emit = defineEmits<{ edit: [type: LeaveTypeRead] }>()
@@ -78,6 +81,12 @@ const emit = defineEmits<{ edit: [type: LeaveTypeRead] }>()
 }
 .leave-types__row--off td:not(:last-child) {
   opacity: 0.6;
+}
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 2px 20px;
 }
 .dot {
   display: inline-block;

@@ -14,7 +14,7 @@
 
 /** Wording for leave types whose allowance is earned month by month. */
 import type { Balance } from '@/types/leave'
-import { formatDays, toNumber, toNumberOrNull } from '@/utils/leave'
+import { formatDays, pluralDays, toNumber, toNumberOrNull } from '@/utils/leave'
 
 /** "Earned 15 of 18 so far" while a monthly type is still building up; '' otherwise. */
 export function earnedSoFar(balance: Pick<Balance, 'accrual' | 'allocated' | 'earned'>): string {
@@ -41,6 +41,12 @@ export function earningCaption(balance: Balance): string | null {
 
 /** Said wherever "days left" counts days that will be earned later. */
 export const BOOKED_AHEAD_NOTE = "Includes what's earned by the booked leave dates"
+
+/** "Up to 1 day a month; unused days lapse." for a type with a monthly limit; '' otherwise. */
+export function monthlyLimitNote(balance: Pick<Balance, 'monthly_limit_days'>): string {
+  const perMonth = toNumberOrNull(balance.monthly_limit_days)
+  return perMonth === null ? '' : `Up to ${pluralDays(perMonth)} a month; unused days lapse.`
+}
 
 /**
  * For a monthly type, "days left" can be more than earned − used − pending:

@@ -21,7 +21,7 @@ from decimal import Decimal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.leave_policy import AllocationRounding, ProrationMethod, WfhApproval
-from app.models.leave_type import LeaveAccrual
+from app.models.leave_type import LeaveAccrual, LeaveEligibility
 from app.models.policy_holiday import HolidayKind, HolidaySource
 from app.schemas.leave import PersonRef
 from app.schemas.leave_summary import Balance, LeaveYear
@@ -96,6 +96,11 @@ class LeaveTypeWrite(BaseModel):
     is_paid: bool = True
     is_encashable: bool = False
     counts_toward_warning: bool = True
+    # Who on the policy can see and request it.
+    eligibility: LeaveEligibility = LeaveEligibility.EVERYONE
+    auto_approve: bool = False
+    # At most this many days in a calendar month, with no carry-over; None = no limit.
+    monthly_limit_days: Decimal | None = Field(None, ge=0.5, le=31, decimal_places=1)
     color_key: str = Field("swatch-1", pattern=r"^swatch-[1-7]$")
     is_active: bool = True
 

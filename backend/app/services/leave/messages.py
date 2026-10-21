@@ -51,8 +51,11 @@ def compose_request_message(
     when = f"{format_range(request.start_date, request.end_date)} ({_days(request.days)})"
     what = _KIND_LABEL[request.kind]
     if auto_approved:
-        return f"{name} is working from home {when}. It was approved automatically."
-    text = f"{name} requested {what} {when}."
+        # Leave that approves itself (period leave) is never named by type.
+        doing = "working from home" if request.kind == LeaveKind.WFH else "on leave"
+        text = f"{name} is {doing} {when}. It was approved automatically."
+    else:
+        text = f"{name} requested {what} {when}."
     return f"{text} {high_leave_line(high_leave)}" if high_leave else text
 
 

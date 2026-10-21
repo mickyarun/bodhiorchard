@@ -34,6 +34,14 @@ class LeaveAccrual(StrEnum):
     MONTHLY = "monthly"
 
 
+class LeaveEligibility(StrEnum):
+    """Who on the policy can see and request the type."""
+
+    EVERYONE = "everyone"
+    # People whose profile gender is female (e.g. period leave).
+    WOMEN = "women"
+
+
 def _values(enum: type[StrEnum]) -> list[str]:
     return [member.value for member in enum]
 
@@ -69,6 +77,19 @@ class LeaveType(BaseModel):
         default=LeaveAccrual.UPFRONT,
         server_default=LeaveAccrual.UPFRONT.value,
     )
+    eligibility: Mapped[LeaveEligibility] = mapped_column(
+        Enum(LeaveEligibility, name="leave_eligibility", values_callable=_values),
+        nullable=False,
+        default=LeaveEligibility.EVERYONE,
+        server_default=LeaveEligibility.EVERYONE.value,
+    )
+    # Approved as soon as it's sent; the managers get a heads-up instead.
+    auto_approve: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    # At most this many days in any calendar month; unused days don't carry
+    # over. NULL = no monthly limit.
+    monthly_limit_days: Mapped[Decimal | None] = mapped_column(Numeric(3, 1), nullable=True)
     # A palette slot ("swatch-1" … "swatch-7"); only HR and the requester see it.
     color_key: Mapped[str] = mapped_column(String(20), nullable=False, default="swatch-1")
     is_active: Mapped[bool] = mapped_column(
