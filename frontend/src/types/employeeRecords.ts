@@ -59,12 +59,13 @@ export interface DocumentRead {
   size_bytes: number
   uploaded_by: PersonRef | null
   created_at: string
+  /** HR can delete any document; others only the ones they uploaded. */
+  can_delete: boolean
 }
 
 export interface DocumentList {
   documents: DocumentRead[]
   can_upload: boolean
-  can_delete: boolean
   /** Largest file the server accepts. */
   max_upload_bytes: number
 }

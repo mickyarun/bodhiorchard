@@ -17,7 +17,9 @@
 HR (employees:manage for details, employees:documents for documents),
 the org owner (who holds every permission), and the employee for their
 own record. Engineering roles — DevOps, developers, admins without these
-permissions — get nothing. Only HR deletes documents.
+permissions — get nothing. HR deletes any document; anyone else only the
+ones they uploaded themselves (a wrong file or type is deleted and sent
+again), so HR's own uploads, like an offer letter, stay put.
 """
 
 import uuid
@@ -35,7 +37,12 @@ class SensitiveAccess:
 
     details: bool
     documents: bool
-    delete_documents: bool
+    # Any document, not just the caller's own uploads.
+    delete_any_document: bool
+
+    def may_delete(self, actor_id: uuid.UUID, uploaded_by: uuid.UUID | None) -> bool:
+        """HR deletes any document; others only what they uploaded themselves."""
+        return self.delete_any_document or (self.documents and uploaded_by == actor_id)
 
 
 def sensitive_access(
@@ -46,5 +53,5 @@ def sensitive_access(
     return SensitiveAccess(
         details=is_self or perms.has(MANAGE),
         documents=is_self or perms.has(DOCUMENTS),
-        delete_documents=perms.has(DOCUMENTS),
+        delete_any_document=perms.has(DOCUMENTS),
     )

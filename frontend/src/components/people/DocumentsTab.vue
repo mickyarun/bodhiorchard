@@ -15,12 +15,16 @@
  -->
 
 <!-- Documents: encrypted at rest, opened in memory, every open logged.
-     The employee and HR can upload; only HR deletes. -->
+     The employee and HR can upload. HR deletes any document; anyone else
+     only what they uploaded, so a wrong file or type can be sent again. -->
 <template>
   <section>
     <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-4">
       <p class="text-body-2 text-medium-emphasis">
         PDF, JPEG or PNG<template v-if="list">, up to {{ formatBytes(list.max_upload_bytes) }}</template>. Stored encrypted.
+        <template v-if="list?.documents.some(d => d.can_delete)">
+          Wrong file or type? Delete it and upload again.
+        </template>
       </p>
       <v-btn v-if="list?.can_upload" color="primary" variant="tonal" size="small" prepend-icon="mdi-upload" @click="uploading = true">
         Upload
@@ -44,7 +48,7 @@
           <td class="text-right text-no-wrap">
             <v-btn size="small" variant="text" @click="openDoc(doc, false)">Open</v-btn>
             <v-btn size="small" variant="text" @click="openDoc(doc, true)">Download</v-btn>
-            <v-btn v-if="list.can_delete" size="small" variant="text" color="error" @click="deleting = doc">Delete</v-btn>
+            <v-btn v-if="doc.can_delete" size="small" variant="text" color="error" @click="deleting = doc">Delete</v-btn>
           </td>
         </tr>
       </tbody>

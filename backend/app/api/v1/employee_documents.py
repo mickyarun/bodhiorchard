@@ -15,7 +15,8 @@
 """Employee documents: list, upload, open, delete.
 
 HR (employees:documents), the owner, and the employee for their own
-documents; only HR deletes. Files are decrypted in memory and never cached.
+documents. HR deletes any document, others only their own uploads. Files
+are decrypted in memory and never cached.
 """
 
 import uuid
@@ -41,11 +42,10 @@ from app.models.employee_document import DocumentType, EmployeeDocument
 from app.models.user import User
 from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.employee_sensitive import EmployeeDocumentRepository
-from app.repositories.user import UserRepository
 from app.schemas.employee_sensitive import DocumentList, DocumentRead
-from app.schemas.leave import PersonRef
 from app.services.employees import documents
 from app.services.employees.document_policy import MAX_DOCUMENT_BYTES
+from app.services.employees.document_reads import document_reads
 from app.services.employees.sensitive_access import sensitive_access
 from app.services.employees.sensitive_details import Subject
 from app.services.file_storage import FileStorageError
@@ -55,26 +55,6 @@ router = APIRouter(tags=["employees"])
 NO_ACCESS = "Only HR and the employee can see these documents."
 STORAGE_DOWN = "Document storage isn't available right now. Try again in a moment."
 logger = structlog.get_logger(__name__)
-
-
-async def _reads(db: AsyncSession, docs: list[EmployeeDocument]) -> list[DocumentRead]:
-    names = await UserRepository(db).get_names_by_ids(
-        {d.uploaded_by for d in docs if d.uploaded_by}
-    )
-    return [
-        DocumentRead(
-            id=d.id,
-            doc_type=d.doc_type,
-            filename=documents.listed_filename(d),
-            mime_type=d.mime_type,
-            size_bytes=d.size_bytes,
-            uploaded_by=PersonRef(user_id=d.uploaded_by, name=names.get(d.uploaded_by, "Someone"))
-            if d.uploaded_by
-            else None,
-            created_at=d.created_at,
-        )
-        for d in docs
-    ]
 
 
 @router.get("/{user_id}/documents", response_model=DocumentList)
@@ -93,9 +73,8 @@ async def list_documents(
         profile.id
     )
     return DocumentList(
-        documents=await _reads(db, docs),
+        documents=await document_reads(db, docs, access, current_user.id),
         can_upload=True,
-        can_delete=access.delete_documents,
         max_upload_bytes=MAX_DOCUMENT_BYTES,
     )
 
@@ -112,7 +91,8 @@ async def upload_document(
     db: AsyncSession = Depends(get_db),
 ) -> DocumentRead:
     """Upload a PDF, JPEG or PNG (up to 10 MB); it's encrypted before storage."""
-    if not sensitive_access(perms, current_user.id, user_id).documents:
+    access = sensitive_access(perms, current_user.id, user_id)
+    if not access.documents:
         raise forbid(NO_ACCESS)
     profile, _user = await load_record(db, current_user.org_id, user_id)
     data = await file.read(MAX_DOCUMENT_BYTES + 1)  # never read more than the cap
@@ -136,7 +116,7 @@ async def upload_document(
     except Exception:
         await documents.discard_blob(doc.storage_path)
         raise
-    return (await _reads(db, [doc]))[0]
+    return (await document_reads(db, [doc], access, current_user.id))[0]
 
 
 async def _document(
@@ -199,10 +179,11 @@ async def delete_document(
     perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Delete a document (HR only); the deletion is logged."""
+    """Delete a document (HR any, others their own uploads); the deletion is logged."""
     doc, subject = await _document(db, current_user, perms, doc_id)
-    if not sensitive_access(perms, current_user.id, subject.user_id).delete_documents:
-        raise forbid("Only HR can delete documents.")
+    access = sensitive_access(perms, current_user.id, subject.user_id)
+    if not access.may_delete(current_user.id, doc.uploaded_by):
+        raise forbid("You can delete documents you uploaded. Ask HR to remove this one.")
     path = await documents.delete_document(db, subject, current_user.id, doc)
     await db.commit()
     await documents.discard_blob(path)

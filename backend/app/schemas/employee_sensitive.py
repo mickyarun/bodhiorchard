@@ -117,6 +117,8 @@ class DocumentRead(BaseModel):
     size_bytes: int
     uploaded_by: PersonRef | None
     created_at: datetime
+    # Whether the caller may delete it: HR any, others their own uploads.
+    can_delete: bool
 
 
 class DocumentList(BaseModel):
@@ -124,7 +126,6 @@ class DocumentList(BaseModel):
 
     documents: list[DocumentRead]
     can_upload: bool
-    can_delete: bool
     # The size cap, so the upload dialog can say it and check before sending.
     max_upload_bytes: int
 

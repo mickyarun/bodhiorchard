@@ -124,7 +124,7 @@ async def test_no_key_means_503_not_plaintext(
     assert "HR_ENCRYPTION_KEYS" in response.json()["detail"]
 
 
-async def test_documents_are_encrypted_at_rest_and_only_hr_deletes(
+async def test_documents_are_encrypted_at_rest_and_uploaders_delete_their_own(
     client: AsyncClient, pg_session_factory: Factory, hr_key: FileStorage
 ) -> None:
     org, emp, hr, _dev = await _team(pg_session_factory)
@@ -165,9 +165,10 @@ async def test_documents_are_encrypted_at_rest_and_only_hr_deletes(
     )
     assert over.status_code == 422 and "10 MB" in over.json()["detail"]
     assert len(list(Path(hr_key.local_dir).rglob("*.bin"))) == 1
+    # The employee uploaded it (say, as the wrong type), so they can remove it.
+    assert listed.json()["documents"][0]["can_delete"] is True
     delete = f"{BASE}/documents/{doc_id}"
-    assert (await client.delete(delete, headers=as_user(emp, org))).status_code == 403
-    assert (await client.delete(delete, headers=as_user(hr, org))).status_code == 204
+    assert (await client.delete(delete, headers=as_user(emp, org))).status_code == 204
     async with pg_session_factory() as db:
         assert await db.get(EmployeeDocument, uuid.UUID(doc_id)) is None
         actions = (
@@ -186,6 +187,27 @@ async def test_documents_are_encrypted_at_rest_and_only_hr_deletes(
             "document_viewed",
             "document_deleted",
         }
+
+
+async def test_only_hr_deletes_what_hr_uploaded(
+    client: AsyncClient, pg_session_factory: Factory, hr_key: FileStorage
+) -> None:
+    org, emp, hr, _dev = await _team(pg_session_factory)
+    uploaded = await client.post(
+        f"{BASE}/{emp}/documents",
+        data={"doc_type": "offer_letter"},
+        files={"file": ("offer.pdf", PDF, "application/pdf")},
+        headers=as_user(hr, org),
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    assert uploaded.json()["can_delete"] is True
+    for who, allowed in ((emp, False), (hr, True)):
+        listed = await client.get(f"{BASE}/{emp}/documents", headers=as_user(who, org))
+        assert listed.json()["documents"][0]["can_delete"] is allowed
+    delete = f"{BASE}/documents/{uploaded.json()['id']}"
+    refused = await client.delete(delete, headers=as_user(emp, org))
+    assert refused.status_code == 403 and "Ask HR" in refused.json()["detail"]
+    assert (await client.delete(delete, headers=as_user(hr, org))).status_code == 204
 
 
 async def test_access_log_cannot_be_rewritten(
