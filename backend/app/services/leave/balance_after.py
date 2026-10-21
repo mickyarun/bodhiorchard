@@ -34,9 +34,9 @@ from app.repositories.leave_ledger import LeaveLedgerRepository
 from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.leave_usage import LeaveUsageRepository
-from app.services.leave.accrual import earned_by
+from app.services.leave.accrual import Booking, usable_from
 from app.services.leave.allocation import allocation_for_year
-from app.services.leave.balances import proration_rule
+from app.services.leave.balances import booking, proration_rule
 from app.services.leave.calendar_math import LeaveYearBounds, leave_year_bounds
 from app.services.leave.policies import effective_from
 
@@ -100,13 +100,19 @@ async def balances_after(
                 year.end,
                 proration_rule(policies[request.policy_id]),
             )
-        # As the request was priced: what is earned by the day it starts.
-        earned = earned_by(
-            allocated, leave_type.accrual, joined, year.start, year.end, request.start_date
+        # As the request is priced: from the day it starts, with leave
+        # booked in later months still covered by those months.
+        days = usable_from(
+            allocated,
+            leave_type.accrual,
+            joined,
+            year.start,
+            year.end,
+            request.start_date,
+            adjustments,
+            usage.get(key, []),
         )
-        out[request.id] = AfterApproval(
-            days=earned + adjustments - usage.get(key, ZERO), year=year.label
-        )
+        out[request.id] = AfterApproval(days=days, year=year.label)
     return out
 
 
@@ -115,8 +121,8 @@ async def _usage(
     org_id: uuid.UUID,
     priced: Sequence[LeaveRequest],
     years: dict[uuid.UUID, LeaveYearBounds],
-) -> dict[UsageKey, Decimal]:
-    """Approved plus pending days per (member, type, leave year) in one query."""
+) -> dict[UsageKey, list[Booking]]:
+    """Approved and pending bookings per (member, type, leave year) in one query."""
     # The leave years each (member, type) is being priced for.
     wanted: dict[tuple[uuid.UUID, uuid.UUID], set[LeaveYearBounds]] = defaultdict(set)
     for request in priced:
@@ -129,9 +135,9 @@ async def _usage(
         min(b.start for b in bounds),
         max(b.end for b in bounds),
     )
-    totals: dict[UsageKey, Decimal] = defaultdict(lambda: ZERO)
-    for user_id, type_id, _status, start, days in rows:
+    bookings: dict[UsageKey, list[Booking]] = defaultdict(list)
+    for user_id, type_id, status, start, days in rows:
         for year in wanted.get((user_id, type_id), ()):
             if year.start <= start <= year.end:
-                totals[(user_id, type_id, year.label)] += days
-    return totals
+                bookings[(user_id, type_id, year.label)].append(booking(status, start, days))
+    return bookings

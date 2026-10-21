@@ -72,6 +72,12 @@ describe('balances', () => {
     expect(meterPercents(balance())).toEqual({ used: 25, pending: (1 / 12) * 100 })
   })
 
+  it('draws a monthly type against what is earned so far', () => {
+    // 3 used of 6 earned (of 12 for the year): the bar is half full.
+    const monthly = balance({ accrual: 'monthly', earned: '6', used: '3', pending: '0' })
+    expect(meterPercents(monthly)).toEqual({ used: 50, pending: 0 })
+  })
+
   it('caps the meter at 100 when over-used', () => {
     const over = meterPercents(balance({ used: '14', pending: '2' }))
     expect(over).toEqual({ used: 100, pending: 0 })

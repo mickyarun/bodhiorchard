@@ -120,10 +120,14 @@ export function balanceTotal(balance: Balance): number | null {
   return toNumber(balance.allocated) + toNumber(balance.adjustments)
 }
 
-/** Meter fill in percent: used, then pending, never over 100 together. */
+/**
+ * Meter fill in percent: used, then pending, never over 100 together. The
+ * track is what is earned so far, so a monthly type's bar matches its
+ * "days left" rather than the whole year's allowance.
+ */
 export function meterPercents(balance: Balance): { used: number; pending: number } | null {
-  const total = balanceTotal(balance)
-  if (total === null) return null
+  if (balance.allocated === null) return null
+  const total = toNumber(balance.earned ?? balance.allocated) + toNumber(balance.adjustments)
   if (total <= 0) return { used: 0, pending: 0 }
   const used = Math.min(100, (toNumber(balance.used) / total) * 100)
   const pending = Math.min(100 - used, (toNumber(balance.pending) / total) * 100)

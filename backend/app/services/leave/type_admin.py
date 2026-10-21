@@ -16,6 +16,8 @@
 
 Types are deactivated, never deleted. A quota change applies to leave
 years not yet allocated; frozen years keep theirs unless HR recalculates.
+How a type is given (upfront or monthly) can't change while this leave
+year's allocation is booked.
 """
 
 import uuid
@@ -26,10 +28,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.leave_config_event import LeaveConfigAction
 from app.models.leave_policy import LeavePolicy
 from app.models.leave_type import LeaveType
+from app.repositories.leave_ledger import LeaveLedgerRepository
+from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.leave_type import LeaveTypeRepository
 from app.schemas.leave_policy import LeaveTypeWrite
 from app.services.leave import config_audit
+from app.services.leave.calendar_math import leave_year_bounds
 from app.services.leave.errors import LeaveConflictError
+from app.services.leave.policies import today_for
 
 
 async def create_type(
@@ -59,6 +65,8 @@ async def update_type(
     repo = LeaveTypeRepository(db, org_id=leave_type.org_id)
     if await repo.code_taken(leave_type.policy_id, body.code, exclude=leave_type.id):
         raise LeaveConflictError(f"The code {body.code} is already used on this policy.")
+    if body.accrual != leave_type.accrual:
+        await _check_accrual_change(db, leave_type)
     after = body.model_dump()
     changes = config_audit.diff(config_audit.snapshot(leave_type, after), after)
     if not changes:
@@ -67,6 +75,27 @@ async def update_type(
         setattr(leave_type, field, value)
     await db.flush()
     _record(db, leave_type, actor_id, LeaveConfigAction.TYPE_UPDATED, changes)
+
+
+async def _check_accrual_change(db: AsyncSession, leave_type: LeaveType) -> None:
+    """Refuse to change how a type is given once this year's allocation is booked.
+
+    Allocations are frozen per year, but accrual is read from the type, so a
+    switch would re-time days already counted in a year in use: someone who
+    took their upfront leave early would suddenly be overdrawn.
+    """
+    policy = await LeavePolicyRepository(db, org_id=leave_type.org_id).get_by_id(
+        leave_type.policy_id
+    )
+    if policy is None:
+        return
+    year = leave_year_bounds(today_for(policy), policy.year_start_month)
+    ledger = LeaveLedgerRepository(db, org_id=leave_type.org_id)
+    if await ledger.allocated_since(leave_type.id, year.label):
+        raise LeaveConflictError(
+            "This type is already in use this leave year, so how it's given can't "
+            "change now. Add a new type for the new rule, or change it next year."
+        )
 
 
 def _record(

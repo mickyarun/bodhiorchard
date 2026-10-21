@@ -25,6 +25,8 @@ year already in use. Until then it is worked out live from the policy.
 """
 
 import uuid
+from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -33,11 +35,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.employee_profile import EmployeeProfile
 from app.models.leave_policy import LeavePolicy
+from app.models.leave_request import LeaveStatus
 from app.models.leave_type import LeaveType
 from app.repositories.leave_ledger import LeaveLedgerRepository
 from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.leave_usage import LeaveUsageRepository
-from app.services.leave.accrual import earned_by
+from app.services.leave.accrual import Booking, earned_by, taken_by, usable_from
 from app.services.leave.allocation import ProrationRule, allocation_for_year
 from app.services.leave.calendar_math import LeaveYearBounds
 from app.services.leave.policies import effective_from
@@ -61,10 +64,12 @@ def day_in_year(day: date, year: LeaveYearBounds) -> date:
 
 @dataclass(frozen=True)
 class BalanceLine:
-    """One leave type's numbers for one year. None = no limit.
+    """One leave type's numbers for one year, as of the day it was built for.
 
-    ``earned`` is how much of ``allocated`` is released by the day the line
-    was built for; the same as ``allocated`` for an upfront type.
+    None = no limit. ``earned`` is how much of ``allocated`` is released by
+    that day (all of it for an upfront type). ``available`` is what can still
+    be booked from that day without overdrawing any later month; ``taken``
+    is the paid days of approved leave that has already started.
     """
 
     leave_type: LeaveType
@@ -73,28 +78,30 @@ class BalanceLine:
     adjustments: Decimal
     used: Decimal
     pending: Decimal
+    available: Decimal | None
+    taken: Decimal
 
-    @property
-    def available(self) -> Decimal | None:
-        """Days still free to request, counting pending requests as taken."""
-        if self.earned is None:
-            return None
-        return self.earned + self.adjustments - self.used - self.pending
+
+def booking(status: LeaveStatus, start: date, days: Decimal) -> Booking:
+    """A usage row as a booking (pending leave isn't approved yet)."""
+    return Booking(start=start, days=days, approved=status == LeaveStatus.APPROVED)
 
 
 def build_line(
     leave_type: LeaveType,
     stored: Decimal | None,
     adjustments: Decimal,
-    used: Decimal,
-    pending: Decimal,
+    bookings: Sequence[Booking],
     *,
     profile: EmployeeProfile | None,
     year: LeaveYearBounds,
     rule: ProrationRule,
     on: date,
 ) -> BalanceLine:
-    """One type's balance as of ``on``; an unstored allocation is worked out live."""
+    """One type's balance as of ``on``; an unstored allocation is worked out live.
+
+    ``bookings`` are the type's active requests starting in ``year``.
+    """
     quota = leave_type.annual_quota_days
     allocated = stored
     joined = effective_from(profile)
@@ -102,11 +109,15 @@ def build_line(
         allocated = None
     elif stored is None:
         allocated = allocation_for_year(quota, joined, year.start, year.end, rule)
-    earned = (
-        None
-        if allocated is None
-        else earned_by(allocated, leave_type.accrual, joined, year.start, year.end, on)
-    )
+    used = sum((b.days for b in bookings if b.approved), ZERO)
+    pending = sum((b.days for b in bookings if not b.approved), ZERO)
+    earned = available = None
+    if allocated is not None:
+        accrual = leave_type.accrual
+        earned = earned_by(allocated, accrual, joined, year.start, year.end, on)
+        available = usable_from(
+            allocated, accrual, joined, year.start, year.end, on, adjustments, bookings
+        )
     return BalanceLine(
         leave_type=leave_type,
         allocated=allocated,
@@ -114,6 +125,8 @@ def build_line(
         adjustments=adjustments,
         used=used,
         pending=pending,
+        available=available,
+        taken=taken_by(bookings, on),
     )
 
 
@@ -129,8 +142,9 @@ async def balances_for(
 ) -> list[BalanceLine]:
     """Balances for every active leave type on ``policy``, as of ``on``.
 
-    ``on`` matters only for monthly types: a request passes its start date
-    (what will have been earned by then), a balance page passes today.
+    ``on`` is the day the balance is read for: a request passes its start
+    date (what will have been earned by then, and what later months still
+    need), a balance page passes today.
 
     A year with no allocation yet gets one computed from the current quota
     and proration rule. Only ``persist_type_id`` (the type a real submit or
@@ -156,14 +170,17 @@ async def balances_for(
             # Callers hold the member's lock, so nobody else writes it meanwhile.
             await ledger.ensure_allocation(user_id, persist.id, year.label, days)
             totals[persist.id] = (days, adjustments)
-    usage = await LeaveUsageRepository(db, org_id=org_id).leave_day_totals(
-        user_id, year.start, year.end
+    rows = await LeaveUsageRepository(db, org_id=org_id).leave_days_by_start(
+        {user_id}, {t.id for t in types}, year.start, year.end
     )
+    bookings: dict[uuid.UUID, list[Booking]] = defaultdict(list)
+    for _user, type_id, status, start, days in rows:
+        bookings[type_id].append(booking(status, start, days))
     return [
         build_line(
             t,
             *totals.get(t.id, (None, ZERO)),
-            *usage.get(t.id, (ZERO, ZERO)),
+            bookings[t.id],
             profile=profile,
             year=year,
             rule=rule,

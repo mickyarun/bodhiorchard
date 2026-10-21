@@ -33,10 +33,14 @@ from app.services.leave.reports.population import people, scoped_ids
 
 
 def encashable(line: BalanceLine) -> Decimal | None:
-    """Unused days paid out at exit for an encashable type, else None."""
-    if not line.leave_type.is_encashable or line.available is None:
+    """Unused days paid out if they left today, for an encashable type, else None.
+
+    What is earned so far plus adjustments, less leave already taken.
+    Pending and future leave is left out: it never happens if they leave.
+    """
+    if not line.leave_type.is_encashable or line.earned is None:
         return None
-    return max(line.available, Decimal(0))
+    return max(line.earned + line.adjustments - line.taken, Decimal(0))
 
 
 async def balance_report(

@@ -45,31 +45,6 @@ class LeaveUsageRepository(BaseRepository[LeaveRequest]):
         """Initialize the repository."""
         super().__init__(LeaveRequest, db, org_id=org_id)
 
-    async def leave_day_totals(
-        self, user_id: uuid.UUID, start: date, end: date
-    ) -> dict[uuid.UUID, tuple[Decimal, Decimal]]:
-        """``{leave_type_id: (approved_days, pending_days)}`` for a leave year."""
-        stmt = self._scoped(
-            select(LeaveRequest.leave_type_id, LeaveRequest.status, func.sum(PAID_DAYS))
-            .where(
-                LeaveRequest.user_id == user_id,
-                LeaveRequest.kind == LeaveKind.LEAVE,
-                LeaveRequest.status.in_(ACTIVE),
-                LeaveRequest.start_date >= start,
-                LeaveRequest.start_date <= end,
-            )
-            .group_by(LeaveRequest.leave_type_id, LeaveRequest.status)
-        )
-        totals: dict[uuid.UUID, tuple[Decimal, Decimal]] = {}
-        for type_id, status, days in (await self._db.execute(stmt)).all():
-            approved, pending = totals.get(type_id, (ZERO, ZERO))
-            if status == LeaveStatus.APPROVED:
-                approved += days
-            else:
-                pending += days
-            totals[type_id] = (approved, pending)
-        return totals
-
     async def lop_total(self, user_id: uuid.UUID, start: date, end: date) -> Decimal:
         """Loss-of-pay days on approved and pending leave starting in a leave year."""
         stmt = self._scoped(

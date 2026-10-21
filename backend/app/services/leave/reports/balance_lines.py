@@ -29,11 +29,17 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.leave_policy import LeavePolicy
-from app.models.leave_request import LeaveStatus
 from app.repositories.leave_ledger import LeaveLedgerRepository
 from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.leave_usage import LeaveUsageRepository
-from app.services.leave.balances import BalanceLine, build_line, day_in_year, proration_rule
+from app.services.leave.accrual import Booking
+from app.services.leave.balances import (
+    BalanceLine,
+    booking,
+    build_line,
+    day_in_year,
+    proration_rule,
+)
 from app.services.leave.calendar_math import (
     LeaveYearBounds,
     leave_year_bounds,
@@ -85,12 +91,12 @@ async def balance_lines(
     ledger = await LeaveLedgerRepository(db, org_id=org_id).type_totals(users, type_ids)
     usage_repo = LeaveUsageRepository(db, org_id=org_id)
     year_of = {p.user_id: years[p.policy.id] for p in persons if p.policy}
-    used: dict[tuple[uuid.UUID, uuid.UUID], list[Decimal]] = defaultdict(lambda: [ZERO, ZERO])
+    bookings: dict[tuple[uuid.UUID, uuid.UUID], list[Booking]] = defaultdict(list)
     for user, type_id, status, start, days in await usage_repo.leave_days_by_start(
         users, type_ids, first, last
     ):
         if year_of[user].start <= start <= year_of[user].end:
-            used[(user, type_id)][0 if status == LeaveStatus.APPROVED else 1] += days
+            bookings[(user, type_id)].append(booking(status, start, days))
     lop: dict[uuid.UUID, Decimal] = defaultdict(Decimal)
     for user, start, days in await usage_repo.lop_by_start(users, first, last):
         if year_of[user].start <= start <= year_of[user].end:
@@ -100,19 +106,18 @@ async def balance_lines(
         if p.policy is None:
             continue
         year, rule = years[p.policy.id], proration_rule(p.policy)
-        # Monthly types show what is earned by today (a past year: all of it).
+        # Read as of today (a past year at its end): what is earned and still
+        # bookable now, with leave booked ahead counted in its own month.
         on = day_in_year(today_for(p.policy), year)
         lines = []
         for t in types.get(p.policy.id, []):
             stored, adjustments = ledger.get((p.user_id, t.id, year.label), (None, ZERO))
-            approved, pending = used[(p.user_id, t.id)]
             lines.append(
                 build_line(
                     t,
                     stored,
                     adjustments,
-                    approved,
-                    pending,
+                    bookings[(p.user_id, t.id)],
                     profile=p.profile,
                     year=year,
                     rule=rule,

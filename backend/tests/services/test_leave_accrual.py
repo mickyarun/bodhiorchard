@@ -21,7 +21,7 @@ from decimal import Decimal
 import pytest
 
 from app.models.leave_type import LeaveAccrual
-from app.services.leave.accrual import earned_by
+from app.services.leave.accrual import Booking, earned_by, taken_by, usable_from
 
 YEAR_START, YEAR_END = date(2026, 1, 1), date(2026, 12, 31)
 MONTHLY, UPFRONT = LeaveAccrual.MONTHLY, LeaveAccrual.UPFRONT
@@ -67,3 +67,36 @@ def test_uneven_shares_round_down_and_the_last_month_settles_up() -> None:
     assert earned("4", date(2026, 6, 5)) == Decimal("2")
     assert earned("4", date(2026, 11, 5)) == Decimal("3.6")
     assert earned("4", date(2026, 12, 5)) == 4
+
+
+def booked(*items: tuple[date, str, bool]) -> list[Booking]:
+    return [Booking(start=d, days=Decimal(days), approved=ok) for d, days, ok in items]
+
+
+def usable(on: date, bookings: list[Booking], accrual: LeaveAccrual = MONTHLY) -> Decimal:
+    return usable_from(Decimal(18), accrual, None, YEAR_START, YEAR_END, on, Decimal(0), bookings)
+
+
+def test_leave_booked_ahead_uses_its_own_months_allowance() -> None:
+    # 10 days in December are covered by December's 18 earned, so a
+    # February request still has February's 3 days: booking order is moot.
+    december = booked((date(2026, 12, 7), "10", True))
+    assert usable(date(2026, 2, 9), december) == Decimal("3")
+    # But nothing earlier may eat into what December needs: by March only
+    # 4.5 is earned, and the year can spare 18 - 10 = 8 at most.
+    assert usable(date(2026, 3, 2), december) == Decimal("4.5")
+    assert usable(date(2026, 8, 3), december) == Decimal("8")
+
+
+def test_upfront_is_the_whole_year_less_everything_booked() -> None:
+    bookings = booked((date(2026, 12, 7), "10", True), (date(2026, 2, 9), "3", False))
+    assert usable(date(2026, 2, 1), bookings, UPFRONT) == Decimal("5")
+
+
+def test_taken_counts_only_approved_leave_that_has_started() -> None:
+    bookings = booked(
+        (date(2026, 3, 2), "2", True),
+        (date(2026, 3, 9), "1", False),
+        (date(2026, 12, 7), "10", True),
+    )
+    assert taken_by(bookings, date(2026, 10, 21)) == Decimal("2")
