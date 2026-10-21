@@ -15,7 +15,8 @@
  -->
 
 <!-- One balance tile: a big number, a thin meter (used solid, pending
-     lighter) and a caption. Presentational; BalanceGrid maps data in. -->
+     lighter), a caption and an optional note under it. Presentational;
+     BalanceGrid maps data in. -->
 <template>
   <v-card
     :color="compact ? undefined : 'surface'"
@@ -41,6 +42,7 @@
       />
     </div>
     <div class="text-caption text-medium-emphasis mt-2">{{ caption }}</div>
+    <div v-if="note" class="text-caption text-medium-emphasis font-italic">{{ note }}</div>
   </v-card>
 </template>
 
@@ -55,6 +57,8 @@ const props = defineProps<{
   unit?: string
   meter: { used: number; pending: number } | null
   caption: string
+  /** A second, quieter line, e.g. why "days left" counts later earning. */
+  note?: string
   tag?: string
   /** Smaller, tinted tile for use inside another card. */
   compact?: boolean

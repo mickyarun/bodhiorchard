@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Balance } from '@/types/leave'
-import { earnedSoFar, earningCaption } from '@/utils/leaveAccrual'
+import { BOOKED_AHEAD_NOTE, bookedAheadNote, earnedSoFar, earningCaption } from '@/utils/leaveAccrual'
 
 describe('earnedSoFar', () => {
   it('says how much of a monthly allowance is earned so far', () => {
@@ -60,5 +60,21 @@ describe('earningCaption', () => {
   it('hands back to the usual caption once everything is earned', () => {
     expect(earningCaption(balance({ earned: '12' }))).toBeNull()
     expect(earningCaption(balance({ accrual: 'upfront', earned: '12' }))).toBeNull()
+  })
+})
+
+describe('bookedAheadNote', () => {
+  it('explains days left that count what later months will earn', () => {
+    // 10 earned, 3 pending in November: 8 left, not 10 - 3 = 7.
+    const ahead = balance({ earned: '10', used: '0', pending: '3', available: '8' })
+    expect(bookedAheadNote(ahead)).toBe(BOOKED_AHEAD_NOTE)
+  })
+
+  it('stays quiet when the numbers add up as they are', () => {
+    expect(bookedAheadNote(balance({ earned: '10', used: '2', pending: '0', available: '8' }))).toBe('')
+    expect(
+      bookedAheadNote(balance({ accrual: 'upfront', earned: '12', pending: '3', available: '9' })),
+    ).toBe('')
+    expect(bookedAheadNote(balance({ earned: null, available: null }))).toBe('')
   })
 })

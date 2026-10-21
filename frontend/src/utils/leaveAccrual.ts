@@ -38,3 +38,25 @@ export function earningCaption(balance: Balance): string | null {
   if (pending > 0) parts.push(`${formatDays(pending)} pending`)
   return parts.join(' · ')
 }
+
+/** Said wherever "days left" counts days that will be earned later. */
+export const BOOKED_AHEAD_NOTE = "Includes what's earned by the booked leave dates"
+
+/**
+ * For a monthly type, "days left" can be more than earned − used − pending:
+ * leave booked for a later month is covered by what is earned by then, so
+ * it takes less from today's balance. Returns a line saying so when that
+ * happens, so the numbers on the card add up for the reader; '' otherwise.
+ */
+export function bookedAheadNote(
+  balance: Pick<Balance, 'accrual' | 'earned' | 'adjustments' | 'used' | 'pending' | 'available'>,
+): string {
+  if (balance.accrual !== 'monthly') return ''
+  const earned = toNumberOrNull(balance.earned)
+  const available = toNumberOrNull(balance.available)
+  if (earned === null || available === null) return ''
+  const plain =
+    earned + toNumber(balance.adjustments) - toNumber(balance.used) - toNumber(balance.pending)
+  // Decimal strings: compare to a hundredth so rounding never shows the note.
+  return available - plain > 0.005 ? BOOKED_AHEAD_NOTE : ''
+}

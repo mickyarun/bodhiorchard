@@ -17,6 +17,10 @@
 <!-- Balances per member and leave type for a leave year. "Encashable at exit"
      is what would be paid out if they left today ('—' for other types). -->
 <template>
+  <p v-if="accruing" class="legend text-caption text-medium-emphasis">
+    Some leave here is earned monthly. Its Available includes what will be earned by the dates
+    already booked, so it can be more than earned so far minus used and pending.
+  </p>
   <v-data-table item-value="key" :headers="HEADERS" :items="rows" density="comfortable" :items-per-page="50">
     <template #[`item.name`]="{ item }"><ReportPersonCell :row="item" /></template>
     <template #[`item.allocated`]="{ item }">{{ limit(item.allocated) }}</template>
@@ -51,6 +55,15 @@ const rows = computed(() =>
   (props.report?.rows ?? []).map(r => ({ ...r, key: `${r.user_id}:${r.leave_type_id}` })),
 )
 
+// Any type still building up (earned < allocated) means it's earned monthly.
+const accruing = computed(() =>
+  (props.report?.rows ?? []).some(r => {
+    const earned = toNumberOrNull(r.earned)
+    const allocated = toNumberOrNull(r.allocated)
+    return earned !== null && allocated !== null && earned < allocated
+  }),
+)
+
 const HEADERS = [
   { title: 'Employee', key: 'name', sortable: true },
   { title: 'Year', key: 'leave_year', sortable: true },
@@ -69,3 +82,10 @@ function limit(value: Decimalish | null): string {
   return n === null ? 'No limit' : formatDays(n)
 }
 </script>
+
+<style scoped>
+.legend {
+  padding: 12px 16px 0;
+  margin: 0;
+}
+</style>
