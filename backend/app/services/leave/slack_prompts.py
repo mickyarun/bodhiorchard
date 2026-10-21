@@ -23,6 +23,7 @@ the request itself is already saved and visible in the app.
 import uuid
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import AsyncSessionLocal
@@ -32,6 +33,7 @@ from app.repositories.leave_slack_prompt import LeaveSlackPromptRepository
 from app.repositories.user import UserRepository
 from app.services.leave.messages import compose_request_message
 from app.services.leave.slack_blocks import approval_blocks, escape, outcome_blocks
+from app.services.leave.slack_context import prompt_context
 from app.services.notifications import NotificationCategory, category_default
 from app.services.slack_client import conversations_open
 from app.services.slack_dm import bot_token
@@ -54,7 +56,12 @@ async def send_prompts(
             default_enabled=category_default(NotificationCategory.LEAVE_APPROVALS),
             user_ids=approver_ids,
         )
-        blocks = approval_blocks(text, request_id, f"{settings.frontend_url}/leave/approvals")
+        if not pairs:
+            return
+        context = await _context_lines(db, org_id, request_id)
+        blocks = approval_blocks(
+            text, request_id, f"{settings.frontend_url}/leave/approvals", context
+        )
         prompts = LeaveSlackPromptRepository(db, org_id=org_id)
         for user_id, slack_id in pairs:
             try:
@@ -84,6 +91,22 @@ async def send_prompts(
                 )
     # It may have been decided while the DMs were going out.
     await refresh_prompts(org_id, request_id)
+
+
+async def _context_lines(db: AsyncSession, org_id: uuid.UUID, request_id: uuid.UUID) -> list[str]:
+    """Balances / WFH history for the prompt; the prompt still goes out without them."""
+    try:
+        request = await LeaveRequestRepository(db, org_id=org_id).get_by_id(request_id)
+        return await prompt_context(db, org_id, request) if request else []
+    except Exception:
+        await db.rollback()
+        logger.warning(
+            "leave_slack_context_failed",
+            org_id=str(org_id),
+            request_id=str(request_id),
+            exc_info=True,
+        )
+        return []
 
 
 async def refresh_prompts(org_id: uuid.UUID, request_id: uuid.UUID) -> None:

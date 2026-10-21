@@ -170,3 +170,20 @@ class LeaveReportRepository(BaseRepository[LeaveRequest]):
             )
         )
         return list((await self._db.execute(stmt)).scalars().all())
+
+    async def recent_taken(
+        self, user_id: uuid.UUID, kind: LeaveKind, cutoff: date, *, limit: int
+    ) -> list[LeaveRequest]:
+        """A member's latest approved ``kind`` requests started by ``cutoff``, newest first."""
+        stmt = (
+            self._scoped(select(LeaveRequest))
+            .where(
+                LeaveRequest.user_id == user_id,
+                LeaveRequest.kind == kind,
+                LeaveRequest.status == LeaveStatus.APPROVED,
+                LeaveRequest.start_date <= cutoff,
+            )
+            .order_by(LeaveRequest.start_date.desc(), LeaveRequest.created_at.desc())
+            .limit(limit)
+        )
+        return list((await self._db.execute(stmt)).scalars().all())

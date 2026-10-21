@@ -19,6 +19,7 @@ kind, which dates. Never the leave type or reason.
 """
 
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 APPROVE = "leave_approve"
@@ -44,11 +45,22 @@ def _section(text: str) -> Block:
     return {"type": "section", "text": {"type": "mrkdwn", "text": escape(text)}}
 
 
-def approval_blocks(text: str, request_id: uuid.UUID, link: str) -> list[Block]:
-    """The request line with Approve, Reject and Open buttons."""
+def _context(lines: Sequence[str]) -> list[Block]:
+    """Small grey lines; none at all when there's nothing to say."""
+    if not lines:
+        return []
+    elements = [{"type": "mrkdwn", "text": escape(line)} for line in lines]
+    return [{"type": "context", "elements": elements}]
+
+
+def approval_blocks(
+    text: str, request_id: uuid.UUID, link: str, context: Sequence[str] = ()
+) -> list[Block]:
+    """The request line, any ``context`` lines, then Approve, Reject and Open."""
     value = str(request_id)
     return [
         _section(text),
+        *_context(context),
         {
             "type": "actions",
             "block_id": "leave_decision",
