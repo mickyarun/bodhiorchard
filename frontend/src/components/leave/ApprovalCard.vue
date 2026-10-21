@@ -63,8 +63,9 @@
       </span>
       <span v-if="request.decision_note" class="text-caption">“{{ request.decision_note }}”</span>
     </div>
+    <ApprovedLeaveActions v-if="request.status !== 'pending' && request.can_change" :request="request" />
 
-    <template v-else>
+    <template v-if="request.status === 'pending'">
       <v-textarea
         v-if="rejecting"
         v-model="note"
@@ -102,6 +103,7 @@
 import { computed, ref } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import ApprovalFacts from '@/components/leave/ApprovalFacts.vue'
+import ApprovedLeaveActions from '@/components/leave/ApprovedLeaveActions.vue'
 import BalanceGrid from '@/components/leave/BalanceGrid.vue'
 import LeaveStatusChip from '@/components/leave/LeaveStatusChip.vue'
 import { useLeaveApprovalsStore } from '@/stores/leaveApprovals'

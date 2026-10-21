@@ -82,7 +82,7 @@ class Notice:
             spawn(refresh_after_change(self.org_id, self.sync_request_id))
 
 
-def _stage(
+def stage_rows(
     db: AsyncSession,
     notice: Notice,
     *,
@@ -91,6 +91,7 @@ def _stage(
     message: str,
     link: str,
 ) -> Notice:
+    """Add the in-app rows for ``notice`` to the caller's transaction (sent after commit)."""
     for user_id in notice.user_ids:
         note = Notification(
             id=uuid.uuid4(),
@@ -153,7 +154,7 @@ def stage_new_request(
         # A pending request has nothing on the calendar yet.
         sync_request_id=request.id if auto_approved else None,
     )
-    return _stage(
+    return stage_rows(
         db,
         notice,
         kind=NotificationType.LEAVE_REQUESTED,
@@ -177,7 +178,7 @@ def stage_decision(
         # A rejected request never had events or a status to take off.
         sync_request_id=request.id if request.status == LeaveStatus.APPROVED else None,
     )
-    return _stage(
+    return stage_rows(
         db,
         notice,
         kind=NotificationType.LEAVE_DECIDED,

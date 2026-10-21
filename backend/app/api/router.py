@@ -60,6 +60,7 @@ from app.api.v1.leave_approvals import router as leave_approvals_router
 from app.api.v1.leave_balances import router as leave_balances_router
 from app.api.v1.leave_calendar import router as leave_calendar_router
 from app.api.v1.leave_calendar_sync import router as leave_calendar_sync_router
+from app.api.v1.leave_changes import router as leave_changes_router
 from app.api.v1.leave_digest import router as leave_digest_router
 from app.api.v1.leave_history import router as leave_history_router
 from app.api.v1.leave_holidays import router as leave_holidays_router
@@ -135,6 +136,7 @@ api_router.include_router(offices_router, prefix="/api/v1/offices", dependencies
 for leave_part in (
     leave_router,
     leave_approvals_router,
+    leave_changes_router,
     leave_calendar_router,
     leave_balances_router,
     leave_policies_router,

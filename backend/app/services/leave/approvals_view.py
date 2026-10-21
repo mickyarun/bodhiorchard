@@ -28,7 +28,7 @@ from typing import Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permission_deps import PermissionSet
-from app.models.leave_request import LeaveRequest
+from app.models.leave_request import LeaveRequest, LeaveStatus
 from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.employee_reporting_manager import EmployeeReportingManagerRepository
 from app.repositories.leave_request import LeaveRequestRepository
@@ -104,7 +104,9 @@ async def _decidable(
     requests = (
         await repo.list_pending(scope, narrow)
         if status == "pending"
-        else await repo.list_decided(scope, since, narrow, limit=DECIDED_LIMIT)
+        else await repo.list_decided(
+            scope, since, narrow, limit=DECIDED_LIMIT, open_from=datetime.now(UTC).date()
+        )
     )
     approvers = await approvers_for_many(db, org_id, {r.user_id for r in requests})
     allowed: list[tuple[LeaveRequest, Route]] = []
@@ -167,9 +169,13 @@ async def approval_items(
         hidden = request.leave_type_id is not None and read.leave_type is None
         if hidden:
             after.pop(request.id, None)
+        # Approved and not over: the caller may still move it or withdraw it.
+        open_ = (
+            not pending and request.status == LeaveStatus.APPROVED and request.end_date >= today
+        )
         items.append(
             ApprovalItem(
-                request=read,
+                request=read.model_copy(update={"can_change": open_}),
                 route=route,
                 designation=profile.designation if profile else None,
                 department=profile.department if profile else None,

@@ -21,11 +21,12 @@ row lock with a conditional status update.
 """
 
 import uuid
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.leave_policy import LeavePolicy
 from app.models.leave_request import LeaveRequest, LeaveStatus
 from app.repositories.leave_request import LeaveRequestRepository
 from app.services.leave.calendar_math import count_days
@@ -33,6 +34,16 @@ from app.services.leave.errors import LeaveConflictError, LeaveForbiddenError
 from app.services.leave.lifecycle import load_request
 from app.services.leave.loss_of_pay import give_back
 from app.services.leave.policies import mandatory_holidays, policy_for_request, today_for
+
+
+async def days_between(
+    db: AsyncSession, policy: LeavePolicy, request: LeaveRequest, start: date, end: date
+) -> Decimal:
+    """Working days ``request`` uses from ``start`` to ``end`` on its policy."""
+    holidays = await mandatory_holidays(db, policy, start, end)
+    return count_days(
+        start, end, request.half_day, working_days=policy.working_days, holidays=holidays
+    ).days
 
 
 async def cancel(
@@ -52,15 +63,8 @@ async def cancel(
     if request.status == LeaveStatus.APPROVED and request.start_date < today <= request.end_date:
         # Under way: keep the days already taken, cancel the rest.
         yesterday = today - timedelta(days=1)
-        holidays = await mandatory_holidays(db, member.policy, request.start_date, yesterday)
-        taken = count_days(
-            request.start_date,
-            yesterday,
-            request.half_day,
-            working_days=member.policy.working_days,
-            holidays=holidays,
-        )
-        if taken.days == 0:
+        taken = await days_between(db, member.policy, request, request.start_date, yesterday)
+        if taken == 0:
             # Only non-working days have passed: nothing was taken yet.
             changed = await repo.transition(
                 request.id, [LeaveStatus.APPROVED], status=LeaveStatus.CANCELLED
@@ -70,9 +74,9 @@ async def cancel(
                 request.id,
                 [LeaveStatus.APPROVED],
                 end_date=yesterday,
-                days=taken.days,
+                days=taken,
                 # Fewer days now: loss-of-pay days are given back first.
-                lop_days=max(Decimal(0), request.lop_days - (request.days - taken.days)),
+                lop_days=max(Decimal(0), request.lop_days - (request.days - taken)),
             )
     elif request.status == LeaveStatus.PENDING:
         changed = await repo.transition(

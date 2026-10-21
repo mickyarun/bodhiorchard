@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from app.models.leave_request import LeaveKind, LeaveStatus
 from app.schemas.leave import HighLeave
 from app.services.leave.messages import (
+    compose_change_message,
     compose_decision_message,
     compose_request_message,
     format_range,
@@ -89,3 +90,19 @@ def test_decisions_only_resync_requests_that_were_approved() -> None:
     org = uuid.uuid4()
     assert after_cancel(org, pending_cancelled).sync_request_id is None  # type: ignore[arg-type]
     assert after_cancel(org, approved_cancelled).sync_request_id is not None  # type: ignore[arg-type]
+
+
+def test_change_messages_say_what_happened_never_the_type_or_reason() -> None:
+    moved = _request(status=LeaveStatus.APPROVED, decision_note="Swap with Ravi")
+    text = compose_change_message(moved, "Priya", withdrawn=False)  # type: ignore[arg-type]
+    assert text == "Priya changed your leave to Mon 19 – Wed 21 Oct (3 days). Note: Swap with Ravi"
+    assert "Fever" not in text
+
+    gone = _request(status=LeaveStatus.REJECTED, decision_note=None)
+    assert compose_change_message(gone, "Priya", withdrawn=True) == (  # type: ignore[arg-type]
+        "Priya withdrew the approval for your leave Mon 19 – Wed 21 Oct (3 days)."
+    )
+    cut = _request(status=LeaveStatus.APPROVED, decision_note=None, days=Decimal("1"))
+    assert compose_change_message(cut, "Priya", withdrawn=True).startswith(  # type: ignore[arg-type]
+        "Priya ended your leave early: it now runs"
+    )

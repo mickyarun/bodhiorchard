@@ -85,6 +85,15 @@ class DecisionBody(BaseModel):
     note: str | None = Field(None, max_length=500)
 
 
+class RescheduleBody(BaseModel):
+    """New dates for approved leave; the note goes to the requester."""
+
+    start_date: date
+    end_date: date
+    half_day: HalfDay = HalfDay.NONE
+    note: str | None = Field(None, max_length=500)
+
+
 class ApprovalCount(BaseModel):
     """Pending requests the caller can act on (nav badge)."""
 

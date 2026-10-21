@@ -127,20 +127,30 @@ class LeaveRequestRepository(BaseRepository[LeaveRequest]):
         filters: RequestFilter | None = None,
         *,
         limit: int,
+        open_from: date | None = None,
     ) -> list[LeaveRequest]:
-        """Requests decided by a person (since ``since``), newest first; at most ``limit``."""
-        stmt = self._scoped(
-            select(LeaveRequest).where(
-                LeaveRequest.status.in_((LeaveStatus.APPROVED, LeaveStatus.REJECTED)),
-                LeaveRequest.decided_by.is_not(None),
-            )
+        """Requests decided by a person (since ``since``), newest first; at most ``limit``.
+
+        With ``open_from``, approved leave not over by then is included too,
+        however long ago or automatically it was approved: it can still change.
+        """
+        decided = and_(
+            LeaveRequest.status.in_((LeaveStatus.APPROVED, LeaveStatus.REJECTED)),
+            LeaveRequest.decided_by.is_not(None),
         )
         if since is not None:
-            stmt = stmt.where(LeaveRequest.decided_at >= since)
+            decided = and_(decided, LeaveRequest.decided_at >= since)
+        if open_from is not None:
+            still_open = and_(
+                LeaveRequest.status == LeaveStatus.APPROVED, LeaveRequest.end_date >= open_from
+            )
+            decided = or_(decided, still_open)
+        stmt = self._scoped(select(LeaveRequest).where(decided))
         stmt = apply_filter(stmt, filters)
         if user_ids is not None:
             stmt = stmt.where(LeaveRequest.user_id.in_(user_ids))
-        result = await self._db.execute(stmt.order_by(LeaveRequest.decided_at.desc()).limit(limit))
+        order = LeaveRequest.decided_at.desc().nulls_last()
+        result = await self._db.execute(stmt.order_by(order).limit(limit))
         return list(result.scalars().all())
 
     async def calendar(self, start: date, end: date, viewer: uuid.UUID) -> list[LeaveRequest]:

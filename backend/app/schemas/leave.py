@@ -175,3 +175,6 @@ class LeaveRequestRead(BaseModel):
     decision_note: str | None
     created_at: datetime
     can_cancel: bool
+    # The viewer (a manager, HR or the owner) may move it or withdraw its
+    # approval: approved, not over yet, and not their own.
+    can_change: bool = False

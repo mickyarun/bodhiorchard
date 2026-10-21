@@ -27,6 +27,14 @@ import type { ApprovalItem, ApprovalPage, LeaveKind, LeaveRequestRead, LeaveType
 import { extractApiError } from '@/utils/errors'
 import { rangeProblem } from '@/utils/leaveRanges'
 
+/** New dates for approved leave, and an optional note for the requester. */
+export interface RescheduleInput {
+  start_date: string
+  end_date: string
+  half_day: string
+  note?: string | null
+}
+
 export type ApprovalTab = 'pending' | 'decided'
 
 /** Optional narrowing; empty strings / null don't filter. */
@@ -125,6 +133,29 @@ export const useLeaveApprovalsStore = defineStore('leaveApprovals', () => {
     return null
   }
 
+  /** Change approved leave; the card shows the request as it now stands. */
+  async function change(
+    id: string,
+    action: 'withdraw' | 'reschedule',
+    body: Record<string, string | null>,
+  ): Promise<string | null> {
+    try {
+      const { data } = await api.post<LeaveRequestRead>(`/v1/leave/requests/${id}/${action}`, body)
+      items.value = items.value.map(item => (item.request.id === id ? { ...item, request: data } : item))
+      return null
+    } catch (err) {
+      return extractApiError(err, "Couldn't change this leave. Reload and try again.")
+    }
+  }
+
+  function withdraw(id: string, note: string): Promise<string | null> {
+    return change(id, 'withdraw', { note: note.trim() })
+  }
+
+  function reschedule(id: string, dates: RescheduleInput): Promise<string | null> {
+    return change(id, 'reschedule', { ...dates, note: dates.note?.trim() || null })
+  }
+
   function remember(data: ApprovalItem[]): void {
     const byId = new Map(people.value.map(p => [p.user_id, p]))
     const types = new Map(leaveTypes.value.map(t => [t.id, t]))
@@ -151,6 +182,6 @@ export const useLeaveApprovalsStore = defineStore('leaveApprovals', () => {
 
   return {
     items, truncated, status, filters, people, leaveTypes, loading, error, notice,
-    forgetPreviousViewer, fetch, approve, reject,
+    forgetPreviousViewer, fetch, approve, reject, withdraw, reschedule,
   }
 })

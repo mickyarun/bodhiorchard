@@ -175,6 +175,8 @@ export interface LeaveRequestRead {
   decision_note: string | null
   created_at: string
   can_cancel: boolean
+  /** A manager, HR or the owner may still move it or withdraw its approval. */
+  can_change?: boolean
 }
 
 export interface AlsoOut {

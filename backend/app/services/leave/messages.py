@@ -95,3 +95,27 @@ def compose_decision_message(request: LeaveRequest, decider: str) -> str:
         f"Your request for {what} {format_range(request.start_date, request.end_date)} "
         f"was {verb} by {decider}."
     )
+
+
+_NOUN = {
+    LeaveKind.LEAVE: "leave",
+    LeaveKind.WFH: "work from home",
+    LeaveKind.OPTIONAL_HOLIDAY: "optional holiday",
+}
+
+
+def compose_change_message(request: LeaveRequest, actor: str, *, withdrawn: bool) -> str:
+    """Requester-facing text after a manager changed approved leave (no type, no reason).
+
+    ``request`` is as it stands after the change.
+    """
+    what = _NOUN[request.kind]
+    when = f"{format_range(request.start_date, request.end_date)} ({days_text(request.days)})"
+    if withdrawn and request.status == LeaveStatus.REJECTED:
+        text = f"{actor} withdrew the approval for your {what} {when}."
+    elif withdrawn:
+        text = f"{actor} ended your {what} early: it now runs {when}."
+    else:
+        text = f"{actor} changed your {what} to {when}."
+    note = request.decision_note
+    return f"{text} Note: {note}" if note else text
