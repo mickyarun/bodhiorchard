@@ -21,7 +21,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AxiosRequestConfig } from 'axios'
 import api from './api'
-import { takeReturnTo } from '@/utils/returnTo'
+import { forgetReturnTo, takeReturnTo } from '@/utils/returnTo'
 
 const realAdapter = api.defaults.adapter
 
@@ -38,6 +38,7 @@ function unauthorized(): void {
 
 describe('session ran out', () => {
   beforeEach(() => {
+    forgetReturnTo()
     sessionStorage.clear()
     localStorage.clear()
     localStorage.setItem('bodhiorchard_token', 'expired') // and no refresh token

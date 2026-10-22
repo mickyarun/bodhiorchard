@@ -14,14 +14,17 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import { afterSignIn } from '@/utils/afterSignIn'
-import { rememberReturnTo, takeReturnTo } from '@/utils/returnTo'
+import { forgetReturnTo, rememberReturnTo, takeReturnTo } from '@/utils/returnTo'
 import { WORKSPACE_ENGINEERING } from '@/utils/workspace'
 
 const engineer = { permissions: [WORKSPACE_ENGINEERING], character_model: 'barbarian' }
 const peopleOnly = { permissions: [], character_model: null }
 
 describe('afterSignIn', () => {
-  beforeEach(() => sessionStorage.clear())
+  beforeEach(() => {
+    forgetReturnTo()
+    sessionStorage.clear()
+  })
 
   it('goes back to the page they were going to', () => {
     rememberReturnTo('/leave#slackCode=c&slackState=s')

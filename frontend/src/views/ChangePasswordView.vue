@@ -98,6 +98,13 @@ async function handleSubmit() {
   const err = await authStore.changePassword(newPassword.value)
   loading.value = false
   if (err === null) {
+    // The profile couldn't load while the password change was pending; it
+    // decides whether an engineer picks their avatar next.
+    try {
+      await authStore.fetchUser()
+    } catch {
+      // Without it, the router guard loads it on the way.
+    }
     router.push(afterSignIn(authStore.user))
   } else {
     errorMsg.value = err

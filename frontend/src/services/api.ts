@@ -199,7 +199,7 @@ function clearAuthAndRedirect(): void {
   if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/setup')) {
     // The session ran out mid-use: back to this page after signing in again.
     const { pathname, search, hash } = window.location
-    rememberReturnTo(pathname + search + hash)
+    rememberReturnTo(pathname + search + hash, { final: true })
     window.location.href = '/login'
   }
 }

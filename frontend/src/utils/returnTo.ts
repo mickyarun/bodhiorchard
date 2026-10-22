@@ -32,9 +32,21 @@ export function isSafeReturnPath(path: string): boolean {
   return /^\/(?![/\\])/.test(path) && !/[\u0000-\u001f]/.test(path) && !NOT_A_DESTINATION.test(path)
 }
 
-/** Remember ``path`` (a route's ``fullPath``, fragment included) for after sign-in. */
-export function rememberReturnTo(path: string): void {
-  if (!isSafeReturnPath(path)) return
+/**
+ * Set once the session has run out and a full redirect to login is under way:
+ * routing that still happens before the page unloads (a component tidying its
+ * URL, say) must not replace the page it was really on. A reload resets it.
+ */
+let leaving = false
+
+/**
+ * Remember ``path`` (a route's ``fullPath``, fragment included) for after
+ * sign-in. ``final`` is for the redirect that's leaving the page: what it
+ * remembers stands until then.
+ */
+export function rememberReturnTo(path: string, { final = false } = {}): void {
+  if (leaving || !isSafeReturnPath(path)) return
+  leaving = final
   try {
     sessionStorage.setItem(KEY, JSON.stringify({ path, at: Date.now() }))
   } catch {
@@ -58,6 +70,7 @@ export function takeReturnTo(): string | null {
 
 /** Drop any remembered page (on logout). */
 export function forgetReturnTo(): void {
+  leaving = false
   try {
     sessionStorage.removeItem(KEY)
   } catch {

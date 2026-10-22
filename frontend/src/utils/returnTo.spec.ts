@@ -42,7 +42,10 @@ describe('isSafeReturnPath', () => {
 })
 
 describe('return-to', () => {
-  beforeEach(() => sessionStorage.clear())
+  beforeEach(() => {
+    forgetReturnTo()
+    sessionStorage.clear()
+  })
   afterEach(() => vi.useRealTimers())
 
   it('gives the remembered page back once, fragment included', () => {
@@ -62,6 +65,12 @@ describe('return-to', () => {
     expect(takeReturnTo()).toBeNull()
     sessionStorage.setItem('bodhiorchard_return_to', 'https://evil.example')
     expect(takeReturnTo()).toBeNull()
+  })
+
+  it('keeps what the redirect leaving the page remembered', () => {
+    rememberReturnTo('/leave#slackCode=c&slackState=s', { final: true })
+    rememberReturnTo('/leave') // the page tidying its URL on the way out
+    expect(takeReturnTo()).toBe('/leave#slackCode=c&slackState=s')
   })
 
   it('forgets on logout', () => {
