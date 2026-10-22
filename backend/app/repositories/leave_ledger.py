@@ -148,6 +148,36 @@ class LeaveLedgerRepository(BaseRepository[LeaveLedgerEntry]):
         )
         await self._db.execute(stmt)
 
+    async def carried(
+        self,
+        user_ids: Collection[uuid.UUID],
+        type_ids: Collection[uuid.UUID],
+        leave_years: Collection[int],
+    ) -> set[tuple[uuid.UUID, uuid.UUID, int]]:
+        """``(user, type, leave_year)`` that already had days carried into them.
+
+        Only the credit counts: a carry's matching debit sits in the year the
+        days left, which may itself be a year carried into.
+        """
+        if not user_ids or not type_ids or not leave_years:
+            return set()
+        stmt = self._scoped(
+            select(
+                LeaveLedgerEntry.user_id,
+                LeaveLedgerEntry.leave_type_id,
+                LeaveLedgerEntry.leave_year,
+            ).where(
+                LeaveLedgerEntry.entry_type == LedgerEntryType.CARRY_FORWARD,
+                LeaveLedgerEntry.days > 0,
+                LeaveLedgerEntry.user_id.in_(user_ids),
+                LeaveLedgerEntry.leave_type_id.in_(type_ids),
+                LeaveLedgerEntry.leave_year.in_(leave_years),
+            )
+        )
+        return {
+            (user, type_id, year) for user, type_id, year in (await self._db.execute(stmt)).all()
+        }
+
     async def list_for(self, user_id: uuid.UUID, leave_year: int) -> list[LeaveLedgerEntry]:
         """A member's entries for one year, oldest first."""
         stmt = self._scoped(

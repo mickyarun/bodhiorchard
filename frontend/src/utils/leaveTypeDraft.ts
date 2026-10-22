@@ -32,6 +32,7 @@ export function blankType(): LeaveTypeWrite {
     auto_approve: false,
     monthly_limit_days: null,
     stops_at_balance: false,
+    carry_forward_days: null,
     color_key: SWATCH_KEYS[0],
     is_active: true,
   }
@@ -59,12 +60,22 @@ export function periodLeave(): LeaveTypeWrite {
   }
 }
 
-/** No limit, or half-day steps from 0.5 to 31 (what the server accepts). */
-export function validMonthlyLimit(value: Decimalish | null): boolean {
+/** Null (not set), or half-day steps from 0.5 to ``max``. */
+function validHalfDays(value: Decimalish | null, max: number): boolean {
   if (value === null) return true
   if (value === '') return false
   const days = Number(value)
-  return days >= 0.5 && days <= 31 && Number.isInteger(days * 2)
+  return days >= 0.5 && days <= max && Number.isInteger(days * 2)
+}
+
+/** No limit, or half-day steps from 0.5 to 31 (what the server accepts). */
+export function validMonthlyLimit(value: Decimalish | null): boolean {
+  return validHalfDays(value, 31)
+}
+
+/** Nothing carried, or up to a year's worth in half-day steps. */
+export function validCarryForward(value: Decimalish | null): boolean {
+  return validHalfDays(value, 365)
 }
 
 /** True once a policy has period leave (on or off), so the shortcut steps aside. */

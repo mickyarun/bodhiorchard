@@ -83,6 +83,8 @@ export interface LeaveTypeWrite {
   monthly_limit_days: Decimalish | null
   /** Refuse requests past the balance (people use another type) instead of going unpaid. */
   stops_at_balance: boolean
+  /** Unused days carried into the next leave year, up to this many; null = none. */
+  carry_forward_days: Decimalish | null
   color_key: string
   is_active: boolean
 }

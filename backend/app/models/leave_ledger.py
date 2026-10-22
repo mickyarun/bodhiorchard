@@ -41,6 +41,9 @@ class LedgerEntryType(StrEnum):
     # Written by "recalculate allocation": the gap between the frozen
     # allocation (plus earlier corrections) and what it should be now.
     CORRECTION = "correction"
+    # Unused days brought in from the year before, written once per user,
+    # type and year at the start of the leave year.
+    CARRY_FORWARD = "carry_forward"
 
 
 class LeaveLedgerEntry(BaseModel):

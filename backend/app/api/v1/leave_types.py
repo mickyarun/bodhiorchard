@@ -47,6 +47,7 @@ def _read(t: LeaveType) -> LeaveTypeRead:
         auto_approve=t.auto_approve,
         monthly_limit_days=t.monthly_limit_days,
         stops_at_balance=t.stops_at_balance,
+        carry_forward_days=t.carry_forward_days,
         color_key=t.color_key,
         is_active=t.is_active,
     )

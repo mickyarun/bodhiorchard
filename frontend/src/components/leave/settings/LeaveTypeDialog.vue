@@ -47,6 +47,7 @@
           <div class="group" role="group" :aria-labelledby="ids.allowance">
             <div :id="ids.allowance" class="group__title text-overline text-medium-emphasis">Allowance</div>
             <LeaveTypeAllowanceField v-model:unlimited="unlimited" v-model:days="quota" v-model:accrual="draft.accrual" v-model:stops="draft.stops_at_balance" />
+            <LeaveTypeCarryField v-if="!unlimited" v-model="draft.carry_forward_days" class="mt-3" />
           </div>
           <div class="group" role="group" :aria-labelledby="ids.access">
             <div :id="ids.access" class="group__title text-overline text-medium-emphasis">Who &amp; approval</div>
@@ -87,13 +88,14 @@ import AppCallout from '@/components/common/AppCallout.vue'
 import LeaveSwitchRow from '@/components/leave/settings/LeaveSwitchRow.vue'
 import LeaveTypeAccessFields from '@/components/leave/settings/LeaveTypeAccessFields.vue'
 import LeaveTypeAllowanceField from '@/components/leave/settings/LeaveTypeAllowanceField.vue'
+import LeaveTypeCarryField from '@/components/leave/settings/LeaveTypeCarryField.vue'
 import LeaveTypeColorPicker from '@/components/leave/settings/LeaveTypeColorPicker.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useLeavePolicyConfigStore } from '@/stores/leavePolicyConfig'
 import type { LeaveTypeRead, LeaveTypeWrite } from '@/types/leavePolicy'
 import { codeFromName, toNumberOrNull } from '@/utils/leave'
 import { FIELD_PROPS, gendersLabel } from '@/utils/leavePolicyDisplay'
-import { blankType, draftFromType, validMonthlyLimit } from '@/utils/leaveTypeDraft'
+import { blankType, draftFromType, validCarryForward, validMonthlyLimit } from '@/utils/leaveTypeDraft'
 
 const props = defineProps<{
   modelValue: boolean
@@ -129,6 +131,7 @@ const valid = computed(
     !!draft.value.code.trim() &&
     (unlimited.value || (typeof quota.value === 'number' && quota.value >= 0 && quota.value <= 365)) &&
     validMonthlyLimit(draft.value.monthly_limit_days) &&
+    (unlimited.value || validCarryForward(draft.value.carry_forward_days)) &&
     (draft.value.eligible_genders === null || draft.value.eligible_genders.length > 0) &&
     !autoProblem.value,
 )
@@ -166,6 +169,7 @@ async function submit(): Promise<void> {
     // An unlimited type has nothing to release month by month.
     accrual: unlimited.value ? 'upfront' : draft.value.accrual,
     stops_at_balance: !unlimited.value && draft.value.stops_at_balance,
+    carry_forward_days: unlimited.value ? null : draft.value.carry_forward_days,
   }
   error.value = (await store.saveType(props.policyId, body, props.type?.id ?? null)) ?? ''
   saving.value = false

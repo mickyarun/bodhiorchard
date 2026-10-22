@@ -104,6 +104,8 @@ class LeaveTypeWrite(BaseModel):
     monthly_limit_days: Decimal | None = Field(None, ge=0.5, le=31, decimal_places=1)
     # Refuse requests past the balance instead of making the rest loss of pay.
     stops_at_balance: bool = False
+    # Carry unused days into the next leave year, up to this many; None = none.
+    carry_forward_days: Decimal | None = Field(None, ge=0, le=365, decimal_places=1)
     color_key: str = Field("swatch-1", pattern=r"^swatch-[1-7]$")
     is_active: bool = True
 
@@ -121,7 +123,7 @@ class LeaveTypeWrite(BaseModel):
             raise ValueError("Pick at least one gender, or let everyone use it.")
         return sorted(set(value))
 
-    @field_validator("monthly_limit_days")
+    @field_validator("monthly_limit_days", "carry_forward_days")
     @classmethod
     def _half_days(cls, value: Decimal | None) -> Decimal | None:
         if value is not None and (value * 2) % 1:
@@ -133,9 +135,11 @@ class LeaveTypeWrite(BaseModel):
         # Unlimited leave that approves itself would need nobody's say at all.
         if self.auto_approve and self.annual_quota_days is None:
             raise ValueError("A type that approves itself needs a yearly allowance.")
-        # Unlimited leave has no balance to stop at.
+        # Unlimited leave has no balance to stop at, or to carry over.
         if self.annual_quota_days is None:
             self.stops_at_balance = False
+        if self.annual_quota_days is None or not self.carry_forward_days:
+            self.carry_forward_days = None
         return self
 
 
