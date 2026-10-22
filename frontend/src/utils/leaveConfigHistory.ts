@@ -44,6 +44,7 @@ const FIELD_LABELS: Record<string, string> = {
   auto_approve: 'Approved automatically',
   monthly_limit_days: 'Most days in a month',
   stops_at_balance: 'Stop requests past the balance',
+  carry_forward_days: 'Carry into next year',
   leave_notice_days: 'High-leave heads-up (days)',
   leave_warning_days: 'High-leave warning (days)',
   color_key: 'Colour',
@@ -53,11 +54,9 @@ const FIELD_LABELS: Record<string, string> = {
 
 function formatValue(field: string, value: unknown): string {
   if (value === null || value === undefined) {
-    return field === 'annual_quota_days' || field === 'monthly_limit_days'
-      ? 'no limit'
-      : field === 'eligible_genders'
-        ? 'everyone'
-        : '—'
+    if (field === 'annual_quota_days' || field === 'monthly_limit_days') return 'no limit'
+    if (field === 'carry_forward_days') return 'none'
+    return field === 'eligible_genders' ? 'everyone' : '—'
   }
   if (field === 'working_days' && Array.isArray(value)) {
     return value.map(day => WEEKDAY_SHORT[Number(day)] ?? String(day)).join(', ')

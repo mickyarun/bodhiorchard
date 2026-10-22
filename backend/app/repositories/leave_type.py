@@ -73,3 +73,12 @@ class LeaveTypeRepository(BaseRepository[LeaveType]):
         for row in (await self._db.execute(stmt.order_by(LeaveType.name))).scalars().all():
             out[row.policy_id].append(row)
         return out
+
+    async def with_carry_forward(self) -> list[LeaveType]:
+        """Active types that carry unused days into the next leave year."""
+        stmt = self._scoped(
+            select(LeaveType).where(
+                LeaveType.is_active.is_(True), LeaveType.carry_forward_days > 0
+            )
+        )
+        return list((await self._db.execute(stmt)).scalars().all())
