@@ -19,6 +19,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import case, func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, lazyload
 
@@ -619,39 +620,18 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
     ) -> BUDDesign:
         """Create or update a design for a (bud, repo) pair.
 
-        The select takes a row-level lock via ``with_for_update`` so two
-        concurrent ``upsert`` calls against the same ``(bud_id, repo_id)``
-        serialize at the row level — the in-process ``asyncio.Lock`` in
-        ``job_utils.section_locks`` only covers the same Python process,
-        which is not enough once multiple workers run. The lock is
-        released when the surrounding transaction commits.
+        A single ``INSERT ... ON CONFLICT DO UPDATE`` against
+        ``uq_bud_designs_bud_repo`` (``NULLS NOT DISTINCT``, so the
+        BUD-level ``repo_id=NULL`` design is one key too). When two
+        transactions race on the same key, Postgres makes the second wait
+        on the first's uncommitted row and then takes the update branch.
+        A select-then-insert can't do that: before the first insert
+        commits, there is no row for ``FOR UPDATE`` to lock.
+
+        On update, ``status`` is always written. ``design_html``,
+        ``job_id`` and ``notes`` are written only when passed.
         """
-        stmt = self._scoped(
-            select(BUDDesign)
-            .where(BUDDesign.bud_id == bud_id)
-            .where(
-                BUDDesign.repo_id == repo_id
-                if repo_id is not None
-                else BUDDesign.repo_id.is_(None)
-            )
-            .with_for_update()
-        )
-        result = await self._db.execute(stmt)
-        existing = result.scalar_one_or_none()
-
-        if existing is not None:
-            if design_html is not None:
-                existing.design_html = design_html
-            existing.status = status
-            if job_id is not None:
-                existing.job_id = job_id
-            if notes is not None:
-                existing.notes = notes
-            await self._db.flush()
-            await self._db.refresh(existing)
-            return existing
-
-        design = BUDDesign(
+        stmt = pg_insert(BUDDesign).values(
             org_id=self._org_id,
             bud_id=bud_id,
             repo_id=repo_id,
@@ -660,7 +640,19 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
             job_id=job_id,
             notes=notes,
         )
-        return await self.create(design)
+        optional = {"design_html": design_html, "job_id": job_id, "notes": notes}
+        # ON CONFLICT skips the ORM's ``onupdate``, so bump updated_at here.
+        set_: dict[str, Any] = {"status": status, "updated_at": func.now()}
+        set_.update({col: value for col, value in optional.items() if value is not None})
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_bud_designs_bud_repo",
+            set_=set_,
+            where=BUDDesign.org_id == self._org_id,
+        )
+        result = await self._db.execute(
+            stmt.returning(BUDDesign).execution_options(populate_existing=True)
+        )
+        return result.scalar_one()
 
 
 class BUDChatMessageRepository(BaseRepository[BUDChatMessage]):
