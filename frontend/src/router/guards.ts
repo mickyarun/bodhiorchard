@@ -32,6 +32,7 @@ import {
 import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { useNavigationProgress } from '@/composables/useNavigationProgress'
+import { rememberReturnTo } from '@/utils/returnTo'
 import { canOpenWorkspace, homeRouteFor } from '@/utils/workspace'
 import './routeMeta'
 
@@ -126,6 +127,8 @@ export function installGuards(router: Router): void {
 
     // Auth guard — require token for protected routes
     if (done && !PUBLIC_ROUTES.has(to.name as string) && !hasToken) {
+      // Back here once they've signed in.
+      rememberReturnTo(to.fullPath)
       return { name: 'login' }
     }
 

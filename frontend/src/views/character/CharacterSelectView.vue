@@ -210,6 +210,7 @@ import { useMembersStore } from '@/stores/members'
 import { useAuthStore } from '@/stores/auth'
 import { useXPStore } from '@/stores/xp'
 import { formatSP } from '@/utils/format'
+import { takeReturnTo } from '@/utils/returnTo'
 
 const router = useRouter()
 const membersStore = useMembersStore()
@@ -292,7 +293,8 @@ async function handleSave(): Promise<void> {
     const serialized = serializeCharacterConfig(config)
     await membersStore.updateCharacter(userId, serialized)
     await authStore.fetchUser()
-    router.push({ name: 'dashboard' })
+    // Where they were going before signing in, if anywhere.
+    router.push(takeReturnTo() ?? { name: 'dashboard' })
   } catch (err) {
     console.error('[CharacterSelect] Failed to save:', err)
   } finally {
