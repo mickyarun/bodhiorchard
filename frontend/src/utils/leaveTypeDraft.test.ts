@@ -62,6 +62,7 @@ describe('leave type drafts', () => {
 describe('type rule tags and history', () => {
   it('lists only the special rules', () => {
     expect(typeRuleTags(read())).toEqual([])
+    expect(typeRuleTags(read({ stops_at_balance: true }))).toEqual(['Stops at balance'])
     expect(typeRuleTags(read({ ...periodLeave() }))).toEqual(['Female only', 'Auto-approved', '1 day a month'])
   })
 

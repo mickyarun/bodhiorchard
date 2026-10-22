@@ -40,6 +40,7 @@ from app.services.leave.loss_of_pay import split_paid
 from app.services.leave.month_usage import booked_by_month, requested_by_month
 from app.services.leave.monthly_limit import first_month_over, limit_message
 from app.services.leave.optional_holidays import pick_optional_holiday
+from app.services.leave.over_balance import refusal
 from app.services.leave.policies import MemberPolicy
 
 ZERO = Decimal("0")
@@ -144,7 +145,8 @@ async def apply_balance(
 ) -> None:
     """Price a leave request against the type's balance for its leave year.
 
-    Days past the balance aren't refused: they're loss of pay.
+    Days past the balance are loss of pay, unless the type stops at its
+    balance (sick leave): then the request is refused with what's left.
     """
     policy = member.policy
     leave_type = await LeaveTypeRepository(db, org_id=policy.org_id).get_by_id(leave_type_id)
@@ -170,6 +172,8 @@ async def apply_balance(
     line = find_line(lines, leave_type_id)
     result.balance_before = line.available if line else None
     _paid, result.lop_days = split_paid(result.days, result.balance_before)
+    if (why := refusal(leave_type, result.lop_days, line, lines)) is not None:
+        result.problem("over_balance", why)
 
 
 async def check_monthly_limit(

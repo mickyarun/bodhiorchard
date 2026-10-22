@@ -119,13 +119,14 @@ export function gendersLabel(genders: readonly Gender[]): string {
 
 /** Short tags for a type's special rules, e.g. ["Women only", "Auto-approved", "1 day a month"]. */
 export function typeRuleTags(
-  type: Pick<LeaveTypeRead, 'eligible_genders' | 'auto_approve' | 'monthly_limit_days'>,
+  type: Pick<LeaveTypeRead, 'eligible_genders' | 'auto_approve' | 'monthly_limit_days' | 'stops_at_balance'>,
 ): string[] {
   const tags: string[] = []
   if (type.eligible_genders) tags.push(`${gendersLabel(type.eligible_genders)} only`)
   if (type.auto_approve) tags.push('Auto-approved')
   const perMonth = toNumberOrNull(type.monthly_limit_days)
   if (perMonth !== null) tags.push(`${pluralDays(perMonth)} a month`)
+  if (type.stops_at_balance) tags.push('Stops at balance')
   return tags
 }
 

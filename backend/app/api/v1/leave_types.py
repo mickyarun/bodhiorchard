@@ -46,6 +46,7 @@ def _read(t: LeaveType) -> LeaveTypeRead:
         eligible_genders=t.eligible_genders,
         auto_approve=t.auto_approve,
         monthly_limit_days=t.monthly_limit_days,
+        stops_at_balance=t.stops_at_balance,
         color_key=t.color_key,
         is_active=t.is_active,
     )

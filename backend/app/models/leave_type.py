@@ -83,6 +83,11 @@ class LeaveType(BaseModel):
     # At most this many days in any calendar month; unused days don't carry
     # over. NULL = no monthly limit.
     monthly_limit_days: Mapped[Decimal | None] = mapped_column(Numeric(3, 1), nullable=True)
+    # Requests past the balance are refused (people use another type) instead
+    # of the extra days becoming loss of pay. Sick leave, usually.
+    stops_at_balance: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     # A palette slot ("swatch-1" … "swatch-7"); only HR and the requester see it.
     color_key: Mapped[str] = mapped_column(String(20), nullable=False, default="swatch-1")
     is_active: Mapped[bool] = mapped_column(

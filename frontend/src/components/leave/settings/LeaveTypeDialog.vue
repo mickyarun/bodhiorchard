@@ -46,7 +46,7 @@
           </div>
           <div class="group" role="group" :aria-labelledby="ids.allowance">
             <div :id="ids.allowance" class="group__title text-overline text-medium-emphasis">Allowance</div>
-            <LeaveTypeAllowanceField v-model:unlimited="unlimited" v-model:days="quota" v-model:accrual="draft.accrual" />
+            <LeaveTypeAllowanceField v-model:unlimited="unlimited" v-model:days="quota" v-model:accrual="draft.accrual" v-model:stops="draft.stops_at_balance" />
           </div>
           <div class="group" role="group" :aria-labelledby="ids.access">
             <div :id="ids.access" class="group__title text-overline text-medium-emphasis">Who &amp; approval</div>
@@ -165,6 +165,7 @@ async function submit(): Promise<void> {
     annual_quota_days: unlimited.value ? null : quota.value,
     // An unlimited type has nothing to release month by month.
     accrual: unlimited.value ? 'upfront' : draft.value.accrual,
+    stops_at_balance: !unlimited.value && draft.value.stops_at_balance,
   }
   error.value = (await store.saveType(props.policyId, body, props.type?.id ?? null)) ?? ''
   saving.value = false

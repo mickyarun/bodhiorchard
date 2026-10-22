@@ -81,6 +81,8 @@ export interface LeaveTypeWrite {
   auto_approve: boolean
   /** At most this many days in a calendar month, with no carry-over; null = no limit. */
   monthly_limit_days: Decimalish | null
+  /** Refuse requests past the balance (people use another type) instead of going unpaid. */
+  stops_at_balance: boolean
   color_key: string
   is_active: boolean
 }

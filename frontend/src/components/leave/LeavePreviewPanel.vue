@@ -77,6 +77,8 @@ const skips = computed(() =>
 
 // Days past the balance aren't refused: they're unpaid.
 const lopLine = computed(() => {
+  // A type that stops at its balance refuses instead: its message says what to do.
+  if (props.preview?.problems.some(p => p.code === 'over_balance')) return ''
   const lop = lopLabel(props.preview?.lop_days)
   return lop ? `${lop}: these days are past your ${props.typeName ?? 'leave'} balance, so they're unpaid.` : ''
 })

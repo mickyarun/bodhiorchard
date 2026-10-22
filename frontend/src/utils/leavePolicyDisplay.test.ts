@@ -54,6 +54,7 @@ function type(overrides: Partial<LeaveTypeRead> = {}): LeaveTypeRead {
     eligible_genders: null,
     auto_approve: false,
     monthly_limit_days: null,
+    stops_at_balance: false,
     is_paid: true,
     color_key: 'swatch-1',
     is_active: true,

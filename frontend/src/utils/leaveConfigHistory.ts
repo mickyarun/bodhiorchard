@@ -43,6 +43,7 @@ const FIELD_LABELS: Record<string, string> = {
   eligible_genders: 'Who can use it',
   auto_approve: 'Approved automatically',
   monthly_limit_days: 'Most days in a month',
+  stops_at_balance: 'Stop requests past the balance',
   leave_notice_days: 'High-leave heads-up (days)',
   leave_warning_days: 'High-leave warning (days)',
   color_key: 'Colour',

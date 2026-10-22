@@ -113,6 +113,7 @@ ProblemCode = Literal[
     "no_approver",
     "remote_no_wfh",
     "monthly_limit",
+    "over_balance",
 ]
 
 

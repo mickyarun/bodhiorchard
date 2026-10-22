@@ -41,6 +41,12 @@
       <p class="text-caption text-medium-emphasis">
         {{ accrual === 'monthly' ? 'An equal part on the 1st of each month: 18 a year is 1.5 a month.' : 'The whole allowance is there from the first day of the leave year.' }}
       </p>
+      <LeaveSwitchRow
+        v-model="stops"
+        class="stops"
+        label="Stop requests past the balance"
+        :description="stops ? 'People are told what\'s left and asked to use another type for the rest.' : 'Days past the balance are allowed and become loss of pay.'"
+      />
     </template>
     <p v-else class="text-caption text-medium-emphasis">
       No balance is tracked. Requests still need approval.
@@ -51,6 +57,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
+import LeaveSwitchRow from '@/components/leave/settings/LeaveSwitchRow.vue'
 import type { LeaveAccrual } from '@/types/leave'
 import { FIELD_PROPS } from '@/utils/leavePolicyDisplay'
 
@@ -59,6 +66,7 @@ type Mode = 'fixed' | 'unlimited'
 const unlimited = defineModel<boolean>('unlimited', { required: true })
 const days = defineModel<number | null>('days', { required: true })
 const accrual = defineModel<LeaveAccrual>('accrual', { required: true })
+const stops = defineModel<boolean>('stops', { required: true })
 
 const MODES: { label: string; value: Mode }[] = [
   { label: 'Fixed', value: 'fixed' },
@@ -88,6 +96,9 @@ const mode = computed<Mode>({
 .days {
   width: 200px;
   flex: none;
+}
+.stops {
+  align-self: stretch;
 }
 .given {
   display: flex;

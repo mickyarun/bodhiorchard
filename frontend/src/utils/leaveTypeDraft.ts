@@ -31,6 +31,7 @@ export function blankType(): LeaveTypeWrite {
     eligible_genders: null,
     auto_approve: false,
     monthly_limit_days: null,
+    stops_at_balance: false,
     color_key: SWATCH_KEYS[0],
     is_active: true,
   }
