@@ -32,13 +32,10 @@ local Postgres is never touched.
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator, Iterator
-from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from alembic.config import Config
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (
@@ -48,12 +45,12 @@ from sqlalchemy.ext.asyncio import (
 )
 from testcontainers.postgres import PostgresContainer
 
-from alembic import command
 from app.api.router import api_router
 from app.api.v1._hr_errors import register_hr_errors
 from app.api.v1._leave_errors import register_leave_errors
 from app.core.deps import get_db
 from app.services.permission_seeder import seed_permissions
+from tests.integration.alembic_support import run_alembic
 
 
 @pytest.fixture(scope="session")
@@ -101,21 +98,7 @@ def _apply_migrations(
     its own; tests run on pytest-asyncio's session loop, which this
     doesn't touch.
     """
-    backend_root = Path(__file__).resolve().parents[2]
-    alembic_cfg = Config(str(backend_root / "alembic.ini"))
-    alembic_cfg.set_main_option("script_location", str(backend_root / "alembic"))
-    # Alembic's env.py reads DATABASE_URL from os.environ. Stash the
-    # current value (if any) and restore afterwards so we don't leak
-    # the container URL into the rest of the session.
-    prior = os.environ.get("DATABASE_URL")
-    os.environ["DATABASE_URL"] = pg_async_url
-    try:
-        command.upgrade(alembic_cfg, "head")
-    finally:
-        if prior is None:
-            os.environ.pop("DATABASE_URL", None)
-        else:
-            os.environ["DATABASE_URL"] = prior
+    run_alembic(pg_async_url, "upgrade", "head")
     return pg_async_url
 
 

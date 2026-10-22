@@ -23,7 +23,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import func, insert, select, text, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -166,9 +166,10 @@ class BUDSectionSessionRepository(BaseRepository[BUDSectionSession]):
 
         Single statement: ``INSERT ... ON CONFLICT DO UPDATE SET ...``
         where the UPDATE branch is gated by ``active_job_id IS NULL``.
-        Postgres serialises concurrent writes on the matching partial
-        unique index, so exactly one caller wins the claim for a given
-        ``(bud, section, design_id)`` triple. The other caller's
+        Postgres serialises concurrent writes on the
+        ``uq_bud_section_sessions_thread`` constraint, so exactly one
+        caller wins the claim for a given ``(bud, section, design_id)``
+        triple. The other caller's
         RETURNING is empty and we surface that as ``won=False`` so the
         endpoint can respond 409 with the current pointer.
 
@@ -190,23 +191,11 @@ class BUDSectionSessionRepository(BaseRepository[BUDSectionSession]):
             "active_job_started_at": func.now(),
         }
 
-        # The model uses two partial unique indexes — one for
-        # ``design_id IS NULL`` and one for ``design_id IS NOT NULL`` —
-        # because PG 14 lacks ``UNIQUE NULLS NOT DISTINCT``. The
-        # ON CONFLICT target must pick the matching one.
-        if design_id is None:
-            index_elements = ["bud_id", "section"]
-            index_where = text("design_id IS NULL")
-        else:
-            index_elements = ["bud_id", "section", "design_id"]
-            index_where = text("design_id IS NOT NULL")
-
         stmt = (
             pg_insert(BUDSectionSession)
             .values(**values)
             .on_conflict_do_update(
-                index_elements=index_elements,
-                index_where=index_where,
+                constraint="uq_bud_section_sessions_thread",
                 set_={
                     "active_job_id": job_id,
                     "active_job_status": ChatActiveJobStatus.QUEUED,

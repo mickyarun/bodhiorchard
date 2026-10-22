@@ -63,3 +63,14 @@ async def test_design_upsert_only_overwrites_fields_passed() -> None:
     assert "updated_at = now()" in update_clause
     assert "design_html =" not in update_clause
     assert "job_id =" not in update_clause
+
+
+@pytest.mark.asyncio
+async def test_design_upsert_raises_when_existing_row_is_another_orgs() -> None:
+    """An empty RETURNING means the org guard skipped the update: raise, don't hide it."""
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+    repo = BUDDesignRepository(db, org_id=uuid.uuid4())
+
+    with pytest.raises(ValueError, match="belongs to another org"):
+        await repo.upsert(bud_id=uuid.uuid4(), repo_id=None)

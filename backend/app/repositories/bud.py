@@ -630,6 +630,13 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
 
         On update, ``status`` is always written. ``design_html``,
         ``job_id`` and ``notes`` are written only when passed.
+
+        Callers upserting several keys in one transaction must go in a
+        stable key order, or two of them can deadlock waiting on each
+        other's rows.
+
+        Raises ``ValueError`` if the key's existing row belongs to another
+        org: the conflict is found but the org guard skips the update.
         """
         stmt = pg_insert(BUDDesign).values(
             org_id=self._org_id,
@@ -652,7 +659,13 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
         result = await self._db.execute(
             stmt.returning(BUDDesign).execution_options(populate_existing=True)
         )
-        return result.scalar_one()
+        design = result.scalar_one_or_none()
+        if design is None:
+            raise ValueError(
+                f"Design for bud {bud_id} / repo {repo_id} belongs to another org "
+                f"than {self._org_id}"
+            )
+        return design
 
 
 class BUDChatMessageRepository(BaseRepository[BUDChatMessage]):
