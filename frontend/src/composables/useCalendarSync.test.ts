@@ -24,6 +24,9 @@ describe('calendarTestMessage', () => {
     expect(calendarTestMessage({ ok: false, error: 'invalid_grant', calendar: null })).toContain(
       "service account still exists",
     )
+    expect(
+      calendarTestMessage({ ok: false, error: 'calendar_403', detail: 'API disabled', calendar: null }),
+    ).toContain('Google said: API disabled')
     expect(calendarTestMessage({ ok: false, error: 'calendar_500', calendar: null })).toBe(
       'Google refused the request (calendar_500).',
     )

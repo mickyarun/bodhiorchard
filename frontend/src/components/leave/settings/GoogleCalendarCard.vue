@@ -72,7 +72,9 @@
     </div>
     <p class="text-caption text-medium-emphasis mt-4">
       Events say "Out of office" or "Home", never the leave type or reason. Cancelled or rejected
-      requests are taken off again, and switching sync off takes upcoming events off too.
+      requests are taken off again, and switching sync off takes upcoming events off too. On
+      Workspace editions without working location (Business Starter), WFH shows as an all-day
+      "Working from home" entry instead.
     </p>
 
     <AppCallout v-if="sync.error.value" variant="error" class="mt-4">{{ sync.error.value }}</AppCallout>

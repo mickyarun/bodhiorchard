@@ -49,4 +49,6 @@ class CalendarSyncTestResult(BaseModel):
 
     ok: bool
     error: str | None = None
+    # Google's own explanation when it refused (shown as is).
+    detail: str | None = None
     calendar: str | None = None

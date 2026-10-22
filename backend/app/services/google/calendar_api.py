@@ -37,6 +37,8 @@ class CalendarApiError(Exception):
     def __init__(self, status: int, detail: str) -> None:
         super().__init__(f"{status}: {detail}")
         self.status = status
+        # Google's own message, e.g. that the Calendar API is disabled in the project.
+        self.detail = detail
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -104,9 +106,15 @@ async def delete_event(token: str, event_id: str) -> None:
     _raise_for(response)
 
 
-async def primary_calendar_id(token: str) -> str:
-    """The user's primary calendar id (their email): a cheap "can we write here?" check."""
+async def calendar_name(token: str) -> str:
+    """The user's calendar name (usually their email), read the way the sync reads it.
+
+    Uses the events list, which the ``calendar.events`` scope allows; reading
+    the calendar itself would need a scope the sync never asks for.
+    """
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as client:
-        response = await client.get(BASE, headers=_headers(token))
+        response = await client.get(
+            f"{BASE}/events", params={"maxResults": "1"}, headers=_headers(token)
+        )
     _raise_for(response)
-    return str(response.json().get("id", ""))
+    return str(response.json().get("summary", ""))

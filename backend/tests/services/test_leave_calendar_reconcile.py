@@ -21,7 +21,7 @@ import pytest
 
 from app.schemas.leave_calendar_sync import CalendarSyncOptions
 from app.services.google import service_account
-from app.services.google.calendar_api import Event
+from app.services.google.calendar_api import CalendarApiError, Event
 from app.services.google.service_account import GoogleAuthError, ServiceAccountKey, parse_key
 from app.services.leave.calendar_sync import sync
 from app.services.leave.calendar_sync.settings import CalendarSync
@@ -101,3 +101,42 @@ def test_parse_key_reads_a_service_account_json_and_ignores_its_token_uri() -> N
 def test_parse_key_refuses_anything_else(raw: str) -> None:
     with pytest.raises(GoogleAuthError):
         parse_key(raw)
+
+
+async def test_an_edition_without_working_location_gets_a_plain_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Business Starter refuses working-location events; the day still shows."""
+    written: list[dict[str, Any]] = []
+
+    async def put_event(_token: str, _id: str, body: Event, *, exists: bool) -> None:
+        if body.get("eventType") == "workingLocation":
+            raise CalendarApiError(400, "Working location is not enabled")
+        written.append(body)
+
+    monkeypatch.setattr(sync.calendar_api, "put_event", put_event)
+    home = {
+        "eventType": "workingLocation",
+        "summary": "Home",
+        "transparency": "transparent",
+        "workingLocationProperties": {"type": "homeOffice"},
+        "start": {"date": "2026-10-23"},
+    }
+    await sync._put("tok", "bo1", home, exists=False)
+    assert written == [
+        {
+            "summary": "Working from home",
+            "transparency": "transparent",
+            "start": {"date": "2026-10-23"},
+            "visibility": "default",
+        }  # fmt: skip
+    ]
+
+
+async def test_other_google_errors_are_not_hidden(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def put_event(*_a: Any, **_k: Any) -> None:
+        raise CalendarApiError(500, "backend error")
+
+    monkeypatch.setattr(sync.calendar_api, "put_event", put_event)
+    with pytest.raises(CalendarApiError):
+        await sync._put("tok", "bo1", {"eventType": "outOfOffice"}, exists=False)

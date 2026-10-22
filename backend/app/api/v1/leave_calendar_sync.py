@@ -77,11 +77,11 @@ async def test_calendar_sync(
         return CalendarSyncTestResult(ok=False, error="no_key")
     try:
         token = await access_token(sync.key, current_user.email, calendar_api.SCOPE)
-        calendar = await calendar_api.primary_calendar_id(token)
+        calendar = await calendar_api.calendar_name(token)
     except GoogleAuthError as exc:
         return CalendarSyncTestResult(ok=False, error=exc.code)
     except CalendarApiError as exc:
-        return CalendarSyncTestResult(ok=False, error=f"calendar_{exc.status}")
+        return CalendarSyncTestResult(ok=False, error=f"calendar_{exc.status}", detail=exc.detail)
     except httpx.HTTPError:
         return CalendarSyncTestResult(ok=False, error="google_unreachable")
     return CalendarSyncTestResult(ok=True, calendar=calendar)

@@ -40,7 +40,12 @@ from app.repositories.user import UserRepository
 from app.services.google import calendar_api
 from app.services.google.calendar_api import CalendarApiError, Event
 from app.services.google.service_account import GoogleAuthError, access_token
-from app.services.leave.calendar_sync.events import RequestShape, wanted_events
+from app.services.leave.calendar_sync.events import (
+    STATUS_TYPES,
+    RequestShape,
+    plain_event,
+    wanted_events,
+)
 from app.services.leave.calendar_sync.settings import CalendarSync, load_sync
 from app.services.leave.policies import mandatory_holidays, policy_for_request
 
@@ -124,9 +129,27 @@ async def _apply(sync: CalendarSync, email: str, tag: str, wanted: dict[str, Eve
     token = await access_token(sync.key, email, calendar_api.SCOPE)
     existing = await calendar_api.tagged_event_ids(token, tag)
     for event_id, body in wanted.items():
-        await calendar_api.put_event(token, event_id, body, exists=event_id in existing)
+        await _put(token, event_id, body, exists=event_id in existing)
     for event_id in existing - wanted.keys():
         await calendar_api.delete_event(token, event_id)
+
+
+async def _put(token: str, event_id: str, body: Event, *, exists: bool) -> None:
+    """Write the event; if the edition refuses its status type, write a plain one.
+
+    An event keeps the type it was first made with, so once a plain one
+    exists it's updated as plain.
+    """
+    if body.get("eventType") not in STATUS_TYPES:
+        await calendar_api.put_event(token, event_id, body, exists=exists)
+        return
+    try:
+        await calendar_api.put_event(token, event_id, body, exists=exists)
+    except CalendarApiError as exc:
+        if exc.status not in (400, 403):
+            raise
+        logger.info("leave_calendar_status_event_refused", status=exc.status, detail=exc.detail)
+        await calendar_api.put_event(token, event_id, plain_event(body), exists=exists)
 
 
 async def backfill(org_id: uuid.UUID) -> None:

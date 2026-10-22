@@ -21,7 +21,12 @@ from datetime import date
 from app.models.leave_request import HalfDay, LeaveKind
 from app.schemas.leave_calendar_sync import CalendarSyncOptions
 from app.services.google.calendar_api import TAG
-from app.services.leave.calendar_sync.events import RequestShape, desired_events, wanted_events
+from app.services.leave.calendar_sync.events import (
+    RequestShape,
+    desired_events,
+    plain_event,
+    wanted_events,
+)
 
 MON_FRI = [0, 1, 2, 3, 4]
 REQUEST = uuid.UUID("0123456789abcdef0123456789abcdef")
@@ -104,3 +109,19 @@ def test_switched_off_or_not_approved_wants_nothing_so_events_are_removed() -> N
     assert wanted_events(_shape(), on, approved=True)
     assert wanted_events(_shape(), on, approved=False) == {}
     assert wanted_events(_shape(), off, approved=True) == {}
+
+
+def test_plain_versions_keep_dates_tag_and_busy_free_without_status_fields() -> None:
+    (ooo,) = desired_events(_shape(), CalendarSyncOptions()).values()
+    plain = plain_event(ooo)
+    assert "eventType" not in plain and "outOfOfficeProperties" not in plain
+    assert plain["summary"] == "Out of office" and plain["transparency"] == "opaque"
+    assert (
+        plain["start"] == ooo["start"] and plain["extendedProperties"] == ooo["extendedProperties"]
+    )
+
+    home = next(iter(desired_events(_shape(kind=LeaveKind.WFH), CalendarSyncOptions()).values()))
+    plain_home = plain_event(home)
+    assert plain_home["summary"] == "Working from home"
+    assert plain_home["transparency"] == "transparent"
+    assert "workingLocationProperties" not in plain_home

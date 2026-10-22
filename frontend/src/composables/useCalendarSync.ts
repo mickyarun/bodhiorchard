@@ -30,6 +30,8 @@ export interface CalendarSyncSettings {
 export interface CalendarSyncTestResult {
   ok: boolean
   error: string | null
+  // Google's own explanation when it refused.
+  detail?: string | null
   calendar: string | null
 }
 
@@ -43,14 +45,16 @@ const GOOGLE_ERRORS: Record<string, string> = {
   invalid_grant:
     "Google refused to act for your email. Check you're signed in here with your Workspace account, and that the uploaded key's service account still exists.",
   invalid_key: "The saved key can't be used. Upload a fresh JSON key.",
-  calendar_403: 'Google refused access to your calendar. Check that Calendar is turned on for your account.',
+  calendar_403:
+    'Google refused access to your calendar. Check the Google Calendar API is enabled in the Cloud project that owns the service account, and that Calendar is on for your account.',
   calendar_404: "Google couldn't find your calendar.",
   google_unreachable: "Couldn't reach Google from the server. Try again in a minute.",
 }
 
 export function calendarTestMessage(result: CalendarSyncTestResult): string {
   if (result.ok) return `Connected. Events will appear on calendars like ${result.calendar}.`
-  return GOOGLE_ERRORS[result.error ?? ''] ?? `Google refused the request (${result.error}).`
+  const message = GOOGLE_ERRORS[result.error ?? ''] ?? `Google refused the request (${result.error}).`
+  return result.detail ? `${message} Google said: ${result.detail}` : message
 }
 
 const DEFAULTS: CalendarSyncSettings = {

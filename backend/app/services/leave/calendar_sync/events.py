@@ -137,3 +137,22 @@ def wanted_events(
 ) -> dict[str, Event]:
     """What should be on the calendar: the events when on and approved, else nothing."""
     return desired_events(shape, options) if options.enabled and approved else {}
+
+
+# Status events (Out of office, working location) aren't on every Google
+# Workspace edition: Business Starter has no working location, for one.
+STATUS_TYPES = {"outOfOffice", "workingLocation"}
+_PLAIN_TITLE = {"outOfOffice": OOO_TITLE, "workingLocation": "Working from home"}
+_STATUS_FIELDS = ("eventType", "outOfOfficeProperties", "workingLocationProperties")
+
+
+def plain_event(body: Event) -> Event:
+    """The same entry as an ordinary event, for editions without status events.
+
+    Same dates, tag and busy/free; an Out of office stays busy, working from
+    home stays free. It just can't decline meetings or set a work location.
+    """
+    plain = {k: v for k, v in body.items() if k not in _STATUS_FIELDS}
+    plain["summary"] = _PLAIN_TITLE.get(str(body.get("eventType")), str(body.get("summary", "")))
+    plain["visibility"] = "default"
+    return plain
