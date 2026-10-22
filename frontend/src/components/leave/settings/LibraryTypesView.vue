@@ -27,6 +27,7 @@
       <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="edit(null)">Add library type</v-btn>
     </div>
     <AppCallout v-if="store.error" variant="error" class="mb-4">{{ store.error }}</AppCallout>
+    <AppCallout v-if="deleteError" variant="error" class="mb-4">{{ deleteError }}</AppCallout>
     <v-progress-linear v-if="store.loading && !store.entries.length" indeterminate color="primary" class="mb-4" />
     <LeaveEmptyState
       v-if="!store.loading && !store.entries.length && !store.error"
@@ -34,46 +35,7 @@
       title="No library types yet"
       body="Add the types most policies share, such as earned, sick or casual leave."
     />
-    <v-table v-else-if="store.entries.length" density="comfortable" hover class="library">
-      <thead>
-        <tr>
-          <th scope="col">Leave type</th>
-          <th scope="col">Default allowance</th>
-          <th scope="col">Policies</th>
-          <th scope="col"><span class="d-sr-only">Edit</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          v-for="entry in store.entries"
-          :key="entry.id"
-          class="library__row"
-          tabindex="0"
-          :aria-label="`Edit ${entry.name}`"
-          @click="edit(entry)"
-          @keydown.enter.prevent="edit(entry)"
-          @keydown.space.prevent="edit(entry)"
-        >
-          <td>
-            <span class="dot" aria-hidden="true" :style="{ background: `rgb(var(--v-theme-${swatchColor(entry.color_key)}))` }" />
-            <span class="font-weight-medium">{{ entry.name }}</span>
-            <div v-if="typeRuleTags(entry).length" class="tags">
-              <v-chip v-for="tag in typeRuleTags(entry)" :key="tag" size="x-small" variant="outlined" label>{{ tag }}</v-chip>
-            </div>
-          </td>
-          <td>{{ allowanceLabel(entry) }}</td>
-          <td>
-            <div class="text-body-2">{{ usesLabel(entry.uses) }}</div>
-            <div v-if="entry.uses.length" class="tags tags--flush">
-              <v-chip v-for="use in entry.uses" :key="use.type_id" size="x-small" variant="tonal" label>{{ useLabel(use) }}</v-chip>
-            </div>
-          </td>
-          <td class="text-right">
-            <v-icon icon="mdi-chevron-right" size="20" class="text-medium-emphasis" aria-hidden="true" />
-          </td>
-        </tr>
-      </tbody>
-    </v-table>
+    <LibraryTypeTable v-else-if="store.entries.length" :entries="store.entries" @edit="edit" />
     <LeaveTypeDialog
       v-model="dialogOpen"
       library
@@ -81,7 +43,22 @@
       :scope="editing?.uses.length ? 'on every policy that uses it' : 'on the policies you add it to'"
       :note="editNote"
       :save="save"
+    >
+      <template v-if="editing" #actions>
+        <v-btn v-if="!editing.uses.length" variant="text" color="error" @click="deleting = editing">Delete</v-btn>
+        <span v-else class="text-caption text-medium-emphasis">To delete it, stop following it on each policy first.</span>
+      </template>
+    </LeaveTypeDialog>
+    <ConfirmDialog
+      :model-value="!!deleting"
+      title="Delete this library type?"
+      :message="`${deleting?.name ?? ''} isn't on any policy. Its history stays.`"
+      confirm-label="Delete"
+      icon="mdi-delete-outline"
+      @update:model-value="value => !value && (deleting = null)"
+      @confirm="remove"
     />
+    <LibraryHistory />
   </section>
 </template>
 
@@ -91,18 +68,21 @@ import { useRoute, useRouter } from 'vue-router'
 import AppCallout from '@/components/common/AppCallout.vue'
 import LeaveEmptyState from '@/components/leave/settings/LeaveEmptyState.vue'
 import LeaveTypeDialog from '@/components/leave/settings/LeaveTypeDialog.vue'
+import LibraryHistory from '@/components/leave/settings/LibraryHistory.vue'
+import LibraryTypeTable from '@/components/leave/settings/LibraryTypeTable.vue'
+import ConfirmDialog from '@/components/settings/code/ConfirmDialog.vue'
 import { useLeaveLibraryStore } from '@/stores/leaveLibrary'
 import type { LibraryTypeRead } from '@/types/leaveLibrary'
 import type { LeaveTypeWrite } from '@/types/leavePolicy'
-import { swatchColor } from '@/utils/leave'
-import { entryBody, entryDraft, useLabel, usesLabel } from '@/utils/leaveLibrary'
-import { allowanceLabel, typeRuleTags } from '@/utils/leavePolicyDisplay'
+import { entryBody, entryDraft } from '@/utils/leaveLibrary'
 
 const store = useLeaveLibraryStore()
 const route = useRoute()
 const router = useRouter()
 const dialogOpen = ref(false)
 const editing = ref<LibraryTypeRead | null>(null)
+const deleting = ref<LibraryTypeRead | null>(null)
+const deleteError = ref('')
 
 const editNote = computed(() => {
   const uses = editing.value?.uses ?? []
@@ -112,12 +92,21 @@ const editNote = computed(() => {
 })
 
 function edit(entry: LibraryTypeRead | null): void {
+  deleteError.value = ''
   editing.value = entry
   dialogOpen.value = true
 }
 
 function save(body: LeaveTypeWrite): Promise<string | null> {
   return store.saveEntry(entryBody(body), editing.value?.id ?? null)
+}
+
+async function remove(): Promise<void> {
+  const entry = deleting.value
+  deleting.value = null
+  if (!entry) return
+  dialogOpen.value = false
+  deleteError.value = (await store.deleteEntry(entry.id)) ?? ''
 }
 
 // Opened from a policy's "Edit in library": show that entry, then drop it from the URL.
@@ -140,31 +129,5 @@ onMounted(() => {
 <style scoped>
 .intro {
   max-width: 640px;
-}
-.library {
-  background: transparent;
-}
-.library__row {
-  cursor: pointer;
-}
-.library__row:focus-visible {
-  outline: 2px solid rgb(var(--v-theme-primary));
-  outline-offset: -2px;
-}
-.tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin: 4px 0 2px 20px;
-}
-.tags--flush {
-  margin-left: 0;
-}
-.dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  margin-right: 10px;
 }
 </style>

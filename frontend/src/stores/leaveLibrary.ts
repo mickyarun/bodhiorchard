@@ -56,6 +56,17 @@ export const useLeaveLibraryStore = defineStore('leaveLibrary', () => {
     return null
   }
 
+  /** Deletes a library type no policy uses (the server refuses otherwise). */
+  async function deleteEntry(id: string): Promise<string | null> {
+    try {
+      await api.delete(`/v1/leave/library-types/${id}`)
+    } catch (err) {
+      return extractApiError(err, "Couldn't delete the library type. Try again.")
+    }
+    await fetchEntries()
+    return null
+  }
+
   /** Adds a library type to a policy. */
   function addToPolicy(policyId: string, body: LibraryTypeAdd): Promise<string | null> {
     return policyWrite(policyId, () => api.post(`/v1/leave/policies/${policyId}/library-types`, body))
@@ -88,5 +99,16 @@ export const useLeaveLibraryStore = defineStore('leaveLibrary', () => {
     return null
   }
 
-  return { entries, error, loading, fetchEntries, saveEntry, addToPolicy, linkExisting, updateLink, unlink }
+  return {
+    entries,
+    error,
+    loading,
+    fetchEntries,
+    saveEntry,
+    deleteEntry,
+    addToPolicy,
+    linkExisting,
+    updateLink,
+    unlink,
+  }
 })

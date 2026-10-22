@@ -25,17 +25,18 @@ refuses the whole edit, naming that policy.
 """
 
 import uuid
+from collections.abc import Mapping
 from decimal import Decimal
 
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.leave_type import LeaveType
+from app.models.leave_config_event import LeaveConfigAction
 from app.models.leave_type_template import LeaveTypeTemplate
 from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.leave_type_template import LeaveTypeTemplateRepository
-from app.schemas.leave_library import LibraryTypeRead, LibraryTypeUse, LibraryTypeWrite
+from app.schemas.leave_library import LibraryTypeWrite
 from app.schemas.leave_type import LeaveTypeRules, LeaveTypeWrite
 from app.services.leave import config_audit, type_admin
 from app.services.leave.errors import LeaveConflictError, LeaveError, LeaveInvalidError
@@ -62,30 +63,25 @@ def linked_body(
         raise LeaveInvalidError(message) from exc
 
 
-async def list_library(db: AsyncSession, org_id: uuid.UUID) -> list[LibraryTypeRead]:
-    """Every library entry, with the policies that use it."""
-    templates = await LeaveTypeTemplateRepository(db, org_id=org_id).list_by_name()
-    linked = await LeaveTypeRepository(db, org_id=org_id).linked_to([t.id for t in templates])
-    uses = await _uses(db, org_id, linked)
-    return [library_read(t, uses.get(t.id, [])) for t in templates]
-
-
-async def uses_of(db: AsyncSession, template: LeaveTypeTemplate) -> list[LibraryTypeUse]:
-    """The policies using one entry."""
-    linked = await LeaveTypeRepository(db, org_id=template.org_id).linked_to([template.id])
-    return (await _uses(db, template.org_id, linked)).get(template.id, [])
-
-
 async def create_entry(
-    db: AsyncSession, org_id: uuid.UUID, body: LibraryTypeWrite, *, may_approve: bool
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    body: LibraryTypeWrite,
+    *,
+    may_approve: bool,
 ) -> LeaveTypeTemplate:
     """Add a type to the library; policies add it from there."""
     type_admin.check_auto_approve(body, may_approve)
     repo = LeaveTypeTemplateRepository(db, org_id=org_id)
-    entry = LeaveTypeTemplate(org_id=org_id, **body.model_dump())
+    after = body.model_dump()
+    entry = LeaveTypeTemplate(org_id=org_id, **after)
     # Checked first for the usual case; the insert catches two adds at once.
     if await repo.code_taken(body.code, exclude=None) or not await repo.create_unique(entry):
         raise LeaveConflictError(f"The code {body.code} is already used in the library.")
+    _record(
+        db, entry, actor_id, LeaveConfigAction.LIBRARY_TYPE_CREATED, config_audit.diff({}, after)
+    )
     return entry
 
 
@@ -103,12 +99,34 @@ async def update_entry(
     if await repo.code_taken(body.code, exclude=template.id):
         raise LeaveConflictError(f"The code {body.code} is already used in the library.")
     after = body.model_dump()
-    if not config_audit.diff(config_audit.snapshot(template, after), after):
+    changes = config_audit.diff(config_audit.snapshot(template, after), after)
+    if not changes:
         return
     for field, value in after.items():
         setattr(template, field, value)
     await db.flush()
+    _record(db, template, actor_id, LeaveConfigAction.LIBRARY_TYPE_UPDATED, changes)
     await sync_linked(db, template, actor_id, may_approve=may_approve)
+
+
+async def delete_entry(db: AsyncSession, template: LeaveTypeTemplate, actor_id: uuid.UUID) -> None:
+    """Delete an entry no policy uses; the trail keeps its name.
+
+    Refused while any policy type follows it, switched off or not: that type
+    must stop following the library first, so nothing points at a gone entry.
+    """
+    linked = await LeaveTypeRepository(db, org_id=template.org_id).linked_to([template.id])
+    if linked:
+        policies = await LeavePolicyRepository(db, org_id=template.org_id).by_ids(
+            {t.policy_id for t in linked}
+        )
+        names = ", ".join(sorted(p.name for p in policies.values()))
+        raise LeaveConflictError(
+            f"{template.name} is still on {names}. On each policy, open it and choose "
+            "Stop following the library, then delete it here."
+        )
+    _record(db, template, actor_id, LeaveConfigAction.LIBRARY_TYPE_DELETED, {})
+    await LeaveTypeTemplateRepository(db, org_id=template.org_id).delete(template)
 
 
 async def sync_linked(
@@ -140,30 +158,19 @@ async def sync_linked(
             raise type(exc)(f"On {policy.name if policy else 'a policy'}: {exc}") from exc
 
 
-def library_read(template: LeaveTypeTemplate, uses: list[LibraryTypeUse]) -> LibraryTypeRead:
-    """Wire shape of an entry with its uses."""
-    rules = {field: getattr(template, field) for field in LeaveTypeRules.model_fields}
-    return LibraryTypeRead.model_validate({**rules, "id": template.id, "uses": uses})
-
-
-async def _uses(
-    db: AsyncSession, org_id: uuid.UUID, linked: list[LeaveType]
-) -> dict[uuid.UUID, list[LibraryTypeUse]]:
-    policies = await LeavePolicyRepository(db, org_id=org_id).by_ids({t.policy_id for t in linked})
-    out: dict[uuid.UUID, list[LibraryTypeUse]] = {}
-    for t in linked:
-        if t.template_id is None:
-            continue
-        out.setdefault(t.template_id, []).append(
-            LibraryTypeUse(
-                policy_id=t.policy_id,
-                policy_name=policies[t.policy_id].name,
-                type_id=t.id,
-                own_quota=t.own_quota,
-                annual_quota_days=t.annual_quota_days,
-                is_active=t.is_active,
-            )
-        )
-    for uses in out.values():
-        uses.sort(key=lambda use: use.policy_name.casefold())
-    return out
+def _record(
+    db: AsyncSession,
+    template: LeaveTypeTemplate,
+    actor_id: uuid.UUID,
+    action: LeaveConfigAction,
+    changes: Mapping[str, object],
+) -> None:
+    # No policy: the library's own trail. Named in every event, as it may be renamed or deleted.
+    config_audit.record(
+        db,
+        org_id=template.org_id,
+        actor_id=actor_id,
+        action=action,
+        policy_id=None,
+        changes={"library": template.name, **changes},
+    )

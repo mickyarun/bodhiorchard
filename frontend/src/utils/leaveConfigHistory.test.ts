@@ -87,6 +87,11 @@ describe('eventTitle', () => {
     expect(eventTitle(event('type_updated', { type: 'SL', library: [null, 'Sick'] }))).toBe(
       'Changed leave type SL',
     )
+    expect(eventTitle(event('library_type_created', { library: 'Sick' }))).toBe('Added library type Sick')
+    expect(eventTitle(event('library_type_updated', { library: 'Sick leave' }))).toBe(
+      'Changed library type Sick leave',
+    )
+    expect(eventTitle(event('library_type_deleted', { library: 'Sick' }))).toBe('Deleted library type Sick')
     expect(eventTitle(event('employees_assigned', { assigned: 1 }))).toBe(
       'Moved 1 person onto this policy',
     )

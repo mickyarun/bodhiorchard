@@ -14,9 +14,10 @@
  * limitations under the License.
  -->
 
-<!-- Add or edit a leave type, on one policy or in the library. Types are
-     switched off, never deleted, so past requests keep their meaning. The
-     caller saves (`save` returns an error message or null). -->
+<!-- Add or edit a leave type, on one policy or in the library. A policy's
+     types are switched off, never deleted, so past requests keep their meaning. The
+     caller saves (`save` returns an error message or null); the `actions`
+     slot adds buttons at the start of the footer. -->
 <template>
   <v-dialog :model-value="modelValue" max-width="600" :fullscreen="xs" scrollable @update:model-value="emit('update:modelValue', $event)">
     <v-card color="surface" rounded="lg">
@@ -32,19 +33,7 @@
         <v-form class="d-flex flex-column" @submit.prevent="submit">
           <div class="group" role="group" :aria-labelledby="ids.basics">
             <div :id="ids.basics" class="group__title text-overline text-medium-emphasis">Basics</div>
-            <div class="name-row">
-              <v-text-field v-model="draft.name" label="Name" maxlength="100" autofocus v-bind="FIELD_PROPS" @update:model-value="syncCode" />
-              <v-text-field
-                v-model="draft.code"
-                label="Code"
-                maxlength="10"
-                v-bind="FIELD_PROPS"
-                @update:model-value="codeTouched = true"
-              />
-            </div>
-            <p class="text-caption text-medium-emphasis mt-2">
-              The code is a short ID for reports, filled in from the name.
-            </p>
+            <LeaveTypeNameFields v-model:name="draft.name" v-model:code="draft.code" v-model:code-touched="codeTouched" />
           </div>
           <div class="group" role="group" :aria-labelledby="ids.allowance">
             <div :id="ids.allowance" class="group__title text-overline text-medium-emphasis">Allowance</div>
@@ -72,7 +61,9 @@
         </v-form>
       </v-card-text>
       <v-divider />
-      <div class="d-flex justify-end ga-2 pa-4">
+      <div class="d-flex flex-wrap align-center ga-2 pa-4">
+        <slot name="actions" />
+        <v-spacer />
         <v-btn variant="text" @click="close">Cancel</v-btn>
         <v-btn color="primary" variant="flat" :loading="saving" :disabled="!valid" @click="submit">
           {{ initial ? 'Save changes' : `Add ${noun}` }}
@@ -90,10 +81,11 @@ import LeaveSwitchRow from '@/components/leave/settings/LeaveSwitchRow.vue'
 import LeaveTypeAccessFields from '@/components/leave/settings/LeaveTypeAccessFields.vue'
 import LeaveTypeAllowanceField from '@/components/leave/settings/LeaveTypeAllowanceField.vue'
 import LeaveTypeColorPicker from '@/components/leave/settings/LeaveTypeColorPicker.vue'
+import LeaveTypeNameFields from '@/components/leave/settings/LeaveTypeNameFields.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import type { LeaveTypeWrite } from '@/types/leavePolicy'
-import { codeFromName, toNumberOrNull } from '@/utils/leave'
-import { FIELD_PROPS, gendersLabel } from '@/utils/leavePolicyDisplay'
+import { toNumberOrNull } from '@/utils/leave'
+import { gendersLabel } from '@/utils/leavePolicyDisplay'
 import { blankType, validMonthlyLimit } from '@/utils/leaveTypeDraft'
 
 const props = defineProps<{
@@ -154,10 +146,6 @@ watch(
   },
 )
 
-function syncCode(name: string): void {
-  if (!codeTouched.value) draft.value.code = codeFromName(name)
-}
-
 function close(): void {
   emit('update:modelValue', false)
 }
@@ -191,16 +179,5 @@ async function submit(): Promise<void> {
 .group__title {
   margin-bottom: 8px;
   line-height: 1.6;
-}
-.name-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 160px;
-  gap: 16px;
-  align-items: start;
-}
-@media (max-width: 600px) {
-  .name-row {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

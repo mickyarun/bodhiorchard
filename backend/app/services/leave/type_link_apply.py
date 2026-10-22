@@ -104,7 +104,12 @@ async def _link(
     keep = accept_differences or not group.needs_confirmation
     savepoint = await db.begin_nested()
     try:
-        template = group.existing or await _create_entry(db, org_id, group)
+        # An existing entry is locked (and may have been deleted since the plan).
+        template = (
+            await type_linking.load_entry(db, org_id, group.existing.id)
+            if group.existing
+            else await _create_entry(db, org_id, actor_id, group)
+        )
         await _link_members(db, actor_id, template, group)
     except (LeaveError, ValidationError) as exc:
         await savepoint.rollback()
@@ -117,10 +122,10 @@ async def _link(
 
 
 async def _create_entry(
-    db: AsyncSession, org_id: uuid.UUID, group: LinkGroup
+    db: AsyncSession, org_id: uuid.UUID, actor_id: uuid.UUID, group: LinkGroup
 ) -> LeaveTypeTemplate:
     body = LibraryTypeWrite.model_validate(group.rules)
-    return await type_library.create_entry(db, org_id, body, may_approve=True)
+    return await type_library.create_entry(db, org_id, actor_id, body, may_approve=True)
 
 
 async def _link_members(

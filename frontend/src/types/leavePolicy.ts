@@ -169,6 +169,9 @@ export type ConfigAction =
   | 'type_created'
   | 'type_updated'
   | 'employees_assigned'
+  | 'library_type_created'
+  | 'library_type_updated'
+  | 'library_type_deleted'
 
 /** One change to a policy or its leave types; `changes` is {field: [old, new]}. */
 export interface ConfigEventRead {

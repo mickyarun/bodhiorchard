@@ -14,8 +14,8 @@
 
 """Append-only trail of changes to leave configuration.
 
-Who changed a quota, a policy's rules, the default policy, or moved
-people between policies — so a change that benefits the person making it
+Who changed a quota, a policy's rules, the default policy, a library leave
+type, or moved people between policies — so a change that benefits the person making it
 can always be traced. Only field names and their old/new values are
 kept; there are no free-text reasons here. Balance adjustments are
 already traced by their ledger rows (``created_by`` plus a note).
@@ -44,6 +44,10 @@ class LeaveConfigAction(StrEnum):
     TYPE_CREATED = "type_created"
     TYPE_UPDATED = "type_updated"
     EMPLOYEES_ASSIGNED = "employees_assigned"
+    # The org's leave type library: these have no policy (policy_id is NULL).
+    LIBRARY_TYPE_CREATED = "library_type_created"
+    LIBRARY_TYPE_UPDATED = "library_type_updated"
+    LIBRARY_TYPE_DELETED = "library_type_deleted"
 
 
 class LeaveConfigEvent(BaseModel):

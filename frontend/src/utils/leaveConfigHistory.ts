@@ -93,6 +93,7 @@ export function changeLines(changes: Record<string, unknown>): string[] {
 /** One-line summary of what happened. */
 export function eventTitle(event: ConfigEventRead): string {
   const type = typeof event.changes.type === 'string' ? event.changes.type : ''
+  const library = typeof event.changes.library === 'string' ? event.changes.library : ''
   switch (event.action) {
     case 'policy_created':
       return 'Created the policy'
@@ -106,9 +107,13 @@ export function eventTitle(event: ConfigEventRead): string {
       return `Added leave type ${type}`
     case 'type_updated':
       // A plain name (not an [old, new] pair) means the change came from editing the library.
-      return typeof event.changes.library === 'string'
-        ? `Changed leave type ${type} in the library`
-        : `Changed leave type ${type}`
+      return library ? `Changed leave type ${type} in the library` : `Changed leave type ${type}`
+    case 'library_type_created':
+      return `Added library type ${library}`
+    case 'library_type_updated':
+      return `Changed library type ${library}`
+    case 'library_type_deleted':
+      return `Deleted library type ${library}`
     case 'employees_assigned': {
       const count = Number(event.changes.assigned ?? 0)
       return `Moved ${count} ${count === 1 ? 'person' : 'people'} onto this policy`
