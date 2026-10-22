@@ -12,30 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/** A leave policy's configuration history (leave:configure). */
+/** A leave configuration trail (leave:configure): a policy's, or the leave type library's. */
 import { ref } from 'vue'
 
 import api from '@/services/api'
 import type { ConfigEventRead } from '@/types/leavePolicy'
 import { extractApiError } from '@/utils/errors'
 
-export function usePolicyHistory() {
+export function useConfigHistory() {
   const events = ref<ConfigEventRead[]>([])
   const loading = ref(false)
   const error = ref('')
   let call = 0
 
-  async function load(policyId: string): Promise<void> {
+  /** `path` is the trail's endpoint, e.g. `/v1/leave/policies/<id>/history`. */
+  async function load(path: string): Promise<void> {
     const current = ++call
     loading.value = true
     error.value = ''
     try {
-      const { data } = await api.get<ConfigEventRead[]>(`/v1/leave/policies/${policyId}/history`)
+      const { data } = await api.get<ConfigEventRead[]>(path)
       if (current === call) events.value = data
     } catch (err) {
       if (current === call) {
         events.value = []
-        error.value = extractApiError(err, "Couldn't load this policy's history. Reload to try again.")
+        error.value = extractApiError(err, "Couldn't load the history. Reload to try again.")
       }
     } finally {
       if (current === call) loading.value = false

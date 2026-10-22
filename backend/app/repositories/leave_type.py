@@ -73,3 +73,22 @@ class LeaveTypeRepository(BaseRepository[LeaveType]):
         for row in (await self._db.execute(stmt.order_by(LeaveType.name))).scalars().all():
             out[row.policy_id].append(row)
         return out
+
+    async def linked_to(self, template_ids: Collection[uuid.UUID]) -> list[LeaveType]:
+        """Every policy type following these library entries, active or not."""
+        if not template_ids:
+            return []
+        stmt = self._scoped(select(LeaveType).where(LeaveType.template_id.in_(template_ids)))
+        result = await self._db.execute(stmt.order_by(LeaveType.policy_id, LeaveType.id))
+        return list(result.scalars().all())
+
+    async def linked_on_policy(
+        self, policy_id: uuid.UUID, template_id: uuid.UUID
+    ) -> LeaveType | None:
+        """The policy's type following ``template_id``, if it has one."""
+        stmt = self._scoped(
+            select(LeaveType).where(
+                LeaveType.policy_id == policy_id, LeaveType.template_id == template_id
+            )
+        )
+        return (await self._db.execute(stmt.limit(1))).scalar_one_or_none()
