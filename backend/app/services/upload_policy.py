@@ -197,6 +197,26 @@ QA_EVIDENCE_POLICY = UploadPolicy(
 )
 
 
+# Profile photos. Extension-driven so the stored MIME is ours rather than
+# whatever the browser claimed, and capped small: these are rendered at
+# 72px in Slack and 64px in the directory, so anything above a couple of
+# MB is a phone camera original nobody will ever see at full size.
+AVATAR_EXTENSIONS: Mapping[str, str] = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+
+AVATAR_POLICY = UploadPolicy.for_extensions(
+    label="Profile photo",
+    max_bytes=5 * 1024 * 1024,
+    extensions=AVATAR_EXTENSIONS,
+    max_files=1,
+)
+
+
 def bug_attachment_policy(*, max_file_mb: int, max_files: int) -> UploadPolicy:
     """Build the bug-attachment policy from an org's configured limits.
 

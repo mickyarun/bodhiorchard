@@ -326,6 +326,10 @@ class IntegrationConfig(BaseSettings):
 
     slack_bot_token: str = Field(default="", alias="SLACK_BOT_TOKEN")
     slack_signing_secret: str = Field(default="", alias="SLACK_SIGNING_SECRET")
+    # Giphy key for celebration GIFs. Deployment-wide rather than per-org:
+    # it carries no tenant data and the free tier is rate-limited per key.
+    # Empty disables the lookup — celebration posts then go out text-only.
+    giphy_api_key: str = Field(default="", alias="GIPHY_API_KEY")
 
 
 _DEV_BRIDGE_SECRET = "dev-colyseus-bridge-secret"

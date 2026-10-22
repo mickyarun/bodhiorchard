@@ -37,6 +37,10 @@ class EmployeeAccess:
     # Generate or reset their sign-in password (never your own: use the
     # normal change-password screen for that).
     reset_password: bool
+    # Looser than ``edit_personal`` on purpose: a profile photo is
+    # self-expression, not an HR-controlled record like a joining date, so
+    # the subject can always change their own.
+    edit_avatar: bool
 
 
 def access_for(perms: PermissionSet, actor_id: uuid.UUID, subject_id: uuid.UUID) -> EmployeeAccess:
@@ -60,4 +64,5 @@ def access_for(perms: PermissionSet, actor_id: uuid.UUID, subject_id: uuid.UUID)
         edit_name=is_self or manage,
         # The takeover guard's own bar for anyone with a record (HR or owner).
         reset_password=perms.has_all(HR_RECORD_ACCESS) and not is_self,
+        edit_avatar=is_self or manage,
     )

@@ -83,6 +83,11 @@ class EmployeeContact(BaseModel):
     emergency_contact_name: str | None = Field(None, max_length=255)
     emergency_contact_relation: str | None = Field(None, max_length=100)
     emergency_contact_phone: str | None = Field(None, max_length=40)
+    # Celebration opt-outs live on the self-editable set so a member can mute
+    # their own announcement from their profile without needing HR. Defaults
+    # mirror the column defaults (opt-out, not opt-in).
+    celebrate_birthday: bool = True
+    celebrate_anniversary: bool = True
 
 
 class EmployeePersonal(EmployeeContact):
@@ -139,6 +144,12 @@ class EmployeeRead(BaseModel):
     name: str
     email: str
     is_active: bool
+    # Profile photo, visible to anyone who can see the record at all. May be
+    # absolute (Slack CDN) or root-relative (hosted here); ``None`` means the
+    # UI falls back to initials.
+    avatar_url: str | None = None
+    # Whether the caller may replace this photo: their own, or HR's.
+    can_edit_avatar: bool = False
     work: EmployeeWork
     # Read-only alongside the work details; null only before the org has a
     # default policy. Changed through the leave policy assign route.
@@ -156,6 +167,7 @@ class DirectoryEntry(BaseModel):
     """One row of the employee directory."""
 
     user_id: uuid.UUID
+    avatar_url: str | None = None
     name: str
     email: str
     is_active: bool
@@ -209,3 +221,14 @@ class ManagersUpdate(BaseModel):
     """Replace an employee's reporting managers."""
 
     managers: list[ManagerInput] = Field(default_factory=list, max_length=10)
+
+
+class AvatarRead(BaseModel):
+    """The member's profile photo URL after an upload or removal.
+
+    ``None`` means "no photo" — the UI falls back to initials. The value
+    may be absolute (a Slack CDN address) or root-relative (one we host);
+    see ``app.services.avatars``.
+    """
+
+    avatar_url: str | None = None

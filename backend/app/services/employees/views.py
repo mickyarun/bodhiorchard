@@ -83,6 +83,8 @@ async def employee_read(
         name=user.name,
         email=user.email,
         is_active=user.is_active,
+        avatar_url=user.avatar_url,
+        can_edit_avatar=access.edit_avatar,
         work=EmployeeWork.model_validate(profile),
         leave_policy=await _leave_policy(db, org_id, profile),
         office=offices.get(profile.office_id) if profile.office_id else None,
@@ -116,6 +118,7 @@ async def directory_entries(
         entries.append(
             DirectoryEntry(
                 user_id=row.profile.user_id,
+                avatar_url=row.avatar_url,
                 name=row.name,
                 email=row.email,
                 is_active=row.is_active,

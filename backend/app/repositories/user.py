@@ -673,6 +673,16 @@ class UserRepository(BaseRepository[User]):
         result = await self._db.execute(stmt)
         return list(result.tuples().all())
 
+    async def get_by_avatar_key(self, key: str) -> User | None:
+        """The member whose self-hosted photo is published under ``key``.
+
+        Deliberately not org-scoped: it backs the unauthenticated photo
+        route, where the random per-upload key *is* the capability. The
+        unique index on ``avatar_key`` makes this a single index lookup.
+        """
+        result = await self._db.execute(select(User).where(User.avatar_key == key))
+        return result.scalar_one_or_none()
+
     async def get_by_slack_id_in_org(self, org_id: uuid.UUID, slack_id: str) -> User | None:
         """Fetch the org member whose ``slack_id`` matches.
 

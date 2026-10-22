@@ -33,6 +33,7 @@ module, so we just construct the same class with the persisted values
 and the shipped defaults fill any gaps.
 """
 
+import json
 from typing import Any
 
 import structlog
@@ -40,6 +41,7 @@ import structlog
 from app.schemas.settings import (
     BUDStageSettings,
     BugAttachmentSettings,
+    CelebrationSettings,
     JiraSettings,
     PresenceSettings,
     QAAutomationSettings,
@@ -55,6 +57,10 @@ logger = structlog.get_logger(__name__)
 DEFAULT_PRESENCE_SETTINGS: PresenceSettings = PresenceSettings()
 DEFAULT_QUIZ_SETTINGS: QuizGameSettings = QuizGameSettings()
 DEFAULT_BUG_ATTACHMENT_SETTINGS: BugAttachmentSettings = BugAttachmentSettings()
+DEFAULT_CELEBRATION_SETTINGS: CelebrationSettings = CelebrationSettings()
+# Invalid celebration payloads already logged by this process (bounded).
+_REPORTED_INVALID_CELEBRATIONS: set[str] = set()
+_MAX_REPORTED_INVALID = 256
 
 
 def get_qa_settings(org_config: dict[str, Any] | None) -> QAAutomationSettings:
@@ -155,6 +161,41 @@ def get_quiz_settings(org_config: dict[str, Any] | None) -> QuizGameSettings:
             action="falling back to defaults — fix this org's config JSONB",
         )
         return DEFAULT_QUIZ_SETTINGS
+
+
+def get_celebration_settings(org_config: dict[str, Any] | None) -> CelebrationSettings:
+    """Resolve per-org celebration settings from an organization config dict.
+
+    The ONLY reader of the ``org.config["celebrations"]`` key. **Defensive:**
+    a corrupt stored section returns ``DEFAULT_CELEBRATION_SETTINGS`` (which
+    is disabled) rather than raising, so the cross-org celebration sweep
+    never aborts on one bad org.
+
+    Args:
+        org_config: The raw ``organization.config`` JSONB dict, or None.
+
+    Returns:
+        A ``CelebrationSettings`` with all fields populated.
+    """
+    raw = (org_config or {}).get("celebrations") or {}
+    try:
+        return CelebrationSettings(**raw)
+    except Exception as exc:
+        # The scheduler resolves settings every 60s, so an unconditional
+        # log here would emit ~1,400 identical errors a day per broken org.
+        # Report each distinct bad payload once per process instead.
+        fingerprint = json.dumps(raw, sort_keys=True, default=str)
+        if fingerprint not in _REPORTED_INVALID_CELEBRATIONS:
+            if len(_REPORTED_INVALID_CELEBRATIONS) >= _MAX_REPORTED_INVALID:
+                _REPORTED_INVALID_CELEBRATIONS.clear()
+            _REPORTED_INVALID_CELEBRATIONS.add(fingerprint)
+            logger.error(
+                "celebration_settings_invalid",
+                raw_keys=list(raw.keys()),
+                error=str(exc),
+                action="falling back to defaults (disabled) — fix this org's config JSONB",
+            )
+        return DEFAULT_CELEBRATION_SETTINGS
 
 
 def get_bug_reject_threshold(org_config: dict[str, Any] | None) -> int:

@@ -56,6 +56,14 @@ export const peopleRoutes: RouteRecordRaw[] = [
     component: () => import('@/views/settings/SettingsOffices.vue'),
   },
   {
+    path: 'settings/celebrations',
+    name: 'settings-celebrations',
+    // HR (owns the dates) or admins/the owner (own the channel). Any-of,
+    // matching the backend; the channel itself is admin/owner-only.
+    meta: { permission: ['employees:manage', 'org:edit_settings'] },
+    component: () => import('@/views/settings/SettingsCelebrations.vue'),
+  },
+  {
     path: 'people',
     name: 'employees',
     meta: { permission: 'employees:view' },
