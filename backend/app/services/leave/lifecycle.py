@@ -29,6 +29,7 @@ from app.core.permission_deps import PermissionSet
 from app.models.leave_request import ApprovalMode, LeaveRequest, LeaveStatus
 from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.leave_request import LeaveRequestRepository
+from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.user import UserRepository
 from app.schemas.leave import LeaveRequestCreate
 from app.services.fixed_window import seconds_until_allowed
@@ -141,6 +142,7 @@ async def decide(
         # The balance may have moved since it was sent (an adjustment, another
         # approval): price it again so loss of pay is right when it's approved.
         await reprice(db, await policy_for_request(db, org_id, request), request)
+        await _refuse_if_over(db, org_id, request)
     changed = await repo.transition(
         request.id,
         [LeaveStatus.PENDING],
@@ -157,6 +159,22 @@ async def decide(
         member = await policy_for_request(db, org_id, request)
         await give_back(db, member, request.user_id, request.leave_type_id, request.start_date)
     return request
+
+
+async def _refuse_if_over(db: AsyncSession, org_id: uuid.UUID, request: LeaveRequest) -> None:
+    """A type that stops at its balance isn't approved into loss of pay.
+
+    Its balance can drop after the request was sent (HR took days off), so
+    the approver is told to send it back rather than approve unpaid days.
+    """
+    if request.lop_days <= 0 or request.leave_type_id is None:
+        return
+    leave_type = await LeaveTypeRepository(db, org_id=org_id).get_by_id(request.leave_type_id)
+    if leave_type is not None and leave_type.stops_at_balance:
+        raise LeaveConflictError(
+            f"Their {leave_type.name} balance went down after they asked, and this request "
+            "is now past it. Reject it so they can request the rest as another type."
+        )
 
 
 async def already_decided(db: AsyncSession, org_id: uuid.UUID, request: LeaveRequest) -> str:

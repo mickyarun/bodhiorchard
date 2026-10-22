@@ -133,6 +133,9 @@ class LeaveTypeWrite(BaseModel):
         # Unlimited leave that approves itself would need nobody's say at all.
         if self.auto_approve and self.annual_quota_days is None:
             raise ValueError("A type that approves itself needs a yearly allowance.")
+        # Unlimited leave has no balance to stop at.
+        if self.annual_quota_days is None:
+            self.stops_at_balance = False
         return self
 
 
