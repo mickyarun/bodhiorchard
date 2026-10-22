@@ -54,6 +54,10 @@ export interface EmployeeContact {
   emergency_contact_name: string | null
   emergency_contact_relation: string | null
   emergency_contact_phone: string | null
+  /** Mute your own birthday announcement. Opt-out: true by default. */
+  celebrate_birthday: boolean
+  /** Mute your own work-anniversary announcement. Opt-out: true by default. */
+  celebrate_anniversary: boolean
 }
 
 export interface EmployeePersonal extends EmployeeContact {
@@ -84,6 +88,10 @@ export interface EmployeeRecord {
   name: string
   email: string
   is_active: boolean
+  /** Absolute (Slack CDN) or root-relative (hosted here); null = initials. */
+  avatar_url: string | null
+  /** Whether the viewer may replace this photo: their own, or HR. */
+  can_edit_avatar: boolean
   work: EmployeeWork
   office: OfficeRef | null
   /** Null only before the org has a default policy. */
@@ -105,6 +113,7 @@ export interface EmployeeRecord {
 
 export interface DirectoryEntry {
   user_id: string
+  avatar_url: string | null
   name: string
   email: string
   is_active: boolean

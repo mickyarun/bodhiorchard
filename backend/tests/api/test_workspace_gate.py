@@ -35,6 +35,10 @@ SHARED_MODULES = frozenset(
         "app.api.v1.employee_documents",
         "app.api.v1.employee_login",
         "app.api.v1.employee_sensitive",
+        # Writes are self-or-HR; the GET is deliberately unauthenticated so
+        # ``<img>`` tags and Slack's image unfurler can fetch a photo.
+        # ``test_avatar_read_is_public_writes_are_not`` pins that split.
+        "app.api.v1.employee_avatars",
         "app.api.v1.employee_updates",
         "app.api.v1.employees",
         "app.api.v1.leave",
@@ -140,3 +144,30 @@ def test_core_engineering_routes_are_gated() -> None:
     gated = [r for r in _routes() if r.path.startswith(prefixes)]
     assert gated, "expected engineering routes to exist"
     assert all(_is_gated(r) for r in gated)
+
+
+def test_avatar_read_is_public_writes_are_not() -> None:
+    """Serving a profile photo needs no JWT; changing one does.
+
+    Slack fetches celebration-post images from its own servers and a
+    browser ``<img>`` sends no Authorization header, so ``serve_avatar`` has
+    to be open. That is a deliberate trade — it must not quietly spread to
+    the upload, delete and Slack-import routes, and nobody should "fix" the
+    GET without reading why it is this way.
+    """
+    avatar_routes = [r for r in _routes() if r.module == "app.api.v1.employee_avatars"]
+    endpoints = {r.dependant.call.__name__: r for r in avatar_routes if r.dependant.call}
+    assert set(endpoints) == {
+        "serve_avatar",
+        "upload_avatar",
+        "delete_avatar",
+        "import_slack_photos",
+    }, sorted(endpoints)
+
+    for name, route in endpoints.items():
+        deps = {d.call.__name__ for d in route.dependant.dependencies if d.call}
+        authenticated = "get_current_user" in deps
+        if name == "serve_avatar":
+            assert not authenticated, f"{route.path} must stay unauthenticated"
+        else:
+            assert authenticated, f"{route.path} must require a signed-in user"

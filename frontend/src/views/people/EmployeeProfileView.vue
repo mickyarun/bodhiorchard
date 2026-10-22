@@ -40,7 +40,14 @@
     </AppCallout>
 
     <template v-else-if="record">
-      <EmployeeHeaderCard :record="record">
+      <AppCallout v-if="avatarError" variant="error" class="mb-4">
+        {{ avatarError }}
+      </AppCallout>
+      <EmployeeHeaderCard
+        :record="record"
+        @avatar-updated="onAvatarUpdated"
+        @avatar-error="avatarError = $event"
+      >
         <template #actions>
           <EmployeePasswordButton
             v-if="record.access.reset_password"
@@ -110,6 +117,16 @@ const routeUserId = computed(() => route.params.userId as string | undefined)
 const isOwn = computed(() => !routeUserId.value || routeUserId.value === authStore.user?.id)
 const record = computed(() => store.record)
 const tab = ref('personal')
+const avatarError = ref('')
+
+/**
+ * Keep the loaded record in step with the photo the child just changed,
+ * so the header and the directory agree without a refetch.
+ */
+function onAvatarUpdated(avatarUrl: string | null): void {
+  avatarError.value = ''
+  if (store.record) store.record.avatar_url = avatarUrl
+}
 // Balances are open to HR, the member and the member's managers (the
 // API enforces the same rule).
 const isManagerOfRecord = computed(

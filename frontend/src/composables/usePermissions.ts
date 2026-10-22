@@ -51,6 +51,14 @@ export function usePermissions() {
   /** HR invites new hires from the Employees page (no engineering access needed). */
   const canInviteMembers = computed(() => hasPermission('team:invite'))
   const canSeeEmployeeDocuments = computed(() => hasPermission('employees:documents'))
+  // Celebrations: HR (who own the dates) and admins/the owner (who own the
+  // org's Slack presence) can open the settings; only admins/the owner may
+  // choose the channel or turn on the @channel ping. Mirrors the backend's
+  // _CELEBRATION_EDITORS / _CELEBRATION_CHANNEL_CONTROL in api/v1/settings.py.
+  const canManageCelebrations = computed(() =>
+    hasAnyPermission('employees:manage', 'org:edit_settings'),
+  )
+  const canControlCelebrationChannel = computed(() => hasPermission('org:edit_settings'))
   // Leave: approving anyone's requests (HR), and configuring policies,
   // types, holidays and balances.
   const canApproveLeave = computed(() => hasPermission('leave:approve'))
@@ -113,6 +121,8 @@ export function usePermissions() {
     canManageEmployees,
     canInviteMembers,
     canSeeEmployeeDocuments,
+    canManageCelebrations,
+    canControlCelebrationChannel,
     canApproveLeave,
     canConfigureLeave,
     canViewLeaveReports,

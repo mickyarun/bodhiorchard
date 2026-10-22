@@ -20,6 +20,7 @@ repo management, GitHub integration, and Slack member sync.
 
 import re
 import secrets
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -28,7 +29,12 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.core.deps import get_current_user, get_db, get_permission_set, require_permissions
+from app.core.deps import (
+    get_current_user,
+    get_db,
+    get_permission_set,
+    require_permissions,
+)
 from app.core.encryption import decrypt_secret, encrypt_secret
 from app.core.permission_deps import PermissionSet
 from app.core.permissions import WORKSPACE_ENGINEERING
@@ -37,11 +43,13 @@ from app.mcp.auth import compute_token_prefix
 from app.models.organization import Organization
 from app.models.user import User
 from app.models.user_mcp_token import DEFAULT_TOKEN_NAME, UserMCPToken
+from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.slack_identity import SlackIdentityRepository
 from app.repositories.user_mcp_token import UserMCPTokenRepository
 from app.schemas.settings import (
     AIConfigSettings,
+    CelebrationSettings,
     ConnectionsRead,
     ConnectionsUpdate,
     GitHubAppStatus,
@@ -52,6 +60,8 @@ from app.schemas.settings import (
     SlackSettings,
     SourceCodeSettings,
 )
+from app.services.celebrations.poster import post_sample
+from app.services.celebrations.schedule import resolve_zone
 from app.services.github_app_auth import fetch_and_persist_app_slug
 from app.services.github_app_jwt import (
     GITHUB_APP_INSTALL_URL_TEMPLATE as _APP_INSTALL_URL_TEMPLATE,
@@ -66,6 +76,7 @@ from app.services.github_app_slug import (
 from app.services.org_settings import (
     get_bud_stage_settings,
     get_bug_attachment_settings,
+    get_celebration_settings,
     get_jira_settings,
     get_presence_settings,
     get_qa_settings,
@@ -397,6 +408,171 @@ async def update_quiz_game_settings(
     await db.flush()
     await db.refresh(org)
     return get_quiz_settings(org.config)
+
+
+# Celebration settings are shared ground. HR owns the employee records being
+# announced; admins and the org owner own the org's Slack presence. Either
+# may open the page and tune the schedule…
+_CELEBRATION_EDITORS = ("employees:manage", "org:edit_settings")
+# …but only an admin or the owner (``org:*`` / owner bypass) decides *where*
+# announcements are posted and whether they ping ``@channel`` — that is
+# control over a company-wide broadcast, not over HR data.
+_CELEBRATION_CHANNEL_CONTROL = "org:edit_settings"
+_CHANNEL_CONTROL_DENIED = (
+    "Only an admin or the org owner can change the celebration channel or @channel setting."
+)
+
+
+class CelebrationTestResult(BaseModel):
+    """Outcome of a celebration sample post."""
+
+    posted: bool
+    # ``sent``, or why nothing was posted: ``no_channel``,
+    # ``no_slack_token``, ``token_decrypt_failed``, or ``slack:<code>``
+    # carrying Slack's own error (``channel_not_found``, ``not_in_channel`` …).
+    detail: str
+
+
+class CelebrationAudience(BaseModel):
+    """How many people the feature will announce, shown before switching it on."""
+
+    birthdays: int
+    anniversaries: int
+
+
+@router.get(
+    "/celebrations",
+    response_model=CelebrationSettings,
+    dependencies=[Depends(require_permissions(*_CELEBRATION_EDITORS, mode="any"))],
+)
+async def get_celebration_config(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CelebrationSettings:
+    """Return the organization's birthday / work-anniversary settings.
+
+    Open to HR (``employees:manage``) and to admins / the owner
+    (``org:edit_settings``); see ``_CELEBRATION_EDITORS``.
+    """
+    org = await OrganizationRepository(db).get_for_user(current_user)
+    return get_celebration_settings(org.config)
+
+
+@router.patch(
+    "/celebrations",
+    response_model=CelebrationSettings,
+    dependencies=[Depends(require_permissions(*_CELEBRATION_EDITORS, mode="any"))],
+)
+async def update_celebration_config(
+    body: CelebrationSettings,
+    current_user: User = Depends(get_current_user),
+    perms: PermissionSet = Depends(get_permission_set),
+    db: AsyncSession = Depends(get_db),
+) -> CelebrationSettings:
+    """Replace the organization's celebration settings.
+
+    Stored under ``org.config["celebrations"]`` in the snake_case shape
+    ``get_celebration_settings`` reads back. Switching the feature on or
+    off is logged with the actor and the audience size: it starts (or
+    stops) publishing personal dates about everyone who has not opted out,
+    so there should be a record of who decided that and when.
+    """
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_for_user(current_user)
+    current = get_celebration_settings(org.config)
+    was_enabled = current.enabled
+    channel_changed = (
+        body.slack_channel_id != current.slack_channel_id
+        or body.mention_channel != current.mention_channel
+    )
+    if channel_changed and not perms.has(_CELEBRATION_CHANNEL_CONTROL):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_CHANNEL_CONTROL_DENIED)
+    config = dict(org.config or {})
+    config["celebrations"] = body.model_dump(mode="json", by_alias=False)
+    org.config = config
+    flag_modified(org, "config")
+    await db.flush()
+    await db.refresh(org)
+
+    if body.enabled != was_enabled:
+        birthdays, anniversaries = await EmployeeProfileRepository(
+            db, org_id=org.id
+        ).count_celebration_audience()
+        logger.info(
+            "celebrations_enabled" if body.enabled else "celebrations_disabled",
+            org_id=str(org.id),
+            by_user_id=str(current_user.id),
+            channel=body.slack_channel_id,
+            birthday_audience=birthdays,
+            anniversary_audience=anniversaries,
+        )
+    return get_celebration_settings(org.config)
+
+
+@router.get(
+    "/celebrations/audience",
+    response_model=CelebrationAudience,
+    dependencies=[Depends(require_permissions(*_CELEBRATION_EDITORS, mode="any"))],
+)
+async def get_celebration_audience(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CelebrationAudience:
+    """How many current employees have each date on file and have not muted it.
+
+    Counts only — never names or dates — so the settings page can say
+    "this will announce N birthdays" before anyone switches it on.
+    """
+    org = await OrganizationRepository(db).get_for_user(current_user)
+    birthdays, anniversaries = await EmployeeProfileRepository(
+        db, org_id=org.id
+    ).count_celebration_audience()
+    return CelebrationAudience(birthdays=birthdays, anniversaries=anniversaries)
+
+
+@router.post(
+    "/celebrations/test",
+    response_model=CelebrationTestResult,
+    dependencies=[Depends(require_permissions(*_CELEBRATION_EDITORS, mode="any"))],
+)
+async def send_celebration_test(
+    body: CelebrationSettings | None = None,
+    current_user: User = Depends(get_current_user),
+    perms: PermissionSet = Depends(get_permission_set),
+    db: AsyncSession = Depends(get_db),
+) -> CelebrationTestResult:
+    """Post a labelled sample digest, with the caller as the celebrant.
+
+    Works on any day and **never** touches the ledger, so testing cannot
+    consume or pre-empt a real announcement. Pass the unsaved form as the
+    body to check a channel before committing to it; omit it to test what
+    is saved.
+    """
+    org = await OrganizationRepository(db).get_for_user(current_user)
+    saved = get_celebration_settings(org.config)
+    settings_obj = body or saved
+    # Otherwise "send sample" would be a way round the channel rule: HR could
+    # post (with the bot's name on it) into any channel the bot belongs to.
+    if settings_obj.slack_channel_id != saved.slack_channel_id and not perms.has(
+        _CELEBRATION_CHANNEL_CONTROL
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_CHANNEL_CONTROL_DENIED)
+    if not settings_obj.slack_channel_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Set a Slack channel before sending a test.",
+        )
+
+    today = datetime.now(UTC).astimezone(resolve_zone(settings_obj.timezone)).date()
+    result = await post_sample(
+        org.id,
+        settings_obj,
+        actor_name=current_user.name,
+        actor_slack_id=current_user.slack_id,
+        actor_avatar_url=current_user.avatar_url,
+        today=today,
+    )
+    return CelebrationTestResult(posted=result.posted, detail=result.reason or "sent")
 
 
 class MCPTokenResponse(BaseModel):

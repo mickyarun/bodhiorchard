@@ -49,6 +49,8 @@
       <FieldGrid :fields="emergencyFields" />
       <div class="section-eyebrow mt-6">About</div>
       <FieldGrid :fields="aboutFields" />
+      <div class="section-eyebrow mt-6">Celebrations</div>
+      <FieldGrid :fields="celebrationFields" />
     </template>
 
     <v-form v-else @submit.prevent="save">
@@ -64,6 +66,24 @@
           <v-select v-model="draft.blood_group" :items="BLOOD_GROUPS" label="Blood group" clearable v-bind="field" />
         </template>
       </div>
+      <div class="section-eyebrow mt-6">Celebrations</div>
+      <div class="text-caption text-medium-emphasis mb-2">
+        Announcements show the day and month only — never the year.
+      </div>
+      <v-switch
+        v-model="draft.celebrate_birthday"
+        color="primary"
+        label="Announce my birthday"
+        density="compact"
+        hide-details
+      />
+      <v-switch
+        v-model="draft.celebrate_anniversary"
+        color="primary"
+        label="Announce my work anniversary"
+        density="compact"
+        hide-details
+      />
       <AppCallout v-if="error" variant="error" class="mt-3">{{ error }}</AppCallout>
       <div class="d-flex justify-end ga-2 mt-4">
         <v-btn variant="text" @click="editing = false">Cancel</v-btn>
@@ -114,6 +134,16 @@ const emergencyFields = computed<GridField[]>(() => [
   { label: 'Relation', value: props.personal.emergency_contact_relation },
   { label: 'Phone', value: props.personal.emergency_contact_phone },
 ])
+const celebrationFields = computed<GridField[]>(() => [
+  {
+    label: 'Birthday announcement',
+    value: props.personal.celebrate_birthday ? 'On' : 'Muted',
+  },
+  {
+    label: 'Work anniversary announcement',
+    value: props.personal.celebrate_anniversary ? 'On' : 'Muted',
+  },
+])
 const aboutFields = computed<GridField[]>(() => [
   { label: 'Date of birth', value: formatDateOnly(props.personal.date_of_birth), locked: locked.value },
   {
@@ -145,6 +175,9 @@ async function save(): Promise<void> {
           emergency_contact_name: values.emergency_contact_name,
           emergency_contact_relation: values.emergency_contact_relation,
           emergency_contact_phone: values.emergency_contact_phone,
+          // Self-editable: muting your own celebration shouldn't need HR.
+          celebrate_birthday: values.celebrate_birthday,
+          celebrate_anniversary: values.celebrate_anniversary,
         })
       : await store.updatePersonal(props.employeeId, values)) ?? ''
   saving.value = false
