@@ -62,12 +62,14 @@ onMounted(async () => {
   const handed = new URLSearchParams(route.hash.slice(1))
   const code = handed.get('slackCode')
   const state = handed.get('slackState')
-  if (outcome.value || code) {
-    // Shown once, and the code is single-use: take it out of the URL now.
+  // Only once it's finished: if the session ran out on the way, the sign-in
+  // redirect remembers this URL, code included, to finish after login.
+  if (code && state) outcome.value = connectOutcome(await status.finish(code, state))
+  if (outcome.value) {
+    // Shown once, and the code is single-use: take it out of the URL.
     const { slackStatus: _s, ...rest } = route.query
     void router.replace({ query: rest, hash: '' })
   }
-  if (code && state) outcome.value = connectOutcome(await status.finish(code, state))
   await status.load()
 })
 </script>

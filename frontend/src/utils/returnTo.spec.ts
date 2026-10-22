@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { isSafeReturnPath, rememberReturnTo, takeReturnTo } from '@/utils/returnTo'
+import { forgetReturnTo, isSafeReturnPath, rememberReturnTo, takeReturnTo } from '@/utils/returnTo'
 
 describe('isSafeReturnPath', () => {
   it.each(['/leave', '/leave#slackCode=c&slackState=s', '/people/123?tab=leave', '/'])(
@@ -25,6 +25,7 @@ describe('isSafeReturnPath', () => {
     'https://evil.example/leave',
     '//evil.example/leave',
     '/\\evil.example',
+    '/\t/evil.example',
     'javascript:alert(1)',
     'leave',
     '',
@@ -60,6 +61,12 @@ describe('return-to', () => {
     sessionStorage.setItem('bodhiorchard_return_to', JSON.stringify({ path: '//evil.example', at }))
     expect(takeReturnTo()).toBeNull()
     sessionStorage.setItem('bodhiorchard_return_to', 'https://evil.example')
+    expect(takeReturnTo()).toBeNull()
+  })
+
+  it('forgets on logout', () => {
+    rememberReturnTo('/leave')
+    forgetReturnTo()
     expect(takeReturnTo()).toBeNull()
   })
 

@@ -75,6 +75,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { afterSignIn } from '@/utils/afterSignIn'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -97,7 +98,7 @@ async function handleSubmit() {
   const err = await authStore.changePassword(newPassword.value)
   loading.value = false
   if (err === null) {
-    router.push({ name: 'character-select' })
+    router.push(afterSignIn(authStore.user))
   } else {
     errorMsg.value = err
   }

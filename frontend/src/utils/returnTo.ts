@@ -55,3 +55,12 @@ export function takeReturnTo(): string | null {
     return null
   }
 }
+
+/** Drop any remembered page (on logout). */
+export function forgetReturnTo(): void {
+  try {
+    sessionStorage.removeItem(KEY)
+  } catch {
+    // Nothing to forget.
+  }
+}
