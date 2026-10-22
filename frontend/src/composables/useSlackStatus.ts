@@ -46,13 +46,17 @@ const OUTCOMES: Record<string, { ok: boolean; text: string }> = {
     ok: false,
     text: 'That Slack connect link was started by someone else, so nothing changed. Press Connect Slack here yourself.',
   },
+  other_org: {
+    ok: false,
+    text: 'You started connecting Slack in your other organization. Switch back to it to finish, or press Connect Slack here.',
+  },
   wrong_account: {
     ok: false,
     text: "That wasn't the Slack account linked to you here. Sign in to your own Slack account and try again.",
   },
   unlinkable: {
     ok: false,
-    text: "We couldn't link that Slack account to you: its email doesn't match your email here, or it's already linked to someone. Ask HR to link it.",
+    text: "We couldn't link that Slack account to you automatically (its email has to match your email here, and it can't already be linked to someone). Ask HR to link it.",
   },
   rotation: {
     ok: false,

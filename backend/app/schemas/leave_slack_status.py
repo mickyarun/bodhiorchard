@@ -24,6 +24,7 @@ ConnectOutcome = Literal[
     "moved",
     "expired",
     "not_yours",
+    "other_org",
     "wrong_account",
     "unlinkable",
     "rotation",

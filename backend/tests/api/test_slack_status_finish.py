@@ -104,6 +104,15 @@ async def test_someone_else_signed_in_changes_nothing(exchanged: list[str]) -> N
     assert db.committed == 0
 
 
+async def test_their_own_connect_from_another_org_is_left_alone(exchanged: list[str]) -> None:
+    body = SlackStatusFinish(code="code-1", state=make_state(uuid.uuid4(), ME))
+    user = SimpleNamespace(id=ME, org_id=ORG)
+    result = await finish_my_slack_status(body, user, FakeDb())  # type: ignore[arg-type]
+    assert result.outcome == "other_org"
+    assert exchanged == []
+    assert DISCARDED == []  # theirs to finish in that org
+
+
 async def test_a_forged_state_is_expired(exchanged: list[str]) -> None:
     body = SlackStatusFinish(code="code-1", state="not-a-jwt")
     user = SimpleNamespace(id=ME, org_id=ORG)

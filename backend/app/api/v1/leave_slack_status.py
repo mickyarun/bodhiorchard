@@ -120,8 +120,12 @@ async def finish_my_slack_status(
         org_id, user_id = read_state(body.state)
     except InvalidStateError:
         return SlackStatusFinished(outcome="expired")
+    if user_id == current_user.id and org_id != current_user.org_id:
+        # Theirs, started in their other organization: left for them to finish there.
+        return SlackStatusFinished(outcome="other_org")
+    # The client the code was issued for (the state's org), to use it up if refused.
     client = await load_client(db, org_id)
-    if (org_id, user_id) != (current_user.org_id, current_user.id):
+    if user_id != current_user.id:
         # Used up, never kept: whoever approved can't have it finished elsewhere.
         if client.ready:
             await discard(db, client, body.code)

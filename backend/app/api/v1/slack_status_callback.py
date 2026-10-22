@@ -15,9 +15,10 @@
 """Where Slack sends a member back after they approve status updates.
 
 It's a browser redirect with no login, so it doesn't finish anything: it
-hands ``code`` and ``state`` to the Leave page (in the URL fragment), which finishes while signed
-in (``POST /leave/slack-status/me/finish``). That way a connect link opened
-by anyone but the member who started it goes nowhere, even if they approve.
+hands ``code`` and ``state`` to the Leave page in the URL fragment, and the
+page finishes while signed in (``POST /leave/slack-status/me/finish``). That
+way a connect link opened by anyone but the member who started it goes
+nowhere, even if they approve.
 """
 
 from urllib.parse import urlencode
