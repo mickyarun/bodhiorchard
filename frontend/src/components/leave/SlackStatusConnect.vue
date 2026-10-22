@@ -15,8 +15,8 @@
  -->
 
 <!-- Leave home: offer to show WFH / leave as the member's Slack status, and
-     say how it went when Slack sends them back (?slackStatus=…). Renders
-     nothing when HR hasn't set it up. -->
+     finish when Slack sends them back (?slackCode=…&slackState=…, or
+     ?slackStatus=… if they cancelled). Renders nothing when HR hasn't set it up. -->
 <template>
   <AppCallout v-if="outcome" :variant="outcome.ok ? 'success' : 'warning'" class="mb-4">
     {{ outcome.text }}
@@ -42,7 +42,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppCallout from '@/components/common/AppCallout.vue'
 import { connectOutcome, useMySlackStatus } from '@/composables/useSlackStatus'
@@ -51,15 +51,22 @@ const route = useRoute()
 const router = useRouter()
 const status = useMySlackStatus()
 const mine = computed(() => status.mine.value)
-const code = typeof route.query.slackStatus === 'string' ? route.query.slackStatus : null
-const outcome = connectOutcome(code)
+const outcome = ref(connectOutcome(queryText('slackStatus')))
 
-onMounted(() => {
-  void status.load()
-  if (code) {
-    // Shown once; a refresh shouldn't repeat it.
-    const { slackStatus: _done, ...rest } = route.query
+function queryText(key: string): string | null {
+  const value = route.query[key]
+  return typeof value === 'string' ? value : null
+}
+
+onMounted(async () => {
+  const code = queryText('slackCode')
+  const state = queryText('slackState')
+  if (outcome.value || code) {
+    // Shown once, and the code is single-use: take it out of the URL now.
+    const { slackStatus: _s, slackCode: _c, slackState: _t, ...rest } = route.query
     void router.replace({ query: rest })
   }
+  if (code && state) outcome.value = connectOutcome(await status.finish(code, state))
+  await status.load()
 })
 </script>

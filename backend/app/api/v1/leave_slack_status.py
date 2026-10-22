@@ -14,6 +14,8 @@
 
 """Slack status on WFH and leave days: HR's settings and each member's own link."""
 
+import httpx
+import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,19 +23,31 @@ from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.user import User
 from app.repositories.slack_status_link import SlackStatusLinkRepository
 from app.schemas.leave_slack_status import (
+    ConnectOutcome,
     SlackStatusConnect,
+    SlackStatusFinish,
+    SlackStatusFinished,
     SlackStatusMine,
     SlackStatusSettings,
     SlackStatusUpdate,
 )
 from app.services.background import spawn
 from app.services.leave.permissions import CONFIGURE
-from app.services.leave.slack_status.apply import forget, hand_back
-from app.services.leave.slack_status.oauth import authorize_url
+from app.services.leave.slack_status.apply import forget, hand_back, refresh_member
+from app.services.leave.slack_status.oauth import (
+    InvalidStateError,
+    UnlinkableSlackAccountError,
+    WrongSlackAccountError,
+    authorize_url,
+    complete,
+    read_state,
+)
 from app.services.leave.slack_status.scheduler import clear_all
 from app.services.leave.slack_status.settings import load_client, load_settings, save_settings
+from app.services.slack_user_api import SlackUserApiError
 
 router = APIRouter(tags=["leave"])
+logger = structlog.get_logger(__name__)
 
 
 @router.get("/slack-status", response_model=SlackStatusSettings)
@@ -88,6 +102,49 @@ async def connect_my_slack_status(
     if not client.ready:
         raise HTTPException(status_code=409, detail="Slack status isn't set up for your team.")
     return SlackStatusConnect(url=authorize_url(client, current_user.org_id, current_user.id))
+
+
+@router.post("/slack-status/me/finish", response_model=SlackStatusFinished)
+async def finish_my_slack_status(
+    body: SlackStatusFinish,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SlackStatusFinished:
+    """Finish what Slack sent back: keep the token, set today's status.
+
+    Only for the member who started it, checked before the code is used, so
+    a connect link opened by anyone else changes nothing.
+    """
+    try:
+        org_id, user_id = read_state(body.state)
+    except InvalidStateError:
+        return SlackStatusFinished(outcome="expired")
+    if (org_id, user_id) != (current_user.org_id, current_user.id):
+        return SlackStatusFinished(outcome="not_yours")
+    client = await load_client(db, org_id)
+    if not client.ready:
+        return SlackStatusFinished(outcome="failed")
+    outcome: ConnectOutcome
+    try:
+        connected = await complete(db, client, org_id, user_id, body.code)
+    except UnlinkableSlackAccountError:
+        outcome = "unlinkable"
+    except WrongSlackAccountError:
+        outcome = "wrong_account"
+    except SlackUserApiError as exc:
+        logger.warning("slack_status_connect_failed", org_id=str(org_id), error=exc.code)
+        outcome = "rotation" if exc.code == "token_rotation_on" else "failed"
+    except httpx.HTTPError as exc:
+        logger.warning("slack_status_connect_failed", org_id=str(org_id), error=str(exc))
+        outcome = "failed"
+    else:
+        await db.commit()
+        await hand_back(connected.stale_tokens)
+        spawn(refresh_member(org_id, user_id))
+        return SlackStatusFinished(outcome="moved" if connected.moved else "connected")
+    # Nothing of a refused connect is kept (a self-link included).
+    await db.rollback()
+    return SlackStatusFinished(outcome=outcome)
 
 
 @router.delete("/slack-status/me", status_code=204)

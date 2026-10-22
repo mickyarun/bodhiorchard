@@ -18,9 +18,10 @@ The link says who clicks Approve in Slack (see :mod:`app.services.slack_identity
 so it's only made when the account is provably the member's own:
 
 - they signed in to Slack and approved as it (the OAuth grant names it; it
-  can't be typed in or picked), starting from their own logged-in session;
-- the org's own bot can see it, and Slack reports the same email as their
-  profile here, so a colleague can't approve someone else's connect link;
+  can't be typed in or picked), and the connect was both started and finished
+  in their own signed-in session;
+- the org's own bot can see it, and Slack reports the same confirmed email
+  as their profile here;
 - nothing is taken over: they have no link yet, nobody here has that account,
   and they're in this org only (the link is shared across a person's orgs).
 
@@ -51,7 +52,7 @@ async def link_own_account(
     if member.slack_id or not await _unclaimed(db, org_id, member.id, slack_user_id):
         return False
     slack_email = await _slack_email(db, org_id, slack_user_id)
-    if not slack_email or slack_email != member.email.strip().casefold():
+    if not slack_email or slack_email != member.email.strip().lower():
         logger.info("slack_self_link_refused", org_id=str(org_id), user_id=str(member.id))
         return False
     member.slack_id = slack_user_id
@@ -85,10 +86,13 @@ async def _slack_email(db: AsyncSession, org_id: uuid.UUID, slack_user_id: str) 
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("slack_self_link_lookup_failed", org_id=str(org_id), error=str(exc))
         return ""
-    if not user or user.get("deleted") or user.get("is_bot"):
+    # A stranger is someone from another workspace (Slack Connect).
+    if not user or user.get("deleted") or user.get("is_bot") or user.get("is_stranger"):
         return ""
     # An email the person never confirmed proves nothing.
     if user.get("is_email_confirmed") is False:
         return ""
     email = (user.get("profile") or {}).get("email") or ""
-    return str(email).strip().casefold()
+    # Lowercased only, as Settings → Slack matches emails: casefold would
+    # also equate different non-ASCII addresses.
+    return str(email).strip().lower()

@@ -39,6 +39,7 @@ class Recorder:
     def __init__(self) -> None:
         self.saved: list[tuple[uuid.UUID, str]] = []
         self.revoked: list[str] = []
+        self.held: list[object] = []  # links already holding a token
 
 
 @pytest.fixture
@@ -73,6 +74,9 @@ def slack(monkeypatch: pytest.MonkeyPatch) -> Recorder:
 
         async def remove_elsewhere(self, *_a: Any) -> int:
             return 0
+
+        async def links_for_account(self, *_a: Any) -> list[object]:
+            return rec.held
 
     monkeypatch.setattr(oauth, "SlackStatusLinkRepository", Links)
     monkeypatch.setattr(oauth, "SlackStatusAccountRepository", Accounts)
@@ -127,6 +131,18 @@ async def test_another_account_is_refused_and_handed_back(
     assert tried == []  # an existing link is never replaced from here
     assert slack.saved == []
     assert slack.revoked == ["xoxp-1"]
+
+
+async def test_a_token_someone_already_holds_is_not_handed_back(
+    slack: Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Same person, connected from their other profile: Slack returned that token.
+    slack.held = [SimpleNamespace(token=encrypt_secret("xoxp-1"))]
+    _member(monkeypatch, None)
+    _self_link(monkeypatch, provable=False)
+    with pytest.raises(UnlinkableSlackAccountError):
+        await complete(None, CLIENT, ORG, USER, "code")  # type: ignore[arg-type]
+    assert slack.revoked == []
 
 
 async def test_unlinked_member_links_their_own_account(

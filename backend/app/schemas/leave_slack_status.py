@@ -14,7 +14,21 @@
 
 """DTOs for setting people's Slack status on WFH and leave days."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+# How finishing a connect went; the Leave page explains each one.
+ConnectOutcome = Literal[
+    "connected",
+    "moved",
+    "expired",
+    "not_yours",
+    "wrong_account",
+    "unlinkable",
+    "rotation",
+    "failed",
+]
 
 
 class SlackStatusSettings(BaseModel):
@@ -49,3 +63,16 @@ class SlackStatusConnect(BaseModel):
     """Where to send the member to approve."""
 
     url: str
+
+
+class SlackStatusFinish(BaseModel):
+    """What Slack sent back, handed on by the Leave page while signed in."""
+
+    code: str = Field(min_length=1, max_length=512)
+    state: str = Field(min_length=1, max_length=2048)
+
+
+class SlackStatusFinished(BaseModel):
+    """How it went."""
+
+    outcome: ConnectOutcome

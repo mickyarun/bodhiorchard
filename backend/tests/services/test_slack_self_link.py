@@ -94,6 +94,8 @@ async def test_matching_email_links_the_account(monkeypatch: pytest.MonkeyPatch)
         pytest.param({"slack_user": _slack_user(is_email_confirmed=False)}, id="unconfirmed"),
         pytest.param({"slack_user": _slack_user(deleted=True)}, id="deactivated"),
         pytest.param({"slack_user": _slack_user(is_bot=True)}, id="bot-account"),
+        pytest.param({"slack_user": _slack_user(is_stranger=True)}, id="other-workspace"),
+        pytest.param({"slack_user": _slack_user("asha@exämple.com")}, id="lookalike"),
         pytest.param({"slack_user": _slack_user(), "token": ""}, id="no-bot-token"),
         pytest.param({"slack_user": _slack_user(), "holders": [uuid.uuid4()]}, id="taken"),
         pytest.param({"slack_user": _slack_user(), "orgs": 2}, id="in-another-org"),

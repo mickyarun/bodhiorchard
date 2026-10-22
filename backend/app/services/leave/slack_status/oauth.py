@@ -42,6 +42,7 @@ from app.services.slack_user_api import (
     AUTHORIZE_URL,
     USER_SCOPES,
     SlackUserApiError,
+    UserGrant,
     exchange_code,
     revoke,
 )
@@ -126,11 +127,11 @@ async def complete(
     grant = await exchange_code(client.client_id, client.client_secret, code, redirect_url())
     member = await UserRepository(db).get_by_id_in_org(user_id, org_id)
     if member is None:
-        await _refuse(grant.token, WrongSlackAccountError())
+        await _refuse(db, grant, WrongSlackAccountError())
     if not member.slack_id and not await link_own_account(db, org_id, member, grant.slack_user_id):
-        await _refuse(grant.token, UnlinkableSlackAccountError())
+        await _refuse(db, grant, UnlinkableSlackAccountError())
     if member.slack_id != grant.slack_user_id:
-        await _refuse(grant.token, WrongSlackAccountError())
+        await _refuse(db, grant, WrongSlackAccountError())
     accounts = SlackStatusAccountRepository(db)
     others = await accounts.links_elsewhere(grant.slack_user_id, org_id)
     await accounts.remove_elsewhere(grant.slack_user_id, org_id)
@@ -140,11 +141,18 @@ async def complete(
     return Connected(moved=bool(others), stale_tokens=_stale(others, grant.token))
 
 
-async def _refuse(token: str, error: WrongSlackAccountError) -> NoReturn:
-    """Hand the unused token back, then raise. Nothing was saved, so it goes
-    back now; best effort, as the member should still hear why."""
-    with contextlib.suppress(SlackUserApiError, httpx.HTTPError):
-        await revoke(token)
+async def _refuse(db: AsyncSession, grant: UserGrant, error: WrongSlackAccountError) -> NoReturn:
+    """Hand the unused token back, then raise; best effort, as the member
+    should still hear why.
+
+    Slack gives the same person the same token again, so if that account is
+    already connected (say, from their other profile here) the token is in
+    use, and handing it back would switch their status off: it's kept.
+    """
+    links = await SlackStatusAccountRepository(db).links_for_account(grant.slack_user_id)
+    if not any(decrypt_secret(link.token) == grant.token for link in links):
+        with contextlib.suppress(SlackUserApiError, httpx.HTTPError):
+            await revoke(grant.token)
     raise error
 
 
