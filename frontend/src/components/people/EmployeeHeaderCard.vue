@@ -19,9 +19,15 @@
 <template>
   <v-card color="surface" class="pa-6 mb-4" rounded="lg">
     <div class="d-flex ga-4 align-start flex-wrap">
-      <v-avatar size="64" color="primary" variant="tonal">
-        <span class="text-h6 font-weight-bold">{{ initials }}</span>
-      </v-avatar>
+      <EmployeeAvatar
+        :user-id="record.user_id"
+        :name="record.name"
+        :avatar-url="record.avatar_url"
+        :editable="record.can_edit_avatar"
+        :size="64"
+        @updated="emit('avatar-updated', $event)"
+        @error="emit('avatar-error', $event)"
+      />
       <div class="flex-grow-1" style="min-width: 0">
         <div class="d-flex align-center ga-2 flex-wrap">
           <h1 class="text-h5 font-weight-bold bo-display">{{ record.name }}</h1>
@@ -53,6 +59,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import EditNameDialog from '@/components/people/EditNameDialog.vue'
+import EmployeeAvatar from '@/components/people/EmployeeAvatar.vue'
 import EmployeeStatusChip from '@/components/people/EmployeeStatusChip.vue'
 import type { EmployeeRecord } from '@/types/employee'
 import { EMPLOYMENT_TYPE_LABELS, formatDateOnly, workplaceLabel } from '@/utils/employee'
@@ -60,15 +67,11 @@ import { EMPLOYMENT_TYPE_LABELS, formatDateOnly, workplaceLabel } from '@/utils/
 const props = defineProps<{ record: EmployeeRecord }>()
 const editingName = ref(false)
 
-const initials = computed(
-  () =>
-    props.record.name
-      .split(' ')
-      .map(part => part[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2) || '?',
-)
+const emit = defineEmits<{
+  /** New photo URL, or null after a removal. */
+  'avatar-updated': [avatarUrl: string | null]
+  'avatar-error': [message: string]
+}>()
 
 const roleLine = computed(() =>
   [props.record.work.designation, props.record.work.department].filter(Boolean).join(' · ') ||

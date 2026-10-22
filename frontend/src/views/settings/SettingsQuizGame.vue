@@ -22,19 +22,12 @@ import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import SettingsPageShell from '@/components/settings/SettingsPageShell.vue'
 import { useQuizReviewStore } from '@/stores/quizReview'
 import type { QuizDifficulty, QuizSettings } from '@/types/quiz'
+import { WEEKDAY_ITEMS } from '@/utils/schedule'
+import { timezoneOptions } from '@/utils/timezones'
 
 const store = useQuizReviewStore()
 const saveSuccess = ref(false)
 
-const WEEKDAYS = [
-  { title: 'Mon', value: 0 },
-  { title: 'Tue', value: 1 },
-  { title: 'Wed', value: 2 },
-  { title: 'Thu', value: 3 },
-  { title: 'Fri', value: 4 },
-  { title: 'Sat', value: 5 },
-  { title: 'Sun', value: 6 },
-]
 const DIFFICULTIES: { label: string; value: QuizDifficulty }[] = [
   { label: 'Easy', value: 'easy' },
   { label: 'Medium', value: 'medium' },
@@ -47,15 +40,6 @@ const TYPES = [
   { title: 'Fill in the blank', value: 'fill_blank' },
 ]
 
-function timezones(): string[] {
-  try {
-    return (Intl as unknown as { supportedValuesOf: (k: string) => string[] }).supportedValuesOf(
-      'timeZone'
-    )
-  } catch {
-    return []
-  }
-}
 
 const form = ref<QuizSettings | null>(null)
 
@@ -112,7 +96,7 @@ onMounted(load)
 
       <v-select
         v-model="form.activeWeekdays"
-        :items="WEEKDAYS"
+        :items="WEEKDAY_ITEMS"
         label="Quiz days"
         multiple
         chips
@@ -133,7 +117,7 @@ onMounted(load)
         />
         <v-autocomplete
           v-model="form.timezone"
-          :items="timezones()"
+          :items="timezoneOptions(form.timezone)"
           label="Timezone (blank = server)"
           clearable
           variant="outlined"

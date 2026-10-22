@@ -39,6 +39,9 @@ dependencies = [
     "python-multipart>=0.0.6",
     "httpx>=0.27.0",
     "fastembed>=0.4.0",
+    # Profile-photo re-encoding: strips EXIF/GPS and normalises size and
+    # format before a photo is served publicly.
+    "pillow>=10.0",
     "pgvector>=0.2.4",
     "redis>=5.0.0,<9",
     "structlog>=24.1.0",

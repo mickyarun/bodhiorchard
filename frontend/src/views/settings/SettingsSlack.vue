@@ -648,7 +648,7 @@ async function saveChanges(): Promise<void> {
           slack_id: m.slack_id,
           slack_name: m.slack_name,
           slack_email: m.slack_email!,
-          slack_avatar: m.slack_avatar,
+          // No photo URL: the backend fetches it from Slack's API itself.
         }))
       const { data } = await api.post('/v1/settings/slack/import-members', { imports })
       messages.push(`Imported ${data.imported} member${data.imported !== 1 ? 's' : ''}`)

@@ -385,6 +385,123 @@ class QuizGameSettings(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class CelebrationWeekendPolicy(StrEnum):
+    """What happens when a celebration falls on a non-posting weekday."""
+
+    # Never mention it — the day passes silently.
+    SKIP = "skip"
+    # The next posting day's digest also carries the days it skipped over.
+    ROLL_FORWARD = "roll_forward"
+    # The previous posting day celebrates early.
+    ROLL_BACKWARD = "roll_backward"
+
+
+def _default_celebration_weekdays() -> list[int]:
+    """Default posting days — every day, Python ``date.weekday()`` ints.
+
+    Unlike the quiz, celebrations default to all seven days: a birthday
+    on a Saturday is still that Saturday, and announcing it two days late
+    reads worse than a weekend notification. ``weekend_policy`` only
+    comes into play for an org that deliberately narrows this.
+    """
+    return [0, 1, 2, 3, 4, 5, 6]
+
+
+def _default_gif_tags() -> list[str]:
+    """Giphy search tags, picked at random per post."""
+    return ["celebration", "confetti", "party", "fireworks", "cheers"]
+
+
+class CelebrationSettings(BaseModel):
+    """Org-level birthday and work-anniversary announcements.
+
+    Stored under ``org.config["celebrations"]``. One digest is posted per
+    local date to ``slack_channel_id`` at ``post_time`` in ``timezone``
+    (``None`` = server-local), covering every celebrant that date.
+
+    Posting runs every day by default, weekends included, so a
+    celebration is announced on the day it falls. Narrowing
+    ``active_weekdays`` brings ``weekend_policy`` into play for the days
+    that are then skipped.
+
+    Announcements are opt-out **per employee** via
+    ``employee_profiles.celebrate_birthday`` / ``celebrate_anniversary``;
+    these settings are the org-wide master switches on top of that. Birth
+    years are never published — only the day and month.
+    """
+
+    enabled: bool = False
+    # Slack channel ID (``C...``), not a ``#name`` — the bot must be a member.
+    # Without it the scheduler no-ops, which is why ``enabled`` defaults False.
+    slack_channel_id: str | None = Field(default=None, alias="slackChannelId")
+    post_time: str = Field(
+        default="09:30",
+        alias="postTime",
+        pattern=r"^([01]\d|2[0-3]):[0-5]\d$",
+    )
+    timezone: str | None = Field(default=None)
+    active_weekdays: list[int] = Field(
+        default_factory=_default_celebration_weekdays,
+        alias="activeWeekdays",
+        min_length=1,
+    )
+    weekend_policy: CelebrationWeekendPolicy = Field(
+        default=CelebrationWeekendPolicy.ROLL_FORWARD,
+        alias="weekendPolicy",
+    )
+    include_birthdays: bool = Field(default=True, alias="includeBirthdays")
+    include_anniversaries: bool = Field(default=True, alias="includeAnniversaries")
+    # ``@channel`` pings everyone in the channel. Off by default — an org
+    # with a busy #general will not thank us for a daily broadcast ping.
+    mention_channel: bool = Field(default=False, alias="mentionChannel")
+    gif_enabled: bool = Field(default=True, alias="gifEnabled")
+    # Giphy content rating ceiling. ``g`` keeps a work channel safe.
+    gif_rating: Literal["g", "pg", "pg-13"] = Field(default="g", alias="gifRating")
+    gif_tags: list[str] = Field(default_factory=_default_gif_tags, alias="gifTags")
+
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone(cls, value: str | None) -> str | None:
+        """Reject unknown IANA timezone names. ``None`` is allowed."""
+        return validate_optional_timezone(value)
+
+    @field_validator("active_weekdays")
+    @classmethod
+    def _validate_weekdays(cls, value: list[int]) -> list[int]:
+        """Each entry must be a valid weekday (0=Mon..6=Sun); dedupe and sort."""
+        for day in value:
+            if day < 0 or day > 6:
+                raise ValueError(f"weekday out of range (0-6): {day}")
+        return sorted(set(value))
+
+    @field_validator("slack_channel_id")
+    @classmethod
+    def _normalize_channel(cls, value: str | None) -> str | None:
+        """Trim, drop a pasted leading ``#``, and treat blank as unset."""
+        if value is None:
+            return None
+        cleaned = value.strip().lstrip("#")
+        return cleaned or None
+
+    @field_validator("gif_tags")
+    @classmethod
+    def _clean_tags(cls, value: list[str]) -> list[str]:
+        """Trim and drop blanks; fall back to the defaults if nothing survives."""
+        tags = [t.strip() for t in value if t.strip()]
+        return tags or _default_gif_tags()
+
+    @model_validator(mode="after")
+    def _channel_required_when_enabled(self) -> "CelebrationSettings":
+        """A digest with nowhere to go is a misconfiguration, not a no-op."""
+        if self.enabled and not self.slack_channel_id:
+            raise ValueError("slack_channel_id is required when celebrations are enabled")
+        if self.enabled and not (self.include_birthdays or self.include_anniversaries):
+            raise ValueError("enable at least one of birthdays or anniversaries")
+        return self
+
+    model_config = {"populate_by_name": True}
+
+
 class ConnectionsRead(BaseModel):
     """Response schema for GET /settings/connections."""
 

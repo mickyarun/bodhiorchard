@@ -77,6 +77,12 @@ def setup_logging(log_level: str = "INFO", json_output: bool = True) -> None:
 
     level = getattr(logging, log_level.upper(), logging.INFO)
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=level)
+    # httpx logs every request URL at INFO. Some third-party APIs only take
+    # their key as a query parameter (Giphy's ``api_key``), so at INFO those
+    # secrets would land in stdout and the rotating log file. Request-level
+    # noise is also worthless at INFO; warnings and errors still come through.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(max(level, logging.WARNING))
     _attach_file_handler(level)
 
 
