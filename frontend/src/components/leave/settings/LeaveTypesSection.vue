@@ -15,7 +15,8 @@
  -->
 
 <!-- A policy's leave types. Switched-off types sit apart: they can't be
-     requested any more, but their past requests and balances stay. -->
+     requested any more, but their past requests and balances stay. Types
+     from the library open their own dialog (quota and on/off only). -->
 <template>
   <LeaveSectionCard
     icon="mdi-shape-outline"
@@ -26,7 +27,8 @@
       <v-btn v-if="!hasPeriodLeave(store.types)" variant="text" prepend-icon="mdi-water-outline" @click="addPeriodLeave">
         Add period leave
       </v-btn>
-      <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="edit(null)">Add leave type</v-btn>
+      <v-btn variant="text" prepend-icon="mdi-plus" @click="edit(null)">Add leave type</v-btn>
+      <v-btn color="primary" variant="tonal" prepend-icon="mdi-bookshelf" @click="picking = true">Add from library</v-btn>
     </template>
     <AppCallout v-if="store.typesError" variant="error" class="mb-4">{{ store.typesError }}</AppCallout>
     <LeaveEmptyState
@@ -36,7 +38,8 @@
       body="Add the leave people can request, such as casual, sick or parental."
     >
       <template #actions>
-        <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" @click="edit(null)">Add leave type</v-btn>
+        <v-btn color="primary" variant="flat" prepend-icon="mdi-bookshelf" @click="picking = true">Add from library</v-btn>
+        <v-btn variant="text" prepend-icon="mdi-plus" @click="edit(null)">Add leave type</v-btn>
         <v-btn variant="text" prepend-icon="mdi-water-outline" @click="addPeriodLeave">Add period leave</v-btn>
       </template>
     </LeaveEmptyState>
@@ -57,7 +60,15 @@
         </v-expand-transition>
       </div>
     </template>
-    <LeaveTypeDialog v-model="dialogOpen" :policy-id="policy.id" :policy-name="policy.name" :type="editing" :preset="preset" />
+    <LeaveTypeDialog
+      v-model="dialogOpen"
+      :initial="editing && draftFromType(editing)"
+      :scope="`on ${policy.name}`"
+      :save="saveOwn"
+      :preset="preset"
+    />
+    <LinkedTypeDialog v-model="linkedOpen" :policy-name="policy.name" :type="editing" />
+    <LibraryPickerDialog v-model="picking" :policy="policy" />
   </LeaveSectionCard>
 </template>
 
@@ -68,17 +79,21 @@ import LeaveEmptyState from '@/components/leave/settings/LeaveEmptyState.vue'
 import LeaveSectionCard from '@/components/leave/settings/LeaveSectionCard.vue'
 import LeaveTypeDialog from '@/components/leave/settings/LeaveTypeDialog.vue'
 import LeaveTypeTable from '@/components/leave/settings/LeaveTypeTable.vue'
+import LibraryPickerDialog from '@/components/leave/settings/LibraryPickerDialog.vue'
+import LinkedTypeDialog from '@/components/leave/settings/LinkedTypeDialog.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useLeavePolicyConfigStore } from '@/stores/leavePolicyConfig'
 import type { LeaveTypeRead, LeaveTypeWrite, PolicyRead } from '@/types/leavePolicy'
 import { splitLeaveTypes } from '@/utils/leavePolicyDisplay'
-import { hasPeriodLeave, periodLeave } from '@/utils/leaveTypeDraft'
+import { draftFromType, hasPeriodLeave, periodLeave } from '@/utils/leaveTypeDraft'
 
 const props = defineProps<{ policy: PolicyRead }>()
 
 const store = useLeavePolicyConfigStore()
 const { canApproveLeave } = usePermissions()
 const dialogOpen = ref(false)
+const linkedOpen = ref(false)
+const picking = ref(false)
 const editing = ref<LeaveTypeRead | null>(null)
 const preset = ref<LeaveTypeWrite | null>(null)
 const showOff = ref(false)
@@ -87,7 +102,12 @@ const groups = computed(() => splitLeaveTypes(store.types))
 function edit(type: LeaveTypeRead | null): void {
   editing.value = type
   preset.value = null
-  dialogOpen.value = true
+  if (type?.template_id) linkedOpen.value = true
+  else dialogOpen.value = true
+}
+
+function saveOwn(body: LeaveTypeWrite): Promise<string | null> {
+  return store.saveType(props.policy.id, body, editing.value?.id ?? null)
 }
 
 /** Opens the dialog filled in for period leave; HR reviews and saves it. */

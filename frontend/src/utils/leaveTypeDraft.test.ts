@@ -27,6 +27,8 @@ const read = (over: Partial<LeaveTypeRead> = {}): LeaveTypeRead => ({
   code: 'CL',
   id: 't1',
   policy_id: 'p1',
+  template_id: null,
+  own_quota: false,
   ...over,
 })
 

@@ -51,6 +51,7 @@ SHARED_MODULES = frozenset(
         "app.api.v1.leave_reports",
         "app.api.v1.leave_reports_export",
         "app.api.v1.leave_types",
+        "app.api.v1.leave_library",
         "app.api.v1.slack_status_callback",
         "app.api.v1.github_webhook",
         "app.api.v1.internal_colyseus",

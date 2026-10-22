@@ -71,6 +71,7 @@ from app.models.leave_policy import LeavePolicy
 from app.models.leave_request import LeaveRequest
 from app.models.leave_slack_prompt import LeaveSlackPrompt
 from app.models.leave_type import LeaveType
+from app.models.leave_type_template import LeaveTypeTemplate
 from app.models.mcp_audit_log import MCPAuditLogEntry
 from app.models.minigame import MinigameScore, MinigameSession
 from app.models.notification import Notification, NotificationType
@@ -170,6 +171,7 @@ __all__ = [
     "LeaveSlackPrompt",
     "SlackStatusLink",
     "LeaveType",
+    "LeaveTypeTemplate",
     "PolicyHoliday",
     "BugComment",
     "BugSeverity",

@@ -19,37 +19,15 @@ import uuid
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1._leave_admin import load_policy
+from app.api.v1._leave_admin import load_policy, load_type, type_read
 from app.core.deps import PermissionSet, get_db, get_permission_set, require_permissions
-from app.models.leave_type import LeaveType
 from app.models.user import User
 from app.repositories.leave_type import LeaveTypeRepository
-from app.schemas.leave_policy import LeaveTypeRead, LeaveTypeWrite
-from app.services.leave import type_admin
-from app.services.leave.errors import LeaveNotFoundError
+from app.schemas.leave_type import LeaveTypeRead, LeaveTypeWrite
+from app.services.leave import type_admin, type_linking
 from app.services.leave.permissions import APPROVE, CONFIGURE
 
 router = APIRouter(tags=["leave-admin"])
-
-
-def _read(t: LeaveType) -> LeaveTypeRead:
-    return LeaveTypeRead(
-        id=t.id,
-        policy_id=t.policy_id,
-        name=t.name,
-        code=t.code,
-        annual_quota_days=t.annual_quota_days,
-        accrual=t.accrual,
-        is_paid=t.is_paid,
-        is_encashable=t.is_encashable,
-        counts_toward_warning=t.counts_toward_warning,
-        eligible_genders=t.eligible_genders,
-        auto_approve=t.auto_approve,
-        monthly_limit_days=t.monthly_limit_days,
-        stops_at_balance=t.stops_at_balance,
-        color_key=t.color_key,
-        is_active=t.is_active,
-    )
 
 
 @router.get("/policies/{policy_id}/types", response_model=list[LeaveTypeRead])
@@ -61,7 +39,7 @@ async def list_types(
     """All types on a policy, active and inactive."""
     policy = await load_policy(db, current_user.org_id, policy_id)
     types = await LeaveTypeRepository(db, org_id=current_user.org_id).list_for_policy(policy.id)
-    return [_read(t) for t in types]
+    return [type_read(t) for t in types]
 
 
 @router.post(
@@ -81,7 +59,7 @@ async def create_type(
     created = await type_admin.create_type(
         db, policy, current_user.id, body, may_approve=perms.has(APPROVE)
     )
-    return _read(created)
+    return type_read(created)
 
 
 @router.put("/types/{type_id}", response_model=LeaveTypeRead)
@@ -92,11 +70,12 @@ async def update_type(
     perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> LeaveTypeRead:
-    """Edit a type. Quota changes apply to years not yet allocated."""
-    leave_type = await LeaveTypeRepository(db, org_id=current_user.org_id).get_by_id(type_id)
-    if leave_type is None:
-        raise LeaveNotFoundError("Leave type not found.")
-    await type_admin.update_type(
+    """Edit a policy's own type. Quota changes apply to years not yet allocated.
+
+    A type that follows the library is changed there, or via ``/link``.
+    """
+    leave_type = await load_type(db, current_user.org_id, type_id)
+    await type_linking.update_own_type(
         db, leave_type, current_user.id, body, may_approve=perms.has(APPROVE)
     )
-    return _read(leave_type)
+    return type_read(leave_type)

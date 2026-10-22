@@ -27,6 +27,16 @@ const event = (action: ConfigEventRead['action'], changes: Record<string, unknow
   }) satisfies ConfigEventRead
 
 describe('changeLines', () => {
+  it('names the library a type follows, or that it stopped', () => {
+    expect(changeLines({ type: 'SL', library: [null, 'Sick'], own_quota: [false, true] })).toEqual([
+      'Library type: Sick',
+      "Policy's own yearly quota: no → yes",
+    ])
+    expect(changeLines({ library: ['Sick', null] })).toEqual([
+      "Library type: Sick → none (the policy's own)",
+    ])
+  })
+
   it('describes each changed field in plain words', () => {
     expect(
       changeLines({
@@ -71,6 +81,12 @@ describe('changeLines', () => {
 describe('eventTitle', () => {
   it('names the leave type and counts people moved', () => {
     expect(eventTitle(event('type_updated', { type: 'CL' }))).toBe('Changed leave type CL')
+    expect(eventTitle(event('type_updated', { type: 'SL', library: 'Sick' }))).toBe(
+      'Changed leave type SL in the library',
+    )
+    expect(eventTitle(event('type_updated', { type: 'SL', library: [null, 'Sick'] }))).toBe(
+      'Changed leave type SL',
+    )
     expect(eventTitle(event('employees_assigned', { assigned: 1 }))).toBe(
       'Moved 1 person onto this policy',
     )

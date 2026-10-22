@@ -14,19 +14,21 @@
  * limitations under the License.
  -->
 
-<!-- Add or edit a leave type. Types are switched off, never deleted, so
-     past requests keep their meaning. -->
+<!-- Add or edit a leave type, on one policy or in the library. Types are
+     switched off, never deleted, so past requests keep their meaning. The
+     caller saves (`save` returns an error message or null). -->
 <template>
   <v-dialog :model-value="modelValue" max-width="600" :fullscreen="xs" scrollable @update:model-value="emit('update:modelValue', $event)">
     <v-card color="surface" rounded="lg">
       <div class="d-flex align-start ga-2 pa-6 pb-2">
         <div class="flex-grow-1">
-          <h2 class="text-h6 font-weight-bold">{{ type ? 'Edit leave type' : 'Add leave type' }}</h2>
-          <p class="text-body-2 text-medium-emphasis">Applies to {{ draft.eligible_genders ? `people recorded as ${gendersLabel(draft.eligible_genders)}` : 'everyone' }} on {{ policyName }}.</p>
+          <h2 class="text-h6 font-weight-bold">{{ initial ? `Edit ${noun}` : `Add ${noun}` }}</h2>
+          <p class="text-body-2 text-medium-emphasis">Applies to {{ draft.eligible_genders ? `people recorded as ${gendersLabel(draft.eligible_genders)}` : 'everyone' }} {{ scope }}.</p>
         </div>
         <v-btn icon="mdi-close" variant="text" size="small" aria-label="Close" @click="close" />
       </div>
       <v-card-text class="px-6">
+        <AppCallout v-if="note" variant="info" class="mb-4">{{ note }}</AppCallout>
         <v-form class="d-flex flex-column" @submit.prevent="submit">
           <div class="group" role="group" :aria-labelledby="ids.basics">
             <div :id="ids.basics" class="group__title text-overline text-medium-emphasis">Basics</div>
@@ -60,7 +62,7 @@
             <LeaveSwitchRow v-model="draft.is_encashable" label="Encashable at exit" description="Unused days are paid out when someone leaves." />
             <LeaveSwitchRow v-model="draft.counts_toward_warning" label="Counts toward the high-leave warning" description="Off for sick leave, usually. The lines are set in Rules." />
             <LeaveSwitchRow
-              v-if="type"
+              v-if="initial && !library"
               v-model="draft.is_active"
               label="Available to request"
               description="Switch off to retire it. Past requests and balances are kept."
@@ -73,7 +75,7 @@
       <div class="d-flex justify-end ga-2 pa-4">
         <v-btn variant="text" @click="close">Cancel</v-btn>
         <v-btn color="primary" variant="flat" :loading="saving" :disabled="!valid" @click="submit">
-          {{ type ? 'Save changes' : 'Add leave type' }}
+          {{ initial ? 'Save changes' : `Add ${noun}` }}
         </v-btn>
       </div>
     </v-card>
@@ -89,25 +91,30 @@ import LeaveTypeAccessFields from '@/components/leave/settings/LeaveTypeAccessFi
 import LeaveTypeAllowanceField from '@/components/leave/settings/LeaveTypeAllowanceField.vue'
 import LeaveTypeColorPicker from '@/components/leave/settings/LeaveTypeColorPicker.vue'
 import { usePermissions } from '@/composables/usePermissions'
-import { useLeavePolicyConfigStore } from '@/stores/leavePolicyConfig'
-import type { LeaveTypeRead, LeaveTypeWrite } from '@/types/leavePolicy'
+import type { LeaveTypeWrite } from '@/types/leavePolicy'
 import { codeFromName, toNumberOrNull } from '@/utils/leave'
 import { FIELD_PROPS, gendersLabel } from '@/utils/leavePolicyDisplay'
-import { blankType, draftFromType, validMonthlyLimit } from '@/utils/leaveTypeDraft'
+import { blankType, validMonthlyLimit } from '@/utils/leaveTypeDraft'
 
 const props = defineProps<{
   modelValue: boolean
-  policyId: string
-  policyName: string
-  type: LeaveTypeRead | null
-  /** A new type's starting values (e.g. period leave); blank when absent. */
+  /** The type being edited; null adds one. */
+  initial: LeaveTypeWrite | null
+  /** After "Applies to everyone": "on India", "on every policy that uses it". */
+  scope: string
+  save: (body: LeaveTypeWrite) => Promise<string | null>
+  /** A new type's starting values (e.g. period leave). */
   preset?: LeaveTypeWrite | null
+  /** A library type: no on/off switch, that's per policy. */
+  library?: boolean
+  /** Shown above the form, e.g. that an edit reaches every policy using it. */
+  note?: string
 }>()
 const emit = defineEmits<(e: 'update:modelValue', value: boolean) => void>()
 
 const DEFAULT_QUOTA = 12
 const ids = { basics: useId(), allowance: useId(), access: useId(), appearance: useId() }
-const store = useLeavePolicyConfigStore()
+const noun = computed(() => (props.library ? 'library type' : 'leave type'))
 const { canApproveLeave } = usePermissions()
 const { xs } = useDisplay()
 const draft = ref<LeaveTypeWrite>(blankType())
@@ -137,12 +144,12 @@ watch(
   () => props.modelValue,
   open => {
     if (!open) return
-    const start = props.type ? draftFromType(props.type) : (props.preset ?? blankType())
+    const start = props.initial ?? props.preset ?? blankType()
     draft.value = { ...start }
-    const current = props.type || props.preset ? toNumberOrNull(start.annual_quota_days) : DEFAULT_QUOTA
-    unlimited.value = !!props.type && current === null
+    const current = props.initial || props.preset ? toNumberOrNull(start.annual_quota_days) : DEFAULT_QUOTA
+    unlimited.value = !!props.initial && current === null
     quota.value = current ?? DEFAULT_QUOTA
-    codeTouched.value = !!props.type || !!props.preset
+    codeTouched.value = !!props.initial || !!props.preset
     error.value = ''
   },
 )
@@ -167,7 +174,7 @@ async function submit(): Promise<void> {
     accrual: unlimited.value ? 'upfront' : draft.value.accrual,
     stops_at_balance: !unlimited.value && draft.value.stops_at_balance,
   }
-  error.value = (await store.saveType(props.policyId, body, props.type?.id ?? null)) ?? ''
+  error.value = (await props.save(body)) ?? ''
   saving.value = false
   if (!error.value) close()
 }

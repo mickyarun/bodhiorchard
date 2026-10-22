@@ -38,7 +38,7 @@ export function blankType(): LeaveTypeWrite {
 }
 
 export function draftFromType(type: LeaveTypeRead): LeaveTypeWrite {
-  const { id: _id, policy_id: _policy, ...write } = type
+  const { id: _id, policy_id: _policy, template_id: _template, own_quota: _own, ...write } = type
   return write
 }
 

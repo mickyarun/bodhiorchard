@@ -19,9 +19,12 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.leave_policy import LeavePolicy
+from app.models.leave_type import LeaveType
 from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.leave_policy_members import LeavePolicyMemberRepository
+from app.repositories.leave_type import LeaveTypeRepository
 from app.schemas.leave_policy import PolicyRead
+from app.schemas.leave_type import LeaveTypeRead
 from app.services.leave.errors import LeaveNotFoundError
 
 
@@ -31,6 +34,14 @@ async def load_policy(db: AsyncSession, org_id: uuid.UUID, policy_id: uuid.UUID)
     if policy is None:
         raise LeaveNotFoundError("Policy not found.")
     return policy
+
+
+async def load_type(db: AsyncSession, org_id: uuid.UUID, type_id: uuid.UUID) -> LeaveType:
+    """A leave type in this org, or 404."""
+    leave_type = await LeaveTypeRepository(db, org_id=org_id).get_by_id(type_id)
+    if leave_type is None:
+        raise LeaveNotFoundError("Leave type not found.")
+    return leave_type
 
 
 async def policy_read(db: AsyncSession, policy: LeavePolicy) -> PolicyRead:
@@ -58,4 +69,27 @@ async def policy_read(db: AsyncSession, policy: LeavePolicy) -> PolicyRead:
             policy
         ),
         has_requests=await repo.has_requests(policy.id),
+    )
+
+
+def type_read(t: LeaveType) -> LeaveTypeRead:
+    """Wire shape of a policy's leave type."""
+    return LeaveTypeRead(
+        id=t.id,
+        policy_id=t.policy_id,
+        template_id=t.template_id,
+        own_quota=t.own_quota,
+        name=t.name,
+        code=t.code,
+        annual_quota_days=t.annual_quota_days,
+        accrual=t.accrual,
+        is_paid=t.is_paid,
+        is_encashable=t.is_encashable,
+        counts_toward_warning=t.counts_toward_warning,
+        eligible_genders=t.eligible_genders,
+        auto_approve=t.auto_approve,
+        monthly_limit_days=t.monthly_limit_days,
+        stops_at_balance=t.stops_at_balance,
+        color_key=t.color_key,
+        is_active=t.is_active,
     )

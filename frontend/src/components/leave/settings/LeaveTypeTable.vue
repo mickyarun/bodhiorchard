@@ -40,12 +40,16 @@
         <td>
           <span class="dot" aria-hidden="true" :style="{ background: `rgb(var(--v-theme-${swatchColor(type.color_key)}))` }" />
           <span class="font-weight-medium">{{ type.name }}</span>
+          <v-chip v-if="type.template_id" size="x-small" variant="tonal" color="primary" label class="ml-2">Library</v-chip>
           <v-chip v-if="!type.is_active" size="x-small" variant="tonal" label class="ml-2">Off</v-chip>
           <div v-if="typeRuleTags(type).length" class="tags">
             <v-chip v-for="tag in typeRuleTags(type)" :key="tag" size="x-small" variant="outlined" label>{{ tag }}</v-chip>
           </div>
         </td>
-        <td>{{ allowanceLabel(type) }}</td>
+        <td>
+          {{ allowanceLabel(type) }}
+          <span v-if="type.own_quota" class="text-caption text-medium-emphasis">(this policy's own)</span>
+        </td>
         <td>
           <v-chip size="small" variant="tonal" :color="type.is_paid ? 'success' : undefined" label>
             {{ type.is_paid ? 'Paid' : 'Unpaid' }}

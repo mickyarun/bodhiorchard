@@ -48,6 +48,8 @@ const FIELD_LABELS: Record<string, string> = {
   leave_warning_days: 'High-leave warning (days)',
   color_key: 'Colour',
   is_active: 'Active',
+  own_quota: "Policy's own yearly quota",
+  library: 'Library type',
   is_default: 'Default policy',
 }
 
@@ -57,7 +59,9 @@ function formatValue(field: string, value: unknown): string {
       ? 'no limit'
       : field === 'eligible_genders'
         ? 'everyone'
-        : '—'
+        : field === 'library'
+          ? "none (the policy's own)"
+          : '—'
   }
   if (field === 'working_days' && Array.isArray(value)) {
     return value.map(day => WEEKDAY_SHORT[Number(day)] ?? String(day)).join(', ')
@@ -101,7 +105,10 @@ export function eventTitle(event: ConfigEventRead): string {
     case 'type_created':
       return `Added leave type ${type}`
     case 'type_updated':
-      return `Changed leave type ${type}`
+      // A plain name (not an [old, new] pair) means the change came from editing the library.
+      return typeof event.changes.library === 'string'
+        ? `Changed leave type ${type} in the library`
+        : `Changed leave type ${type}`
     case 'employees_assigned': {
       const count = Number(event.changes.assigned ?? 0)
       return `Moved ${count} ${count === 1 ? 'person' : 'people'} onto this policy`
