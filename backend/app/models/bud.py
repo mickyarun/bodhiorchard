@@ -228,7 +228,16 @@ class BUDDesign(BaseModel):
 
     __tablename__ = "bud_designs"
     __table_args__ = (
-        UniqueConstraint("bud_id", "repo_id", name="uq_bud_design_bud_repo"),
+        # NULLS NOT DISTINCT: the BUD-level design (repo_id NULL) is one
+        # key, not one-per-row. A plain unique constraint lets concurrent
+        # upserts insert several (bud, NULL) rows. The repository's
+        # ON CONFLICT upsert targets this constraint by name.
+        UniqueConstraint(
+            "bud_id",
+            "repo_id",
+            name="uq_bud_designs_bud_repo",
+            postgresql_nulls_not_distinct=True,
+        ),
         Index("ix_bud_designs_bud_id", "bud_id"),
     )
 

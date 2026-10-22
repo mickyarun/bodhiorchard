@@ -92,6 +92,27 @@ async def _assert_design_system_available(
             )
 
 
+async def _upsert_pending_designs(
+    design_repo: BUDDesignRepository, bud_id: uuid.UUID, repo_ids: list[uuid.UUID | None]
+) -> list[tuple[uuid.UUID | None, str]]:
+    """Upsert a PENDING design row per repo; return ``(repo_id, design_id)`` pairs.
+
+    Rows are written in a fixed key order (BUD-level first, then by repo id)
+    so two overlapping requests take the row locks in the same order instead
+    of deadlocking. The returned pairs keep the caller's order, with a
+    repeated repo listed once so it doesn't get two jobs on one row.
+    """
+    design_ids: dict[uuid.UUID | None, str] = {}
+    for rid in sorted(set(repo_ids), key=lambda r: (r is not None, str(r))):
+        design = await design_repo.upsert(
+            bud_id=bud_id,
+            repo_id=rid,
+            status=BUDDesignStatus.PENDING,
+        )
+        design_ids[rid] = str(design.id)
+    return [(rid, design_ids[rid]) for rid in dict.fromkeys(repo_ids)]
+
+
 @router.get(
     "",
     response_model=list[BUDDesignRead],
@@ -137,14 +158,7 @@ async def generate_designs(
 
     await _assert_design_system_available(db, current_user.org_id, repo_ids)
 
-    design_rows: list[tuple[uuid.UUID | None, str]] = []
-    for rid in repo_ids:
-        design = await design_repo.upsert(
-            bud_id=bud.id,
-            repo_id=rid,
-            status=BUDDesignStatus.PENDING,
-        )
-        design_rows.append((rid, str(design.id)))
+    design_rows = await _upsert_pending_designs(design_repo, bud.id, repo_ids)
     await db.flush()
 
     # Resolve skill + create agent task BEFORE enqueuing jobs

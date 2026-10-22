@@ -257,3 +257,25 @@ async def test_upload_over_size_limit_rejected(
 
     assert excinfo.value.status_code == 413
     design_repo.upsert.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pending_designs_upsert_in_lock_order_but_return_caller_order() -> None:
+    """Rows are written BUD-level first then by repo id; pairs keep request order, deduped.
+
+    A fixed write order means two overlapping generate requests take the
+    design-row locks in the same order and can't deadlock.
+    """
+    low, high = uuid.UUID(int=1), uuid.UUID(int=2)
+    ids = {None: uuid.uuid4(), low: uuid.uuid4(), high: uuid.uuid4()}
+    design_repo = MagicMock(
+        upsert=AsyncMock(side_effect=lambda **kw: SimpleNamespace(id=ids[kw["repo_id"]]))
+    )
+
+    pairs = await bud_designs._upsert_pending_designs(
+        design_repo, uuid.uuid4(), [high, None, low, high]
+    )
+
+    written = [call.kwargs["repo_id"] for call in design_repo.upsert.await_args_list]
+    assert written == [None, low, high]
+    assert pairs == [(high, str(ids[high])), (None, str(ids[None])), (low, str(ids[low]))]
