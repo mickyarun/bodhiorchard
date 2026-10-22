@@ -21,6 +21,7 @@ describe('connectOutcome', () => {
     expect(connectOutcome('connected')?.ok).toBe(true)
     expect(connectOutcome('moved')?.text).toContain('instead of your other team')
     expect(connectOutcome('wrong_account')?.text).toContain('your own Slack account')
+    expect(connectOutcome('unlinkable')?.text).toContain('Ask HR to link it')
     expect(connectOutcome('something_new')).toEqual(connectOutcome('failed'))
   })
 })

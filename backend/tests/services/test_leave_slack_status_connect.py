@@ -23,7 +23,11 @@ import pytest
 from app.core.encryption import encrypt_secret
 from app.services import slack_user_api
 from app.services.leave.slack_status import apply, oauth
-from app.services.leave.slack_status.oauth import WrongSlackAccountError, complete
+from app.services.leave.slack_status.oauth import (
+    UnlinkableSlackAccountError,
+    WrongSlackAccountError,
+    complete,
+)
 from app.services.leave.slack_status.settings import StatusClient
 from app.services.slack_user_api import SlackUserApiError, UserGrant
 
@@ -75,15 +79,32 @@ def slack(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     return rec
 
 
-def _member(monkeypatch: pytest.MonkeyPatch, slack_id: str | None) -> None:
+def _member(monkeypatch: pytest.MonkeyPatch, slack_id: str | None) -> SimpleNamespace:
+    member = SimpleNamespace(slack_id=slack_id)
+
     class Users:
         def __init__(self, *_a: Any) -> None:
             pass
 
         async def get_by_id_in_org(self, *_a: Any) -> object:
-            return SimpleNamespace(slack_id=slack_id)
+            return member
 
     monkeypatch.setattr(oauth, "UserRepository", Users)
+    return member
+
+
+def _self_link(monkeypatch: pytest.MonkeyPatch, *, provable: bool) -> list[str]:
+    """Stand in for slack_self_link: links the grant's account when ``provable``."""
+    tried: list[str] = []
+
+    async def link_own_account(_db: Any, _org: Any, member: Any, slack_user_id: str) -> bool:
+        tried.append(slack_user_id)
+        if provable:
+            member.slack_id = slack_user_id
+        return provable
+
+    monkeypatch.setattr(oauth, "link_own_account", link_own_account)
+    return tried
 
 
 async def test_own_account_is_kept(slack: Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -95,13 +116,38 @@ async def test_own_account_is_kept(slack: Recorder, monkeypatch: pytest.MonkeyPa
     assert slack.revoked == []
 
 
-@pytest.mark.parametrize("linked", ["U_COLLEAGUE", None])
 async def test_another_account_is_refused_and_handed_back(
-    slack: Recorder, monkeypatch: pytest.MonkeyPatch, linked: str | None
+    slack: Recorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _member(monkeypatch, linked)
-    with pytest.raises(WrongSlackAccountError):
+    _member(monkeypatch, "U_COLLEAGUE")
+    tried = _self_link(monkeypatch, provable=True)
+    with pytest.raises(WrongSlackAccountError) as raised:
         await complete(None, CLIENT, ORG, USER, "code")  # type: ignore[arg-type]
+    assert not isinstance(raised.value, UnlinkableSlackAccountError)
+    assert tried == []  # an existing link is never replaced from here
+    assert slack.saved == []
+    assert slack.revoked == ["xoxp-1"]
+
+
+async def test_unlinked_member_links_their_own_account(
+    slack: Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    member = _member(monkeypatch, None)
+    _self_link(monkeypatch, provable=True)
+    await complete(None, CLIENT, ORG, USER, "code")  # type: ignore[arg-type]
+    assert member.slack_id == "U_ME"
+    assert slack.saved == [(USER, "U_ME")]
+    assert slack.revoked == []
+
+
+async def test_unlinked_member_with_an_unprovable_account_is_sent_to_hr(
+    slack: Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    member = _member(monkeypatch, None)
+    _self_link(monkeypatch, provable=False)
+    with pytest.raises(UnlinkableSlackAccountError):
+        await complete(None, CLIENT, ORG, USER, "code")  # type: ignore[arg-type]
+    assert member.slack_id is None
     assert slack.saved == []
     assert slack.revoked == ["xoxp-1"]
 

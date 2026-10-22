@@ -28,7 +28,8 @@ export interface SlackStatusSettings {
 export interface SlackStatusMine {
   available: boolean
   connected: boolean
-  // Their Slack account is linked to their profile (needed to connect).
+  // A Slack account is linked to their profile; if not, connecting links the
+  // one they sign in with when its email matches theirs.
   linked: boolean
 }
 
@@ -44,6 +45,10 @@ const OUTCOMES: Record<string, { ok: boolean; text: string }> = {
   wrong_account: {
     ok: false,
     text: "That wasn't the Slack account linked to you here. Sign in to your own Slack account and try again.",
+  },
+  unlinkable: {
+    ok: false,
+    text: "We couldn't link that Slack account to you: its email doesn't match your email here, or it's already linked to someone. Ask HR to link it.",
   },
   rotation: {
     ok: false,

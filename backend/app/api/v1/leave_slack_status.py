@@ -87,11 +87,6 @@ async def connect_my_slack_status(
     client = await load_client(db, current_user.org_id)
     if not client.ready:
         raise HTTPException(status_code=409, detail="Slack status isn't set up for your team.")
-    if not current_user.slack_id:
-        raise HTTPException(
-            status_code=409,
-            detail="Your Slack account isn't linked yet. Ask HR to link it on your profile.",
-        )
     return SlackStatusConnect(url=authorize_url(client, current_user.org_id, current_user.id))
 
 

@@ -30,6 +30,7 @@ from app.services.background import spawn
 from app.services.leave.slack_status.apply import hand_back, refresh_member
 from app.services.leave.slack_status.oauth import (
     InvalidStateError,
+    UnlinkableSlackAccountError,
     WrongSlackAccountError,
     complete,
     read_state,
@@ -65,6 +66,8 @@ async def slack_status_callback(
         return _back("failed")
     try:
         connected = await complete(db, client, org_id, user_id, code)
+    except UnlinkableSlackAccountError:
+        return _back("unlinkable")
     except WrongSlackAccountError:
         return _back("wrong_account")
     except SlackUserApiError as exc:
