@@ -15,7 +15,7 @@
 """Where Slack sends a member back after they approve status updates.
 
 It's a browser redirect with no login, so it doesn't finish anything: it
-hands ``code`` and ``state`` to the Leave page, which finishes while signed
+hands ``code`` and ``state`` to the Leave page (in the URL fragment), which finishes while signed
 in (``POST /leave/slack-status/me/finish``). That way a connect link opened
 by anyone but the member who started it goes nowhere, even if they approve.
 """
@@ -35,11 +35,12 @@ async def slack_status_callback(
     state: str = "", code: str = "", error: str = ""
 ) -> RedirectResponse:
     """Back to the Leave page, with what Slack sent for it to finish."""
+    leave = f"{settings.frontend_url}/leave"
     if error:
         # They pressed Cancel on Slack's page.
-        query = {"slackStatus": "cancelled"}
-    elif not code or not state:
-        query = {"slackStatus": "failed"}
-    else:
-        query = {"slackCode": code, "slackState": state}
-    return RedirectResponse(f"{settings.frontend_url}/leave?{urlencode(query)}", 303)
+        return RedirectResponse(f"{leave}?slackStatus=cancelled", 303)
+    if not code or not state:
+        return RedirectResponse(f"{leave}?slackStatus=failed", 303)
+    # In the fragment: browsers never send it to a server or in a Referer,
+    # so the code stays out of access logs.
+    return RedirectResponse(f"{leave}#{urlencode({'slackCode': code, 'slackState': state})}", 303)

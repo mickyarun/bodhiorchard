@@ -15,7 +15,7 @@
  -->
 
 <!-- Leave home: offer to show WFH / leave as the member's Slack status, and
-     finish when Slack sends them back (?slackCode=…&slackState=…, or
+     finish when Slack sends them back (#slackCode=…&slackState=…, or
      ?slackStatus=… if they cancelled). Renders nothing when HR hasn't set it up. -->
 <template>
   <AppCallout v-if="outcome" :variant="outcome.ok ? 'success' : 'warning'" class="mb-4">
@@ -59,12 +59,13 @@ function queryText(key: string): string | null {
 }
 
 onMounted(async () => {
-  const code = queryText('slackCode')
-  const state = queryText('slackState')
+  const handed = new URLSearchParams(route.hash.slice(1))
+  const code = handed.get('slackCode')
+  const state = handed.get('slackState')
   if (outcome.value || code) {
     // Shown once, and the code is single-use: take it out of the URL now.
-    const { slackStatus: _s, slackCode: _c, slackState: _t, ...rest } = route.query
-    void router.replace({ query: rest })
+    const { slackStatus: _s, ...rest } = route.query
+    void router.replace({ query: rest, hash: '' })
   }
   if (code && state) outcome.value = connectOutcome(await status.finish(code, state))
   await status.load()

@@ -38,6 +38,9 @@ ORG, ME = uuid.uuid4(), uuid.uuid4()
 CLIENT = StatusClient(enabled=True, client_id="1.2", client_secret="s")
 
 
+DISCARDED: list[str] = []
+
+
 class FakeDb:
     def __init__(self) -> None:
         self.committed = 0
@@ -65,6 +68,12 @@ def exchanged(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     async def hand_back(_tokens: list[str]) -> None:
         return None
 
+    async def discard(_db: Any, _client: Any, code: str) -> None:
+        DISCARDED.append(code)
+
+    DISCARDED.clear()
+    monkeypatch.setattr(leave_slack_status, "discard", discard)
+
     monkeypatch.setattr(leave_slack_status, "load_client", load_client)
     monkeypatch.setattr(leave_slack_status, "complete", complete)
     monkeypatch.setattr(leave_slack_status, "hand_back", hand_back)
@@ -90,7 +99,8 @@ async def test_someone_else_signed_in_changes_nothing(exchanged: list[str]) -> N
     # A colleague opened the member's connect link and approved as themselves.
     db = FakeDb()
     assert await _finish(db, started_by=ME, signed_in=uuid.uuid4()) == "not_yours"
-    assert exchanged == []  # the code is never used, so no token is ever issued
+    assert exchanged == []  # nothing is kept for anyone
+    assert DISCARDED == ["code-1"]  # and the code is used up, so it can't be replayed
     assert db.committed == 0
 
 
@@ -125,7 +135,9 @@ async def test_a_refusal_keeps_nothing(
 
 async def test_the_callback_only_hands_the_code_to_the_leave_page() -> None:
     response = await slack_status_callback(state="s1", code="c1", error="")
-    query = parse_qs(urlparse(response.headers["location"]).query)
-    assert query == {"slackCode": ["c1"], "slackState": ["s1"]}
+    location = urlparse(response.headers["location"])
+    # In the fragment, so it never reaches a server log or a Referer.
+    assert location.query == ""
+    assert parse_qs(location.fragment) == {"slackCode": ["c1"], "slackState": ["s1"]}
     cancelled = await slack_status_callback(state="s1", code="", error="access_denied")
     assert "slackStatus=cancelled" in cancelled.headers["location"]

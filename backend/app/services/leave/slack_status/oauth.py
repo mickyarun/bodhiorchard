@@ -141,19 +141,32 @@ async def complete(
     return Connected(moved=bool(others), stale_tokens=_stale(others, grant.token))
 
 
+async def discard(db: AsyncSession, client: StatusClient, code: str) -> None:
+    """Use up a code we won't keep, so it can't be finished from anywhere else
+    (Slack doesn't tie a code to its state). Best effort."""
+    with contextlib.suppress(SlackUserApiError, httpx.HTTPError):
+        grant = await exchange_code(client.client_id, client.client_secret, code, redirect_url())
+        await _hand_back_unless_held(db, grant)
+
+
 async def _refuse(db: AsyncSession, grant: UserGrant, error: WrongSlackAccountError) -> NoReturn:
     """Hand the unused token back, then raise; best effort, as the member
-    should still hear why.
+    should still hear why."""
+    with contextlib.suppress(SlackUserApiError, httpx.HTTPError):
+        await _hand_back_unless_held(db, grant)
+    raise error
+
+
+async def _hand_back_unless_held(db: AsyncSession, grant: UserGrant) -> None:
+    """Revoke the grant's token, unless a link holds it.
 
     Slack gives the same person the same token again, so if that account is
     already connected (say, from their other profile here) the token is in
-    use, and handing it back would switch their status off: it's kept.
+    use, and handing it back would switch their status off.
     """
     links = await SlackStatusAccountRepository(db).links_for_account(grant.slack_user_id)
     if not any(decrypt_secret(link.token) == grant.token for link in links):
-        with contextlib.suppress(SlackUserApiError, httpx.HTTPError):
-            await revoke(grant.token)
-    raise error
+        await revoke(grant.token)
 
 
 def _stale(others: list[SlackStatusLink], kept: str) -> list[str]:

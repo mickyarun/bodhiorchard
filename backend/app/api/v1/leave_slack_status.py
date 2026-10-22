@@ -40,6 +40,7 @@ from app.services.leave.slack_status.oauth import (
     WrongSlackAccountError,
     authorize_url,
     complete,
+    discard,
     read_state,
 )
 from app.services.leave.slack_status.scheduler import clear_all
@@ -112,16 +113,19 @@ async def finish_my_slack_status(
 ) -> SlackStatusFinished:
     """Finish what Slack sent back: keep the token, set today's status.
 
-    Only for the member who started it, checked before the code is used, so
+    Only for the member who started it, checked before the code is kept, so
     a connect link opened by anyone else changes nothing.
     """
     try:
         org_id, user_id = read_state(body.state)
     except InvalidStateError:
         return SlackStatusFinished(outcome="expired")
-    if (org_id, user_id) != (current_user.org_id, current_user.id):
-        return SlackStatusFinished(outcome="not_yours")
     client = await load_client(db, org_id)
+    if (org_id, user_id) != (current_user.org_id, current_user.id):
+        # Used up, never kept: whoever approved can't have it finished elsewhere.
+        if client.ready:
+            await discard(db, client, body.code)
+        return SlackStatusFinished(outcome="not_yours")
     if not client.ready:
         return SlackStatusFinished(outcome="failed")
     outcome: ConnectOutcome

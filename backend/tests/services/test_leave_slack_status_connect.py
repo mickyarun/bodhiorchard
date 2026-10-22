@@ -27,6 +27,7 @@ from app.services.leave.slack_status.oauth import (
     UnlinkableSlackAccountError,
     WrongSlackAccountError,
     complete,
+    discard,
 )
 from app.services.leave.slack_status.settings import StatusClient
 from app.services.slack_user_api import SlackUserApiError, UserGrant
@@ -143,6 +144,15 @@ async def test_a_token_someone_already_holds_is_not_handed_back(
     with pytest.raises(UnlinkableSlackAccountError):
         await complete(None, CLIENT, ORG, USER, "code")  # type: ignore[arg-type]
     assert slack.revoked == []
+
+
+@pytest.mark.parametrize("held", [False, True])
+async def test_a_discarded_code_is_used_up(slack: Recorder, held: bool) -> None:
+    if held:
+        slack.held = [SimpleNamespace(token=encrypt_secret("xoxp-1"))]
+    await discard(None, CLIENT, "code")  # type: ignore[arg-type]
+    assert slack.saved == []
+    assert slack.revoked == ([] if held else ["xoxp-1"])
 
 
 async def test_unlinked_member_links_their_own_account(
