@@ -73,23 +73,5 @@ async def policy_read(db: AsyncSession, policy: LeavePolicy) -> PolicyRead:
 
 
 def type_read(t: LeaveType) -> LeaveTypeRead:
-    """Wire shape of a policy's leave type."""
-    return LeaveTypeRead(
-        id=t.id,
-        policy_id=t.policy_id,
-        template_id=t.template_id,
-        own_quota=t.own_quota,
-        name=t.name,
-        code=t.code,
-        annual_quota_days=t.annual_quota_days,
-        accrual=t.accrual,
-        is_paid=t.is_paid,
-        is_encashable=t.is_encashable,
-        counts_toward_warning=t.counts_toward_warning,
-        eligible_genders=t.eligible_genders,
-        auto_approve=t.auto_approve,
-        monthly_limit_days=t.monthly_limit_days,
-        stops_at_balance=t.stops_at_balance,
-        color_key=t.color_key,
-        is_active=t.is_active,
-    )
+    """Wire shape of a policy's leave type: every field the schema has, from the row."""
+    return LeaveTypeRead.model_validate(t, from_attributes=True)

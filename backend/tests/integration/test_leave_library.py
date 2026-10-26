@@ -143,8 +143,12 @@ async def test_only_approvers_make_a_library_type_approve_itself(
     assert refused.status_code == 403, refused.text
     body["auto_approve"] = False
     assert (await client.post(f"{BASE}/library-types", json=body, headers=auth)).status_code == 201
-    again = await client.post(f"{BASE}/library-types", json=body, headers=auth)
+    same_code = {**body, "name": "Monthly"}
+    again = await client.post(f"{BASE}/library-types", json=same_code, headers=auth)
     assert again.status_code == 409 and "already used in the library" in again.text
+    same_name = {**body, "name": " period ", "code": "PX"}
+    named = await client.post(f"{BASE}/library-types", json=same_name, headers=auth)
+    assert named.status_code == 409 and "already has a type called period" in named.text
 
 
 async def test_a_self_approving_entry_needs_a_quota_on_every_policy(

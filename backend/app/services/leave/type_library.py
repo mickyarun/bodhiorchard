@@ -76,6 +76,7 @@ async def create_entry(
     repo = LeaveTypeTemplateRepository(db, org_id=org_id)
     after = body.model_dump()
     entry = LeaveTypeTemplate(org_id=org_id, **after)
+    await _refuse_name_taken(repo, body.name, exclude=None)
     # Checked first for the usual case; the insert catches two adds at once.
     if await repo.code_taken(body.code, exclude=None) or not await repo.create_unique(entry):
         raise LeaveConflictError(f"The code {body.code} is already used in the library.")
@@ -96,6 +97,7 @@ async def update_entry(
     """Edit an entry and every policy type that follows it, all or nothing."""
     type_admin.check_auto_approve(body, may_approve)
     repo = LeaveTypeTemplateRepository(db, org_id=template.org_id)
+    await _refuse_name_taken(repo, body.name, exclude=template.id)
     if await repo.code_taken(body.code, exclude=template.id):
         raise LeaveConflictError(f"The code {body.code} is already used in the library.")
     after = body.model_dump()
@@ -156,6 +158,14 @@ async def sync_linked(
         except LeaveError as exc:
             policy = policies.get(leave_type.policy_id)
             raise type(exc)(f"On {policy.name if policy else 'a policy'}: {exc}") from exc
+
+
+async def _refuse_name_taken(
+    repo: LeaveTypeTemplateRepository, name: str, *, exclude: uuid.UUID | None
+) -> None:
+    # Two entries called "Sick leave" couldn't be told apart in a policy's picker.
+    if await repo.name_taken(name, exclude=exclude):
+        raise LeaveConflictError(f"The library already has a type called {name.strip()}.")
 
 
 def _record(

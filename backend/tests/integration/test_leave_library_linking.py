@@ -26,7 +26,7 @@ from app.models.leave_type import LeaveAccrual, LeaveType
 from app.repositories.leave_type_template import LeaveTypeTemplateRepository
 from app.services.leave.lifecycle import submit
 from app.services.leave.policies import ensure_default_policy
-from app.services.leave.type_link_apply import LinkStatus, link_existing_types
+from app.services.leave.type_link_apply import Acceptance, LinkStatus, link_existing_types
 from tests.integration.leave_library_support import add_policy, library_sick
 from tests.integration.leave_support import (
     Factory,
@@ -82,6 +82,22 @@ async def test_a_policy_type_links_and_lets_go_keeping_its_requests(
     assert (await client.put(f"{BASE}/types/{sick}", json=edit, headers=auth)).status_code == 200
 
 
+async def test_linking_a_switched_off_type_keeps_it_off(
+    client: AsyncClient, pg_session_factory: Factory
+) -> None:
+    org, (hr,), _casual = await setup_org(pg_session_factory, "Hr")
+    await give_role(pg_session_factory, org, hr, "hr")
+    async with pg_session_factory() as db:
+        policy = (await ensure_default_policy(db, org)).id
+    retired = await _type(pg_session_factory, org, policy, "Sick", "SL", "4", is_active=False)
+    entry = await library_sick(client, as_user(hr, org))
+    linked = await client.post(
+        f"{BASE}/types/{retired}/link", json={"template_id": entry}, headers=as_user(hr, org)
+    )
+    assert linked.status_code == 200, linked.text
+    assert (linked.json()["template_id"], linked.json()["is_active"]) == (entry, False)
+
+
 async def _two_policies(
     factory: Factory,
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]:
@@ -105,7 +121,7 @@ async def test_dry_run_reports_and_changes_nothing_then_apply_waits_for_confirma
     await _type(pg_session_factory, org, uk, "Only here", "OH", "1")
 
     async with pg_session_factory() as db:
-        dry = await link_existing_types(db, org, hr, apply=False, accept_differences=False)
+        dry = await link_existing_types(db, org, hr, apply=False)
     by_name = {o.group.name: o for o in dry}
     assert set(by_name) == {"Earned leave", "Sick leave"}
     # The same groups wait for confirmation as when applying.
@@ -123,7 +139,7 @@ async def test_dry_run_reports_and_changes_nothing_then_apply_waits_for_confirma
         assert await LeaveTypeTemplateRepository(db, org_id=org).list_by_name() == []
 
     async with pg_session_factory() as db:
-        applied = await link_existing_types(db, org, hr, apply=True, accept_differences=False)
+        applied = await link_existing_types(db, org, hr, apply=True)
     assert {o.group.name: o.status for o in applied} == {
         "Earned leave": LinkStatus.NEEDS_CONFIRMATION, "Sick leave": LinkStatus.LINKED
     }  # fmt: skip
@@ -131,10 +147,14 @@ async def test_dry_run_reports_and_changes_nothing_then_apply_waits_for_confirma
         row = await db.get(LeaveType, uk_sick)
         assert row is not None and row.template_id is not None
         assert (row.own_quota, row.annual_quota_days, row.name) == (True, D(6), "Sick leave")
-        accepted = await link_existing_types(db, org, hr, apply=True, accept_differences=True)
+        # Confirmed by name, whatever its case or spacing.
+        accepted = await link_existing_types(
+            db, org, hr, apply=True, accepted=Acceptance(names=frozenset({"earned  LEAVE"}))
+        )
     assert [(o.group.name, o.status) for o in accepted] == [("Earned leave", LinkStatus.LINKED)]
     async with pg_session_factory() as db:
-        assert await link_existing_types(db, org, hr, apply=True, accept_differences=True) == []
+        everything = Acceptance(everything=True)
+        assert await link_existing_types(db, org, hr, apply=True, accepted=everything) == []
 
 
 async def test_a_policy_whose_year_is_allocated_blocks_an_accrual_change(
@@ -150,6 +170,6 @@ async def test_a_policy_whose_year_is_allocated_blocks_an_accrual_change(
         await submit(db, org, emp, leave_body(in_use, mon, mon))
         await db.commit()
     async with pg_session_factory() as db:
-        dry = await link_existing_types(db, org, hr, apply=False, accept_differences=False)
+        dry = await link_existing_types(db, org, hr, apply=False)
     assert [o.status for o in dry] == [LinkStatus.BLOCKED]
     assert dry[0].reason.startswith("On Default: This type is already in use this leave year")

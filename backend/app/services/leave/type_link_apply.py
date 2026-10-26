@@ -18,7 +18,8 @@ Run as a dry run first: every group is linked inside the transaction and
 then rolled back, so the report shows what applying would do, including a
 policy that refuses (e.g. how a type is given can't change once its year is
 allocated). Groups whose linking would change more than a quota are only
-kept once the owner accepts those differences. Safe to run again:
+kept once the owner accepts those differences, group by group or all at
+once. Safe to run again:
 linked types are left alone and names with an entry link to it.
 """
 
@@ -36,7 +37,7 @@ from app.repositories.leave_type_template import LeaveTypeTemplateRepository
 from app.schemas.leave_library import LibraryTypeWrite, LinkedTypeWrite
 from app.services.leave import type_library, type_linking
 from app.services.leave.errors import LeaveError
-from app.services.leave.type_link_plan import LinkGroup, plan_links
+from app.services.leave.type_link_plan import LinkGroup, name_key, plan_links
 
 
 class LinkStatus(StrEnum):
@@ -48,6 +49,18 @@ class LinkStatus(StrEnum):
     # Linking would change more than a quota; the owner hasn't accepted it yet.
     NEEDS_CONFIRMATION = "needs confirmation"
     BLOCKED = "blocked"
+
+
+@dataclass(frozen=True)
+class Acceptance:
+    """Which groups' listed differences the owner confirmed: some by name, or all."""
+
+    names: frozenset[str] = frozenset()
+    everything: bool = False
+
+    def covers(self, group: LinkGroup) -> bool:
+        """True when ``group`` may be linked although more than a quota changes."""
+        return self.everything or name_key(group.name) in {name_key(n) for n in self.names}
 
 
 @dataclass(frozen=True)
@@ -65,7 +78,7 @@ async def link_existing_types(
     actor_id: uuid.UUID,
     *,
     apply: bool,
-    accept_differences: bool,
+    accepted: Acceptance = Acceptance(),
 ) -> list[LinkOutcome]:
     """Plan, link each group in its own savepoint, then commit or roll back.
 
@@ -77,7 +90,7 @@ async def link_existing_types(
     templates = await LeaveTypeTemplateRepository(db, org_id=org_id).list_by_name()
     outcomes = []
     for group in plan_links(types, policies, templates):
-        outcomes.append(await _link(db, org_id, actor_id, group, apply, accept_differences))
+        outcomes.append(await _link(db, org_id, actor_id, group, apply, accepted))
     if apply:
         await db.commit()
     else:
@@ -91,7 +104,7 @@ async def _link(
     actor_id: uuid.UUID,
     group: LinkGroup,
     apply: bool,
-    accept_differences: bool,
+    accepted: Acceptance,
 ) -> LinkOutcome:
     """Link one group in a savepoint, kept only when it may be.
 
@@ -101,7 +114,7 @@ async def _link(
     """
     if group.problems:
         return LinkOutcome(group, LinkStatus.BLOCKED, " ".join(group.problems))
-    keep = accept_differences or not group.needs_confirmation
+    keep = not group.needs_confirmation or accepted.covers(group)
     savepoint = await db.begin_nested()
     try:
         # An existing entry is locked (and may have been deleted since the plan).

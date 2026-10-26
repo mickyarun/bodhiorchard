@@ -84,11 +84,10 @@ const saving = ref(false)
 const confirmUnlink = ref(false)
 const error = ref('')
 
-const libraryQuota = computed(() => {
-  const entry = library.entries.find(e => e.id === props.type?.template_id)
-  // Until the library loads, a type that follows it holds the same quota.
-  return entry ? entry.annual_quota_days : (props.type?.annual_quota_days ?? null)
-})
+// Undefined until the library has loaded: the type's own quota may not be the default.
+const libraryQuota = computed(
+  () => library.entries.find(e => e.id === props.type?.template_id)?.annual_quota_days,
+)
 
 watch(
   () => props.modelValue,
@@ -98,7 +97,8 @@ watch(
     days.value = toNumberOrNull(props.type.annual_quota_days)
     active.value = props.type.is_active
     error.value = ''
-    if (!library.entries.length) void library.fetchEntries()
+    // Always fresh: another admin may have changed the default since it was cached.
+    void library.fetchEntries()
   },
 )
 

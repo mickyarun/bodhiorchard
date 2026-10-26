@@ -15,7 +15,7 @@
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, SQLColumnExpression, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -58,9 +58,26 @@ class LeaveTypeTemplateRepository(BaseRepository[LeaveTypeTemplate]):
         await self._db.refresh(entry)
         return True
 
+    async def name_taken(self, name: str, *, exclude: uuid.UUID | None) -> bool:
+        """True if another library type has ``name``, ignoring case and spacing."""
+        stmt = self._scoped(
+            select(LeaveTypeTemplate.id).where(
+                _name_key(LeaveTypeTemplate.name) == _name_key(name)
+            )
+        )
+        if exclude is not None:
+            stmt = stmt.where(LeaveTypeTemplate.id != exclude)
+        return (await self._db.execute(stmt)).first() is not None
+
     async def code_taken(self, code: str, *, exclude: uuid.UUID | None) -> bool:
         """True if another library type uses ``code``."""
         stmt = self._scoped(select(LeaveTypeTemplate.id).where(LeaveTypeTemplate.code == code))
         if exclude is not None:
             stmt = stmt.where(LeaveTypeTemplate.id != exclude)
         return (await self._db.execute(stmt)).first() is not None
+
+
+def _name_key(name: SQLColumnExpression[str] | str) -> ColumnElement[str]:
+    """ "Sick  Leave" and "sick leave" compare equal (as the linking plan matches them)."""
+    collapsed = func.regexp_replace(func.btrim(name), r"\s+", " ", "g")
+    return func.lower(collapsed)

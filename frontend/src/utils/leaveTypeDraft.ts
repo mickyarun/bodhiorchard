@@ -18,6 +18,7 @@
 import type { Decimalish } from '@/types/leave'
 import type { LeaveTypeRead, LeaveTypeWrite } from '@/types/leavePolicy'
 import { SWATCH_KEYS } from '@/utils/leave'
+import { nameKey } from '@/utils/leaveLibrary'
 
 export function blankType(): LeaveTypeWrite {
   return {
@@ -67,8 +68,9 @@ export function validMonthlyLimit(value: Decimalish | null): boolean {
   return days >= 0.5 && days <= 31 && Number.isInteger(days * 2)
 }
 
-/** True once a policy has period leave (on or off), so the shortcut steps aside. */
+/** True once a policy has period leave (on or off), so the shortcut steps aside.
+ *  Matched by name too: one added from the library may use another code. */
 export function hasPeriodLeave(types: LeaveTypeRead[]): boolean {
-  const code = periodLeave().code
-  return types.some(t => t.code === code)
+  const { code, name } = periodLeave()
+  return types.some(t => t.code === code || nameKey(t.name) === nameKey(name))
 }

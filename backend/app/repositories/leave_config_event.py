@@ -76,6 +76,8 @@ class LeaveConfigEventRepository:
             select(LeaveConfigEvent)
             .where(
                 LeaveConfigEvent.org_id == self._org,
+                # Always true for library events; lets the (org, policy, time) index serve it.
+                LeaveConfigEvent.policy_id.is_(None),
                 LeaveConfigEvent.action.in_(LIBRARY_ACTIONS),
             )
             .order_by(LeaveConfigEvent.created_at.desc())

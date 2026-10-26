@@ -43,7 +43,8 @@ import { type QuotaChoice, quotaLabel } from '@/utils/leaveLibrary'
 import { FIELD_PROPS } from '@/utils/leavePolicyDisplay'
 
 const props = defineProps<{
-  libraryQuota: Decimalish | null
+  /** The library default; undefined while it loads. */
+  libraryQuota: Decimalish | null | undefined
   /** A type that approves itself always needs a quota, so "Unlimited" isn't offered. */
   autoApprove: boolean
 }>()
@@ -52,7 +53,10 @@ const days = defineModel<number | null>('days', { required: true })
 
 const options = computed(() => {
   const all: { label: string; value: QuotaChoice }[] = [
-    { label: `Library (${quotaLabel(props.libraryQuota)})`, value: 'library' },
+    {
+      label: props.libraryQuota === undefined ? 'Library' : `Library (${quotaLabel(props.libraryQuota)})`,
+      value: 'library',
+    },
     { label: 'Own number', value: 'fixed' },
     { label: 'Unlimited', value: 'unlimited' },
   ]

@@ -21,9 +21,10 @@ Usage (from backend/):
     python -m scripts.link_leave_types --org <slug> --actor <email> --apply
         Links the groups that only differ in quota. Groups whose linking
         would change other fields are listed and skipped.
-    ... --apply --accept-differences
-        Also links those, once the owner has read and confirmed the listed
-        differences. The library entry keeps the first policy's values.
+    ... --apply --accept "Earned leave" [--accept "Sick leave" ...]
+        Also links the named groups, once the owner has read and confirmed
+        their listed differences. The library entry keeps the first policy's
+        values. --accept-all confirms every group at once.
 
 Every linked type gets an event in its policy's history, by --actor.
 """
@@ -36,7 +37,12 @@ from typing import Any
 from app.database import AsyncSessionLocal
 from app.repositories.organization import OrganizationRepository
 from app.repositories.user import UserRepository
-from app.services.leave.type_link_apply import LinkOutcome, LinkStatus, link_existing_types
+from app.services.leave.type_link_apply import (
+    Acceptance,
+    LinkOutcome,
+    LinkStatus,
+    link_existing_types,
+)
 from app.services.leave.type_link_plan import LinkGroup
 
 
@@ -65,10 +71,10 @@ def _report(outcomes: list[LinkOutcome]) -> None:
         print(f"  => {outcome.status.value}{detail}\n")
     if any(o.group.needs_confirmation for o in outcomes):
         print("Fields listed under a policy change on that policy when it is linked.")
-        print("Confirm them with the owner, then re-run with --apply --accept-differences.")
+        print('Confirm them with the owner, then re-run with --apply --accept "<name>".')
 
 
-async def _run(slug: str, actor_email: str, apply: bool, accept: bool) -> int:
+async def _run(slug: str, actor_email: str, apply: bool, accepted: Acceptance) -> int:
     async with AsyncSessionLocal() as db:
         org = await OrganizationRepository(db).get_by_slug(slug)
         if org is None:
@@ -79,9 +85,7 @@ async def _run(slug: str, actor_email: str, apply: bool, accept: bool) -> int:
             print(f"{actor_email} isn't a member of {org.name}.")
             return 2
         org_name = org.name
-        outcomes = await link_existing_types(
-            db, org.id, actor.id, apply=apply, accept_differences=accept
-        )
+        outcomes = await link_existing_types(db, org.id, actor.id, apply=apply, accepted=accepted)
     print(f"{'Applied' if apply else 'Dry run'} for {org_name}\n")
     _report(outcomes)
     return 1 if any(o.status == LinkStatus.BLOCKED for o in outcomes) else 0
@@ -94,12 +98,16 @@ def main() -> None:
     parser.add_argument("--actor", required=True, help="email recorded on the history events")
     parser.add_argument("--apply", action="store_true", help="keep the changes")
     parser.add_argument(
-        "--accept-differences",
-        action="store_true",
-        help="also link groups whose linking changes more than the quota",
+        "--accept",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="link this group although more than its quota changes (repeatable)",
     )
+    parser.add_argument("--accept-all", action="store_true", help="accept every group's changes")
     args = parser.parse_args()
-    sys.exit(asyncio.run(_run(args.org, args.actor, args.apply, args.accept_differences)))
+    accepted = Acceptance(names=frozenset(args.accept), everything=args.accept_all)
+    sys.exit(asyncio.run(_run(args.org, args.actor, args.apply, accepted)))
 
 
 if __name__ == "__main__":

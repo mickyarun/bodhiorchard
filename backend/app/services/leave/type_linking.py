@@ -82,13 +82,15 @@ async def link_existing(
     """Make a policy's own type follow ``template``; its history stays with it.
 
     It takes the library's rules (name included); its quota is the
-    library's unless ``body`` keeps one of its own.
+    library's unless ``body`` keeps one of its own. Linking doesn't switch
+    it on or off: a retired type stays retired.
     """
     if leave_type.template_id is not None:
         raise LeaveConflictError("This type already follows the library.")
     await _refuse_second_copy(db, leave_type.policy_id, template)
+    keep_switch = body.model_copy(update={"is_active": leave_type.is_active})
     await type_admin.update_type(
-        db, leave_type, actor_id, _body(template, body),
+        db, leave_type, actor_id, _body(template, keep_switch),
         may_approve=may_approve,
         link=TypeLink(template.id, body.own_quota),
         context={"library": [None, template.name]},
