@@ -37,7 +37,7 @@ from tests.integration.alembic_support import run_alembic
 
 pytestmark = pytest.mark.integration
 
-_BEFORE = "cd396fa01ec6"
+_BEFORE = "0b77846123b0"
 _DEDUPE = "35ecdf822b3c"
 
 ORG = uuid.UUID(int=0xA)

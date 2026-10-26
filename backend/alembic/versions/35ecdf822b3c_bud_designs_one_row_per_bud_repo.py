@@ -29,7 +29,7 @@ table but, like a thread rotated out at the message cap, are no longer the
 active thread that chat history shows.
 
 Revision ID: 35ecdf822b3c
-Revises: cd396fa01ec6
+Revises: 0b77846123b0
 Create Date: 2026-10-22 16:39:29.013460
 
 """
@@ -40,7 +40,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "35ecdf822b3c"
-down_revision: str | None = "cd396fa01ec6"
+down_revision: str | None = "0b77846123b0"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
