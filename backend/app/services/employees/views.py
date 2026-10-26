@@ -30,11 +30,12 @@ from app.schemas.employee import (
     DirectoryEntry,
     EmployeeAccessRead,
     EmployeeLeavePolicy,
-    EmployeePersonal,
+    EmployeePersonalRead,
     EmployeeRead,
     EmployeeWork,
     ManagerRef,
 )
+from app.services.avatars import may_edit_avatar
 from app.services.employees.access import EmployeeAccess
 from app.services.employees.offices import office_refs
 
@@ -83,11 +84,13 @@ async def employee_read(
         name=user.name,
         email=user.email,
         is_active=user.is_active,
+        avatar_url=user.avatar_url,
+        can_edit_avatar=await may_edit_avatar(db, access, user.id),
         work=EmployeeWork.model_validate(profile),
         leave_policy=await _leave_policy(db, org_id, profile),
         office=offices.get(profile.office_id) if profile.office_id else None,
         managers=[_manager_ref(link) for link in links.get(profile.id, [])],
-        personal=EmployeePersonal.model_validate(profile) if access.view_personal else None,
+        personal=EmployeePersonalRead.model_validate(profile) if access.view_personal else None,
         access=EmployeeAccessRead(
             edit_work=access.edit_work,
             edit_personal=access.edit_personal,
@@ -116,6 +119,7 @@ async def directory_entries(
         entries.append(
             DirectoryEntry(
                 user_id=row.profile.user_id,
+                avatar_url=row.avatar_url,
                 name=row.name,
                 email=row.email,
                 is_active=row.is_active,

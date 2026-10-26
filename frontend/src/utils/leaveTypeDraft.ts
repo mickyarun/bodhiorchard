@@ -18,6 +18,7 @@
 import type { Decimalish } from '@/types/leave'
 import type { LeaveTypeRead, LeaveTypeWrite } from '@/types/leavePolicy'
 import { SWATCH_KEYS } from '@/utils/leave'
+import { nameKey } from '@/utils/leaveLibrary'
 
 export function blankType(): LeaveTypeWrite {
   return {
@@ -39,7 +40,7 @@ export function blankType(): LeaveTypeWrite {
 }
 
 export function draftFromType(type: LeaveTypeRead): LeaveTypeWrite {
-  const { id: _id, policy_id: _policy, ...write } = type
+  const { id: _id, policy_id: _policy, template_id: _template, own_quota: _own, ...write } = type
   return write
 }
 
@@ -78,8 +79,9 @@ export function validCarryForward(value: Decimalish | null): boolean {
   return validHalfDays(value, 365)
 }
 
-/** True once a policy has period leave (on or off), so the shortcut steps aside. */
+/** True once a policy has period leave (on or off), so the shortcut steps aside.
+ *  Matched by name too: one added from the library may use another code. */
 export function hasPeriodLeave(types: LeaveTypeRead[]): boolean {
-  const code = periodLeave().code
-  return types.some(t => t.code === code)
+  const { code, name } = periodLeave()
+  return types.some(t => t.code === code || nameKey(t.name) === nameKey(name))
 }

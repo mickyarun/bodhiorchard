@@ -25,7 +25,7 @@ from decimal import Decimal
 import pytest
 from httpx import AsyncClient
 
-from app.schemas.leave_policy import LeaveTypeWrite
+from app.schemas.leave_type import LeaveTypeWrite
 from tests.integration.leave_support import Factory, as_user, give_role, setup_org
 
 pytestmark = pytest.mark.integration

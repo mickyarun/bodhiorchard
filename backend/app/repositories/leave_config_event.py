@@ -23,6 +23,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.leave_config_event import LeaveConfigAction, LeaveConfigEvent
 
 HISTORY_LIMIT = 100
+LIBRARY_ACTIONS = (
+    LeaveConfigAction.LIBRARY_TYPE_CREATED,
+    LeaveConfigAction.LIBRARY_TYPE_UPDATED,
+    LeaveConfigAction.LIBRARY_TYPE_DELETED,
+)
 
 
 class LeaveConfigEventRepository:
@@ -60,6 +65,21 @@ class LeaveConfigEventRepository:
         stmt = (
             select(LeaveConfigEvent)
             .where(LeaveConfigEvent.org_id == self._org, LeaveConfigEvent.policy_id == policy_id)
+            .order_by(LeaveConfigEvent.created_at.desc())
+        )
+        result = await self._db.execute(stmt.limit(HISTORY_LIMIT))
+        return list(result.scalars().all())
+
+    async def for_library(self) -> list[LeaveConfigEvent]:
+        """The leave type library's most recent changes, newest first."""
+        stmt = (
+            select(LeaveConfigEvent)
+            .where(
+                LeaveConfigEvent.org_id == self._org,
+                # Always true for library events; lets the (org, policy, time) index serve it.
+                LeaveConfigEvent.policy_id.is_(None),
+                LeaveConfigEvent.action.in_(LIBRARY_ACTIONS),
+            )
             .order_by(LeaveConfigEvent.created_at.desc())
         )
         result = await self._db.execute(stmt.limit(HISTORY_LIMIT))

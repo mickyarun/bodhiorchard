@@ -28,7 +28,8 @@ export interface SlackStatusSettings {
 export interface SlackStatusMine {
   available: boolean
   connected: boolean
-  // Their Slack account is linked to their profile (needed to connect).
+  // A Slack account is linked to their profile; if not, connecting links the
+  // one they sign in with when its email matches theirs.
   linked: boolean
 }
 
@@ -41,9 +42,21 @@ const OUTCOMES: Record<string, { ok: boolean; text: string }> = {
   },
   cancelled: { ok: false, text: 'You cancelled in Slack, so nothing changed.' },
   expired: { ok: false, text: 'That link expired. Try connecting again.' },
+  not_yours: {
+    ok: false,
+    text: 'That Slack connect link was started by someone else, so nothing changed. Press Connect Slack here yourself.',
+  },
+  other_org: {
+    ok: false,
+    text: 'You started connecting Slack in your other organization. Switch back to it to finish, or press Connect Slack here.',
+  },
   wrong_account: {
     ok: false,
     text: "That wasn't the Slack account linked to you here. Sign in to your own Slack account and try again.",
+  },
+  unlinkable: {
+    ok: false,
+    text: "We couldn't link that Slack account to you automatically (its email has to match your email here, and it can't already be linked to someone). Ask HR to link it.",
   },
   rotation: {
     ok: false,
@@ -121,6 +134,19 @@ export function useMySlackStatus() {
     }
   }
 
+  /** Finish what Slack sent back (signed in, so only the member who started it can). */
+  async function finish(code: string, state: string): Promise<string> {
+    busy.value = true
+    try {
+      const body = { code, state }
+      return (await api.post<{ outcome: string }>('/v1/leave/slack-status/me/finish', body)).data.outcome
+    } catch {
+      return 'failed'
+    } finally {
+      busy.value = false
+    }
+  }
+
   async function disconnect(): Promise<void> {
     busy.value = true
     error.value = ''
@@ -134,5 +160,5 @@ export function useMySlackStatus() {
     }
   }
 
-  return { mine, busy, error, load, connect, disconnect }
+  return { mine, busy, error, load, connect, finish, disconnect }
 }

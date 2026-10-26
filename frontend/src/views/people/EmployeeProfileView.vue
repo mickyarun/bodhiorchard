@@ -40,7 +40,14 @@
     </AppCallout>
 
     <template v-else-if="record">
-      <EmployeeHeaderCard :record="record">
+      <AppCallout v-if="avatarError" variant="error" class="mb-4">
+        {{ avatarError }}
+      </AppCallout>
+      <EmployeeHeaderCard
+        :record="record"
+        @avatar-updated="onAvatarUpdated"
+        @avatar-error="avatarError = $event"
+      >
         <template #actions>
           <EmployeePasswordButton
             v-if="record.access.reset_password"
@@ -60,7 +67,12 @@
       <v-card color="surface" rounded="lg" class="pa-6">
         <v-tabs-window v-model="tab">
           <v-tabs-window-item v-if="record.personal" value="personal">
-            <PersonalTab :employee-id="record.user_id" :personal="record.personal" :mode="personalMode" />
+            <PersonalTab
+              :employee-id="record.user_id"
+              :personal="record.personal"
+              :mode="personalMode"
+              :is-self="isOwn"
+            />
           </v-tabs-window-item>
           <v-tabs-window-item value="employment">
             <EmploymentTab :record="record" />
@@ -110,6 +122,16 @@ const routeUserId = computed(() => route.params.userId as string | undefined)
 const isOwn = computed(() => !routeUserId.value || routeUserId.value === authStore.user?.id)
 const record = computed(() => store.record)
 const tab = ref('personal')
+const avatarError = ref('')
+
+/**
+ * Keep the loaded record in step with the photo the child just changed,
+ * so the header and the directory agree without a refetch.
+ */
+function onAvatarUpdated(avatarUrl: string | null): void {
+  avatarError.value = ''
+  if (store.record) store.record.avatar_url = avatarUrl
+}
 // Balances are open to HR, the member and the member's managers (the
 // API enforces the same rule).
 const isManagerOfRecord = computed(
@@ -134,6 +156,8 @@ const personalMode = computed<'hr' | 'self' | 'view'>(() => {
 watch(
   () => routeUserId.value,
   async userId => {
+    // A photo error belongs to the profile it happened on.
+    avatarError.value = ''
     await store.fetchRecord(userId && !isOwn.value ? userId : 'me')
     tab.value = store.record?.personal ? 'personal' : 'employment'
   },

@@ -12,10 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Reading a policy's configuration trail, with who made each change."""
+"""Reading a policy's or the leave type library's trail, with who made each change."""
+
+import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.leave_config_event import LeaveConfigEvent
 from app.models.leave_policy import LeavePolicy
 from app.repositories.leave_config_event import LeaveConfigEventRepository
 from app.repositories.user import UserRepository
@@ -26,6 +29,19 @@ from app.schemas.leave_config import ConfigEventRead
 async def config_history(db: AsyncSession, policy: LeavePolicy) -> list[ConfigEventRead]:
     """The policy's recent changes, newest first."""
     events = await LeaveConfigEventRepository(db, org_id=policy.org_id).for_policy(policy.id)
+    return await _with_actors(db, events)
+
+
+async def library_history(db: AsyncSession, org_id: uuid.UUID) -> list[ConfigEventRead]:
+    """The leave type library's recent changes, newest first.
+
+    Edits that reached policies also show in each policy's own history.
+    """
+    events = await LeaveConfigEventRepository(db, org_id=org_id).for_library()
+    return await _with_actors(db, events)
+
+
+async def _with_actors(db: AsyncSession, events: list[LeaveConfigEvent]) -> list[ConfigEventRead]:
     names = await UserRepository(db).get_names_by_ids({e.actor_id for e in events})
     return [
         ConfigEventRead(

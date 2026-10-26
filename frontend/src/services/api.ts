@@ -14,6 +14,7 @@
 
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import type { ApiError } from '@/types'
+import { rememberReturnTo } from '@/utils/returnTo'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
@@ -196,6 +197,9 @@ function clearAuthAndRedirect(): void {
   localStorage.removeItem('bodhiorchard_refresh_token')
   // Only redirect if not already on login/setup pages
   if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/setup')) {
+    // The session ran out mid-use: back to this page after signing in again.
+    const { pathname, search, hash } = window.location
+    rememberReturnTo(pathname + search + hash, { final: true })
     window.location.href = '/login'
   }
 }

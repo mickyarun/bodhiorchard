@@ -34,6 +34,7 @@ from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.event_loop import configure_event_loop_policy
 from app.core.logging import setup_logging
 from app.core.middleware import RequestLoggingMiddleware
+from app.services.celebrations.scheduler import run_forever as run_celebrations
 from app.services.leave.carry_scheduler import run_forever as run_leave_carry_forward
 from app.services.leave.digest_scheduler import run_forever as run_leave_digest
 from app.services.leave.slack_status.scheduler import run_forever as run_slack_status
@@ -294,6 +295,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 8i. Leave carry forward — hourly; in the first week of each policy's
     # leave year it carries unused days in, once per person, type and year.
     leave_carry_task = asyncio.create_task(run_leave_carry_forward())
+    # 8g. Celebrations — 60s tick that posts one birthday / work-anniversary
+    # digest per org per local date to the configured Slack channel. No-ops
+    # entirely until an org sets a channel and flips the feature on.
+    celebrations_task = asyncio.create_task(run_celebrations())
 
     # 9. PR-merge Redis-stream worker pool. One consumer per
     # (org, repo) stream; supervisor task spawns consumers lazily as
@@ -337,6 +342,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     slack_status_task.cancel()
     leave_carry_task.cancel()
     quiz_rollup_task.cancel()
+    celebrations_task.cancel()
     if pr_merge_pool is not None:
         await pr_merge_pool.stop()
     await stop_workers()

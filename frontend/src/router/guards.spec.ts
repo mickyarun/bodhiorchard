@@ -20,6 +20,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { forgetReturnTo, rememberReturnTo, takeReturnTo } from '@/utils/returnTo'
 import { WORKSPACE_ENGINEERING } from '@/utils/workspace'
 import { installGuards, resetSetupCache } from './guards'
 
@@ -58,6 +59,8 @@ describe('workspace guard', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
+    forgetReturnTo()
+    sessionStorage.clear()
     resetSetupCache()
   })
 
@@ -87,6 +90,25 @@ describe('workspace guard', () => {
     const router = makeRouter()
     await router.push('/login')
     expect(router.currentRoute.value.name).toBe('leave')
+  })
+
+  it('remembers where a signed-out visitor was going, fragment included', async () => {
+    const router = makeRouter()
+    await router.push('/leave#slackCode=c&slackState=s')
+    expect(router.currentRoute.value.name).toBe('login')
+    expect(takeReturnTo()).toBe('/leave#slackCode=c&slackState=s')
+  })
+
+  it('keeps the page a run-out session remembered while the page tidies its URL', async () => {
+    signInWith([])
+    const router = makeRouter()
+    await router.push('/leave#slackCode=c&slackState=s')
+    // The session ran out: the 401 redirect remembers the page and clears the token...
+    rememberReturnTo('/leave#slackCode=c&slackState=s', { final: true })
+    localStorage.removeItem('bodhiorchard_token')
+    // ...then the Slack connect drops the code from its URL before the page unloads.
+    await router.replace({ path: '/leave', hash: '' })
+    expect(takeReturnTo()).toBe('/leave#slackCode=c&slackState=s')
   })
 
   it('does not guess a workspace when the profile fails to load', async () => {

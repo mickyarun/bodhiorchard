@@ -53,6 +53,13 @@ class SlackStatusAccountRepository:
         result = await self._db.execute(select(SlackStatusLink.org_id).distinct())
         return list(result.scalars().all())
 
+    async def links_for_account(self, slack_user_id: str) -> list[SlackStatusLink]:
+        """Every org's link for this Slack account."""
+        result = await self._db.execute(
+            select(SlackStatusLink).where(SlackStatusLink.slack_user_id == slack_user_id)
+        )
+        return list(result.scalars().all())
+
     async def links_elsewhere(
         self, slack_user_id: str, org_id: uuid.UUID
     ) -> list[SlackStatusLink]:

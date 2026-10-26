@@ -197,6 +197,26 @@ QA_EVIDENCE_POLICY = UploadPolicy(
 )
 
 
+# Profile photos. Extension-driven so the stored MIME is ours rather than
+# whatever the browser claimed. The cap fits a phone camera original (a
+# 48-50 MP JPEG runs to ~15 MB): every upload is re-encoded to a small JPEG,
+# so the size limit only bounds what we read, not what we store or serve.
+AVATAR_EXTENSIONS: Mapping[str, str] = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+
+AVATAR_POLICY = UploadPolicy.for_extensions(
+    label="Profile photo",
+    max_bytes=20 * 1024 * 1024,
+    extensions=AVATAR_EXTENSIONS,
+    max_files=1,
+)
+
+
 def bug_attachment_policy(*, max_file_mb: int, max_files: int) -> UploadPolicy:
     """Build the bug-attachment policy from an org's configured limits.
 

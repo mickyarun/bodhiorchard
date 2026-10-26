@@ -24,7 +24,16 @@ import uuid
 from datetime import date
 from enum import StrEnum
 
-from sqlalchemy import CheckConstraint, Date, Enum, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    Enum,
+    ForeignKey,
+    Index,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -168,6 +177,20 @@ class EmployeeProfile(BaseModel):
     emergency_contact_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     emergency_contact_relation: Mapped[str | None] = mapped_column(String(100), nullable=True)
     emergency_contact_phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+    # ── Celebrations ──
+    # Opt-out flags for the company-wide celebration post. Default true so the
+    # feature is live for everyone without a backfill; the employee (and HR)
+    # can mute either stream from the profile. Only the day and month of
+    # ``date_of_birth`` ever leave this table for a birthday announcement —
+    # the year stays behind the ``employees:manage`` gate so a celebration
+    # never discloses someone's age.
+    celebrate_birthday: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    celebrate_anniversary: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
 
     def __repr__(self) -> str:
         return f"<EmployeeProfile(id={self.id}, user_id={self.user_id})>"

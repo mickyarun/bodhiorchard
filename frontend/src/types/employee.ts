@@ -62,6 +62,24 @@ export interface EmployeePersonal extends EmployeeContact {
   blood_group: BloodGroup | null
 }
 
+/**
+ * Personal fields as a profile shows them, plus the celebration opt-outs.
+ *
+ * The opt-outs are read-only on the personal-details save: they change only
+ * through `PATCH /employees/{id}/celebrations` (the employee either way, HR
+ * mute-only), so a stale form can never switch someone's announcement back on.
+ */
+export interface EmployeePersonalRead extends EmployeePersonal {
+  celebrate_birthday: boolean
+  celebrate_anniversary: boolean
+}
+
+/** Body for `PATCH /employees/{id}/celebrations`. Omitted = unchanged. */
+export interface CelebrationPrefs {
+  celebrate_birthday?: boolean
+  celebrate_anniversary?: boolean
+}
+
 export interface ManagerRef {
   user_id: string
   name: string
@@ -84,13 +102,17 @@ export interface EmployeeRecord {
   name: string
   email: string
   is_active: boolean
+  /** Absolute (Slack CDN) or root-relative (hosted here); null = initials. */
+  avatar_url: string | null
+  /** Whether the viewer may replace this photo: their own, or HR. */
+  can_edit_avatar: boolean
   work: EmployeeWork
   office: OfficeRef | null
   /** Null only before the org has a default policy. */
   leave_policy: EmployeeLeavePolicy | null
   managers: ManagerRef[]
   /** Only present for HR, the owner and the employee themself. */
-  personal: EmployeePersonal | null
+  personal: EmployeePersonalRead | null
   /** edit_name: HR, or the person themself. reset_password: HR, never on their own record. */
   access: {
     edit_work: boolean
@@ -105,6 +127,7 @@ export interface EmployeeRecord {
 
 export interface DirectoryEntry {
   user_id: string
+  avatar_url: string | null
   name: string
   email: string
   is_active: boolean

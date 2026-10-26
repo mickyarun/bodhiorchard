@@ -80,15 +80,25 @@
             @click="open(row.user_id)"
           >
             <td>
-              <!-- A real link, so keyboards and screen readers can open it too. -->
-              <router-link
-                :to="{ name: 'employee-profile', params: { userId: row.user_id } }"
-                class="directory__name font-weight-medium"
-                @click.stop
-              >
-                {{ row.name }}
-              </router-link>
-              <div class="text-caption text-medium-emphasis">{{ row.email }}</div>
+              <div class="d-flex align-center ga-3">
+                <EmployeeAvatar
+                  :user-id="row.user_id"
+                  :name="row.name"
+                  :avatar-url="row.avatar_url"
+                  :size="36"
+                />
+                <div style="min-width: 0">
+                  <!-- A real link, so keyboards and screen readers can open it too. -->
+                  <router-link
+                    :to="{ name: 'employee-profile', params: { userId: row.user_id } }"
+                    class="directory__name font-weight-medium"
+                    @click.stop
+                  >
+                    {{ row.name }}
+                  </router-link>
+                  <div class="text-caption text-medium-emphasis">{{ row.email }}</div>
+                </div>
+              </div>
             </td>
             <td class="bo-mono">{{ row.employee_code || '—' }}</td>
             <td>{{ row.designation || '—' }}</td>
@@ -115,6 +125,7 @@ import { useRouter } from 'vue-router'
 import AppCallout from '@/components/common/AppCallout.vue'
 import AddEmployeeDialog from '@/components/people/AddEmployeeDialog.vue'
 import InviteNewHireDialog from '@/components/people/InviteNewHireDialog.vue'
+import EmployeeAvatar from '@/components/people/EmployeeAvatar.vue'
 import EmployeeStatusChip from '@/components/people/EmployeeStatusChip.vue'
 import { useDebounced } from '@/composables/useDebounced'
 import { usePermissions } from '@/composables/usePermissions'

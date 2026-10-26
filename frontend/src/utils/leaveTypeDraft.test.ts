@@ -34,6 +34,8 @@ const read = (over: Partial<LeaveTypeRead> = {}): LeaveTypeRead => ({
   code: 'CL',
   id: 't1',
   policy_id: 'p1',
+  template_id: null,
+  own_quota: false,
   ...over,
 })
 
@@ -63,6 +65,8 @@ describe('leave type drafts', () => {
     // Maternity leave is gender-limited too, but isn't period leave.
     expect(hasPeriodLeave([read({ code: 'ML', eligible_genders: ['female'] })])).toBe(false)
     expect(hasPeriodLeave([read({ code: 'PERIOD', is_active: false })])).toBe(true)
+    // Added from the library under its own code.
+    expect(hasPeriodLeave([read({ name: 'Period  Leave', code: 'PL', template_id: 'e1' })])).toBe(true)
   })
 })
 

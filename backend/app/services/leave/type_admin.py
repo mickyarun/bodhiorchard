@@ -18,10 +18,15 @@ Types are deactivated, never deleted. A quota change applies to leave
 years not yet allocated; frozen years keep theirs unless HR recalculates.
 How a type is given (upfront or monthly) can't change while this leave
 year's allocation is booked.
+
+A type may follow a library entry (``template_id``); the library service
+passes the link and a note for the history through here, so every change
+to a policy's type is checked and recorded in one place.
 """
 
 import uuid
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,7 +36,7 @@ from app.models.leave_type import LeaveType
 from app.repositories.leave_ledger import LeaveLedgerRepository
 from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.leave_type import LeaveTypeRepository
-from app.schemas.leave_policy import LeaveTypeWrite
+from app.schemas.leave_type import LeaveTypeRules, LeaveTypeWrite
 from app.services.leave import config_audit
 from app.services.leave.calendar_math import leave_year_bounds
 from app.services.leave.errors import LeaveConflictError, LeaveForbiddenError
@@ -44,9 +49,24 @@ AUTO_APPROVE_DENIED = (
 )
 
 
-def _check_auto_approve(body: LeaveTypeWrite, may_approve: bool) -> None:
+@dataclass(frozen=True)
+class TypeLink:
+    """The library entry a type follows (None: its own) and whether it keeps its own quota."""
+
+    template_id: uuid.UUID | None
+    own_quota: bool = False
+
+
+def check_auto_approve(body: LeaveTypeRules, may_approve: bool) -> None:
+    """Refuse a self-approving type from someone who doesn't approve leave."""
     if body.auto_approve and not may_approve:
         raise LeaveForbiddenError(AUTO_APPROVE_DENIED)
+
+
+def _link_fields(link: TypeLink | None) -> dict[str, object]:
+    if link is None:
+        return {}
+    return {"template_id": link.template_id, "own_quota": link.own_quota}
 
 
 async def create_type(
@@ -56,22 +76,22 @@ async def create_type(
     body: LeaveTypeWrite,
     *,
     may_approve: bool,
+    link: TypeLink | None = None,
+    context: Mapping[str, object] | None = None,
 ) -> LeaveType:
-    """Add a leave type to a policy."""
-    _check_auto_approve(body, may_approve)
+    """Add a leave type to a policy, standalone or following ``link``."""
+    check_auto_approve(body, may_approve)
     repo = LeaveTypeRepository(db, org_id=policy.org_id)
     if await repo.code_taken(policy.id, body.code, exclude=None):
         raise LeaveConflictError(f"The code {body.code} is already used on this policy.")
     created = await repo.create(
-        LeaveType(org_id=policy.org_id, policy_id=policy.id, **body.model_dump())
+        LeaveType(
+            org_id=policy.org_id, policy_id=policy.id, **body.model_dump(), **_link_fields(link)
+        )
     )
-    _record(
-        db,
-        created,
-        actor_id,
-        LeaveConfigAction.TYPE_CREATED,
-        config_audit.diff({}, body.model_dump()),
-    )
+    changes = config_audit.diff({}, body.model_dump() | _link_fields(link))
+    changes.pop("template_id", None)  # named in ``context``
+    _record(db, created, actor_id, LeaveConfigAction.TYPE_CREATED, {**(context or {}), **changes})
     return created
 
 
@@ -82,26 +102,34 @@ async def update_type(
     body: LeaveTypeWrite,
     *,
     may_approve: bool,
+    link: TypeLink | None = None,
+    context: Mapping[str, object] | None = None,
 ) -> None:
-    """Edit a type's name, code, quota, colour or active flag.
+    """Edit a type's name, code, quota, rules or active flag.
 
     A type that approves itself can only be edited by someone who approves
     leave: raising its allowance is as good as approving the extra days.
+    ``link`` (when given) sets the library entry it follows; ``context``
+    joins the history event, e.g. which library entry the change came from.
     """
-    _check_auto_approve(body, may_approve)
+    check_auto_approve(body, may_approve)
     repo = LeaveTypeRepository(db, org_id=leave_type.org_id)
     if await repo.code_taken(leave_type.policy_id, body.code, exclude=leave_type.id):
         raise LeaveConflictError(f"The code {body.code} is already used on this policy.")
     if body.accrual != leave_type.accrual:
         await _check_accrual_change(db, leave_type)
-    after = body.model_dump()
+    after = body.model_dump() | _link_fields(link)
     changes = config_audit.diff(config_audit.snapshot(leave_type, after), after)
     if not changes:
         return
     for field, value in after.items():
         setattr(leave_type, field, value)
     await db.flush()
-    _record(db, leave_type, actor_id, LeaveConfigAction.TYPE_UPDATED, changes)
+    # The caller names the library entry in ``context``: an id doesn't read in a history.
+    changes.pop("template_id", None)
+    _record(
+        db, leave_type, actor_id, LeaveConfigAction.TYPE_UPDATED, {**(context or {}), **changes}
+    )
 
 
 async def _check_accrual_change(db: AsyncSession, leave_type: LeaveType) -> None:

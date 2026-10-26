@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.models.leave_type import LeaveType
-from app.schemas.leave_policy import LeaveTypeWrite
+from app.schemas.leave_type import LeaveTypeWrite
 from app.services.leave.balances import BalanceLine
 from app.services.leave.calendar_math import leave_year_by_label
 from app.services.leave.carry_rule import added_in, carry_days, carry_notes, due_year

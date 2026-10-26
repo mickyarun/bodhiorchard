@@ -24,6 +24,7 @@ launched ``uvicorn``.
 
 import logging
 import os
+import re
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -77,7 +78,36 @@ def setup_logging(log_level: str = "INFO", json_output: bool = True) -> None:
 
     level = getattr(logging, log_level.upper(), logging.INFO)
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=level)
+    # httpx logs every request URL at INFO. Some third-party APIs only take
+    # their key as a query parameter (Giphy's ``api_key``), so redact those
+    # values on the way out rather than losing outbound request logs.
+    _install_query_secret_redaction(logging.getLogger("httpx"))
     _attach_file_handler(level)
+
+
+# ``name=value`` pairs whose value is a credential. Matched case-insensitively
+# anywhere in the message, so it covers query strings in request URLs.
+_SECRET_QUERY_PARAM = re.compile(
+    r"(?i)\b(api_key|apikey|access_token|token|key|secret|signature|sig)=([^&\s\"']+)"
+)
+
+
+class _RedactQuerySecrets(logging.Filter):
+    """Replace credential values in a log message with ``***``."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        redacted = _SECRET_QUERY_PARAM.sub(r"\1=***", message)
+        if redacted != message:
+            record.msg = redacted
+            record.args = ()
+        return True
+
+
+def _install_query_secret_redaction(target: logging.Logger) -> None:
+    """Attach the redaction filter once (``setup_logging`` may run twice in tests)."""
+    if not any(isinstance(f, _RedactQuerySecrets) for f in target.filters):
+        target.addFilter(_RedactQuerySecrets())
 
 
 def _attach_file_handler(level: int) -> None:

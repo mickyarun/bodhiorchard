@@ -15,8 +15,9 @@
  -->
 
 <!-- Settings → Leave (leave:configure). Policies set working days,
-     holidays, leave types and WFH rules; People shows who follows which.
-     `?view=people` picks the people list, `?policy=<id>` opens a policy. -->
+     holidays, leave types and WFH rules; Leave types is the org's library
+     that policies add types from; People shows who follows which.
+     `?view=types|people` picks a view, `?policy=<id>` opens a policy. -->
 <template>
   <div class="pa-6 settings-leave">
     <div class="d-flex align-start justify-space-between flex-wrap ga-3 mb-4">
@@ -38,6 +39,7 @@
 
     <PolicyDetail v-if="open" :policy="open" :region="regionOf(open)" @back="select(null)" />
     <PolicyListView v-else-if="view === 'policies'" @open="select" />
+    <LibraryTypesView v-else-if="view === 'types'" />
     <LeaveAssignmentsTable v-else />
 
     <AddPolicyDialog v-model="adding" @created="policy => select(policy.id)" />
@@ -51,16 +53,18 @@ import AppCallout from '@/components/common/AppCallout.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import AddPolicyDialog from '@/components/leave/settings/AddPolicyDialog.vue'
 import LeaveAssignmentsTable from '@/components/leave/settings/LeaveAssignmentsTable.vue'
+import LibraryTypesView from '@/components/leave/settings/LibraryTypesView.vue'
 import PolicyDetail from '@/components/leave/settings/PolicyDetail.vue'
 import PolicyListView from '@/components/leave/settings/PolicyListView.vue'
 import { useLeavePoliciesStore } from '@/stores/leavePolicies'
 import type { PolicyRead } from '@/types/leavePolicy'
 import { regionLabel } from '@/utils/leavePolicy'
 
-type View = 'policies' | 'people'
+type View = 'policies' | 'types' | 'people'
 
 const VIEW_OPTIONS: { label: string; value: View }[] = [
   { label: 'Policies', value: 'policies' },
+  { label: 'Leave types', value: 'types' },
   { label: 'People', value: 'people' },
 ]
 
@@ -72,10 +76,10 @@ const adding = ref(false)
 const open = computed(() => store.policies.find(p => p.id === route.query.policy) ?? null)
 
 const view = computed<View>({
-  get: () => (route.query.view === 'people' ? 'people' : 'policies'),
+  get: () => VIEW_OPTIONS.find(o => o.value === route.query.view)?.value ?? 'policies',
   set: value => {
     const rest = queryWithout('view')
-    void router.replace({ query: value === 'people' ? { ...rest, view: value } : rest })
+    void router.replace({ query: value === 'policies' ? rest : { ...rest, view: value } })
   },
 })
 
