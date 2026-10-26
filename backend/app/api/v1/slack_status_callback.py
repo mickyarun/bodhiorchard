@@ -14,66 +14,34 @@
 
 """Where Slack sends a member back after they approve status updates.
 
-No login (it's a browser redirect from Slack): who it's for comes from the
-signed ``state``. Always ends on the member's Leave page with the outcome.
+It's a browser redirect with no login, so it doesn't finish anything: it
+hands ``code`` and ``state`` to the Leave page in the URL fragment, and the
+page finishes while signed in (``POST /leave/slack-status/me/finish``). That
+way a connect link opened by anyone but the member who started it goes
+nowhere, even if they approve.
 """
 
-import httpx
-import structlog
-from fastapi import APIRouter, Depends
+from urllib.parse import urlencode
+
+from fastapi import APIRouter
 from fastapi.responses import RedirectResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.deps import get_db
-from app.services.background import spawn
-from app.services.leave.slack_status.apply import hand_back, refresh_member
-from app.services.leave.slack_status.oauth import (
-    InvalidStateError,
-    WrongSlackAccountError,
-    complete,
-    read_state,
-)
-from app.services.leave.slack_status.settings import load_client
-from app.services.slack_user_api import SlackUserApiError
 
 router = APIRouter(tags=["slack"])
-logger = structlog.get_logger(__name__)
-
-
-def _back(outcome: str) -> RedirectResponse:
-    return RedirectResponse(f"{settings.frontend_url}/leave?slackStatus={outcome}", 303)
 
 
 @router.get("/status/callback", response_class=RedirectResponse)
 async def slack_status_callback(
-    state: str = "",
-    code: str = "",
-    error: str = "",
-    db: AsyncSession = Depends(get_db),
+    state: str = "", code: str = "", error: str = ""
 ) -> RedirectResponse:
-    """Finish the approval: keep the token, set today's status, go back to the app."""
+    """Back to the Leave page, with what Slack sent for it to finish."""
+    leave = f"{settings.frontend_url}/leave"
     if error:
         # They pressed Cancel on Slack's page.
-        return _back("cancelled")
-    try:
-        org_id, user_id = read_state(state)
-    except InvalidStateError:
-        return _back("expired")
-    client = await load_client(db, org_id)
-    if not client.ready or not code:
-        return _back("failed")
-    try:
-        connected = await complete(db, client, org_id, user_id, code)
-    except WrongSlackAccountError:
-        return _back("wrong_account")
-    except SlackUserApiError as exc:
-        logger.warning("slack_status_connect_failed", org_id=str(org_id), error=exc.code)
-        return _back("rotation" if exc.code == "token_rotation_on" else "failed")
-    except httpx.HTTPError as exc:
-        logger.warning("slack_status_connect_failed", org_id=str(org_id), error=str(exc))
-        return _back("failed")
-    await db.commit()
-    await hand_back(connected.stale_tokens)
-    spawn(refresh_member(org_id, user_id))
-    return _back("moved" if connected.moved else "connected")
+        return RedirectResponse(f"{leave}?slackStatus=cancelled", 303)
+    if not code or not state:
+        return RedirectResponse(f"{leave}?slackStatus=failed", 303)
+    # In the fragment: browsers never send it to a server or in a Referer,
+    # so the code stays out of access logs.
+    return RedirectResponse(f"{leave}#{urlencode({'slackCode': code, 'slackState': state})}", 303)

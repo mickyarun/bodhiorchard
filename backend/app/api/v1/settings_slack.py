@@ -35,6 +35,7 @@ from app.models.user import OrgToUser, User
 from app.repositories.organization import OrganizationRepository
 from app.repositories.slack_identity import SlackIdentityRepository
 from app.repositories.user import UserRepository
+from app.services.avatars import sync_slack_photos
 from app.services.slack_identity import assert_can_relink
 
 logger = structlog.get_logger(__name__)
@@ -60,18 +61,28 @@ class SlackMemberPreview(BaseModel):
 
 
 class SlackLinkRequest(BaseModel):
-    """Mapping of Slack ID → Bodhiorchard user ID for bulk linking."""
+    """Mapping of Slack ID → Bodhiorchard user ID for bulk linking.
+
+    Each entry carries ``slack_id`` and ``user_id``. Newly linked members
+    without a photo get their Slack one, looked up server-side.
+    """
 
     links: list[dict[str, str]]
 
 
 class SlackImportItem(BaseModel):
-    """A Slack member to import as a new Bodhiorchard user."""
+    """A Slack member to import as a new Bodhiorchard user.
+
+    Carries no photo URL on purpose: the photo is fetched from Slack's own
+    API after the import (``sync_slack_photos``), so a client cannot plant an
+    arbitrary image URL that every viewer's browser — and Slack itself —
+    would then load. An older client still sending ``slack_avatar`` is
+    harmless: Pydantic ignores the unknown field.
+    """
 
     slack_id: str
     slack_name: str
     slack_email: str
-    slack_avatar: str | None = None
 
 
 class SlackImportRequest(BaseModel):
@@ -212,6 +223,7 @@ async def link_slack_members(
     user_repo = UserRepository(db, org_id=org.id)
 
     linked = 0
+    linked_ids: list[uuid.UUID] = []
     for link in body.links:
         slack_id = link.get("slack_id", "")
         user_id_str = link.get("user_id", "")
@@ -231,18 +243,41 @@ async def link_slack_members(
             # managing the account.
             await assert_can_relink(db, actor=perms, target=user, org_id=org.id, slack_id=slack_id)
             user.slack_id = slack_id
+            linked_ids.append(user.id)
             linked += 1
 
     await db.flush()
 
+    # Give newly linked members their Slack photo if they have none. The
+    # URL is looked up from Slack's API here rather than accepted from the
+    # request, so a client cannot plant an arbitrary image URL that every
+    # viewer's browser (and Slack) would then fetch. Photo import is a
+    # nicety: a Slack hiccup must not fail the link itself.
+    adopted_avatars = 0
+    if linked_ids and org.slack_bot_token:
+        # A savepoint, so a failure inside the photo step (a Slack error, or
+        # its own flush) rolls back only the photos — not the links above.
+        try:
+            async with db.begin_nested():
+                photo_sync = await sync_slack_photos(
+                    db,
+                    org_id=org.id,
+                    bot_token=decrypt_secret(org.slack_bot_token),
+                    only_user_ids=linked_ids,
+                )
+            adopted_avatars = photo_sync.updated
+        except Exception:
+            logger.warning("slack_link_photo_import_failed", org_id=str(org.id), exc_info=True)
+
     logger.info(
         "slack_members_linked",
         linked=linked,
+        adopted_avatars=adopted_avatars,
         total=len(body.links),
         by=current_user.email,
     )
 
-    return {"linked": linked}
+    return {"linked": linked, "avatars": adopted_avatars}
 
 
 @router.post("/slack/unlink-member")
@@ -324,6 +359,7 @@ async def import_slack_members(
     user_repo = UserRepository(db, org_id=org.id)
 
     imported = 0
+    imported_ids: list[uuid.UUID] = []
     skipped: list[str] = []
 
     for item in body.imports:
@@ -338,10 +374,10 @@ async def import_slack_members(
             email=item.slack_email,
             name=item.slack_name,
             password_hash=hash_password(secrets.token_urlsafe(12)),
-            avatar_url=item.slack_avatar,
             slack_id=item.slack_id,
         )
         created = await user_repo.create(new_user)
+        imported_ids.append(created.id)
 
         membership = OrgToUser(
             user_id=created.id,
@@ -351,6 +387,22 @@ async def import_slack_members(
         imported += 1
 
     await db.flush()
+
+    # Photos come from Slack's API, never from the request (see
+    # ``SlackImportItem``). Best-effort: a Slack hiccup must not undo the
+    # import itself — "Import photos from Slack" can be re-run later.
+    if imported_ids and org.slack_bot_token:
+        # Savepoint: a failing photo step must not roll back the import.
+        try:
+            async with db.begin_nested():
+                await sync_slack_photos(
+                    db,
+                    org_id=org.id,
+                    bot_token=decrypt_secret(org.slack_bot_token),
+                    only_user_ids=imported_ids,
+                )
+        except Exception:
+            logger.warning("slack_import_photo_sync_failed", org_id=str(org.id), exc_info=True)
 
     logger.info(
         "slack_members_imported",

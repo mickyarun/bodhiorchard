@@ -19,7 +19,14 @@ import type { LeaveTypeRead } from '@/types/leavePolicy'
 import { monthlyLimitNote } from '@/utils/leaveAccrual'
 import { changeLines } from '@/utils/leaveConfigHistory'
 import { typeRuleTags } from '@/utils/leavePolicyDisplay'
-import { blankType, draftFromType, hasPeriodLeave, periodLeave, validMonthlyLimit } from '@/utils/leaveTypeDraft'
+import {
+  blankType,
+  draftFromType,
+  hasPeriodLeave,
+  periodLeave,
+  validCarryForward,
+  validMonthlyLimit,
+} from '@/utils/leaveTypeDraft'
 
 const read = (over: Partial<LeaveTypeRead> = {}): LeaveTypeRead => ({
   ...blankType(),
@@ -27,6 +34,8 @@ const read = (over: Partial<LeaveTypeRead> = {}): LeaveTypeRead => ({
   code: 'CL',
   id: 't1',
   policy_id: 'p1',
+  template_id: null,
+  own_quota: false,
   ...over,
 })
 
@@ -56,6 +65,8 @@ describe('leave type drafts', () => {
     // Maternity leave is gender-limited too, but isn't period leave.
     expect(hasPeriodLeave([read({ code: 'ML', eligible_genders: ['female'] })])).toBe(false)
     expect(hasPeriodLeave([read({ code: 'PERIOD', is_active: false })])).toBe(true)
+    // Added from the library under its own code.
+    expect(hasPeriodLeave([read({ name: 'Period  Leave', code: 'PL', template_id: 'e1' })])).toBe(true)
   })
 })
 
@@ -63,6 +74,7 @@ describe('type rule tags and history', () => {
   it('lists only the special rules', () => {
     expect(typeRuleTags(read())).toEqual([])
     expect(typeRuleTags(read({ stops_at_balance: true }))).toEqual(['Stops at balance'])
+    expect(typeRuleTags(read({ carry_forward_days: '5.0' }))).toEqual(['Carries up to 5 days'])
     expect(typeRuleTags(read({ ...periodLeave() }))).toEqual(['Female only', 'Auto-approved', '1 day a month'])
   })
 
@@ -70,6 +82,11 @@ describe('type rule tags and history', () => {
     expect(
       changeLines({ eligible_genders: [null, ['female', 'non_binary']], auto_approve: [false, true], monthly_limit_days: [null, '1.0'] }),
     ).toEqual(['Who can use it: Female, Non-binary only', 'Approved automatically: no → yes', 'Most days in a month: 1'])
+  })
+
+  it('reads the carry-forward cap in the change log', () => {
+    expect(changeLines({ carry_forward_days: [null, '5.0'] })).toEqual(['Carry into next year: 5'])
+    expect(changeLines({ carry_forward_days: ['5.0', null] })).toEqual(['Carry into next year: 5 → none'])
   })
 })
 
@@ -96,5 +113,18 @@ describe('validMonthlyLimit', () => {
     expect(validMonthlyLimit(31)).toBe(true)
     expect(validMonthlyLimit(31.5)).toBe(false)
     expect(validMonthlyLimit('abc')).toBe(false)
+  })
+})
+
+describe('validCarryForward', () => {
+  it('accepts nothing carried, or half-day steps up to a year', () => {
+    expect(validCarryForward(null)).toBe(true)
+    expect(validCarryForward(5)).toBe(true)
+    expect(validCarryForward('2.5')).toBe(true)
+    expect(validCarryForward(365)).toBe(true)
+    expect(validCarryForward('')).toBe(false)
+    expect(validCarryForward(0)).toBe(false)
+    expect(validCarryForward(1.25)).toBe(false)
+    expect(validCarryForward(366)).toBe(false)
   })
 })

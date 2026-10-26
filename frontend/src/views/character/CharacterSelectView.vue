@@ -210,6 +210,7 @@ import { useMembersStore } from '@/stores/members'
 import { useAuthStore } from '@/stores/auth'
 import { useXPStore } from '@/stores/xp'
 import { formatSP } from '@/utils/format'
+import { takeReturnTo } from '@/utils/returnTo'
 
 const router = useRouter()
 const membersStore = useMembersStore()
@@ -287,12 +288,15 @@ async function handleSave(): Promise<void> {
     return
   }
 
+  // A first pick is part of signing in (see afterSignIn): it carries on to
+  // the page they were going to. Changing it later just goes home.
+  const signingIn = !authStore.user?.character_model
   saving.value = true
   try {
     const serialized = serializeCharacterConfig(config)
     await membersStore.updateCharacter(userId, serialized)
     await authStore.fetchUser()
-    router.push({ name: 'dashboard' })
+    router.push((signingIn && takeReturnTo()) || { name: 'dashboard' })
   } catch (err) {
     console.error('[CharacterSelect] Failed to save:', err)
   } finally {

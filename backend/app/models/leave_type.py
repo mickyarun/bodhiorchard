@@ -35,7 +35,8 @@ class LeaveAccrual(StrEnum):
     MONTHLY = "monthly"
 
 
-def _values(enum: type[StrEnum]) -> list[str]:
+def enum_values(enum: type[StrEnum]) -> list[str]:
+    """Store an enum by its values ("upfront"), not its member names."""
     return [member.value for member in enum]
 
 
@@ -51,6 +52,18 @@ class LeaveType(BaseModel):
     policy_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("leave_policies.id", ondelete="RESTRICT"), nullable=False
     )
+    # The library entry it follows, if any: every rule but the quota comes
+    # from there. NULL = a type of this policy alone.
+    template_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("leave_type_templates.id", ondelete="RESTRICT", name="fk_leave_types_template"),
+        nullable=True,
+        index=True,
+    )
+    # A linked type with its own yearly quota instead of the library's default.
+    own_quota: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     code: Mapped[str] = mapped_column(String(10), nullable=False)
     # NULL = no limit (e.g. unpaid leave).
@@ -65,7 +78,7 @@ class LeaveType(BaseModel):
         Boolean, nullable=False, default=False, server_default="false"
     )
     accrual: Mapped[LeaveAccrual] = mapped_column(
-        Enum(LeaveAccrual, name="leave_accrual", values_callable=_values),
+        Enum(LeaveAccrual, name="leave_accrual", values_callable=enum_values),
         nullable=False,
         default=LeaveAccrual.UPFRONT,
         server_default=LeaveAccrual.UPFRONT.value,
@@ -73,7 +86,9 @@ class LeaveType(BaseModel):
     # Only people whose profile gender is one of these can see and request
     # it (period leave: female). NULL = everyone on the policy.
     eligible_genders: Mapped[list[Gender] | None] = mapped_column(
-        ARRAY(Enum(Gender, name="employee_gender", values_callable=_values, create_type=False)),
+        ARRAY(
+            Enum(Gender, name="employee_gender", values_callable=enum_values, create_type=False)
+        ),
         nullable=True,
     )
     # Approved as soon as it's sent; the managers get a heads-up instead.
@@ -88,6 +103,9 @@ class LeaveType(BaseModel):
     stops_at_balance: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # Unused days carried into the next leave year, up to this many; the
+    # rest lapse. NULL or 0 = nothing carries over.
+    carry_forward_days: Mapped[Decimal | None] = mapped_column(Numeric(4, 1), nullable=True)
     # A palette slot ("swatch-1" … "swatch-7"); only HR and the requester see it.
     color_key: Mapped[str] = mapped_column(String(20), nullable=False, default="swatch-1")
     is_active: Mapped[bool] = mapped_column(

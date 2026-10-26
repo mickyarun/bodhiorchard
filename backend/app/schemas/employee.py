@@ -93,6 +93,31 @@ class EmployeePersonal(EmployeeContact):
     blood_group: BloodGroup | None = None
 
 
+class EmployeePersonalRead(EmployeePersonal):
+    """Personal fields as shown on a profile, plus the celebration opt-outs.
+
+    The opt-outs are read-only here on purpose. They are written only
+    through :class:`CelebrationPrefsUpdate`, never by the personal-details
+    save: that save replaces every field, so carrying the flags on it would
+    let a stale HR form — or any client that omits them — silently switch a
+    person's muted announcement back on.
+    """
+
+    celebrate_birthday: bool = True
+    celebrate_anniversary: bool = True
+
+
+class CelebrationPrefsUpdate(BaseModel):
+    """Mute or unmute someone's celebration announcements. Omitted = unchanged.
+
+    The employee may set either flag either way. HR may only mute (``False``);
+    turning an announcement back on is the employee's call alone.
+    """
+
+    celebrate_birthday: bool | None = None
+    celebrate_anniversary: bool | None = None
+
+
 class ManagerRef(BaseModel):
     """A reporting manager as shown on a profile."""
 
@@ -139,13 +164,19 @@ class EmployeeRead(BaseModel):
     name: str
     email: str
     is_active: bool
+    # Profile photo, visible to anyone who can see the record at all. May be
+    # absolute (Slack CDN) or root-relative (hosted here); ``None`` means the
+    # UI falls back to initials.
+    avatar_url: str | None = None
+    # Whether the caller may replace this photo: their own, or HR's.
+    can_edit_avatar: bool = False
     work: EmployeeWork
     # Read-only alongside the work details; null only before the org has a
     # default policy. Changed through the leave policy assign route.
     leave_policy: EmployeeLeavePolicy | None = None
     office: OfficeRef | None = None
     managers: list[ManagerRef]
-    personal: EmployeePersonal | None
+    personal: EmployeePersonalRead | None
     access: EmployeeAccessRead
     # Set only after a status change to "exited": whether the account was
     # also deactivated, or still needs an admin to do it.
@@ -156,6 +187,7 @@ class DirectoryEntry(BaseModel):
     """One row of the employee directory."""
 
     user_id: uuid.UUID
+    avatar_url: str | None = None
     name: str
     email: str
     is_active: bool
@@ -209,3 +241,14 @@ class ManagersUpdate(BaseModel):
     """Replace an employee's reporting managers."""
 
     managers: list[ManagerInput] = Field(default_factory=list, max_length=10)
+
+
+class AvatarRead(BaseModel):
+    """The member's profile photo URL after an upload or removal.
+
+    ``None`` means "no photo" — the UI falls back to initials. The value
+    may be absolute (a Slack CDN address) or root-relative (one we host);
+    see ``app.services.avatars``.
+    """
+
+    avatar_url: str | None = None

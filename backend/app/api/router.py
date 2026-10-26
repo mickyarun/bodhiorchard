@@ -44,6 +44,7 @@ from app.api.v1.bugs import router as bugs_router
 from app.api.v1.claude import router as claude_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.design_system import router as design_system_router
+from app.api.v1.employee_avatars import router as employee_avatars_router
 from app.api.v1.employee_documents import router as employee_documents_router
 from app.api.v1.employee_login import router as employee_login_router
 from app.api.v1.employee_sensitive import router as employee_sensitive_router
@@ -64,6 +65,7 @@ from app.api.v1.leave_changes import router as leave_changes_router
 from app.api.v1.leave_digest import router as leave_digest_router
 from app.api.v1.leave_history import router as leave_history_router
 from app.api.v1.leave_holidays import router as leave_holidays_router
+from app.api.v1.leave_library import router as leave_library_router
 from app.api.v1.leave_policies import router as leave_policies_router
 from app.api.v1.leave_reports import router as leave_reports_router
 from app.api.v1.leave_reports_export import router as leave_reports_export_router
@@ -128,6 +130,7 @@ for employee_part in (
     employee_sensitive_router,
     employee_documents_router,
     employee_login_router,
+    employee_avatars_router,
 ):
     api_router.include_router(
         employee_part, prefix="/api/v1/employees", dependencies=PEOPLE_NO_STORE
@@ -141,6 +144,7 @@ for leave_part in (
     leave_balances_router,
     leave_policies_router,
     leave_types_router,
+    leave_library_router,
     leave_holidays_router,
     leave_digest_router,
     leave_calendar_sync_router,

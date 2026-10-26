@@ -14,7 +14,7 @@
 
 /**
  * Leave configuration types (leave:configure), mirroring
- * backend/app/schemas/leave_policy.py. See types/leave.ts for the
+ * backend/app/schemas/leave_policy.py and leave_type.py. See types/leave.ts for the
  * Decimal and date conventions.
  */
 import type {
@@ -83,6 +83,8 @@ export interface LeaveTypeWrite {
   monthly_limit_days: Decimalish | null
   /** Refuse requests past the balance (people use another type) instead of going unpaid. */
   stops_at_balance: boolean
+  /** Unused days carried into the next leave year, up to this many; null = none. */
+  carry_forward_days: Decimalish | null
   color_key: string
   is_active: boolean
 }
@@ -90,6 +92,10 @@ export interface LeaveTypeWrite {
 export interface LeaveTypeRead extends LeaveTypeWrite {
   id: string
   policy_id: string
+  /** The library type it follows (its rules come from there), or null for the policy's own. */
+  template_id: string | null
+  /** A library type with this policy's own yearly quota instead of the library default. */
+  own_quota: boolean
 }
 
 export interface HolidayWrite {
@@ -165,6 +171,9 @@ export type ConfigAction =
   | 'type_created'
   | 'type_updated'
   | 'employees_assigned'
+  | 'library_type_created'
+  | 'library_type_updated'
+  | 'library_type_deleted'
 
 /** One change to a policy or its leave types; `changes` is {field: [old, new]}. */
 export interface ConfigEventRead {

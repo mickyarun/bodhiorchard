@@ -68,6 +68,9 @@ services:
       GITHUB_PAT: ${GITHUB_PAT:-}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      # Celebration GIFs (birthdays / work anniversaries). Optional: blank
+      # means posts go out without a GIF.
+      GIPHY_API_KEY: ${GIPHY_API_KEY:-}
       # File storage. Without these the container never sees the
       # operator's choice: pydantic-settings reads the process
       # environment, and compose passes through only what is listed

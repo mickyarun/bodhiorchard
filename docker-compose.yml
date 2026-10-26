@@ -68,6 +68,8 @@ services:
       # When unset this is empty; orgs using api_key auth mode override it
       # from the encrypted value stored in the DB.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Celebration GIFs. Optional: blank means posts go out without a GIF.
+      GIPHY_API_KEY: ${GIPHY_API_KEY:-}
       # Shared HMAC with the multiplayer service — both sides must match or
       # internal bridge calls (verify-token, org-snapshot, race-*) get 403.
       # Unset: generated into secrets_data, which multiplayer reads too.

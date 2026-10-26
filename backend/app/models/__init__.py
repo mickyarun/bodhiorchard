@@ -47,6 +47,11 @@ from app.models.bud_version import MAX_VERSIONS_PER_PHASE, BUDEditSource, BUDVer
 from app.models.bug import Bug, BugSeverity, BugStatus, BugType
 from app.models.bug_attachment import BugAttachment
 from app.models.bug_comment import BugComment
+from app.models.celebration_config_event import (
+    CelebrationConfigAction,
+    CelebrationConfigEvent,
+)
+from app.models.celebration_post import CelebrationPost
 from app.models.cluster_cache import ClusterCache
 from app.models.design_system import DesignSystemRef
 from app.models.dev_activity import DevActivityLog
@@ -71,6 +76,7 @@ from app.models.leave_policy import LeavePolicy
 from app.models.leave_request import LeaveRequest
 from app.models.leave_slack_prompt import LeaveSlackPrompt
 from app.models.leave_type import LeaveType
+from app.models.leave_type_template import LeaveTypeTemplate
 from app.models.mcp_audit_log import MCPAuditLogEntry
 from app.models.minigame import MinigameScore, MinigameSession
 from app.models.notification import Notification, NotificationType
@@ -170,11 +176,15 @@ __all__ = [
     "LeaveSlackPrompt",
     "SlackStatusLink",
     "LeaveType",
+    "LeaveTypeTemplate",
     "PolicyHoliday",
     "BugComment",
     "BugSeverity",
     "BugStatus",
     "BugType",
+    "CelebrationConfigAction",
+    "CelebrationConfigEvent",
+    "CelebrationPost",
     "ClusterCache",
     "DesignSystemRef",
     "DevActivityLog",

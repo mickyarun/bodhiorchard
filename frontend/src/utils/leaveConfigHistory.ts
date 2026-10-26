@@ -44,20 +44,22 @@ const FIELD_LABELS: Record<string, string> = {
   auto_approve: 'Approved automatically',
   monthly_limit_days: 'Most days in a month',
   stops_at_balance: 'Stop requests past the balance',
+  carry_forward_days: 'Carry into next year',
   leave_notice_days: 'High-leave heads-up (days)',
   leave_warning_days: 'High-leave warning (days)',
   color_key: 'Colour',
   is_active: 'Active',
+  own_quota: "Policy's own yearly quota",
+  library: 'Library type',
   is_default: 'Default policy',
 }
 
 function formatValue(field: string, value: unknown): string {
   if (value === null || value === undefined) {
-    return field === 'annual_quota_days' || field === 'monthly_limit_days'
-      ? 'no limit'
-      : field === 'eligible_genders'
-        ? 'everyone'
-        : '—'
+    if (field === 'annual_quota_days' || field === 'monthly_limit_days') return 'no limit'
+    if (field === 'carry_forward_days') return 'none'
+    if (field === 'eligible_genders') return 'everyone'
+    return field === 'library' ? "none (the policy's own)" : '—'
   }
   if (field === 'working_days' && Array.isArray(value)) {
     return value.map(day => WEEKDAY_SHORT[Number(day)] ?? String(day)).join(', ')
@@ -89,6 +91,7 @@ export function changeLines(changes: Record<string, unknown>): string[] {
 /** One-line summary of what happened. */
 export function eventTitle(event: ConfigEventRead): string {
   const type = typeof event.changes.type === 'string' ? event.changes.type : ''
+  const library = typeof event.changes.library === 'string' ? event.changes.library : ''
   switch (event.action) {
     case 'policy_created':
       return 'Created the policy'
@@ -101,7 +104,14 @@ export function eventTitle(event: ConfigEventRead): string {
     case 'type_created':
       return `Added leave type ${type}`
     case 'type_updated':
-      return `Changed leave type ${type}`
+      // A plain name (not an [old, new] pair) means the change came from editing the library.
+      return library ? `Changed leave type ${type} in the library` : `Changed leave type ${type}`
+    case 'library_type_created':
+      return `Added library type ${library}`
+    case 'library_type_updated':
+      return `Changed library type ${library}`
+    case 'library_type_deleted':
+      return `Deleted library type ${library}`
     case 'employees_assigned': {
       const count = Number(event.changes.assigned ?? 0)
       return `Moved ${count} ${count === 1 ? 'person' : 'people'} onto this policy`

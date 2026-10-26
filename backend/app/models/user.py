@@ -83,7 +83,19 @@ class User(BaseModel):
     password_set_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Either an absolute third-party URL (Slack CDN, pulled in by the member
+    # sync) or a root-relative path into this API for a photo we host.
+    # ``app.services.avatars`` owns the distinction.
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Set only for self-hosted photos: where the bytes live in file storage.
+    # NULL whenever ``avatar_url`` points at someone else's CDN.
+    avatar_storage_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # Opaque, per-upload random key that the public photo URL is built from,
+    # so the URL posted into Slack never carries the member's user id.
+    # Regenerated on every upload, which also busts browser/Slack caches.
+    avatar_key: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, unique=True, index=True
+    )
     slack_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     github_username: Mapped[str | None] = mapped_column(String(100), nullable=True)
     character_model: Mapped[str | None] = mapped_column(String(100), nullable=True)

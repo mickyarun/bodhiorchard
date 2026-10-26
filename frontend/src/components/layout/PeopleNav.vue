@@ -68,6 +68,13 @@
     to="/me/profile"
     rounded="lg"
   />
+  <v-list-item
+    v-if="canManageCelebrations"
+    prepend-icon="mdi-cake-variant-outline"
+    title="Celebrations"
+    to="/settings/celebrations"
+    rounded="lg"
+  />
 </template>
 
 <script setup lang="ts">
@@ -77,7 +84,7 @@ import { useLeaveStore } from '@/stores/leave'
 
 defineProps<{ rail: boolean; showHeading: boolean }>()
 
-const { canViewEmployees, canViewLeaveReports } = usePermissions()
+const { canViewEmployees, canViewLeaveReports, canManageCelebrations } = usePermissions()
 const leaveStore = useLeaveStore()
 
 onMounted(() => {

@@ -31,44 +31,22 @@
       title="No changes yet"
       body="Edits to this policy, its leave types and who follows it show here, with who made them."
     />
-    <ol class="history">
-      <li v-for="event in history.events.value" :key="event.id" class="py-3">
-        <div class="text-body-2">
-          <strong>{{ event.actor.name }}</strong> · {{ eventTitle(event) }}
-        </div>
-        <ul v-if="changeLines(event.changes).length" class="text-body-2 text-medium-emphasis mt-1">
-          <li v-for="line in changeLines(event.changes)" :key="line">{{ line }}</li>
-        </ul>
-        <div class="text-caption text-medium-emphasis mt-1">{{ formatDateTime(event.at) }}</div>
-      </li>
-    </ol>
+    <ConfigEventList :events="history.events.value" />
   </LeaveSectionCard>
 </template>
 
 <script setup lang="ts">
 import { watch } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
+import ConfigEventList from '@/components/leave/settings/ConfigEventList.vue'
 import LeaveEmptyState from '@/components/leave/settings/LeaveEmptyState.vue'
 import LeaveSectionCard from '@/components/leave/settings/LeaveSectionCard.vue'
-import { usePolicyHistory } from '@/composables/usePolicyHistory'
-import { formatDateTime } from '@/utils/date'
-import { changeLines, eventTitle } from '@/utils/leaveConfigHistory'
+import { useConfigHistory } from '@/composables/useConfigHistory'
 
 const props = defineProps<{ policyId: string }>()
-const history = usePolicyHistory()
+const history = useConfigHistory()
 
-watch(() => props.policyId, id => void history.load(id), { immediate: true })
+watch(() => props.policyId, id => void history.load(`/v1/leave/policies/${id}/history`), {
+  immediate: true,
+})
 </script>
-
-<style scoped>
-.history {
-  list-style: none;
-  padding: 0;
-}
-.history > li + li {
-  border-top: 1px solid rgb(var(--v-border-color), var(--v-border-opacity));
-}
-.history ul {
-  padding-left: 18px;
-}
-</style>

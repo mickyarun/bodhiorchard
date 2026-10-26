@@ -18,6 +18,7 @@
 import type { Decimalish } from '@/types/leave'
 import type { LeaveTypeRead, LeaveTypeWrite } from '@/types/leavePolicy'
 import { SWATCH_KEYS } from '@/utils/leave'
+import { nameKey } from '@/utils/leaveLibrary'
 
 export function blankType(): LeaveTypeWrite {
   return {
@@ -32,13 +33,14 @@ export function blankType(): LeaveTypeWrite {
     auto_approve: false,
     monthly_limit_days: null,
     stops_at_balance: false,
+    carry_forward_days: null,
     color_key: SWATCH_KEYS[0],
     is_active: true,
   }
 }
 
 export function draftFromType(type: LeaveTypeRead): LeaveTypeWrite {
-  const { id: _id, policy_id: _policy, ...write } = type
+  const { id: _id, policy_id: _policy, template_id: _template, own_quota: _own, ...write } = type
   return write
 }
 
@@ -59,16 +61,27 @@ export function periodLeave(): LeaveTypeWrite {
   }
 }
 
-/** No limit, or half-day steps from 0.5 to 31 (what the server accepts). */
-export function validMonthlyLimit(value: Decimalish | null): boolean {
+/** Null (not set), or half-day steps from 0.5 to ``max``. */
+function validHalfDays(value: Decimalish | null, max: number): boolean {
   if (value === null) return true
   if (value === '') return false
   const days = Number(value)
-  return days >= 0.5 && days <= 31 && Number.isInteger(days * 2)
+  return days >= 0.5 && days <= max && Number.isInteger(days * 2)
 }
 
-/** True once a policy has period leave (on or off), so the shortcut steps aside. */
+/** No limit, or half-day steps from 0.5 to 31 (what the server accepts). */
+export function validMonthlyLimit(value: Decimalish | null): boolean {
+  return validHalfDays(value, 31)
+}
+
+/** Nothing carried, or up to a year's worth in half-day steps. */
+export function validCarryForward(value: Decimalish | null): boolean {
+  return validHalfDays(value, 365)
+}
+
+/** True once a policy has period leave (on or off), so the shortcut steps aside.
+ *  Matched by name too: one added from the library may use another code. */
 export function hasPeriodLeave(types: LeaveTypeRead[]): boolean {
-  const code = periodLeave().code
-  return types.some(t => t.code === code)
+  const { code, name } = periodLeave()
+  return types.some(t => t.code === code || nameKey(t.name) === nameKey(name))
 }

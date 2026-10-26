@@ -24,6 +24,7 @@ import { ref } from 'vue'
 
 import api from '@/services/api'
 import type {
+  CelebrationPrefs,
   DirectoryEntry,
   EmployeeContact,
   EmployeeLeavePolicy,
@@ -149,6 +150,17 @@ export const useEmployeesStore = defineStore('employees', () => {
     )
   }
 
+  /** Mute or unmute someone's celebration announcements (the employee, or HR mute-only). */
+  async function updateCelebrationPrefs(
+    userId: string,
+    prefs: CelebrationPrefs,
+  ): Promise<string | null> {
+    return save(
+      () => api.patch<EmployeeRecord>(`/v1/employees/${userId}/celebrations`, prefs),
+      "Couldn't change the announcement setting.",
+    )
+  }
+
   async function updateManagers(userId: string, managers: ManagerInput[]): Promise<string | null> {
     return save(
       () => api.put<EmployeeRecord>(`/v1/employees/${userId}/managers`, { managers }),
@@ -184,6 +196,7 @@ export const useEmployeesStore = defineStore('employees', () => {
     updateWork,
     updatePersonal,
     updateMyContact,
+    updateCelebrationPrefs,
     updateManagers,
     updateName,
     setLeavePolicy,

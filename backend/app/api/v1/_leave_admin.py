@@ -19,9 +19,12 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.leave_policy import LeavePolicy
+from app.models.leave_type import LeaveType
 from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.leave_policy_members import LeavePolicyMemberRepository
+from app.repositories.leave_type import LeaveTypeRepository
 from app.schemas.leave_policy import PolicyRead
+from app.schemas.leave_type import LeaveTypeRead
 from app.services.leave.errors import LeaveNotFoundError
 
 
@@ -31,6 +34,14 @@ async def load_policy(db: AsyncSession, org_id: uuid.UUID, policy_id: uuid.UUID)
     if policy is None:
         raise LeaveNotFoundError("Policy not found.")
     return policy
+
+
+async def load_type(db: AsyncSession, org_id: uuid.UUID, type_id: uuid.UUID) -> LeaveType:
+    """A leave type in this org, or 404."""
+    leave_type = await LeaveTypeRepository(db, org_id=org_id).get_by_id(type_id)
+    if leave_type is None:
+        raise LeaveNotFoundError("Leave type not found.")
+    return leave_type
 
 
 async def policy_read(db: AsyncSession, policy: LeavePolicy) -> PolicyRead:
@@ -59,3 +70,8 @@ async def policy_read(db: AsyncSession, policy: LeavePolicy) -> PolicyRead:
         ),
         has_requests=await repo.has_requests(policy.id),
     )
+
+
+def type_read(t: LeaveType) -> LeaveTypeRead:
+    """Wire shape of a policy's leave type: every field the schema has, from the row."""
+    return LeaveTypeRead.model_validate(t, from_attributes=True)

@@ -34,6 +34,7 @@ from app.repositories.base import violated_constraint
 from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.employee_reporting_manager import EmployeeReportingManagerRepository
 from app.schemas.employee import (
+    CelebrationPrefsUpdate,
     EmployeePersonal,
     EmployeeRead,
     EmployeeWork,
@@ -160,6 +161,36 @@ async def update_personal(
         setattr(profile, field, value)
     await db.flush()
     access = access_for(perms, current_user.id, user_id)
+    return await employee_read(db, org_id=org_id, profile=profile, user=user, access=access)
+
+
+@router.patch("/{user_id}/celebrations", response_model=EmployeeRead)
+async def update_celebration_prefs(
+    user_id: uuid.UUID,
+    body: CelebrationPrefsUpdate,
+    current_user: User = Depends(get_current_user),
+    perms: PermissionSet = Depends(get_permission_set),
+    db: AsyncSession = Depends(get_db),
+) -> EmployeeRead:
+    """Mute or unmute someone's birthday / work-anniversary announcement.
+
+    The opt-out belongs to the employee: they may switch either one on or
+    off. HR may mute on someone's behalf (a request made in person, say) but
+    never unmute — only the person can agree to having their date announced
+    again. Nobody else may change it.
+    """
+    access = access_for(perms, current_user.id, user_id)
+    changes = body.model_dump(exclude_unset=True, exclude_none=True)
+    if not access.is_self:
+        if not access.edit_personal:
+            raise forbid("Only HR or the person themself can change this.")
+        if any(changes.values()):
+            raise forbid("Only the person themself can turn an announcement back on.")
+    org_id = current_user.org_id
+    profile, user = await load_record(db, org_id, user_id)
+    for field, value in changes.items():
+        setattr(profile, field, value)
+    await db.flush()
     return await employee_read(db, org_id=org_id, profile=profile, user=user, access=access)
 
 

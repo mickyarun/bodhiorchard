@@ -45,6 +45,8 @@ function type(overrides: Partial<LeaveTypeRead> = {}): LeaveTypeRead {
   return {
     id: 't1',
     policy_id: 'p1',
+    template_id: null,
+    own_quota: false,
     name: 'Casual',
     code: 'CL',
     annual_quota_days: '12',
@@ -55,6 +57,7 @@ function type(overrides: Partial<LeaveTypeRead> = {}): LeaveTypeRead {
     auto_approve: false,
     monthly_limit_days: null,
     stops_at_balance: false,
+    carry_forward_days: null,
     is_paid: true,
     color_key: 'swatch-1',
     is_active: true,

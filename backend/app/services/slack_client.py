@@ -18,6 +18,7 @@ Consolidates all outbound Slack HTTP calls into a single module.
 Uses httpx for async HTTP with explicit timeouts.
 """
 
+from dataclasses import dataclass
 from typing import Any, cast
 
 import httpx
@@ -106,22 +107,25 @@ async def chat_post_message(
     text: str,
     *,
     thread_ts: str | None = None,
+    blocks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """Post a message to a Slack channel or thread.
 
     Args:
         token: Slack bot token.
         channel: Channel ID.
-        text: Message text (supports mrkdwn).
+        text: Message text (supports mrkdwn). When ``blocks`` is given this
+            becomes the notification/fallback text shown in the sidebar and
+            in push notifications, so always pass something readable.
         thread_ts: If provided, posts as a threaded reply.
+        blocks: Block Kit payload for rich layout. Slack renders these
+            instead of ``text``; malformed blocks are rejected wholesale,
+            which is why callers should keep ``text`` meaningful.
 
     Returns:
         The full Slack API response dict, or None on failure.
     """
-    payload: dict[str, str] = {"channel": channel, "text": text}
-    if thread_ts:
-        payload["thread_ts"] = thread_ts
-
+    payload = _message_payload(channel, text, thread_ts=thread_ts, blocks=blocks)
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{_SLACK_BASE}/chat.postMessage",
@@ -134,6 +138,101 @@ async def chat_post_message(
             logger.warning("slack_chat_post_message_failed", error=data.get("error"))
             return None
         return cast(dict[str, Any], data)
+
+
+def _message_payload(
+    channel: str,
+    text: str,
+    *,
+    thread_ts: str | None = None,
+    blocks: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """The ``chat.postMessage`` body shared by both posting helpers."""
+    payload: dict[str, Any] = {"channel": channel, "text": text}
+    if thread_ts:
+        payload["thread_ts"] = thread_ts
+    if blocks:
+        payload["blocks"] = blocks
+    return payload
+
+
+@dataclass(frozen=True)
+class PostOutcome:
+    """What happened to one ``chat.postMessage`` call, for callers that care why.
+
+    Attributes:
+        ok: Slack accepted the message.
+        ts: The message timestamp when ``ok``.
+        error: Slack's error code (``channel_not_found``, ``invalid_blocks``,
+            ``ratelimited`` …), ``http_<status>``, or the transport exception
+            name. ``None`` when ``ok``.
+        maybe_delivered: The request may have reached Slack even though no
+            answer came back (a read timeout, a dropped connection). Callers
+            that must not double-post should treat this as "do not retry".
+    """
+
+    ok: bool
+    ts: str | None = None
+    error: str | None = None
+    maybe_delivered: bool = False
+
+
+# The connection never opened, so the request certainly never reached Slack.
+_NEVER_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+
+
+async def post_message_outcome(
+    token: str,
+    channel: str,
+    text: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+) -> PostOutcome:
+    """Post a message and report precisely how it went. Never raises.
+
+    :func:`chat_post_message` collapses every failure to ``None`` and lets
+    transport errors escape, which is right for its ~60 fire-and-forget
+    callers. A caller that retries — and must therefore never retry
+    something that might already be in the channel — needs the distinction
+    this returns instead.
+
+    Args:
+        token: Slack bot token.
+        channel: Channel ID.
+        text: Fallback / notification text.
+        blocks: Optional Block Kit payload.
+
+    Returns:
+        A :class:`PostOutcome`.
+    """
+    payload = _message_payload(channel, text, blocks=blocks)
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{_SLACK_BASE}/chat.postMessage",
+                json=payload,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=_TIMEOUT,
+            )
+    except _NEVER_SENT as exc:
+        return PostOutcome(ok=False, error=type(exc).__name__)
+    except httpx.HTTPError as exc:
+        # Read/write timeout, dropped connection mid-response, …: the
+        # message may well be in the channel already.
+        return PostOutcome(ok=False, error=type(exc).__name__, maybe_delivered=True)
+
+    if resp.status_code >= 500:
+        # Slack can fail *after* accepting the message, so a 5xx does not
+        # prove nothing was posted. For callers that must never double-post
+        # (a channel-wide announcement) that makes it "maybe delivered".
+        return PostOutcome(ok=False, error=f"http_{resp.status_code}", maybe_delivered=True)
+    try:
+        data = resp.json()
+    except ValueError:
+        return PostOutcome(ok=False, error=f"http_{resp.status_code}_non_json")
+    if not data.get("ok"):
+        return PostOutcome(ok=False, error=str(data.get("error") or "unknown_error"))
+    return PostOutcome(ok=True, ts=data.get("ts"))
 
 
 async def reactions_add(
