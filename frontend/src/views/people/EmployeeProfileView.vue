@@ -67,7 +67,12 @@
       <v-card color="surface" rounded="lg" class="pa-6">
         <v-tabs-window v-model="tab">
           <v-tabs-window-item v-if="record.personal" value="personal">
-            <PersonalTab :employee-id="record.user_id" :personal="record.personal" :mode="personalMode" />
+            <PersonalTab
+              :employee-id="record.user_id"
+              :personal="record.personal"
+              :mode="personalMode"
+              :is-self="isOwn"
+            />
           </v-tabs-window-item>
           <v-tabs-window-item value="employment">
             <EmploymentTab :record="record" />
@@ -151,6 +156,8 @@ const personalMode = computed<'hr' | 'self' | 'view'>(() => {
 watch(
   () => routeUserId.value,
   async userId => {
+    // A photo error belongs to the profile it happened on.
+    avatarError.value = ''
     await store.fetchRecord(userId && !isOwn.value ? userId : 'me')
     tab.value = store.record?.personal ? 'personal' : 'employment'
   },

@@ -39,7 +39,9 @@ ORG = uuid.uuid4()
 TODAY = date(2026, 10, 22)
 NOW = datetime(2026, 10, 22, 9, 45, tzinfo=UTC)
 WINDOW = PostWindow(post_date=TODAY, occasions=(TODAY,), post_at=NOW)
-SETTINGS = CelebrationSettings(enabled=True, slack_channel_id="C123", gif_enabled=False)
+SETTINGS = CelebrationSettings(
+    enabled=True, slack_channel_id="C123", timezone="Europe/London", gif_enabled=False
+)
 
 
 def _sid() -> Celebrant:
@@ -145,7 +147,13 @@ def world(monkeypatch: pytest.MonkeyPatch) -> _World:
     monkeypatch.setattr(poster, "OrganizationRepository", _Orgs)
     monkeypatch.setattr(poster, "decrypt_secret", lambda s: "xoxb-plain")
     monkeypatch.setattr(poster, "post_message_outcome", _send)
+
+    async def _slot(org_id: Any) -> bool:
+        return True
+
     monkeypatch.setattr(poster, "random_celebration_gif", _no_gif)
+    # The cooldown has its own tests below; keep it out of the others.
+    monkeypatch.setattr(poster, "_claim_sample_slot", _slot)
     return w
 
 

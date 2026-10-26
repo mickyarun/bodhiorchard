@@ -28,15 +28,19 @@ from app.api.v1 import settings as routes
 from app.models.organization import Organization
 from app.schemas.settings import CelebrationSettings
 from app.services.celebrations.poster import PostResult
+from tests.api.route_walk import ServedRoute, served_routes
 
 SAVED = {
     "enabled": True,
     "slack_channel_id": "CSAVED",
+    "timezone": "Europe/London",
     "post_time": "09:30",
     "mention_channel": False,
 }
 
 HR = {"employees:manage"}
+# Audit events the fake repository received, newest last.
+AUDIT: list[dict[str, Any]] = []
 ADMIN = {"org:edit_settings"}
 
 
@@ -83,8 +87,17 @@ def org(monkeypatch: pytest.MonkeyPatch) -> Organization:
         async def count_celebration_audience(self) -> tuple[int, int]:
             return 3, 4
 
+    class _Events:
+        def __init__(self, db: Any, *, org_id: Any) -> None:
+            pass
+
+        async def append(self, **kw: Any) -> None:
+            AUDIT.append(kw)
+
+    AUDIT.clear()
     monkeypatch.setattr(routes, "OrganizationRepository", _Orgs)
     monkeypatch.setattr(routes, "EmployeeProfileRepository", _Profiles)
+    monkeypatch.setattr(routes, "CelebrationConfigEventRepository", _Events)
     return organization
 
 
@@ -164,12 +177,85 @@ def test_celebration_routes_are_open_to_hr_and_admins() -> None:
     paths = {
         "/api/v1/settings/celebrations",
         "/api/v1/settings/celebrations/audience",
+        "/api/v1/settings/celebrations/history",
         "/api/v1/settings/celebrations/test",
     }
-    routes_found = [r for r in api_router.routes if getattr(r, "path", "") in paths]
-    assert len(routes_found) == 4  # GET + PATCH share a path
-    for route in routes_found:
-        required: set[str] = set()
-        for dep in route.dependencies:  # type: ignore[attr-defined]
-            required.update(getattr(dep.dependency, "required_permissions", ()))
-        assert required == {"employees:manage", "org:edit_settings"}, route.path
+    found = [r for r in served_routes(api_router) if r.path in paths]
+    # GET + PATCH share the settings path, so one more route than paths.
+    assert len(found) == len(paths) + 1, sorted(r.path for r in found)
+    for route in found:
+        assert _required_permissions(route) == {"employees:manage", "org:edit_settings"}, (
+            route.path
+        )
+
+
+def _required_permissions(route: ServedRoute) -> set[str]:
+    """Every permission a route's dependency tree enforces."""
+    found: set[str] = set()
+    stack = list(route.dependant.dependencies)
+    while stack:
+        dep = stack.pop()
+        found.update(getattr(dep.call, "required_permissions", ()))
+        stack.extend(dep.dependencies)
+    return found
+
+
+class TestAuditTrail:
+    async def test_switching_on_is_recorded_with_the_actor(self, org: Organization) -> None:
+        org.config = {"celebrations": {**SAVED, "enabled": False}}
+        await _patch(_body(), _Perms(ADMIN))
+        assert AUDIT[-1]["action"].value == "enabled"
+        assert AUDIT[-1]["changes"]["enabled"] == [False, True]
+
+    async def test_channel_change_is_its_own_action(self, org: Organization) -> None:
+        await _patch(_body(slack_channel_id="CNEW"), _Perms(ADMIN))
+        assert AUDIT[-1]["action"].value == "channel_changed"
+        assert AUDIT[-1]["changes"] == {"slack_channel_id": ["CSAVED", "CNEW"]}
+
+    async def test_other_edits_are_updates(self, org: Organization) -> None:
+        await _patch(_body(post_time="10:15"), _Perms(HR))
+        assert AUDIT[-1]["action"].value == "updated"
+        assert AUDIT[-1]["changes"] == {"post_time": ["09:30", "10:15"]}
+
+    async def test_saving_unchanged_settings_records_nothing(self, org: Organization) -> None:
+        await _patch(_body(), _Perms(HR))
+        assert AUDIT == []
+
+
+async def test_history_lists_each_days_outcome(
+    org: Organization, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import date
+    from types import SimpleNamespace
+
+    from app.models.celebration_post import CelebrationPostStatus
+
+    rows = [
+        SimpleNamespace(
+            celebrate_date=date(2026, 10, 22),
+            status=CelebrationPostStatus.FAILED,
+            attempts=3,
+            birthday_count=1,
+            anniversary_count=0,
+            last_error="not_in_channel",
+        )
+    ]
+
+    class _Ledger:
+        def __init__(self, db: Any, *, org_id: Any) -> None:
+            pass
+
+        async def list_recent(self, limit: int) -> list[Any]:
+            return rows
+
+    monkeypatch.setattr(routes, "CelebrationPostRepository", _Ledger)
+    history = await routes.get_celebration_history(current_user=_User(), db=_Db())
+    assert history[0].status == "failed"
+    assert history[0].last_error == "not_in_channel"
+
+
+def test_a_timezone_is_required_to_switch_on() -> None:
+    with pytest.raises(ValueError, match="timezone"):
+        CelebrationSettings(enabled=True, slack_channel_id="C1")
+    # Allowed while off, so an unconfigured org still validates.
+    assert CelebrationSettings(enabled=False).timezone is None

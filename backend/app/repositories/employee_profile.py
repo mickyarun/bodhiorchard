@@ -247,6 +247,7 @@ class EmployeeProfileRepository(BaseRepository[EmployeeProfile]):
             if count_years
             else EmployeeProfile.celebrate_birthday
         )
+        latest_occasion = max(wanted.values())
         stmt = (
             select(column, User.id, User.name, User.avatar_url, User.slack_id)
             .join(User, User.id == EmployeeProfile.user_id)
@@ -256,6 +257,13 @@ class EmployeeProfileRepository(BaseRepository[EmployeeProfile]):
                 User.is_active.is_(True),
                 opt_in.is_(True),
                 column.is_not(None),
+                # Not before someone starts: a pre-boarded hire whose record
+                # is already ACTIVE shouldn't be announced to a company they
+                # haven't joined yet.
+                or_(
+                    EmployeeProfile.date_of_joining.is_(None),
+                    EmployeeProfile.date_of_joining <= latest_occasion,
+                ),
                 # Narrow on month first so Postgres can discard most rows
                 # before the per-row day comparison.
                 extract("month", column).in_({m for m, _ in wanted}),

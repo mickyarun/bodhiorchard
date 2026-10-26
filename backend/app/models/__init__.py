@@ -47,6 +47,10 @@ from app.models.bud_version import MAX_VERSIONS_PER_PHASE, BUDEditSource, BUDVer
 from app.models.bug import Bug, BugSeverity, BugStatus, BugType
 from app.models.bug_attachment import BugAttachment
 from app.models.bug_comment import BugComment
+from app.models.celebration_config_event import (
+    CelebrationConfigAction,
+    CelebrationConfigEvent,
+)
 from app.models.celebration_post import CelebrationPost
 from app.models.cluster_cache import ClusterCache
 from app.models.design_system import DesignSystemRef
@@ -178,6 +182,8 @@ __all__ = [
     "BugSeverity",
     "BugStatus",
     "BugType",
+    "CelebrationConfigAction",
+    "CelebrationConfigEvent",
     "CelebrationPost",
     "ClusterCache",
     "DesignSystemRef",

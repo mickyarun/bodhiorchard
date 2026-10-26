@@ -79,11 +79,12 @@ async def test_slack_error_is_definite(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not outcome.maybe_delivered
 
 
-async def test_5xx_is_definite_and_retryable(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_5xx_may_have_been_delivered(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Slack can error after accepting a message; retrying could double-post.
     _patch_transport(monkeypatch, lambda r: httpx.Response(503, text="<html>down</html>"))
     outcome = await _post()
     assert outcome.error == "http_503"
-    assert not outcome.maybe_delivered
+    assert outcome.maybe_delivered
 
 
 async def test_non_json_body_does_not_raise(monkeypatch: pytest.MonkeyPatch) -> None:

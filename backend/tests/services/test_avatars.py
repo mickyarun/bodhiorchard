@@ -14,6 +14,7 @@
 
 """Profile photos: sanitising uploads, URL shapes, Slack photo selection."""
 
+import contextlib
 import io
 
 import pytest
@@ -132,3 +133,144 @@ class TestSlackPhotoUrl:
     def test_non_https_is_rejected(self) -> None:
         profile = {"is_custom_image": True, "image_512": "javascript:alert(1)"}
         assert slack_photo_url(profile) is None
+
+
+# ── review fixes ────────────────────────────────────────────────────────────
+
+
+def _png(size: tuple[int, int] = (64, 48), mode: str = "RGB") -> bytes:
+    out = io.BytesIO()
+    Image.new(mode, size).save(out, format="PNG")
+    return out.getvalue()
+
+
+def test_corrupt_png_is_an_image_error_not_a_crash() -> None:
+    # Zero the IDAT chunk length: Pillow's PNG plugin raises SyntaxError,
+    # which used to escape as a 500.
+    data = bytearray(_png())
+    data[36] = 0x00
+    with pytest.raises(AvatarImageError):
+        normalise_avatar_image(bytes(data))
+
+
+def test_eps_is_refused_without_running_ghostscript(monkeypatch: pytest.MonkeyPatch) -> None:
+    from PIL import EpsImagePlugin
+
+    def _never(*a: object, **kw: object) -> None:
+        raise AssertionError("Ghostscript must never be invoked for an upload")
+
+    monkeypatch.setattr(EpsImagePlugin, "Ghostscript", _never)
+    eps = (
+        b"%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 10 10\n"
+        b"newpath 0 0 moveto 10 10 lineto stroke\nshowpage\n%%EOF\n"
+    )
+    with pytest.raises(AvatarImageError):
+        normalise_avatar_image(eps)
+
+
+@pytest.mark.parametrize("fmt", ["TIFF", "BMP", "ICO"])
+def test_formats_outside_the_allowlist_are_refused(fmt: str) -> None:
+    out = io.BytesIO()
+    Image.new("RGB", (16, 16)).save(out, format=fmt)
+    with pytest.raises(AvatarImageError):
+        normalise_avatar_image(out.getvalue())
+
+
+def test_mutated_images_only_ever_raise_avatar_image_error() -> None:
+    import random
+
+    rng = random.Random(1234)
+    base = _png((32, 32))
+    for _ in range(300):
+        data = bytearray(base)
+        for _ in range(rng.randint(1, 6)):
+            data[rng.randrange(len(data))] = rng.randrange(256)
+        # AvatarImageError is the only acceptable failure; anything else fails.
+        with contextlib.suppress(AvatarImageError):
+            normalise_avatar_image(bytes(data))
+
+
+@pytest.mark.parametrize("mode", ["1", "L", "LA", "P", "RGBA", "I;16"])
+def test_unusual_png_modes_are_handled(mode: str) -> None:
+    clean = Image.open(io.BytesIO(normalise_avatar_image(_png((20, 20), mode))))
+    assert clean.format == "JPEG"
+
+
+def test_a_phone_camera_sized_jpeg_is_accepted() -> None:
+    # ~42 MP: above the old 40 MP cap, typical of 48/50 MP phone sensors.
+    # Greyscale keeps the fixture small; JPEG draft keeps decoding cheap.
+    out = io.BytesIO()
+    Image.new("L", (7488, 5616), 128).save(out, format="JPEG", quality=50)
+    clean = Image.open(io.BytesIO(normalise_avatar_image(out.getvalue())))
+    assert max(clean.size) <= 512
+
+
+class TestSlackPhotoUrlHost:
+    def test_gravatar_subdomains_are_ignored(self) -> None:
+        profile = {"image_512": "https://secure.gravatar.com/avatar/abc"}
+        assert slack_photo_url(profile) is None
+
+    def test_lookalike_hosts_are_not_mistaken_for_gravatar(self) -> None:
+        url = "https://gravatar.com.example.org/photo.png"
+        assert slack_photo_url({"is_custom_image": True, "image_512": url}) == url
+
+    def test_plain_http_is_refused(self) -> None:
+        profile = {"is_custom_image": True, "image_512": "http://avatars.slack-edge.com/x.png"}
+        assert slack_photo_url(profile) is None
+
+
+async def test_slack_import_skips_members_shared_with_another_org(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import uuid
+    from types import SimpleNamespace
+
+    from app.repositories import user as user_repo
+    from app.services import avatars, slack_client
+
+    solo = SimpleNamespace(
+        id=uuid.uuid4(), slack_id="U1", avatar_url=None, avatar_storage_path=None
+    )
+    shared = SimpleNamespace(
+        id=uuid.uuid4(), slack_id="U2", avatar_url=None, avatar_storage_path=None
+    )
+
+    async def _users(token: str) -> list[dict[str, object]]:
+        return [
+            {
+                "id": "U1",
+                "profile": {
+                    "is_custom_image": True,
+                    "image_512": "https://a.slack-edge.com/1.png",
+                },
+            },
+            {
+                "id": "U2",
+                "profile": {
+                    "is_custom_image": True,
+                    "image_512": "https://a.slack-edge.com/2.png",
+                },
+            },
+        ]
+
+    class _Repo:
+        def __init__(self, db: object, org_id: object = None) -> None:
+            pass
+
+        async def list_by_org(self, org_id: object) -> list[SimpleNamespace]:
+            return [solo, shared]
+
+    async def _shared(db: object, ids: object) -> set[object]:
+        return {shared.id}
+
+    class _Db:
+        async def flush(self) -> None:
+            return None
+
+    monkeypatch.setattr(slack_client, "users_list", _users)
+    monkeypatch.setattr(user_repo, "UserRepository", _Repo)
+    monkeypatch.setattr(avatars, "shared_member_ids", _shared)
+    result = await avatars.sync_slack_photos(_Db(), org_id=uuid.uuid4(), bot_token="t")  # type: ignore[arg-type]
+    assert (result.updated, result.skipped_shared) == (1, 1)
+    assert solo.avatar_url == "https://a.slack-edge.com/1.png"
+    assert shared.avatar_url is None

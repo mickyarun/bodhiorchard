@@ -28,10 +28,15 @@ Delivery rules, in the order :func:`post_digest` applies them:
    timeout) is marked UNKNOWN and never retried.
 4. If Slack rejects the blocks — typically because it could not fetch an
    avatar or the GIF — the same attempt is re-sent text-only.
+5. A claim that never reported back (the process died or was cancelled
+   mid-send) is marked UNKNOWN after :data:`STALE_CLAIM`, so it shows up in
+   the history instead of sitting as CLAIMED forever. It is not retried.
 """
 
 from __future__ import annotations
 
+import asyncio
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -49,6 +54,7 @@ from app.schemas.settings import CelebrationSettings
 from app.services.celebrations.compose import compose_digest, fallback_text
 from app.services.celebrations.gif import random_celebration_gif
 from app.services.celebrations.schedule import MAX_SPAN_DAYS, PostWindow
+from app.services.redis_client import get_redis
 from app.services.slack_client import PostOutcome, post_message_outcome
 
 logger = structlog.get_logger(__name__)
@@ -56,6 +62,21 @@ logger = structlog.get_logger(__name__)
 # First attempt plus two retries.
 MAX_ATTEMPTS = 3
 RETRY_DELAY = timedelta(minutes=10)
+# A CLAIMED row this old never got an outcome recorded (crash, deploy,
+# cancellation). Far longer than any real Slack call.
+STALE_CLAIM = timedelta(minutes=15)
+# Coverage of a neighbouring post can reach MAX_SPAN_DAYS on either side of
+# *its* date, so a neighbour up to twice that far away can overlap ours.
+DEDUPE_SPAN_DAYS = 2 * MAX_SPAN_DAYS
+# Minimum gap between sample posts per org: the button posts into a shared
+# company channel and spends the deployment-wide Giphy quota.
+SAMPLE_COOLDOWN_SECONDS = 30
+
+# Orgs already warned about a missing Slack token today, so a feature
+# switched on before Slack is connected logs once a day, not every tick.
+_warned_no_token: dict[uuid.UUID, date] = {}
+# In-process fallback for the sample cooldown when Redis is unavailable.
+_last_sample: dict[uuid.UUID, float] = {}
 
 # Slack's code when it refuses a Block Kit payload — including when it
 # cannot download an image accessory or image block.
@@ -77,7 +98,10 @@ async def _resolve_token(org_id: uuid.UUID) -> tuple[str | None, str | None]:
     async with AsyncSessionLocal() as db:
         encrypted = await OrganizationRepository(db).get_slack_bot_token(org_id)
     if not encrypted:
-        logger.warning("celebration_no_slack_token", org_id=str(org_id))
+        today = datetime.now(UTC).date()
+        if _warned_no_token.get(org_id) != today:
+            _warned_no_token[org_id] = today
+            logger.warning("celebration_no_slack_token", org_id=str(org_id))
         return None, "no_slack_token"
     try:
         return decrypt_secret(encrypted), None
@@ -135,6 +159,19 @@ async def _send(
     )
 
 
+async def _record(
+    org_id: uuid.UUID, row_id: uuid.UUID, outcome: PostOutcome
+) -> CelebrationPostStatus:
+    """Store how the Slack call for ``row_id`` ended, in its own session."""
+    status = _status_for(outcome)
+    async with AsyncSessionLocal() as db:
+        await CelebrationPostRepository(db, org_id=org_id).record_outcome(
+            row_id, status=status, message_ts=outcome.ts, error=outcome.error
+        )
+        await db.commit()
+    return status
+
+
 def _status_for(outcome: PostOutcome) -> CelebrationPostStatus:
     if outcome.ok:
         return CelebrationPostStatus.SENT
@@ -173,6 +210,20 @@ async def post_digest(
 
         occasions: list[date]
         if existing is not None:
+            if (
+                existing.status == CelebrationPostStatus.CLAIMED
+                and existing.updated_at
+                and now - existing.updated_at > STALE_CLAIM
+            ):
+                # Rule 5: the attempt died without reporting. It may have
+                # posted, so it is never retried — just made visible.
+                await ledger.record_outcome(
+                    existing.id,
+                    status=CelebrationPostStatus.UNKNOWN,
+                    error="interrupted: no outcome recorded",
+                )
+                await db.commit()
+                return PostResult(posted=False, reason="interrupted")
             if existing.status != CelebrationPostStatus.FAILED:
                 return PostResult(posted=False, reason="already_posted")
             if existing.attempts >= MAX_ATTEMPTS:
@@ -183,7 +234,7 @@ async def post_digest(
             occasions = list(existing.covered_dates)
         else:
             elsewhere = await ledger.dates_announced_near(
-                window.post_date, span_days=MAX_SPAN_DAYS
+                window.post_date, span_days=DEDUPE_SPAN_DAYS
             )
             occasions = [d for d in window.occasions if d not in elsewhere]
 
@@ -231,18 +282,21 @@ async def post_digest(
 
     try:
         outcome = await _send(token, channel, birthdays, anniversaries, settings)
+    except asyncio.CancelledError:
+        # Shutdown or deploy mid-send. The message may already be in the
+        # channel, so record UNKNOWN (never retried) before letting the
+        # cancellation through; the stale-claim sweep covers a hard kill.
+        await _record(
+            org_id, row_id, PostOutcome(ok=False, error="cancelled", maybe_delivered=True)
+        )
+        raise
     except Exception as exc:
         # ``post_message_outcome`` never raises, so this is a bug in our own
         # composition. Nothing was sent; record it so the retry path sees it.
         logger.exception("celebration_send_crashed", org_id=str(org_id))
         outcome = PostOutcome(ok=False, error=f"internal:{type(exc).__name__}")
 
-    status = _status_for(outcome)
-    async with AsyncSessionLocal() as db:
-        await CelebrationPostRepository(db, org_id=org_id).record_outcome(
-            row_id, status=status, message_ts=outcome.ts, error=outcome.error
-        )
-        await db.commit()
+    status = await _record(org_id, row_id, outcome)
 
     log_fields = {
         "org_id": str(org_id),
@@ -281,6 +335,8 @@ async def post_sample(
     channel = settings.slack_channel_id
     if not channel:
         return PostResult(posted=False, reason="no_channel")
+    if not await _claim_sample_slot(org_id):
+        return PostResult(posted=False, reason="cooldown")
     token, token_problem = await _resolve_token(org_id)
     if token is None:
         return PostResult(posted=False, reason=token_problem)
@@ -297,3 +353,27 @@ async def post_sample(
     if not outcome.ok:
         return PostResult(posted=False, reason=f"slack:{outcome.error}")
     return PostResult(posted=True, birthdays=1)
+
+
+async def _claim_sample_slot(org_id: uuid.UUID) -> bool:
+    """True if a sample may be posted now; starts the org's cooldown if so.
+
+    Uses an atomic Redis ``SET NX EX`` so the cooldown holds across backend
+    instances; falls back to a per-process clock when Redis is unavailable
+    (fail-open, as the MCP rate limiter does).
+    """
+    redis = await get_redis()
+    if redis is not None:
+        try:
+            claimed = await redis.set(
+                f"celebration_sample:{org_id}", "1", nx=True, ex=SAMPLE_COOLDOWN_SECONDS
+            )
+            return bool(claimed)
+        except Exception:
+            logger.warning("celebration_sample_cooldown_redis_failed", exc_info=True)
+    now = time.monotonic()
+    last = _last_sample.get(org_id)
+    if last is not None and now - last < SAMPLE_COOLDOWN_SECONDS:
+        return False
+    _last_sample[org_id] = now
+    return True

@@ -119,30 +119,30 @@ def compute_post_window(
 ) -> PostWindow | None:
     """Return the window if a digest should fire now in ``zone``, else None.
 
-    Fires when, in org-local time, today is an active weekday and the local
-    clock is between ``post_time`` and ``post_time + POST_WINDOW``. Says
-    nothing about whether today's digest was already sent — that is the
-    ledger's job.
+    A digest belongs to the org-local date its ``post_time`` falls on, and
+    fires anywhere from that instant to ``POST_WINDOW`` after it. Both
+    today's slot and yesterday's are considered: a 23:00 post time keeps its
+    full window past midnight instead of losing it at 00:00, and is still
+    recorded against the day it was for. Says nothing about whether that
+    digest was already sent — that is the ledger's job.
+
+    Instants are compared in UTC, so a DST change inside the window cannot
+    stretch or shrink it.
     """
-    now_local = now_utc.astimezone(zone)
-    if now_local.weekday() not in active_weekdays:
-        return None
-
+    now = now_utc.astimezone(UTC)
+    today = now.astimezone(zone).date()
     target = parse_hhmm(post_time)
-    if now_local.timetz().replace(tzinfo=None) < target:
-        return None
-
-    post_date = now_local.date()
-    post_at = datetime.combine(post_date, target, tzinfo=zone).astimezone(UTC)
-    # Compared in UTC so a DST change inside the window cannot stretch or
-    # shrink it.
-    if now_utc.astimezone(UTC) > post_at + POST_WINDOW:
-        return None
-    return PostWindow(
-        post_date=post_date,
-        occasions=covered_dates(post_date, active_weekdays=active_weekdays, policy=policy),
-        post_at=post_at,
-    )
+    for post_date in (today, _step(today, -1)):
+        if post_date.weekday() not in active_weekdays:
+            continue
+        post_at = datetime.combine(post_date, target, tzinfo=zone).astimezone(UTC)
+        if post_at <= now <= post_at + POST_WINDOW:
+            return PostWindow(
+                post_date=post_date,
+                occasions=covered_dates(post_date, active_weekdays=active_weekdays, policy=policy),
+                post_at=post_at,
+            )
+    return None
 
 
 def _step(day: date, delta: int) -> date:

@@ -50,7 +50,23 @@
       <div class="section-eyebrow mt-6">About</div>
       <FieldGrid :fields="aboutFields" />
       <div class="section-eyebrow mt-6">Celebrations</div>
-      <FieldGrid :fields="celebrationFields" />
+      <div class="text-caption text-medium-emphasis mb-1">
+        Announcements show the day and month only — never the year.
+      </div>
+      <v-switch
+        v-for="pref in CELEBRATION_PREFS"
+        :key="pref.key"
+        :model-value="personal[pref.key]"
+        :label="isSelf ? pref.selfLabel : pref.otherLabel"
+        :disabled="!canChange(personal[pref.key]) || prefSaving !== null"
+        :loading="prefSaving === pref.key"
+        :hint="lockedHint(personal[pref.key])"
+        :persistent-hint="!!lockedHint(personal[pref.key])"
+        color="primary"
+        density="compact"
+        @update:model-value="value => setPref(pref.key, !!value)"
+      />
+      <AppCallout v-if="prefError" variant="error" class="mt-2">{{ prefError }}</AppCallout>
     </template>
 
     <v-form v-else @submit.prevent="save">
@@ -66,24 +82,6 @@
           <v-select v-model="draft.blood_group" :items="BLOOD_GROUPS" label="Blood group" clearable v-bind="field" />
         </template>
       </div>
-      <div class="section-eyebrow mt-6">Celebrations</div>
-      <div class="text-caption text-medium-emphasis mb-2">
-        Announcements show the day and month only — never the year.
-      </div>
-      <v-switch
-        v-model="draft.celebrate_birthday"
-        color="primary"
-        label="Announce my birthday"
-        density="compact"
-        hide-details
-      />
-      <v-switch
-        v-model="draft.celebrate_anniversary"
-        color="primary"
-        label="Announce my work anniversary"
-        density="compact"
-        hide-details
-      />
       <AppCallout v-if="error" variant="error" class="mt-3">{{ error }}</AppCallout>
       <div class="d-flex justify-end ga-2 mt-4">
         <v-btn variant="text" @click="editing = false">Cancel</v-btn>
@@ -98,7 +96,7 @@ import { computed, ref } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import FieldGrid, { type GridField } from '@/components/people/FieldGrid.vue'
 import { useEmployeesStore } from '@/stores/employees'
-import type { EmployeePersonal } from '@/types/employee'
+import type { CelebrationPrefs, EmployeePersonal, EmployeePersonalRead } from '@/types/employee'
 import {
   blankToNull,
   BLOOD_GROUP_LABELS,
@@ -109,16 +107,56 @@ import {
 
 const props = defineProps<{
   employeeId: string
-  personal: EmployeePersonal
+  personal: EmployeePersonalRead
   /** hr: every field; self: contact + emergency only; view: read-only. */
   mode: 'hr' | 'self' | 'view'
+  /** The viewer is looking at their own record (HR included). */
+  isSelf: boolean
 }>()
 
 const store = useEmployeesStore()
 const editing = ref(false)
 const saving = ref(false)
 const error = ref('')
-const draft = ref<EmployeePersonal>({ ...props.personal })
+const draft = ref<EmployeePersonal>(personalOnly(props.personal))
+const prefSaving = ref<keyof CelebrationPrefs | null>(null)
+const prefError = ref('')
+
+type PrefKey = 'celebrate_birthday' | 'celebrate_anniversary'
+const CELEBRATION_PREFS: { key: PrefKey; selfLabel: string; otherLabel: string }[] = [
+  { key: 'celebrate_birthday', selfLabel: 'Announce my birthday', otherLabel: 'Announce birthday' },
+  {
+    key: 'celebrate_anniversary',
+    selfLabel: 'Announce my work anniversary',
+    otherLabel: 'Announce work anniversary',
+  },
+]
+
+/**
+ * The opt-out is the employee's: they may switch it either way. HR may
+ * mute on someone's behalf but never unmute — the API enforces the same.
+ */
+function canChange(current: boolean): boolean {
+  if (props.isSelf) return true
+  return props.mode === 'hr' && current
+}
+
+function lockedHint(current: boolean): string {
+  if (props.isSelf || props.mode !== 'hr' || current) return ''
+  return 'Muted by them or on their behalf. Only they can turn it back on.'
+}
+
+async function setPref(key: PrefKey, value: boolean): Promise<void> {
+  prefSaving.value = key
+  prefError.value = (await store.updateCelebrationPrefs(props.employeeId, { [key]: value })) ?? ''
+  prefSaving.value = null
+}
+
+/** The editable personal fields, without the read-only opt-outs. */
+function personalOnly(source: EmployeePersonalRead): EmployeePersonal {
+  const { celebrate_birthday: _b, celebrate_anniversary: _a, ...rest } = source
+  return rest
+}
 
 const GENDERS = selectItems(GENDER_LABELS)
 const BLOOD_GROUPS = selectItems(BLOOD_GROUP_LABELS)
@@ -133,16 +171,6 @@ const emergencyFields = computed<GridField[]>(() => [
   { label: 'Name', value: props.personal.emergency_contact_name },
   { label: 'Relation', value: props.personal.emergency_contact_relation },
   { label: 'Phone', value: props.personal.emergency_contact_phone },
-])
-const celebrationFields = computed<GridField[]>(() => [
-  {
-    label: 'Birthday announcement',
-    value: props.personal.celebrate_birthday ? 'On' : 'Muted',
-  },
-  {
-    label: 'Work anniversary announcement',
-    value: props.personal.celebrate_anniversary ? 'On' : 'Muted',
-  },
 ])
 const aboutFields = computed<GridField[]>(() => [
   { label: 'Date of birth', value: formatDateOnly(props.personal.date_of_birth), locked: locked.value },
@@ -159,7 +187,7 @@ const aboutFields = computed<GridField[]>(() => [
 ])
 
 function startEdit(): void {
-  draft.value = { ...props.personal }
+  draft.value = personalOnly(props.personal)
   error.value = ''
   editing.value = true
 }
@@ -175,9 +203,6 @@ async function save(): Promise<void> {
           emergency_contact_name: values.emergency_contact_name,
           emergency_contact_relation: values.emergency_contact_relation,
           emergency_contact_phone: values.emergency_contact_phone,
-          // Self-editable: muting your own celebration shouldn't need HR.
-          celebrate_birthday: values.celebrate_birthday,
-          celebrate_anniversary: values.celebrate_anniversary,
         })
       : await store.updatePersonal(props.employeeId, values)) ?? ''
   saving.value = false

@@ -198,9 +198,9 @@ QA_EVIDENCE_POLICY = UploadPolicy(
 
 
 # Profile photos. Extension-driven so the stored MIME is ours rather than
-# whatever the browser claimed, and capped small: these are rendered at
-# 72px in Slack and 64px in the directory, so anything above a couple of
-# MB is a phone camera original nobody will ever see at full size.
+# whatever the browser claimed. The cap fits a phone camera original (a
+# 48-50 MP JPEG runs to ~15 MB): every upload is re-encoded to a small JPEG,
+# so the size limit only bounds what we read, not what we store or serve.
 AVATAR_EXTENSIONS: Mapping[str, str] = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -211,7 +211,7 @@ AVATAR_EXTENSIONS: Mapping[str, str] = {
 
 AVATAR_POLICY = UploadPolicy.for_extensions(
     label="Profile photo",
-    max_bytes=5 * 1024 * 1024,
+    max_bytes=20 * 1024 * 1024,
     extensions=AVATAR_EXTENSIONS,
     max_files=1,
 )

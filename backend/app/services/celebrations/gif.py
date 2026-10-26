@@ -71,12 +71,15 @@ async def random_celebration_gif(
         if resp.status_code != 200:
             logger.warning("giphy_lookup_failed", status=resp.status_code, tag=tag)
             return None
-        payload: dict[str, Any] = resp.json()
+        payload = resp.json()
+        # Parsing stays inside the guard: Giphy has answered with
+        # ``data: []`` and other shapes, and a GIF must never be able to
+        # crash a post — real or sample.
+        data = payload.get("data") if isinstance(payload, dict) else None
+        return _pick_rendition(data) if isinstance(data, dict) else None
     except Exception:
         logger.warning("giphy_lookup_error", tag=tag, exc_info=True)
         return None
-
-    return _pick_rendition(payload.get("data") or {})
 
 
 def _pick_rendition(data: dict[str, Any]) -> str | None:

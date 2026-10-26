@@ -20,7 +20,7 @@ repo management, GitHub integration, and Slack member sync.
 
 import re
 import secrets
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 import structlog
@@ -40,9 +40,12 @@ from app.core.permission_deps import PermissionSet
 from app.core.permissions import WORKSPACE_ENGINEERING
 from app.core.security import hash_password
 from app.mcp.auth import compute_token_prefix
+from app.models.celebration_config_event import CelebrationConfigAction
 from app.models.organization import Organization
 from app.models.user import User
 from app.models.user_mcp_token import DEFAULT_TOKEN_NAME, UserMCPToken
+from app.repositories.celebration_config_event import CelebrationConfigEventRepository
+from app.repositories.celebration_post import CelebrationPostRepository
 from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.slack_identity import SlackIdentityRepository
@@ -494,19 +497,81 @@ async def update_celebration_config(
     await db.flush()
     await db.refresh(org)
 
-    if body.enabled != was_enabled:
-        birthdays, anniversaries = await EmployeeProfileRepository(
-            db, org_id=org.id
-        ).count_celebration_audience()
-        logger.info(
-            "celebrations_enabled" if body.enabled else "celebrations_disabled",
-            org_id=str(org.id),
-            by_user_id=str(current_user.id),
-            channel=body.slack_channel_id,
-            birthday_audience=birthdays,
-            anniversary_audience=anniversaries,
+    before = current.model_dump(mode="json", by_alias=False)
+    after = body.model_dump(mode="json", by_alias=False)
+    changes = {k: [before.get(k), v] for k, v in after.items() if before.get(k) != v}
+    if changes:
+        if body.enabled != was_enabled:
+            action = (
+                CelebrationConfigAction.ENABLED
+                if body.enabled
+                else CelebrationConfigAction.DISABLED
+            )
+        elif channel_changed:
+            action = CelebrationConfigAction.CHANNEL_CHANGED
+        else:
+            action = CelebrationConfigAction.UPDATED
+        # Durable trail (who switched it on, who moved the channel): HR and
+        # admins share this page, with admins alone owning the channel.
+        await CelebrationConfigEventRepository(db, org_id=org.id).append(
+            actor_id=current_user.id, action=action, changes=changes
         )
+        if action in (CelebrationConfigAction.ENABLED, CelebrationConfigAction.DISABLED):
+            birthdays, anniversaries = await EmployeeProfileRepository(
+                db, org_id=org.id
+            ).count_celebration_audience()
+            logger.info(
+                f"celebrations_{action.value}",
+                org_id=str(org.id),
+                by_user_id=str(current_user.id),
+                channel=body.slack_channel_id,
+                birthday_audience=birthdays,
+                anniversary_audience=anniversaries,
+            )
     return get_celebration_settings(org.config)
+
+
+class CelebrationPostRead(BaseModel):
+    """One day's digest as the settings page shows it."""
+
+    celebrate_date: date
+    # claimed | sent | failed | unknown — see CelebrationPostStatus.
+    status: str
+    attempts: int
+    birthday_count: int
+    anniversary_count: int
+    # Slack's error code, or why the outcome is unknown.
+    last_error: str | None = None
+
+
+@router.get(
+    "/celebrations/history",
+    response_model=list[CelebrationPostRead],
+    dependencies=[Depends(require_permissions(*_CELEBRATION_EDITORS, mode="any"))],
+)
+async def get_celebration_history(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[CelebrationPostRead]:
+    """The last two weeks of digests, newest first, with how each one went.
+
+    Without this, a failed or uncertain post — the bot removed from the
+    channel, a revoked token — would only ever show up in server logs, and
+    whoever runs the feature would never learn the announcements stopped.
+    """
+    org = await OrganizationRepository(db).get_for_user(current_user)
+    rows = await CelebrationPostRepository(db, org_id=org.id).list_recent(limit=14)
+    return [
+        CelebrationPostRead(
+            celebrate_date=r.celebrate_date,
+            status=r.status.value,
+            attempts=r.attempts,
+            birthday_count=r.birthday_count,
+            anniversary_count=r.anniversary_count,
+            last_error=r.last_error,
+        )
+        for r in rows
+    ]
 
 
 @router.get(

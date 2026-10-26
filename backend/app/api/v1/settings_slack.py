@@ -255,13 +255,16 @@ async def link_slack_members(
     # nicety: a Slack hiccup must not fail the link itself.
     adopted_avatars = 0
     if linked_ids and org.slack_bot_token:
+        # A savepoint, so a failure inside the photo step (a Slack error, or
+        # its own flush) rolls back only the photos — not the links above.
         try:
-            photo_sync = await sync_slack_photos(
-                db,
-                org_id=org.id,
-                bot_token=decrypt_secret(org.slack_bot_token),
-                only_user_ids=linked_ids,
-            )
+            async with db.begin_nested():
+                photo_sync = await sync_slack_photos(
+                    db,
+                    org_id=org.id,
+                    bot_token=decrypt_secret(org.slack_bot_token),
+                    only_user_ids=linked_ids,
+                )
             adopted_avatars = photo_sync.updated
         except Exception:
             logger.warning("slack_link_photo_import_failed", org_id=str(org.id), exc_info=True)
@@ -389,13 +392,15 @@ async def import_slack_members(
     # ``SlackImportItem``). Best-effort: a Slack hiccup must not undo the
     # import itself — "Import photos from Slack" can be re-run later.
     if imported_ids and org.slack_bot_token:
+        # Savepoint: a failing photo step must not roll back the import.
         try:
-            await sync_slack_photos(
-                db,
-                org_id=org.id,
-                bot_token=decrypt_secret(org.slack_bot_token),
-                only_user_ids=imported_ids,
-            )
+            async with db.begin_nested():
+                await sync_slack_photos(
+                    db,
+                    org_id=org.id,
+                    bot_token=decrypt_secret(org.slack_bot_token),
+                    only_user_ids=imported_ids,
+                )
         except Exception:
             logger.warning("slack_import_photo_sync_failed", org_id=str(org.id), exc_info=True)
 

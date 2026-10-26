@@ -136,11 +136,26 @@ def _anniversary_label(celebrant: Celebrant) -> str:
 
 
 def _overflow_block(rest: list[Celebrant]) -> dict[str, Any]:
-    """Name everyone who did not get their own section, within Slack's limit."""
+    """Name everyone who did not get their own section, within Slack's limit.
+
+    Names are added whole until the next one would not fit: cutting the
+    text at a fixed length could split a ``<@U…>`` mention, which Slack then
+    renders as raw markup.
+    """
     prefix = f"…and {len(rest)} more to celebrate: "
-    text = prefix + ", ".join(_mention(c) for c in rest)
-    if len(text) > _SECTION_TEXT_LIMIT:
-        text = text[: _SECTION_TEXT_LIMIT - 1] + "…"
+    shown: list[str] = []
+    length = len(prefix)
+    for celebrant in rest:
+        mention = _mention(celebrant)
+        extra = len(mention) + (2 if shown else 0)  # ", " between names
+        # Leave room for the closing " …" when anyone is left out.
+        if length + extra > _SECTION_TEXT_LIMIT - 2:
+            break
+        shown.append(mention)
+        length += extra
+    text = prefix + ", ".join(shown)
+    if len(shown) < len(rest):
+        text += " …"
     return {"type": "section", "text": {"type": "mrkdwn", "text": text}}
 
 
@@ -172,7 +187,8 @@ def fallback_text(
     Slack parses ``<!channel>``-style control sequences in the top-level
     ``text`` too, so names are escaped here as well.
     """
-    names = [escape_mrkdwn(c.name) for c in birthdays + anniversaries]
+    # Someone with a birthday *and* an anniversary today is named once.
+    names = list(dict.fromkeys(escape_mrkdwn(c.name) for c in birthdays + anniversaries))
     return f"Celebrating {', '.join(names)} today!" if names else "Celebrations today!"
 
 

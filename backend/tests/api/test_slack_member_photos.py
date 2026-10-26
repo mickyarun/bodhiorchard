@@ -50,6 +50,17 @@ class _Db:
     async def flush(self) -> None:
         return None
 
+    def begin_nested(self) -> _Savepoint:
+        return _Savepoint()
+
+
+class _Savepoint:
+    async def __aenter__(self) -> _Savepoint:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
 
 @pytest.fixture
 def env(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:

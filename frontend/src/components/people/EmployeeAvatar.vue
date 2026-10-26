@@ -104,7 +104,7 @@ const emit = defineEmits<{
 // Must stay in step with AVATAR_POLICY on the backend, which is the
 // authority — this only saves the user an upload round-trip.
 const ACCEPT = 'image/png,image/jpeg,image/gif,image/webp'
-const MAX_BYTES = 5 * 1024 * 1024
+const MAX_BYTES = 20 * 1024 * 1024
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const busy = ref(false)
@@ -132,7 +132,7 @@ async function onPick(event: Event): Promise<void> {
   if (!file) return
 
   if (file.size > MAX_BYTES) {
-    emit('error', 'That photo is larger than 5 MB.')
+    emit('error', 'That photo is larger than 20 MB.')
     return
   }
 

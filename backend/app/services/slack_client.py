@@ -222,8 +222,10 @@ async def post_message_outcome(
         return PostOutcome(ok=False, error=type(exc).__name__, maybe_delivered=True)
 
     if resp.status_code >= 500:
-        # Slack documents 5xx as transient and safe to retry.
-        return PostOutcome(ok=False, error=f"http_{resp.status_code}")
+        # Slack can fail *after* accepting the message, so a 5xx does not
+        # prove nothing was posted. For callers that must never double-post
+        # (a channel-wide announcement) that makes it "maybe delivered".
+        return PostOutcome(ok=False, error=f"http_{resp.status_code}", maybe_delivered=True)
     try:
         data = resp.json()
     except ValueError:

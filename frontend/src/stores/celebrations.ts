@@ -23,6 +23,7 @@ import { ref } from 'vue'
 import api from '@/services/api'
 import type {
   CelebrationAudience,
+  CelebrationPostHistory,
   CelebrationSettings,
   CelebrationTestResult,
   SlackAvatarSyncResult,
@@ -32,6 +33,7 @@ import { extractApiError } from '@/utils/errors'
 export const useCelebrationsStore = defineStore('celebrations', () => {
   const settings = ref<CelebrationSettings | null>(null)
   const audience = ref<CelebrationAudience | null>(null)
+  const history = ref<CelebrationPostHistory[]>([])
   const loading = ref(false)
   const saving = ref(false)
   const testing = ref(false)
@@ -68,6 +70,19 @@ export const useCelebrationsStore = defineStore('celebrations', () => {
       return false
     } finally {
       saving.value = false
+    }
+  }
+
+  /** The last two weeks of digests and how each went (sent, failed …). */
+  async function fetchHistory(): Promise<void> {
+    try {
+      const { data } = await api.get<CelebrationPostHistory[]>(
+        '/v1/settings/celebrations/history'
+      )
+      history.value = data
+    } catch {
+      // Informational only; the form works without it.
+      history.value = []
     }
   }
 
@@ -127,6 +142,7 @@ export const useCelebrationsStore = defineStore('celebrations', () => {
   return {
     settings,
     audience,
+    history,
     loading,
     saving,
     testing,
@@ -134,6 +150,7 @@ export const useCelebrationsStore = defineStore('celebrations', () => {
     error,
     fetchSettings,
     fetchAudience,
+    fetchHistory,
     saveSettings,
     sendTest,
     syncSlackAvatars,

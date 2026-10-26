@@ -27,6 +27,8 @@ from PIL import Image
 
 from app.api.router import api_router
 from app.api.v1 import employee_avatars as routes
+from app.services import avatars
+from tests.api.route_walk import ServedRoute, served_routes
 
 ORG = uuid.uuid4()
 ME = uuid.uuid4()
@@ -63,6 +65,7 @@ class _User:
     avatar_url: str | None = None
     avatar_storage_path: str | None = None
     avatar_key: str | None = None
+    is_active: bool = True
 
 
 class _Upload:
@@ -75,8 +78,14 @@ class _Upload:
 
 
 class _Db:
+    def __init__(self) -> None:
+        self.commits = 0
+
     async def flush(self) -> None:
         return None
+
+    async def commit(self) -> None:
+        self.commits += 1
 
 
 @dataclass
@@ -112,9 +121,15 @@ def env(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         async def get_by_avatar_key(self, key: str) -> Any:
             return next((u for u in users.values() if u.avatar_key == key), None)
 
+    shared: set[uuid.UUID] = set()
+
+    async def _shared(db: Any, ids: Any) -> set[uuid.UUID]:
+        return {i for i in ids if i in shared}
+
     monkeypatch.setattr(routes, "UserRepository", _Repo)
     monkeypatch.setattr(routes, "get_file_storage", lambda: storage)
-    return {"users": users, "storage": storage, "me": _User(ME)}
+    monkeypatch.setattr(avatars, "shared_member_ids", _shared)
+    return {"users": users, "storage": storage, "me": _User(ME), "shared": shared}
 
 
 async def _upload(env: dict[str, Any], target: uuid.UUID, data: bytes, perms: _Perms) -> Any:
@@ -198,11 +213,64 @@ class TestPublicServe:
 def test_slack_photo_import_is_open_to_hr_and_admins() -> None:
     """HR or admins/owner run the import — not integrations:configure."""
     route = next(
-        r
-        for r in api_router.routes
-        if getattr(r, "path", "") == "/api/v1/employees/avatars/sync-slack"
+        r for r in served_routes(api_router) if r.path == "/api/v1/employees/avatars/sync-slack"
     )
-    required: set[str] = set()
-    for dep in route.dependencies:  # type: ignore[attr-defined]
-        required.update(getattr(dep.dependency, "required_permissions", ()))
-    assert required == {"employees:manage", "org:edit_settings"}
+    assert _required_permissions(route) == {"employees:manage", "org:edit_settings"}
+
+
+def _required_permissions(route: ServedRoute) -> set[str]:
+    """Every permission a route's dependency tree enforces."""
+    found: set[str] = set()
+    stack = list(route.dependant.dependencies)
+    while stack:
+        dep = stack.pop()
+        found.update(getattr(dep.call, "required_permissions", ()))
+        stack.extend(dep.dependencies)
+    return found
+
+
+class TestReviewFixes:
+    async def test_hr_cannot_change_a_shared_members_photo(self, env: dict[str, Any]) -> None:
+        env["shared"].add(SOMEONE_ELSE)
+        with pytest.raises(HTTPException) as exc:
+            await _upload(env, SOMEONE_ELSE, _png(), _Perms({"employees:manage"}))
+        assert exc.value.status_code == 403
+        assert "another organization" in exc.value.detail
+
+    async def test_a_shared_member_can_still_change_their_own(self, env: dict[str, Any]) -> None:
+        env["shared"].add(ME)
+        result = await _upload(env, ME, _png(), _Perms())
+        assert result.avatar_url
+
+    async def test_deactivated_members_photo_is_not_served(self, env: dict[str, Any]) -> None:
+        await _upload(env, ME, _png(), _Perms())
+        env["users"][ME].is_active = False
+        with pytest.raises(HTTPException) as exc:
+            await routes.serve_avatar(env["users"][ME].avatar_key, db=_Db())
+        assert exc.value.status_code == 404
+
+    async def test_photos_are_cached_for_an_hour_not_a_day(self, env: dict[str, Any]) -> None:
+        await _upload(env, ME, _png(), _Perms())
+        response = await routes.serve_avatar(env["users"][ME].avatar_key, db=_Db())
+        assert response.headers["Cache-Control"] == "public, max-age=3600"
+
+    async def test_old_file_is_deleted_only_after_the_commit(
+        self, env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db = _Db()
+        await routes.upload_avatar(
+            ME, _Upload(_png()), current_user=env["me"], perms=_Perms(), db=db
+        )
+        commits_at_delete: list[int] = []
+        real_delete = env["storage"].delete
+
+        async def _spy(path: str) -> None:
+            commits_at_delete.append(db.commits)
+            await real_delete(path)
+
+        monkeypatch.setattr(env["storage"], "delete", _spy)
+        await routes.upload_avatar(
+            ME, _Upload(_png()), current_user=env["me"], perms=_Perms(), db=db
+        )
+        # Two uploads → two commits; the old file went only after the second.
+        assert commits_at_delete == [2]

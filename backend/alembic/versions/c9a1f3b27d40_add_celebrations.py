@@ -1,7 +1,7 @@
-"""celebration opt-outs, the posted-digest ledger, and self-hosted avatars
+"""celebration opt-outs, ledger, settings audit trail, and self-hosted avatars
 
 Revision ID: c9a1f3b27d40
-Revises: cd396fa01ec6
+Revises: 867a76a33305
 Create Date: 2026-10-22 10:00:00.000000
 
 """
@@ -15,7 +15,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "c9a1f3b27d40"
-down_revision: str | None = "cd396fa01ec6"
+down_revision: str | None = "867a76a33305"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -27,6 +27,32 @@ _STATUS = postgresql.ENUM(
     name="celebration_post_status",
     create_type=False,
 )
+_ACTION = postgresql.ENUM(
+    "enabled",
+    "disabled",
+    "channel_changed",
+    "updated",
+    name="celebration_config_action",
+    create_type=False,
+)
+
+
+def _timestamps() -> tuple[sa.Column[object], sa.Column[object]]:
+    """``created_at`` / ``updated_at`` exactly as ``TimestampMixin`` declares them."""
+    return (
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+    )
 
 
 def upgrade() -> None:
@@ -88,15 +114,35 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("'{}'"),
         ),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        *_timestamps(),
         sa.ForeignKeyConstraint(["org_id"], ["organizations.id"]),
         sa.UniqueConstraint("org_id", "celebrate_date", name="uq_celebration_posts_org_date"),
     )
     op.create_index("ix_celebration_posts_org_id", "celebration_posts", ["org_id"])
 
+    _ACTION.create(op.get_bind(), checkfirst=True)
+    op.create_table(
+        "celebration_config_events",
+        sa.Column("id", sa.UUID(as_uuid=True), primary_key=True),
+        sa.Column("org_id", sa.UUID(as_uuid=True), nullable=False),
+        sa.Column("actor_id", sa.UUID(as_uuid=True), nullable=False),
+        sa.Column("action", _ACTION, nullable=False),
+        sa.Column("changes", postgresql.JSONB(), nullable=False),
+        *_timestamps(),
+        sa.ForeignKeyConstraint(["org_id"], ["organizations.id"]),
+        sa.ForeignKeyConstraint(["actor_id"], ["users.id"], ondelete="RESTRICT"),
+    )
+    op.create_index(
+        "ix_celebration_config_events_org",
+        "celebration_config_events",
+        ["org_id", "created_at"],
+    )
+
 
 def downgrade() -> None:
+    op.drop_index("ix_celebration_config_events_org", table_name="celebration_config_events")
+    op.drop_table("celebration_config_events")
+    _ACTION.drop(op.get_bind(), checkfirst=True)
     op.drop_index("ix_celebration_posts_org_id", table_name="celebration_posts")
     op.drop_table("celebration_posts")
     _STATUS.drop(op.get_bind(), checkfirst=True)

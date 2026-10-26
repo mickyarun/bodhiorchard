@@ -37,13 +37,18 @@ import io
 import secrets
 from collections.abc import Collection
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import structlog
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageOps
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+
+if TYPE_CHECKING:
+    from app.services.employees.access import EmployeeAccess
 
 logger = structlog.get_logger(__name__)
 
@@ -54,9 +59,11 @@ __all__ = [
     "SlackPhotoSync",
     "absolute_avatar_url",
     "avatar_storage_path",
+    "may_edit_avatar",
     "new_avatar_key",
     "normalise_avatar_image",
     "public_avatar_path",
+    "shared_member_ids",
     "slack_photo_url",
     "sync_slack_photos",
 ]
@@ -69,8 +76,15 @@ _AVATAR_EXTENSION = ".jpg"
 # Rendered at 64px in the app and 72px in Slack; 512 leaves headroom for
 # high-density screens without serving a 12-megapixel phone original.
 _AVATAR_MAX_EDGE = 512
-# Refuse decompression bombs well before Pillow's own (warning-only) limit.
-_MAX_SOURCE_PIXELS = 40_000_000
+# Accept today's phone cameras (48-50 MP sensors) while refusing anything
+# larger: Pillow only *errors* at ~179 MP, and a decoded RGB image costs
+# ~3 bytes a pixel. JPEGs — nearly every phone photo — are decoded through
+# ``draft()`` at a fraction of full size, so the cap mostly bounds PNG/WebP.
+_MAX_SOURCE_PIXELS = 64_000_000
+# Decode only these. Pillow otherwise sniffs any of ~40 formats from the
+# bytes, whatever the filename says — including EPS, which shells out to
+# Ghostscript. The extension check alone cannot stop a renamed file.
+_ALLOWED_FORMATS = ("PNG", "JPEG", "GIF", "WEBP")
 
 
 class AvatarImageError(ValueError):
@@ -117,10 +131,14 @@ def normalise_avatar_image(data: bytes) -> bytes:
             implausibly large once decoded.
     """
     try:
-        with Image.open(io.BytesIO(data)) as source:
+        with Image.open(io.BytesIO(data), formats=_ALLOWED_FORMATS) as source:
             width, height = source.size
             if width * height > _MAX_SOURCE_PIXELS:
                 raise AvatarImageError("That image is too large to process.")
+            if source.format == "JPEG":
+                # Let libjpeg decode at 1/2, 1/4 or 1/8 scale: a 48 MP phone
+                # photo then needs a few MB of memory instead of ~150 MB.
+                source.draft("RGB", (_AVATAR_MAX_EDGE * 2, _AVATAR_MAX_EDGE * 2))
             # Typed ``Image | None`` (``None`` only for ``in_place=True``).
             image = ImageOps.exif_transpose(source) or source
             if image.mode not in ("RGB", "L"):
@@ -136,7 +154,11 @@ def normalise_avatar_image(data: bytes) -> bytes:
             return out.getvalue()
     except AvatarImageError:
         raise
-    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+    except Exception as exc:
+        # Deliberately broad: decoders raise more than OSError/ValueError
+        # (Pillow's PNG plugin raises SyntaxError on a corrupt chunk), and
+        # every one of them means "not an image we will serve" — a 400 for
+        # the uploader, never a 500.
         raise AvatarImageError("That file isn't an image we can read.") from exc
 
 
@@ -170,9 +192,15 @@ def slack_photo_url(profile: dict[str, Any]) -> str | None:
     if profile.get("is_custom_image") is False:
         return None
     url = profile.get("image_512") or profile.get("image_192") or profile.get("image_72")
-    if not isinstance(url, str) or not url.startswith("https://"):
+    if not isinstance(url, str):
         return None
-    if "gravatar.com" in url:
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        return None
+    host = parsed.hostname.lower()
+    # Compare the host itself — a substring test would also reject (or, in a
+    # sanitiser, accept) hosts like ``gravatar.com.example``.
+    if host == "gravatar.com" or host.endswith(".gravatar.com"):
         return None
     return url
 
@@ -184,6 +212,9 @@ class SlackPhotoSync:
     updated: int
     skipped_no_photo: int
     skipped_has_photo: int
+    # Members who also belong to another org: their photo is shared, so one
+    # org's Slack must not overwrite what the other org shows.
+    skipped_shared: int = 0
 
 
 async def sync_slack_photos(
@@ -223,10 +254,18 @@ async def sync_slack_photos(
             photos[member["id"]] = url
 
     wanted = set(only_user_ids) if only_user_ids is not None else None
-    updated = skipped_no_photo = skipped_has_photo = 0
-    for user in await UserRepository(db, org_id=org_id).list_by_org(org_id):
-        if not user.slack_id or (wanted is not None and user.id not in wanted):
+    members = [
+        u
+        for u in await UserRepository(db, org_id=org_id).list_by_org(org_id)
+        if u.slack_id and (wanted is None or u.id in wanted)
+    ]
+    shared = await shared_member_ids(db, [u.id for u in members])
+    updated = skipped_no_photo = skipped_has_photo = skipped_shared = 0
+    for user in members:
+        if user.id in shared:
+            skipped_shared += 1
             continue
+        assert user.slack_id is not None  # filtered above; narrows for mypy
         url = photos.get(user.slack_id)
         if not url:
             skipped_no_photo += 1
@@ -244,4 +283,41 @@ async def sync_slack_photos(
         updated=updated,
         skipped_no_photo=skipped_no_photo,
         skipped_has_photo=skipped_has_photo,
+        skipped_shared=skipped_shared,
     )
+
+
+async def shared_member_ids(db: AsyncSession, user_ids: Collection[Any]) -> set[Any]:
+    """Which of ``user_ids`` belong to more than one org.
+
+    ``users`` rows — and so the photo on them — are shared across every org
+    a person belongs to. For those people only they may change their own
+    photo; same rule as Slack links in ``slack_identity``.
+    """
+    if not user_ids:
+        return set()
+    from app.models.user import OrgToUser
+
+    rows = await db.execute(
+        select(OrgToUser.user_id)
+        .where(OrgToUser.user_id.in_(list(user_ids)))
+        .group_by(OrgToUser.user_id)
+        .having(func.count() > 1)
+    )
+    return {row[0] for row in rows.all()}
+
+
+async def may_edit_avatar(db: AsyncSession, access: EmployeeAccess, subject_id: Any) -> bool:
+    """Whether the caller described by ``access`` may change ``subject_id``'s photo.
+
+    Your own photo is always yours. HR (``access.edit_avatar``) may change
+    someone else's only if that person belongs to this org alone — their
+    ``users`` row, and so the photo, is otherwise shown in another org too.
+    The profile page's ``can_edit_avatar`` flag and the upload/delete routes
+    both call this, so the button and the API cannot disagree.
+    """
+    if not access.edit_avatar:
+        return False
+    if access.is_self:
+        return True
+    return subject_id not in await shared_member_ids(db, [subject_id])

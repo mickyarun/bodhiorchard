@@ -21,7 +21,12 @@ import AppCallout from '@/components/common/AppCallout.vue'
 import SettingsPageShell from '@/components/settings/SettingsPageShell.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useCelebrationsStore } from '@/stores/celebrations'
-import type { CelebrationSettings, GifRating, WeekendPolicy } from '@/types/celebrations'
+import type {
+  CelebrationPostHistory,
+  CelebrationSettings,
+  GifRating,
+  WeekendPolicy,
+} from '@/types/celebrations'
 import { WEEKDAY_ITEMS } from '@/utils/schedule'
 import { timezoneOptions } from '@/utils/timezones'
 
@@ -76,8 +81,35 @@ const valid = computed(() => {
   if (!f) return false
   if (f.activeWeekdays.length === 0) return false
   if (!f.enabled) return true
-  return !!f.slackChannelId && (f.includeBirthdays || f.includeAnniversaries)
+  return !!f.slackChannelId && !!f.timezone && (f.includeBirthdays || f.includeAnniversaries)
 })
+
+/**
+ * HR can switch celebrations on, but only an admin or the owner can choose
+ * the channel — so on a fresh org HR would otherwise face a disabled Save
+ * with no explanation.
+ */
+const needsAdminForChannel = computed(
+  () => !!form.value?.enabled && !form.value.slackChannelId && !canControlCelebrationChannel.value,
+)
+
+/** Plain-English status for one day in the history list. */
+const STATUS_LABELS: Record<CelebrationPostHistory['status'], { text: string; color: string }> = {
+  sent: { text: 'Posted', color: 'success' },
+  failed: { text: 'Failed', color: 'error' },
+  unknown: { text: 'Unsure', color: 'warning' },
+  claimed: { text: 'Sending', color: 'info' },
+}
+
+function historyDetail(row: CelebrationPostHistory): string {
+  const who = `${row.birthday_count} birthday(s), ${row.anniversary_count} anniversary(ies)`
+  if (row.status === 'sent') return who
+  if (row.status === 'unknown') {
+    return `${who} — the post may or may not have reached Slack; check the channel.`
+  }
+  const error = row.last_error ? (TEST_MESSAGES[`slack:${row.last_error}`] ?? row.last_error) : ''
+  return error ? `${who} — ${error}` : who
+}
 
 /** Human-readable outcomes for the sample-post reason codes. */
 const TEST_MESSAGES: Record<string, string> = {
@@ -89,6 +121,7 @@ const TEST_MESSAGES: Record<string, string> = {
   'slack:is_archived': 'That channel is archived.',
   'slack:invalid_auth': 'The Slack token is no longer valid. Re-connect Slack.',
   'slack:ratelimited': 'Slack is rate-limiting the bot. Try again in a minute.',
+  cooldown: 'A sample was just sent — wait a few seconds before sending another.',
 }
 
 /** "This will announce 42 birthdays and 57 work anniversaries." */
@@ -104,8 +137,20 @@ const audienceLine = computed(() => {
 })
 
 async function load(): Promise<void> {
-  await Promise.all([store.fetchSettings(), store.fetchAudience()])
-  if (store.settings) form.value = { ...store.settings }
+  await Promise.all([store.fetchSettings(), store.fetchAudience(), store.fetchHistory()])
+  if (!store.settings) return
+  form.value = { ...store.settings }
+  // A timezone is required to switch the feature on; start from the
+  // browser's so the common case needs no typing. Saved only on Save.
+  if (!form.value.timezone) form.value.timezone = browserTimezone()
+}
+
+function browserTimezone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null
+  } catch {
+    return null
+  }
 }
 
 async function save(): Promise<void> {
@@ -137,7 +182,10 @@ async function syncAvatars(): Promise<void> {
   notice.value =
     `${result.updated} photo(s) imported. ` +
     `${result.skipped_has_photo} already had one, ` +
-    `${result.skipped_no_photo} have no Slack photo.`
+    `${result.skipped_no_photo} have no Slack photo` +
+    (result.skipped_shared
+      ? `, ${result.skipped_shared} belong to another org too and can only change their own.`
+      : '.')
 }
 
 onMounted(load)
@@ -214,12 +262,12 @@ onMounted(load)
         <v-autocomplete
           v-model="form.timezone"
           :items="timezoneOptions(form.timezone)"
-          label="Timezone (blank = server)"
-          clearable
+          label="Timezone"
+          :error-messages="form.enabled && !form.timezone ? 'Required to switch this on' : ''"
           variant="outlined"
           density="comfortable"
           style="min-width: 260px"
-          hide-details
+          hide-details="auto"
         />
       </div>
 
@@ -312,6 +360,32 @@ onMounted(load)
           persistent-hint
         />
       </div>
+      <AppCallout v-if="needsAdminForChannel" variant="info" class="mt-4">
+        An admin or the org owner needs to choose the Slack channel before this can be switched
+        on. Everything else here can be set now.
+      </AppCallout>
+
+      <div class="mt-8 mb-2 text-body-2 text-medium-emphasis">Recent posts</div>
+      <div v-if="!store.history.length" class="text-caption text-medium-emphasis">
+        Nothing posted yet.
+      </div>
+      <v-list v-else density="compact" class="pa-0 celebration-history">
+        <v-list-item v-for="row in store.history" :key="row.celebrate_date" class="px-0">
+          <template #prepend>
+            <v-chip
+              :color="STATUS_LABELS[row.status].color"
+              size="x-small"
+              variant="tonal"
+              label
+              class="mr-3"
+            >
+              {{ STATUS_LABELS[row.status].text }}
+            </v-chip>
+          </template>
+          <v-list-item-title class="text-body-2">{{ row.celebrate_date }}</v-list-item-title>
+          <v-list-item-subtitle class="text-caption">{{ historyDetail(row) }}</v-list-item-subtitle>
+        </v-list-item>
+      </v-list>
     </template>
 
     <template #header-actions>

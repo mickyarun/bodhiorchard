@@ -76,6 +76,16 @@ class CelebrationPostRepository(BaseRepository[CelebrationPost]):
             covered.update(dates or ())
         return covered
 
+    async def list_recent(self, limit: int = 14) -> list[CelebrationPost]:
+        """The newest digests first — what the settings page shows as history."""
+        stmt = (
+            select(CelebrationPost)
+            .where(CelebrationPost.org_id == self._org)
+            .order_by(CelebrationPost.celebrate_date.desc())
+            .limit(limit)
+        )
+        return list((await self._db.execute(stmt)).scalars().all())
+
     async def claim(
         self,
         celebrate_date: date,

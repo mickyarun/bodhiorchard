@@ -39,8 +39,13 @@ class EmployeeAccess:
     reset_password: bool
     # Looser than ``edit_personal`` on purpose: a profile photo is
     # self-expression, not an HR-controlled record like a joining date, so
-    # the subject can always change their own.
+    # the subject can always change their own. (HR's reach is further
+    # narrowed for people in several orgs — see ``avatars.may_edit_avatar``.)
     edit_avatar: bool
+    # The record is the caller's own. Some rules turn on this alone: only
+    # the employee may change their own photo once it is shared across
+    # orgs, and only the employee may turn a muted celebration back on.
+    is_self: bool = False
 
 
 def access_for(perms: PermissionSet, actor_id: uuid.UUID, subject_id: uuid.UUID) -> EmployeeAccess:
@@ -65,4 +70,5 @@ def access_for(perms: PermissionSet, actor_id: uuid.UUID, subject_id: uuid.UUID)
         # The takeover guard's own bar for anyone with a record (HR or owner).
         reset_password=perms.has_all(HR_RECORD_ACCESS) and not is_self,
         edit_avatar=is_self or manage,
+        is_self=is_self,
     )

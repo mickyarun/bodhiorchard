@@ -416,8 +416,9 @@ class CelebrationSettings(BaseModel):
     """Org-level birthday and work-anniversary announcements.
 
     Stored under ``org.config["celebrations"]``. One digest is posted per
-    local date to ``slack_channel_id`` at ``post_time`` in ``timezone``
-    (``None`` = server-local), covering every celebrant that date.
+    local date to ``slack_channel_id`` at ``post_time`` in ``timezone``,
+    covering every celebrant that date. A timezone is required to switch the
+    feature on; ``None`` is only allowed while it is off.
 
     Posting runs every day by default, weekends included, so a
     celebration is announced on the day it falls. Narrowing
@@ -495,6 +496,10 @@ class CelebrationSettings(BaseModel):
         """A digest with nowhere to go is a misconfiguration, not a no-op."""
         if self.enabled and not self.slack_channel_id:
             raise ValueError("slack_channel_id is required when celebrations are enabled")
+        if self.enabled and not self.timezone:
+            # "Server time" is UTC in Docker: a blank timezone would post at
+            # 10:30 in a UK summer or 15:00 in India. Make the choice explicit.
+            raise ValueError("choose a timezone before turning celebrations on")
         if self.enabled and not (self.include_birthdays or self.include_anniversaries):
             raise ValueError("enable at least one of birthdays or anniversaries")
         return self

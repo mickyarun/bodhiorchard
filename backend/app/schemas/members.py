@@ -15,8 +15,9 @@
 """Pydantic schemas for member listing and role assignment."""
 
 import uuid
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class MemberRead(BaseModel):
@@ -59,6 +60,22 @@ class AddMemberRequest(BaseModel):
     # The password is a temporary one the inviter shares (HR inviting a new
     # hire): make them choose their own at first sign-in.
     must_change_password: bool = Field(False, alias="mustChangePassword")
+
+    @field_validator("avatar_url")
+    @classmethod
+    def _https_avatar(cls, value: str | None) -> str | None:
+        """Only an https URL (or nothing) may become someone's photo.
+
+        The value is loaded by every viewer's browser and, for celebration
+        posts, fetched by Slack — so ``javascript:``, ``data:``, plain-http
+        or relative values are refused rather than stored.
+        """
+        if value is None or not value.strip():
+            return None
+        parsed = urlparse(value.strip())
+        if parsed.scheme != "https" or not parsed.hostname:
+            raise ValueError("avatarUrl must be an https:// URL")
+        return value.strip()
 
     model_config = {"populate_by_name": True}
 

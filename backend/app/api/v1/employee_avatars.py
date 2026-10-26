@@ -55,6 +55,7 @@ from app.services.avatars import (
     AVATAR_CONTENT_TYPE,
     AvatarImageError,
     avatar_storage_path,
+    may_edit_avatar,
     new_avatar_key,
     normalise_avatar_image,
     public_avatar_path,
@@ -69,9 +70,10 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["employee-avatars"])
 
 _SERVE_HEADERS = {
-    # The key changes on every upload, so a long max-age never serves a
-    # stale photo.
-    "Cache-Control": "public, max-age=86400",
+    # The key changes on every upload, so caching never serves a replaced
+    # photo. Kept to an hour so a removed or deactivated person's photo
+    # drops out of browser, proxy and Slack caches the same day.
+    "Cache-Control": "public, max-age=3600",
     # Never let a browser second-guess the declared image type.
     "X-Content-Type-Options": "nosniff",
     # Belt and braces if someone opens the URL directly in a tab.
@@ -93,15 +95,31 @@ class SlackPhotoSyncRead(BaseModel):
     updated: int
     skipped_no_photo: int
     skipped_has_photo: int
+    skipped_shared: int = 0
 
 
-def _may_edit(perms: PermissionSet, actor_id: uuid.UUID, subject_id: uuid.UUID) -> bool:
-    """Your own photo is always yours to change; HR can change anyone's.
+_FORBIDDEN_SHARED = (
+    "This person belongs to another organization too, so only they can change their photo."
+)
 
-    Delegates to ``access_for`` so this route and the ``can_edit_avatar``
-    flag the profile page reads cannot drift apart.
+
+async def _assert_may_edit(
+    db: AsyncSession, perms: PermissionSet, actor_id: uuid.UUID, subject_id: uuid.UUID
+) -> None:
+    """403 unless the caller may change ``subject_id``'s photo.
+
+    Same decision as the profile page's ``can_edit_avatar`` flag
+    (``may_edit_avatar``), so the button and the API cannot disagree.
     """
-    return access_for(perms, actor_id, subject_id).edit_avatar
+    access = access_for(perms, actor_id, subject_id)
+    if await may_edit_avatar(db, access, subject_id):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=_FORBIDDEN_SHARED
+        if access.edit_avatar
+        else "You can only change your own profile photo.",
+    )
 
 
 async def _delete_stored(path: str, *, user_id: uuid.UUID) -> None:
@@ -131,11 +149,7 @@ async def upload_avatar(
     it is read or processed. The previous photo's bytes are deleted only
     after the new ones are stored.
     """
-    if not _may_edit(perms, current_user.id, user_id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only change your own profile photo.",
-        )
+    await _assert_may_edit(db, perms, current_user.id, user_id)
 
     user_repo = UserRepository(db, org_id=current_user.org_id)
     user = await user_repo.get_by_id_with_membership(user_id, current_user.org_id)
@@ -180,7 +194,13 @@ async def upload_avatar(
     user.avatar_storage_path = stored_path
     user.avatar_key = key
     user.avatar_url = public_avatar_path(key)
-    await db.flush()
+    # Commit before touching the old file: if the commit failed after the
+    # delete, the row would still point at bytes that no longer exist.
+    try:
+        await db.commit()
+    except Exception:
+        await _delete_stored(stored_path, user_id=user_id)  # don't orphan the new file
+        raise
     # Each upload has a fresh key, so the old object would otherwise be
     # orphaned — an unreachable copy of someone's photo left in storage.
     if previous_path and previous_path != stored_path:
@@ -204,11 +224,7 @@ async def delete_avatar(
     db: AsyncSession = Depends(get_db),
 ) -> AvatarRead:
     """Remove a member's photo, falling the UI back to their initials."""
-    if not _may_edit(perms, current_user.id, user_id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only change your own profile photo.",
-        )
+    await _assert_may_edit(db, perms, current_user.id, user_id)
 
     user_repo = UserRepository(db, org_id=current_user.org_id)
     user = await user_repo.get_by_id_with_membership(user_id, current_user.org_id)
@@ -219,7 +235,9 @@ async def delete_avatar(
     user.avatar_storage_path = None
     user.avatar_key = None
     user.avatar_url = None
-    await db.flush()
+    # Row first, bytes second: the public URL dies with the commit, and a
+    # storage hiccup afterwards leaves at worst an unreachable file.
+    await db.commit()
     if previous_path:
         await _delete_stored(previous_path, user_id=user_id)
     return AvatarRead(avatar_url=None)
@@ -250,10 +268,18 @@ async def import_slack_photos(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Connect Slack in Settings → Connections first.",
         )
+    try:
+        bot_token = decrypt_secret(org.slack_bot_token)
+    except Exception:
+        # A rotated encryption key or a token stored by an older deployment.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The stored Slack token can't be read. Re-connect Slack in Settings.",
+        ) from None
     result = await sync_slack_photos(
         db,
         org_id=org.id,
-        bot_token=decrypt_secret(org.slack_bot_token),
+        bot_token=bot_token,
         overwrite=bool(body and body.overwrite),
     )
     logger.info(
@@ -266,6 +292,7 @@ async def import_slack_photos(
         updated=result.updated,
         skipped_no_photo=result.skipped_no_photo,
         skipped_has_photo=result.skipped_has_photo,
+        skipped_shared=result.skipped_shared,
     )
 
 
@@ -283,7 +310,9 @@ async def serve_avatar(
     if len(key) != 32 or not all(c in "0123456789abcdef" for c in key):
         raise not_found
     user = await UserRepository(db).get_by_avatar_key(key)
-    if user is None or not user.avatar_storage_path:
+    # A deactivated account's photo stops being public, even though its URL
+    # lives on in Slack history.
+    if user is None or not user.is_active or not user.avatar_storage_path:
         raise not_found
 
     try:

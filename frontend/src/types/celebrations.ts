@@ -60,4 +60,18 @@ export interface SlackAvatarSyncResult {
   updated: number
   skipped_no_photo: number
   skipped_has_photo: number
+  /** Members also in another org: only they may change their own photo. */
+  skipped_shared: number
+}
+
+/** How one day's digest went, newest first, for the settings page. */
+export interface CelebrationPostHistory {
+  celebrate_date: string
+  /** claimed | sent | failed | unknown */
+  status: 'claimed' | 'sent' | 'failed' | 'unknown'
+  attempts: number
+  birthday_count: number
+  anniversary_count: number
+  /** Slack's error code, or why the outcome is unknown. */
+  last_error: string | null
 }

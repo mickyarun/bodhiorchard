@@ -83,11 +83,6 @@ class EmployeeContact(BaseModel):
     emergency_contact_name: str | None = Field(None, max_length=255)
     emergency_contact_relation: str | None = Field(None, max_length=100)
     emergency_contact_phone: str | None = Field(None, max_length=40)
-    # Celebration opt-outs live on the self-editable set so a member can mute
-    # their own announcement from their profile without needing HR. Defaults
-    # mirror the column defaults (opt-out, not opt-in).
-    celebrate_birthday: bool = True
-    celebrate_anniversary: bool = True
 
 
 class EmployeePersonal(EmployeeContact):
@@ -96,6 +91,31 @@ class EmployeePersonal(EmployeeContact):
     date_of_birth: date | None = None
     gender: Gender | None = None
     blood_group: BloodGroup | None = None
+
+
+class EmployeePersonalRead(EmployeePersonal):
+    """Personal fields as shown on a profile, plus the celebration opt-outs.
+
+    The opt-outs are read-only here on purpose. They are written only
+    through :class:`CelebrationPrefsUpdate`, never by the personal-details
+    save: that save replaces every field, so carrying the flags on it would
+    let a stale HR form — or any client that omits them — silently switch a
+    person's muted announcement back on.
+    """
+
+    celebrate_birthday: bool = True
+    celebrate_anniversary: bool = True
+
+
+class CelebrationPrefsUpdate(BaseModel):
+    """Mute or unmute someone's celebration announcements. Omitted = unchanged.
+
+    The employee may set either flag either way. HR may only mute (``False``);
+    turning an announcement back on is the employee's call alone.
+    """
+
+    celebrate_birthday: bool | None = None
+    celebrate_anniversary: bool | None = None
 
 
 class ManagerRef(BaseModel):
@@ -156,7 +176,7 @@ class EmployeeRead(BaseModel):
     leave_policy: EmployeeLeavePolicy | None = None
     office: OfficeRef | None = None
     managers: list[ManagerRef]
-    personal: EmployeePersonal | None
+    personal: EmployeePersonalRead | None
     access: EmployeeAccessRead
     # Set only after a status change to "exited": whether the account was
     # also deactivated, or still needs an admin to do it.
