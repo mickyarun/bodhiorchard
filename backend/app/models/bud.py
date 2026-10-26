@@ -227,16 +227,18 @@ class BUDDesign(BaseModel):
     """Per-repo design wireframe for a BUD document."""
 
     __tablename__ = "bud_designs"
+    # One design per (bud, repo), and one BUD-level design (repo_id NULL)
+    # per BUD. The unique constraint can't cover the BUD-level row because
+    # NULL != NULL, so a partial unique index does. (UNIQUE NULLS NOT
+    # DISTINCT would need Postgres 15+.) The repository's ON CONFLICT
+    # upsert targets whichever of the two matches the repo_id.
     __table_args__ = (
-        # NULLS NOT DISTINCT: the BUD-level design (repo_id NULL) is one
-        # key, not one-per-row. A plain unique constraint lets concurrent
-        # upserts insert several (bud, NULL) rows. The repository's
-        # ON CONFLICT upsert targets this constraint by name.
-        UniqueConstraint(
+        UniqueConstraint("bud_id", "repo_id", name="uq_bud_design_bud_repo"),
+        Index(
+            "uq_bud_designs_bud_level",
             "bud_id",
-            "repo_id",
-            name="uq_bud_designs_bud_repo",
-            postgresql_nulls_not_distinct=True,
+            unique=True,
+            postgresql_where="repo_id IS NULL",
         ),
         Index("ix_bud_designs_bud_id", "bud_id"),
     )

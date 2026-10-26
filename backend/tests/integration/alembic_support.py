@@ -21,10 +21,26 @@ from pathlib import Path
 from typing import Literal
 
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 from alembic import command
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _config() -> Config:
+    """Alembic config for the backend's migration tree."""
+    alembic_cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
+    return alembic_cfg
+
+
+def parent_revision(revision: str) -> str:
+    """The single ``down_revision`` of ``revision``, read from its migration file."""
+    parent = ScriptDirectory.from_config(_config()).get_revision(revision).down_revision
+    if not isinstance(parent, str):
+        raise ValueError(f"Revision {revision} has no single parent: {parent!r}")
+    return parent
 
 
 def run_alembic(async_url: str, action: Literal["upgrade", "downgrade"], revision: str) -> None:
@@ -33,8 +49,7 @@ def run_alembic(async_url: str, action: Literal["upgrade", "downgrade"], revisio
     Synchronous: env.py drives the migration with ``asyncio.run``, so call
     this from a sync fixture or test, never from inside a running loop.
     """
-    alembic_cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
-    alembic_cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
+    alembic_cfg = _config()
     # Alembic's env.py reads DATABASE_URL from os.environ. Stash the
     # current value (if any) and restore afterwards so we don't leak
     # the container URL into the rest of the session.

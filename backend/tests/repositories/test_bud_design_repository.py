@@ -14,9 +14,10 @@
 
 """Statement-shape tests for ``BUDDesignRepository.upsert``.
 
-The upsert must be a single ``INSERT ... ON CONFLICT`` on the
-``uq_bud_designs_bud_repo`` constraint, so concurrent callers serialize on
-the unique index instead of racing a select-then-insert. The runtime
+The upsert must be a single ``INSERT ... ON CONFLICT`` on the unique index
+that matches the key (the partial ``uq_bud_designs_bud_level`` for the
+BUD-level design, ``uq_bud_design_bud_repo`` for a repo design), so
+concurrent callers serialize on it instead of racing a select-then-insert. The runtime
 behaviour is covered by ``tests/integration/test_bud_design_upsert_concurrency.py``.
 """
 
@@ -31,26 +32,34 @@ from sqlalchemy.dialects import postgresql
 from app.repositories.bud import BUDDesignRepository
 
 
-async def _rendered_upsert(**kwargs: str) -> str:
+async def _rendered_upsert(repo_id: uuid.UUID | None = None, **kwargs: str) -> str:
     """Run ``upsert`` against a mocked session and render the SQL it sent."""
     db = MagicMock()
     db.execute = AsyncMock(return_value=MagicMock())
     repo = BUDDesignRepository(db, org_id=uuid.uuid4())
 
-    await repo.upsert(bud_id=uuid.uuid4(), repo_id=None, **kwargs)
+    await repo.upsert(bud_id=uuid.uuid4(), repo_id=repo_id, **kwargs)
 
     sent_stmt = db.execute.await_args.args[0]
     return str(sent_stmt.compile(dialect=postgresql.dialect()))
 
 
 @pytest.mark.asyncio
-async def test_design_upsert_targets_the_bud_repo_constraint() -> None:
-    """The write is one ON CONFLICT statement on the (bud, repo) constraint."""
+async def test_bud_level_upsert_targets_the_partial_index() -> None:
+    """repo_id NULL conflicts on the partial index over bud_id WHERE repo_id IS NULL."""
     rendered = await _rendered_upsert()
 
     assert rendered.startswith("INSERT INTO bud_designs")
-    assert "ON CONFLICT ON CONSTRAINT uq_bud_designs_bud_repo DO UPDATE" in rendered
+    assert "ON CONFLICT (bud_id) WHERE repo_id IS NULL DO UPDATE" in rendered
     assert "RETURNING" in rendered
+
+
+@pytest.mark.asyncio
+async def test_repo_upsert_targets_the_bud_repo_constraint() -> None:
+    """A repo design conflicts on the (bud, repo) unique constraint."""
+    rendered = await _rendered_upsert(repo_id=uuid.uuid4())
+
+    assert "ON CONFLICT ON CONSTRAINT uq_bud_design_bud_repo DO UPDATE" in rendered
 
 
 @pytest.mark.asyncio

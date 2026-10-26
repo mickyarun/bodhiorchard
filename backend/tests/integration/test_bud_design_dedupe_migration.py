@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Data test for migration ``35ecdf822b3c`` (one design row per bud/repo).
+"""Data test for migration ``fc6f5ea3a1db`` (one BUD-level design per BUD).
 
 The session-wide test database is migrated to head while empty, so the
 duplicate-collapse step never sees data there. This test builds its own
@@ -33,12 +33,12 @@ from sqlalchemy import make_url, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
-from tests.integration.alembic_support import run_alembic
+from tests.integration.alembic_support import parent_revision, run_alembic
 
 pytestmark = pytest.mark.integration
 
-_BEFORE = "0b77846123b0"
-_DEDUPE = "35ecdf822b3c"
+_DEDUPE = "fc6f5ea3a1db"
+_BEFORE = parent_revision(_DEDUPE)
 
 ORG = uuid.UUID(int=0xA)
 BUD, SOLO_BUD = uuid.UUID(int=0xB1), uuid.UUID(int=0xB2)

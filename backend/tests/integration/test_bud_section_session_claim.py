@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``try_claim_active_job`` against real Postgres and ``uq_bud_section_sessions_thread``.
+"""``try_claim_active_job`` against real Postgres and its partial unique indexes.
 
-The claim is an ``INSERT ... ON CONFLICT`` on a ``NULLS NOT DISTINCT``
-constraint. A second claim on the same thread must hit the conflict and
-lose, for ordinary sections (``design_id`` NULL) as well as design rows. If
-NULLs were treated as distinct, the second claim on an ordinary section
-would insert a new row and win.
+The claim is an ``INSERT ... ON CONFLICT`` whose target is one of two
+partial unique indexes, picked by whether ``design_id`` is NULL. A second
+claim on the same thread must hit the conflict and lose, for ordinary
+sections (``design_id`` NULL) as well as design rows. If the NULL case
+missed its index, the second claim would insert a new row and win.
 """
 
 from __future__ import annotations

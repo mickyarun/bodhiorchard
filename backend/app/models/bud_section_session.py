@@ -31,7 +31,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -54,18 +54,28 @@ class BUDSectionSession(BaseModel):
     """Active Claude CLI session id for a BUD section (one row per thread)."""
 
     __tablename__ = "bud_section_sessions"
-    # NULLS NOT DISTINCT gives "one current thread per (bud, section)" for
-    # ordinary sections (design_id NULL) and "one per (bud, section,
-    # design)" for design rows in a single constraint. A plain UNIQUE would
-    # let duplicate non-design rows through, since NULL != NULL. The
-    # repository's ON CONFLICT claim targets this constraint by name.
+    # Two partial unique indexes cover the same intent as a single
+    # ``UNIQUE NULLS NOT DISTINCT`` constraint without requiring PG 15+.
+    # SQL's NULL != NULL means a plain UNIQUE over (bud_id, section,
+    # design_id) lets duplicate non-design rows slip through because
+    # they all carry design_id=NULL. Splitting on NULL vs NOT NULL
+    # enforces "one current thread per (bud, section)" for ordinary
+    # sections and "one per (bud, section, design)" for design rows.
     __table_args__ = (
-        UniqueConstraint(
+        Index(
+            "uq_bud_section_sessions_bud_section",
+            "bud_id",
+            "section",
+            unique=True,
+            postgresql_where="design_id IS NULL",
+        ),
+        Index(
+            "uq_bud_section_sessions_bud_section_design",
             "bud_id",
             "section",
             "design_id",
-            name="uq_bud_section_sessions_thread",
-            postgresql_nulls_not_distinct=True,
+            unique=True,
+            postgresql_where="design_id IS NOT NULL",
         ),
         # Speeds up the boot-time orphan sweep ("which sessions still
         # claim an in-flight chat job that no longer exists?") without

@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import case, func, or_, select, update
+from sqlalchemy import case, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, lazyload
@@ -620,9 +620,10 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
     ) -> BUDDesign:
         """Create or update a design for a (bud, repo) pair.
 
-        A single ``INSERT ... ON CONFLICT DO UPDATE`` against
-        ``uq_bud_designs_bud_repo`` (``NULLS NOT DISTINCT``, so the
-        BUD-level ``repo_id=NULL`` design is one key too). When two
+        A single ``INSERT ... ON CONFLICT DO UPDATE``. A repo design
+        conflicts on ``uq_bud_design_bud_repo``; the BUD-level design
+        (``repo_id`` NULL) on the partial index ``uq_bud_designs_bud_level``,
+        since NULLs never collide in a plain unique constraint. When two
         transactions race on the same key, Postgres makes the second wait
         on the first's uncommitted row and then takes the update branch.
         A select-then-insert can't do that: before the first insert
@@ -651,11 +652,18 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
         # ON CONFLICT skips the ORM's ``onupdate``, so bump updated_at here.
         set_: dict[str, Any] = {"status": status, "updated_at": func.now()}
         set_.update({col: value for col, value in optional.items() if value is not None})
-        stmt = stmt.on_conflict_do_update(
-            constraint="uq_bud_designs_bud_repo",
-            set_=set_,
-            where=BUDDesign.org_id == self._org_id,
-        )
+        org_guard = BUDDesign.org_id == self._org_id
+        if repo_id is None:
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["bud_id"],
+                index_where=text("repo_id IS NULL"),
+                set_=set_,
+                where=org_guard,
+            )
+        else:
+            stmt = stmt.on_conflict_do_update(
+                constraint="uq_bud_design_bud_repo", set_=set_, where=org_guard
+            )
         result = await self._db.execute(
             stmt.returning(BUDDesign).execution_options(populate_existing=True)
         )
