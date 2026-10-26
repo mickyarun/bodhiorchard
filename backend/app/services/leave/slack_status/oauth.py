@@ -23,6 +23,7 @@ import contextlib
 import time
 import uuid
 from dataclasses import dataclass
+from typing import NoReturn
 from urllib.parse import urlencode
 
 import httpx
@@ -36,10 +37,12 @@ from app.repositories.slack_status_accounts import SlackStatusAccountRepository
 from app.repositories.slack_status_link import SlackStatusLinkRepository
 from app.repositories.user import UserRepository
 from app.services.leave.slack_status.settings import StatusClient, redirect_url
+from app.services.slack_self_link import link_own_account
 from app.services.slack_user_api import (
     AUTHORIZE_URL,
     USER_SCOPES,
     SlackUserApiError,
+    UserGrant,
     exchange_code,
     revoke,
 )
@@ -91,6 +94,10 @@ class WrongSlackAccountError(Exception):
     """Approved from a Slack account that isn't the member's linked one."""
 
 
+class UnlinkableSlackAccountError(WrongSlackAccountError):
+    """The member had no link yet, and the account couldn't be shown to be theirs."""
+
+
 @dataclass(frozen=True)
 class Connected:
     """A kept connection: whether another org had the account, and tokens to hand back.
@@ -110,7 +117,8 @@ async def complete(
 
     Only for the member's own linked Slack account: otherwise someone could
     start the flow and get a colleague to approve it, and their leave would
-    then show on the colleague's status.
+    then show on the colleague's status. A member with no link yet gets
+    this account linked if it's provably theirs (see ``slack_self_link``).
 
     A Slack account has one status, so one org drives it: if another org
     was, it's handed over here. Otherwise the two would overwrite and clear
@@ -118,12 +126,12 @@ async def complete(
     """
     grant = await exchange_code(client.client_id, client.client_secret, code, redirect_url())
     member = await UserRepository(db).get_by_id_in_org(user_id, org_id)
-    if member is None or not member.slack_id or member.slack_id != grant.slack_user_id:
-        # Nothing was saved, so it goes back now. Best effort: the member
-        # should still hear it was the wrong account.
-        with contextlib.suppress(SlackUserApiError, httpx.HTTPError):
-            await revoke(grant.token)
-        raise WrongSlackAccountError
+    if member is None:
+        await _refuse(db, grant, WrongSlackAccountError())
+    if not member.slack_id and not await link_own_account(db, org_id, member, grant.slack_user_id):
+        await _refuse(db, grant, UnlinkableSlackAccountError())
+    if member.slack_id != grant.slack_user_id:
+        await _refuse(db, grant, WrongSlackAccountError())
     accounts = SlackStatusAccountRepository(db)
     others = await accounts.links_elsewhere(grant.slack_user_id, org_id)
     await accounts.remove_elsewhere(grant.slack_user_id, org_id)
@@ -131,6 +139,34 @@ async def complete(
         user_id, grant.team_id, grant.slack_user_id, encrypt_secret(grant.token)
     )
     return Connected(moved=bool(others), stale_tokens=_stale(others, grant.token))
+
+
+async def discard(db: AsyncSession, client: StatusClient, code: str) -> None:
+    """Use up a code we won't keep, so it can't be finished from anywhere else
+    (Slack doesn't tie a code to its state). Best effort."""
+    with contextlib.suppress(SlackUserApiError, httpx.HTTPError):
+        grant = await exchange_code(client.client_id, client.client_secret, code, redirect_url())
+        await _hand_back_unless_held(db, grant)
+
+
+async def _refuse(db: AsyncSession, grant: UserGrant, error: WrongSlackAccountError) -> NoReturn:
+    """Hand the unused token back, then raise; best effort, as the member
+    should still hear why."""
+    with contextlib.suppress(SlackUserApiError, httpx.HTTPError):
+        await _hand_back_unless_held(db, grant)
+    raise error
+
+
+async def _hand_back_unless_held(db: AsyncSession, grant: UserGrant) -> None:
+    """Revoke the grant's token, unless a link holds it.
+
+    Slack gives the same person the same token again, so if that account is
+    already connected (say, from their other profile here) the token is in
+    use, and handing it back would switch their status off.
+    """
+    links = await SlackStatusAccountRepository(db).links_for_account(grant.slack_user_id)
+    if not any(decrypt_secret(link.token) == grant.token for link in links):
+        await revoke(grant.token)
 
 
 def _stale(others: list[SlackStatusLink], kept: str) -> list[str]:

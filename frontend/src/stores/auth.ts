@@ -16,6 +16,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { User } from '@/types'
 import api from '@/services/api'
+import { forgetReturnTo } from '@/utils/returnTo'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
@@ -79,6 +80,8 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
     localStorage.removeItem('bodhiorchard_token')
     localStorage.removeItem('bodhiorchard_refresh_token')
+    // Never send whoever signs in next to this person's page.
+    forgetReturnTo()
   }
 
   async function fetchUser(): Promise<void> {

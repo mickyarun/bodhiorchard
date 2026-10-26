@@ -75,6 +75,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { afterSignIn } from '@/utils/afterSignIn'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -97,7 +98,14 @@ async function handleSubmit() {
   const err = await authStore.changePassword(newPassword.value)
   loading.value = false
   if (err === null) {
-    router.push({ name: 'character-select' })
+    // The profile couldn't load while the password change was pending; it
+    // decides whether an engineer picks their avatar next.
+    try {
+      await authStore.fetchUser()
+    } catch {
+      // Without it, the router guard loads it on the way.
+    }
+    router.push(afterSignIn(authStore.user))
   } else {
     errorMsg.value = err
   }
