@@ -12,13 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``try_claim_active_job`` against real Postgres and its partial unique indexes.
+"""Section-session writes against real Postgres and their partial unique indexes.
 
-The claim is an ``INSERT ... ON CONFLICT`` whose target is one of two
-partial unique indexes, picked by whether ``design_id`` is NULL. A second
-claim on the same thread must hit the conflict and lose, for ordinary
-sections (``design_id`` NULL) as well as design rows. If the NULL case
-missed its index, the second claim would insert a new row and win.
+``bud_section_sessions`` has two partial unique indexes, picked by whether
+``design_id`` is NULL. Both writes covered here are ``INSERT ... ON
+CONFLICT`` statements that must target the right one:
+
+* ``upsert`` (a new CLI session id for a thread): a second writer racing
+  the first's uncommitted row must wait on it and then update it, leaving
+  one row with its own session id.
+* ``try_claim_active_job``: a second claim on the same thread must hit the
+  conflict and lose.
+
+Both run for ordinary sections (``design_id`` NULL) and design threads.
 """
 
 from __future__ import annotations
@@ -33,6 +39,7 @@ from app.models.bud import BUDDesign, BUDDesignStatus, BUDDocument, BUDStatus
 from app.models.bud_section_session import BUDSectionSession
 from app.models.organization import Organization
 from app.repositories.bud_section_session import BUDSectionSessionRepository
+from tests.integration.race_support import Write, race_against_uncommitted
 
 pytestmark = pytest.mark.integration
 
@@ -81,3 +88,34 @@ async def test_second_claim_on_a_thread_loses(
     assert first.won and first.session_id is not None
     assert not second.won
     assert rows == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("on_design", [False, True], ids=["section", "design"])
+async def test_racing_upserts_leave_one_row_with_the_second_session(
+    pg_session_factory: async_sessionmaker[AsyncSession], on_design: bool
+) -> None:
+    """B waits on A's uncommitted thread row, then updates it: one row, B's session."""
+    org_id, bud_id, design_id = await _seed(pg_session_factory)
+    section = "design" if on_design else "requirements_md"
+    target = design_id if on_design else None
+    session_a, session_b = uuid.uuid4(), uuid.uuid4()
+
+    def write(session_id: uuid.UUID) -> Write:
+        return lambda db: BUDSectionSessionRepository(db, org_id=org_id).upsert(
+            bud_id, section, session_id, design_id=target
+        )
+
+    b_blocked = await race_against_uncommitted(
+        pg_session_factory, write(session_a), write(session_b)
+    )
+
+    async with pg_session_factory() as db:
+        rows = (
+            (await db.execute(select(BUDSectionSession).where(BUDSectionSession.bud_id == bud_id)))
+            .scalars()
+            .all()
+        )
+
+    assert b_blocked, "Second upsert did not wait for the first writer's uncommitted row."
+    assert [(r.session_id, r.message_count) for r in rows] == [(session_b, 0)]

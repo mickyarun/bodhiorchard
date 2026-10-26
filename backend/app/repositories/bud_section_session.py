@@ -22,6 +22,7 @@ stays here — services and handlers consume the repository methods only.
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -61,6 +62,22 @@ class ClaimResult:
 
     won: bool
     session_id: uuid.UUID | None
+
+
+def _thread_conflict_target(design_id: uuid.UUID | None) -> dict[str, Any]:
+    """ON CONFLICT target for one (bud, section[, design]) thread row.
+
+    The model uses two partial unique indexes — one for ``design_id IS
+    NULL`` and one for ``design_id IS NOT NULL`` — because PG 14 lacks
+    ``UNIQUE NULLS NOT DISTINCT``. The ON CONFLICT target must pick the
+    matching one.
+    """
+    if design_id is None:
+        return {"index_elements": ["bud_id", "section"], "index_where": text("design_id IS NULL")}
+    return {
+        "index_elements": ["bud_id", "section", "design_id"],
+        "index_where": text("design_id IS NOT NULL"),
+    }
 
 
 class BUDSectionSessionRepository(BaseRepository[BUDSectionSession]):
@@ -105,24 +122,39 @@ class BUDSectionSessionRepository(BaseRepository[BUDSectionSession]):
         Resetting an existing row clears ``message_count`` so the resume
         cap counts only turns made against the new session id. Caller is
         responsible for committing the surrounding transaction.
-        """
-        existing = await self.get_active(bud_id, section, design_id)
-        if existing is not None:
-            existing.session_id = session_id
-            existing.message_count = 0
-            await self._db.flush()
-            await self._db.refresh(existing)
-            return existing
 
-        row = BUDSectionSession(
-            org_id=self._org_id,
-            bud_id=bud_id,
-            section=section,
-            design_id=design_id,
-            session_id=session_id,
-            message_count=0,
+        One ``INSERT ... ON CONFLICT DO UPDATE``, so a writer racing
+        another's uncommitted row for the same thread waits on it and then
+        updates it, instead of both inserting and one failing on the
+        unique index. Raises ``ValueError`` if the thread's row belongs to
+        another org (the org guard skips the update).
+        """
+        stmt = (
+            pg_insert(BUDSectionSession)
+            .values(
+                org_id=self._org_id,
+                bud_id=bud_id,
+                section=section,
+                design_id=design_id,
+                session_id=session_id,
+                message_count=0,
+            )
+            .on_conflict_do_update(
+                **_thread_conflict_target(design_id),
+                # ON CONFLICT skips the ORM's ``onupdate``, so bump updated_at here.
+                set_={"session_id": session_id, "message_count": 0, "updated_at": func.now()},
+                where=BUDSectionSession.org_id == self._org_id,
+            )
+            .returning(BUDSectionSession)
+            .execution_options(populate_existing=True)
         )
-        return await self.create(row)
+        row = (await self._db.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            raise ValueError(
+                f"Section session for bud {bud_id} / {section} / design {design_id} "
+                f"belongs to another org than {self._org_id}"
+            )
+        return row
 
     async def increment_message_count(self, row_id: uuid.UUID) -> None:
         """Bump ``message_count`` by one on the given row."""
@@ -190,23 +222,11 @@ class BUDSectionSessionRepository(BaseRepository[BUDSectionSession]):
             "active_job_started_at": func.now(),
         }
 
-        # The model uses two partial unique indexes — one for
-        # ``design_id IS NULL`` and one for ``design_id IS NOT NULL`` —
-        # because PG 14 lacks ``UNIQUE NULLS NOT DISTINCT``. The
-        # ON CONFLICT target must pick the matching one.
-        if design_id is None:
-            index_elements = ["bud_id", "section"]
-            index_where = text("design_id IS NULL")
-        else:
-            index_elements = ["bud_id", "section", "design_id"]
-            index_where = text("design_id IS NOT NULL")
-
         stmt = (
             pg_insert(BUDSectionSession)
             .values(**values)
             .on_conflict_do_update(
-                index_elements=index_elements,
-                index_where=index_where,
+                **_thread_conflict_target(design_id),
                 set_={
                     "active_job_id": job_id,
                     "active_job_status": ChatActiveJobStatus.QUEUED,

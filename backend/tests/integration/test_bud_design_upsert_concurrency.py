@@ -33,17 +33,17 @@ Gated by ``@pytest.mark.integration``; skipped by default. Run with
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.bud import BUDDesign, BUDDesignStatus, BUDDocument, BUDStatus
 from app.models.organization import Organization
 from app.models.tracked_repository import RepoStatus, TrackedRepository
 from app.repositories.bud import BUDDesignRepository
+from tests.integration.race_support import Write, race_against_uncommitted
 
 # Fixtures (``pg_container`` / ``pg_session_factory`` / ...) are
 # auto-discovered from ``tests/integration/conftest.py`` — kept there
@@ -51,8 +51,6 @@ from app.repositories.bud import BUDDesignRepository
 # ``pytest`` run (which excludes the ``integration`` marker anyway).
 
 pytestmark = pytest.mark.integration
-
-_BLOCK_TIMEOUT_S = 10.0
 
 
 async def _seed(
@@ -78,38 +76,6 @@ async def _seed(
         return org.id, bud.id, repo.id
 
 
-async def _upsert_and_commit(
-    factory: async_sessionmaker[AsyncSession],
-    org_id: uuid.UUID,
-    bud_id: uuid.UUID,
-    repo_id: uuid.UUID | None,
-    html: str,
-    pid: asyncio.Future[int],
-) -> None:
-    """Writer B: publish its backend pid, then upsert and commit."""
-    async with factory() as db:
-        pid.set_result((await db.execute(text("SELECT pg_backend_pid()"))).scalar_one())
-        await BUDDesignRepository(db, org_id=org_id).upsert(bud_id, repo_id, design_html=html)
-        await db.commit()
-
-
-async def _wait_until_lock_wait_or_done(
-    factory: async_sessionmaker[AsyncSession], pid: int, task: asyncio.Task[None]
-) -> None:
-    """Return once backend ``pid`` is waiting on a lock, or ``task`` finished."""
-    async with asyncio.timeout(_BLOCK_TIMEOUT_S), factory() as db:
-        while not task.done():
-            wait_type = (
-                await db.execute(
-                    text("SELECT wait_event_type FROM pg_stat_activity WHERE pid = :pid"),
-                    {"pid": pid},
-                )
-            ).scalar_one_or_none()
-            if wait_type == "Lock":
-                return
-            await asyncio.sleep(0.01)
-
-
 async def _designs_for(
     factory: async_sessionmaker[AsyncSession], bud_id: uuid.UUID, repo_id: uuid.UUID | None
 ) -> list[BUDDesign]:
@@ -132,19 +98,12 @@ async def test_second_upsert_waits_for_first_and_updates_its_row(
     org_id, bud_id, tracked_repo_id = await _seed(factory)
     repo_id = tracked_repo_id if repo_scoped else None
 
-    async with factory() as db_a:
-        await BUDDesignRepository(db_a, org_id=org_id).upsert(bud_id, repo_id, design_html="A")
-
-        pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
-        task_b = asyncio.create_task(
-            _upsert_and_commit(factory, org_id, bud_id, repo_id, "B", pid)
+    def write(html: str) -> Write:
+        return lambda db: BUDDesignRepository(db, org_id=org_id).upsert(
+            bud_id, repo_id, design_html=html
         )
-        b_pid = await asyncio.wait_for(pid, _BLOCK_TIMEOUT_S)
-        await _wait_until_lock_wait_or_done(factory, b_pid, task_b)
-        b_blocked = not task_b.done()
-        await db_a.commit()
 
-    await task_b
+    b_blocked = await race_against_uncommitted(factory, write("A"), write("B"))
     rows = await _designs_for(factory, bud_id, repo_id)
 
     assert b_blocked, "Second upsert did not wait for the first writer's uncommitted row."

@@ -19,7 +19,7 @@ elsewhere in ``backend/tests/services`` for repository assertions. They
 cover the bits that are easy to silently break: the ``design_id`` NULL
 predicate (so non-design rows aren't accidentally filtered by a
 ``design_id = NULL`` which is always false), the rotation reset, and
-the upsert branching.
+the upsert's ON CONFLICT target.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from app.models.bud_section_session import BUDSectionSession
 from app.repositories.bud_section_session import BUDSectionSessionRepository
@@ -74,48 +75,51 @@ async def test_get_active_uses_equality_when_design_id_supplied() -> None:
     assert "design_id" in rendered
 
 
-@pytest.mark.asyncio
-async def test_upsert_creates_row_when_absent() -> None:
-    """Missing row → ``db.add`` + flush + refresh (BaseRepository.create)."""
-    repo, db = _make_repo(None)
-    db.add = MagicMock()
-    bud_id = uuid.uuid4()
-    session_id = uuid.uuid4()
-
-    row = await repo.upsert(bud_id, "tech_spec_md", session_id)
-
-    db.add.assert_called_once()
-    assert isinstance(row, BUDSectionSession)
-    assert row.session_id == session_id
-    assert row.message_count == 0
+async def _rendered_upsert(design_id: uuid.UUID | None) -> str:
+    """Run ``upsert`` against a mocked session and render the SQL it sent."""
+    repo, db = _make_repo(MagicMock())
+    await repo.upsert(uuid.uuid4(), "design", uuid.uuid4(), design_id=design_id)
+    return str(db.execute.await_args.args[0].compile(dialect=postgresql.dialect()))
 
 
 @pytest.mark.asyncio
-async def test_upsert_updates_in_place_when_row_exists() -> None:
-    """Existing row → mutate ``session_id`` and zero ``message_count``."""
-    existing = BUDSectionSession(
-        org_id=uuid.uuid4(),
-        bud_id=uuid.uuid4(),
-        section="design",
-        design_id=uuid.uuid4(),
-        session_id=uuid.uuid4(),
-        message_count=7,
-    )
-    repo, db = _make_repo(existing)
-    db.add = MagicMock()
-    new_session_id = uuid.uuid4()
+async def test_upsert_section_thread_targets_the_null_design_index() -> None:
+    """``design_id`` NULL conflicts on (bud_id, section) WHERE design_id IS NULL."""
+    rendered = await _rendered_upsert(None)
 
-    row = await repo.upsert(
-        existing.bud_id,
-        "design",
-        new_session_id,
-        design_id=existing.design_id,
+    assert rendered.startswith("INSERT INTO bud_section_sessions")
+    assert "ON CONFLICT (bud_id, section) WHERE design_id IS NULL DO UPDATE" in rendered
+    assert "RETURNING" in rendered
+
+
+@pytest.mark.asyncio
+async def test_upsert_design_thread_targets_the_design_index() -> None:
+    """A design thread conflicts on (bud_id, section, design_id) WHERE NOT NULL."""
+    rendered = await _rendered_upsert(uuid.uuid4())
+
+    assert (
+        "ON CONFLICT (bud_id, section, design_id) WHERE design_id IS NOT NULL DO UPDATE"
+        in rendered
     )
 
-    db.add.assert_not_called()
-    assert row is existing
-    assert row.session_id == new_session_id
-    assert row.message_count == 0
+
+@pytest.mark.asyncio
+async def test_upsert_resets_session_and_count_on_conflict() -> None:
+    """The update swaps ``session_id``, zeroes ``message_count`` and bumps ``updated_at``."""
+    update_clause = (await _rendered_upsert(None)).split("DO UPDATE SET", 1)[1]
+
+    assert "session_id =" in update_clause
+    assert "message_count =" in update_clause
+    assert "updated_at = now()" in update_clause
+
+
+@pytest.mark.asyncio
+async def test_upsert_raises_when_thread_row_is_another_orgs() -> None:
+    """An empty RETURNING means the org guard skipped the update: raise, don't hide it."""
+    repo, _ = _make_repo(None)
+
+    with pytest.raises(ValueError, match="belongs to another org"):
+        await repo.upsert(uuid.uuid4(), "requirements_md", uuid.uuid4())
 
 
 @pytest.mark.asyncio
