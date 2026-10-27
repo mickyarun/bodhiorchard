@@ -52,7 +52,7 @@ Already running `claude` on your laptop? **Hybrid mode** reuses your Claude Pro/
 npm install && npm run setup && npm run dev
 ```
 
-→ All three paths, the full `bodhiorchard` CLI command list, prerequisites, mode-switching, and a ready-made demo dataset: **[Deployment Guide](docs/deployment.md)**
+→ All three paths, the full `glideship` CLI command list, prerequisites, mode-switching, and a ready-made demo dataset: **[Deployment Guide](docs/deployment.md)**
 
 ## Why Bodhiorchard
 
