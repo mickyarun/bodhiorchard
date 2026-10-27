@@ -21,8 +21,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.models.bud import BUDPriority
-from app.services import slack_intake
-from app.services.slack_intake import normalize_triage_priority
+from app.services import triage_priority
+from app.services.triage_priority import normalize_triage_priority
 
 
 @pytest.mark.parametrize(
@@ -81,7 +81,7 @@ def test_unknown_priority_logs_warning(monkeypatch: pytest.MonkeyPatch) -> None:
     can't see it — patch the module logger directly per repo convention.
     """
     fake_logger = MagicMock()
-    monkeypatch.setattr(slack_intake, "logger", fake_logger)
+    monkeypatch.setattr(triage_priority, "logger", fake_logger)
 
     assert normalize_triage_priority("super-urgent") == BUDPriority.P2
     fake_logger.warning.assert_called_once_with("triage_priority_unknown", raw="super-urgent")
@@ -90,7 +90,7 @@ def test_unknown_priority_logs_warning(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_empty_priority_does_not_log(monkeypatch: pytest.MonkeyPatch) -> None:
     """None / empty string should not emit a warning — that's the documented default."""
     fake_logger = MagicMock()
-    monkeypatch.setattr(slack_intake, "logger", fake_logger)
+    monkeypatch.setattr(triage_priority, "logger", fake_logger)
 
     normalize_triage_priority(None)
     normalize_triage_priority("")

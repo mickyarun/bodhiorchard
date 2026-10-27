@@ -15,43 +15,49 @@
  -->
 
 <!-- Triage: requests from Slack that the Triage agent has scoped. Waiting
-     ones can become a BUD or be rejected; History shows the rest with
-     their outcome. -->
+     ones can become a BUD or be rejected; History lists decided ones (BUD
+     created, approved or rejected) and loads the first time it's opened.
+     Requests the agent is still scoping show in neither. -->
 <template>
   <AppPage title="Triage" subtitle="Requests from Slack, scoped by the Triage agent. Create a BUD from the ones worth building.">
     <template #actions>
       <AppPillToggle v-model="tab" :options="tabOptions" aria-label="Show" />
     </template>
 
-    <AppCallout v-if="triageStore.error" variant="error">
+    <AppCallout v-if="triageStore.error" variant="error" title="Requests didn't load">
       {{ triageStore.error }}
-      <template #actions><v-btn variant="outlined" size="small" @click="load">Retry</v-btn></template>
+      <template #actions><v-btn variant="outlined" size="small" :loading="triageStore.loading" @click="load">Retry</v-btn></template>
     </AppCallout>
 
-    <div v-if="triageStore.loading && !triageStore.sessions.length" class="triage-page__loading">
+    <div v-else-if="triageStore.loading && !shown.length" class="triage-page__loading">
       <v-progress-circular indeterminate color="primary" aria-label="Loading requests" />
     </div>
 
     <div v-else-if="!shown.length" class="triage-page__empty">
-      <h2>{{ tab === 'waiting' ? 'Nothing waiting' : 'No earlier requests yet' }}</h2>
+      <h2>{{ tab === 'waiting' ? 'Nothing waiting' : 'No decided requests yet' }}</h2>
       <p>
-        Feature requests raised in Slack show up here once the Triage agent has scoped them.
+        {{ tab === 'waiting'
+          ? 'Feature requests raised in Slack show up here once the Triage agent has scoped them.'
+          : 'Requests show here once a BUD has been created from them or they have been rejected.' }}
       </p>
     </div>
 
-    <TriageRequestCard
-      v-for="session in shown"
-      :key="session.id"
-      :session="session"
-      :now="now"
-      :busy="pending?.session.id === session.id && working ? pending.action : null"
-      @decide="pending = { session, action: $event }"
-    />
+    <template v-else>
+      <TriageRequestCard
+        v-for="session in shown"
+        :key="session.id"
+        :session="session"
+        :now="now"
+        :busy="pending?.session.id === session.id && working ? pending.action : null"
+        @decide="open(session, $event)"
+      />
+    </template>
 
     <TriageDecisionDialog
       :session="pending?.session ?? null"
       :action="pending?.action ?? 'approve'"
       :busy="working"
+      :error="triageStore.actionError"
       @cancel="pending = null"
       @confirm="decide"
     />
@@ -59,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import AppPage from '@/components/common/AppPage.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
@@ -67,38 +73,47 @@ import TriageDecisionDialog from '@/components/triage/TriageDecisionDialog.vue'
 import TriageRequestCard from '@/components/triage/TriageRequestCard.vue'
 import { useNow } from '@/composables/useNow'
 import { useTriageStore, type TriageSession } from '@/stores/triage'
-import { partitionSessions } from '@/utils/triage'
+
+type Action = 'approve' | 'reject'
 
 const triageStore = useTriageStore()
 const now = useNow()
 
 const tab = ref<'waiting' | 'history'>('waiting')
-const groups = computed(() => partitionSessions(triageStore.sessions))
-const shown = computed(() => groups.value[tab.value])
+const shown = computed(() => (tab.value === 'waiting' ? triageStore.sessions : triageStore.history))
 const tabOptions = computed(() => [
-  { label: `Waiting · ${groups.value.waiting.length}`, value: 'waiting' as const },
+  { label: `Waiting · ${triageStore.sessions.length}`, value: 'waiting' as const },
   { label: 'History', value: 'history' as const },
 ])
 
-const pending = ref<{ session: TriageSession; action: 'approve' | 'reject' } | null>(null)
+const pending = ref<{ session: TriageSession; action: Action } | null>(null)
 const working = ref(false)
 
+function open(session: TriageSession, action: Action): void {
+  triageStore.actionError = ''
+  pending.value = { session, action }
+}
+
 async function decide(notes: string | undefined): Promise<void> {
-  if (!pending.value) return
-  const { session, action } = pending.value
+  const decision = pending.value
+  if (!decision) return
   working.value = true
-  const ok = action === 'approve'
-    ? await triageStore.approveSession(session.id, notes)
-    : await triageStore.rejectSession(session.id, notes)
+  const ok = decision.action === 'approve'
+    ? await triageStore.approveSession(decision.session.id, notes)
+    : await triageStore.rejectSession(decision.session.id, notes)
   working.value = false
-  if (ok) pending.value = null
+  // Close only if the dialog still shows this decision.
+  if (ok && pending.value?.session.id === decision.session.id) pending.value = null
 }
 
 function load(): void {
-  void triageStore.fetchSessions()
+  void (tab.value === 'waiting' ? triageStore.fetchSessions() : triageStore.fetchHistory())
 }
 
-onMounted(load)
+watch(tab, t => {
+  if (t === 'history' && !triageStore.historyLoaded) load()
+})
+onMounted(() => void triageStore.fetchSessions())
 </script>
 
 <style scoped>

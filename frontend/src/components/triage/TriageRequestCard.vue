@@ -15,8 +15,10 @@
  -->
 
 <!-- One triage request: the Slack message on the left, the BUD the Triage
-     agent proposes on the right. A waiting request has one filled action,
-     Create BUD, and Reject beside it; a decided one shows its outcome. -->
+     agent proposes on the right. A waiting request leads with Create BUD
+     (tonal: a page of requests would otherwise be a column of filled
+     buttons; the confirm dialog holds the one filled action) and Reject
+     beside it. A decided one shows its outcome. -->
 <template>
   <article class="triage-card" :aria-labelledby="titleId">
     <div class="triage-card__source">
@@ -36,7 +38,7 @@
     <div class="triage-card__proposal">
       <div class="triage-card__heading">
         <span class="triage-card__eyebrow">Proposed BUD</span>
-        <BudPriorityChip :priority="triagePriority(session.priority)" />
+        <BudPriorityChip :priority="session.bud_priority" />
         <AppTag v-if="compliance" color="warning">Compliance</AppTag>
         <AppTag v-if="!waiting" :color="status.color" sr-prefix="Status:" class="triage-card__status">{{ status.label }}</AppTag>
       </div>
@@ -52,7 +54,7 @@
 
       <div class="triage-card__actions">
         <template v-if="waiting">
-          <v-btn color="primary" variant="flat" :loading="busy === 'approve'" @click="emit('decide', 'approve')">
+          <v-btn color="primary" variant="tonal" :loading="busy === 'approve'" @click="emit('decide', 'approve')">
             Create BUD
           </v-btn>
           <v-btn variant="text" :loading="busy === 'reject'" @click="emit('decide', 'reject')">Reject</v-btn>
@@ -68,16 +70,9 @@ import { computed, useId } from 'vue'
 import AppMonogram from '@/components/common/AppMonogram.vue'
 import AppTag from '@/components/common/AppTag.vue'
 import BudPriorityChip from '@/components/buds/BudPriorityChip.vue'
-import type { TriageSession } from '@/stores/triage'
+import { WAITING_STATUS, type TriageSession } from '@/stores/triage'
 import { formatDateTime, relativeTime } from '@/utils/date'
-import {
-  contextFacts,
-  isCompliance,
-  requesterName,
-  triagePriority,
-  triageStatus,
-  WAITING_STATUS,
-} from '@/utils/triage'
+import { contextFacts, isCompliance, requesterName, triageStatus } from '@/utils/triage'
 
 const props = defineProps<{ session: TriageSession; now: Date; busy: 'approve' | 'reject' | null }>()
 const emit = defineEmits<{ decide: [action: 'approve' | 'reject'] }>()

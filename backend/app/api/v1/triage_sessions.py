@@ -38,7 +38,8 @@ from app.services.bud_assignment import auto_assign_for_phase
 from app.services.bud_timeline import record_event
 from app.services.embedding_service import embedding_service
 from app.services.feature_lifecycle import create_planned_feature
-from app.services.slack_intake import _build_bud_content, normalize_triage_priority
+from app.services.slack_intake import _build_bud_content
+from app.services.triage_priority import normalize_triage_priority
 
 logger = structlog.get_logger(__name__)
 

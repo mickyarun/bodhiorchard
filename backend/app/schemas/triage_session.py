@@ -18,7 +18,10 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
+
+from app.models.bud import BUDPriority
+from app.services.triage_priority import normalize_triage_priority
 
 
 class TriageSessionRead(BaseModel):
@@ -41,6 +44,12 @@ class TriageSessionRead(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def bud_priority(self) -> BUDPriority:
+        """The priority the BUD gets if this request is approved."""
+        return normalize_triage_priority(self.priority)
 
 
 class TriageApprovalRequest(BaseModel):

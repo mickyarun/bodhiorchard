@@ -14,9 +14,6 @@
 
 /** What a triage request card shows, from the API's triage session. */
 import type { TriageSession } from '@/stores/triage'
-import type { BUDPriority } from '@/types'
-
-export const WAITING_STATUS = 'awaiting_pm'
 
 /** Label and theme colour for each status a request moves through. */
 export const TRIAGE_STATUS: Record<string, { label: string; color: string }> = {
@@ -32,35 +29,11 @@ export function triageStatus(status: string): { label: string; color: string } {
   return TRIAGE_STATUS[status] ?? { label: status, color: 'muted' }
 }
 
-/** Waiting requests, and everything else (newest first, as the API sends them). */
-export function partitionSessions(sessions: TriageSession[]): { waiting: TriageSession[]; history: TriageSession[] } {
-  return {
-    waiting: sessions.filter(s => s.status === WAITING_STATUS),
-    history: sessions.filter(s => s.status !== WAITING_STATUS),
-  }
-}
-
 /** The requester's name from the users table, else the Slack name, else the Slack ID. */
 export function requesterName(s: Pick<TriageSession, 'requester_display_name' | 'requester_name' | 'requester_slack_id'>): string {
   if (s.requester_display_name) return s.requester_display_name
   if (s.requester_name && s.requester_name !== s.requester_slack_id) return s.requester_name
   return s.requester_slack_id
-}
-
-// The words the backend's ``normalize_triage_priority`` maps onto P0–P3 when
-// it creates the BUD (anything else, or nothing, becomes P2), so the card
-// shows the priority the BUD will get.
-const PRIORITY_ALIASES: Record<string, BUDPriority> = {
-  p0: 'P0', sev0: 'P0', critical: 'P0', urgent: 'P0', blocker: 'P0', asap: 'P0', highest: 'P0',
-  p1: 'P1', sev1: 'P1', high: 'P1',
-  p2: 'P2', sev2: 'P2', medium: 'P2', normal: 'P2',
-  p3: 'P3', sev3: 'P3', low: 'P3', minor: 'P3', lowest: 'P3', nicetohave: 'P3',
-}
-
-/** The priority the approved BUD gets. */
-export function triagePriority(raw: string | null): BUDPriority {
-  if (!raw) return 'P2'
-  return PRIORITY_ALIASES[raw.toLowerCase().replace(/[^a-z0-9]/g, '')] ?? 'P2'
 }
 
 export interface TriageFact {

@@ -14,36 +14,22 @@
 
 import { describe, expect, it } from 'vitest'
 import type { TriageSession } from '@/stores/triage'
-import { contextFacts, isCompliance, partitionSessions, requesterName, triagePriority, triageStatus } from './triage'
+import { contextFacts, isCompliance, requesterName, triageStatus } from './triage'
 
 function session(over: Partial<TriageSession> = {}): TriageSession {
   return {
     id: 's1', org_id: 'o', slack_channel: 'C1', thread_ts: '1.2', requester_slack_id: 'U1', requester_name: null,
-    requester_display_name: null, original_text: 'Please add export', status: 'awaiting_pm', priority: null,
+    requester_display_name: null, original_text: 'Please add export', status: 'awaiting_pm', priority: null, bud_priority: 'P2',
     feature_name: 'Export', triage_context: null, bud_id: null, created_at: '2026-10-01T00:00:00Z',
     updated_at: '2026-10-01T00:00:00Z', ...over,
   }
 }
 
 describe('triage', () => {
-  it('splits waiting requests from the rest', () => {
-    const { waiting, history } = partitionSessions([session(), session({ id: 's2', status: 'rejected' })])
-    expect(waiting.map(s => s.id)).toEqual(['s1'])
-    expect(history.map(s => s.id)).toEqual(['s2'])
-  })
-
   it('names the requester from the best source', () => {
     expect(requesterName(session({ requester_display_name: 'Emma Clarke', requester_name: 'emma' }))).toBe('Emma Clarke')
     expect(requesterName(session({ requester_name: 'emma' }))).toBe('emma')
     expect(requesterName(session({ requester_name: 'U1' }))).toBe('U1')
-  })
-
-  it('maps priority words the way the BUD will get them', () => {
-    expect(triagePriority('Critical')).toBe('P0')
-    expect(triagePriority('high')).toBe('P1')
-    expect(triagePriority('nice to have')).toBe('P3')
-    expect(triagePriority('whenever')).toBe('P2')
-    expect(triagePriority(null)).toBe('P2')
   })
 
   it('labels statuses, passing unknown ones through', () => {
