@@ -37,7 +37,7 @@ function entry(id: string, over: Partial<CalendarEntry>): CalendarEntry {
 const NOVEMBER = { year: 2026, month: 11 }
 
 describe('monthSummary', () => {
-  it('counts distinct people out and working from home in the month', () => {
+  it('counts other people out and working from home, and flags pending', () => {
     const text = monthSummary(
       [
         entry('a', {}),
@@ -46,18 +46,20 @@ describe('monthSummary', () => {
         entry('c', { kind: 'wfh' }),
         entry('d', { status: 'rejected' }),
         entry('e', { start_date: '2026-12-01', end_date: '2026-12-02' }),
+        entry('me', { is_own: true }),
       ],
       NOVEMBER,
     )
-    expect(text).toBe('2 people out in November · 1 working from home')
+    expect(text).toBe('2 others out in November · 1 working from home · includes pending')
   })
 
-  it('is empty when nobody is out', () => {
+  it('is empty when nobody else is out', () => {
     expect(monthSummary([], NOVEMBER)).toBe('')
+    expect(monthSummary([entry('me', { is_own: true })], NOVEMBER)).toBe('')
   })
 
-  it('uses the singular for one person', () => {
-    expect(monthSummary([entry('a', {})], NOVEMBER)).toBe('1 person out in November')
+  it('uses the singular and leaves out the pending note when none are pending', () => {
+    expect(monthSummary([entry('a', {})], NOVEMBER)).toBe('1 other out in November')
   })
 })
 

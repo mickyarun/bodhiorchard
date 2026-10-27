@@ -56,7 +56,8 @@
     <template #[`item.pending_days`]="{ item }"><span :class="tone(item.pending_days)">{{ days(item.pending_days) }}</span></template>
     <template #[`body.append`]>
       <tr v-if="report?.rows.length" class="totals">
-        <th scope="row">Total</th>
+        <!-- Every listed person, not just this page. -->
+        <th scope="row">Total, all {{ report.rows.length }} {{ report.rows.length === 1 ? 'person' : 'people' }}</th>
         <td v-for="h in headers.slice(1)" :key="h.key" class="text-end">{{ days(totals[h.key]) }}</td>
       </tr>
     </template>

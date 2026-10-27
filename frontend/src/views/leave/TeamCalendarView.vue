@@ -83,7 +83,7 @@ const subtitle = computed(() => {
   if (calendar.loading.value || calendar.error.value) return ''
   return (
     monthSummary(calendar.data.value.entries, calendar.month.value) ||
-    'Nobody is on leave or working from home this month.'
+    'Nobody else is on leave or working from home this month.'
   )
 })
 </script>

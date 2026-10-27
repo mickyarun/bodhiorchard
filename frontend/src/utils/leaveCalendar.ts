@@ -39,21 +39,28 @@ export function entriesOnDay(entries: CalendarEntry[], iso: string): CalendarEnt
     })
 }
 
-/** "6 people out in November · 2 working from home": distinct people with
- *  leave, and with WFH, overlapping the month. Empty when nobody is. */
+/**
+ * "3 others out in November · 1 working from home · includes pending":
+ * distinct people other than the viewer with leave, and with WFH,
+ * overlapping the month. Pending requests count, and the line says so when
+ * any did. Empty when nobody else is out.
+ */
 export function monthSummary(entries: CalendarEntry[], month: MonthRef): string {
   const days = monthDays(month)
   const first = days[0]
   const last = days[days.length - 1]
   const out = new Set<string>()
   const home = new Set<string>()
+  let pending = false
   for (const e of entries) {
-    if (e.end_date < first || e.start_date > last) continue
+    if (e.is_own || e.end_date < first || e.start_date > last) continue
     if (e.status !== 'approved' && e.status !== 'pending') continue
     ;(e.kind === 'wfh' ? home : out).add(e.user.user_id)
+    pending ||= e.status === 'pending'
   }
   const parts: string[] = []
-  if (out.size) parts.push(`${out.size} ${out.size === 1 ? 'person' : 'people'} out in ${MONTH_NAMES[month.month - 1]}`)
+  if (out.size) parts.push(`${out.size} ${out.size === 1 ? 'other' : 'others'} out in ${MONTH_NAMES[month.month - 1]}`)
   if (home.size) parts.push(`${home.size} working from home`)
+  if (parts.length && pending) parts.push('includes pending')
   return parts.join(' · ')
 }
