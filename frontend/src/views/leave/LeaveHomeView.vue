@@ -79,8 +79,8 @@ import { usePermissions } from '@/composables/usePermissions'
 import { useLeaveStore } from '@/stores/leave'
 import type { LeaveKind } from '@/types/leave'
 import { highLeaveForSelf, highLeaveVariant } from '@/utils/highLeave'
-import { joinWithAnd } from '@/utils/leave'
 import { formatLeaveYear } from '@/utils/leaveDates'
+import { approversOf } from '@/utils/leaveHome'
 
 const store = useLeaveStore()
 const { canConfigureLeave } = usePermissions()
@@ -102,12 +102,7 @@ const subtitle = computed(() => {
   return `Leave year ${formatLeaveYear(summary.value.leave_year)} · ${summary.value.policy.name}`
 })
 
-const pendingWith = computed(() => {
-  if (!summary.value || summary.value.routes_to_hr || !summary.value.approvers.length) {
-    return 'Waiting on HR'
-  }
-  return `Waiting on ${joinWithAnd(summary.value.approvers.map(a => a.name))}`
-})
+const pendingWith = computed(() => `Waiting on ${approversOf(summary.value)}`)
 
 function open(kind: LeaveKind): void {
   preset.value = kind

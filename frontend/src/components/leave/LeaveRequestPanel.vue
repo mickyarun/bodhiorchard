@@ -86,6 +86,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useDisplay } from 'vuetify'
 import AppCallout from '@/components/common/AppCallout.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import AppSideSheet from '@/components/common/AppSideSheet.vue'
@@ -95,12 +96,13 @@ import LeaveTypePicker from '@/components/leave/LeaveTypePicker.vue'
 import { useLeaveRequestForm } from '@/composables/useLeaveRequestForm'
 import { useLeaveStore } from '@/stores/leave'
 import type { HalfDay, LeaveKind } from '@/types/leave'
-import { HALF_DAY_LABELS, KIND_LABELS, pillOptions } from '@/utils/leave'
+import { HALF_DAY_LABELS, KIND_LABELS, KIND_SHORT_LABELS, pillOptions } from '@/utils/leave'
 import { formatDayRange } from '@/utils/leaveDates'
 
 const props = defineProps<{ modelValue: boolean; preset: LeaveKind }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; sent: [] }>()
 
+const { xs } = useDisplay()
 const store = useLeaveStore()
 const form = useLeaveRequestForm()
 const field = { variant: 'outlined', density: 'compact', hideDetails: 'auto' } as const
@@ -119,7 +121,9 @@ const kindOptions = computed(() => {
   // Remote people work from home every day: there's nothing to request.
   const kinds: LeaveKind[] = summary.value?.work_arrangement === 'remote' ? ['leave'] : ['leave', 'wfh']
   if ((summary.value?.optional_holidays.quota ?? 0) > 0) kinds.push('optional_holiday')
-  return kinds.map(value => ({ label: KIND_LABELS[value], value }))
+  // "Work from home" wraps inside the toggle on a phone.
+  const labels = xs.value ? KIND_SHORT_LABELS : KIND_LABELS
+  return kinds.map(value => ({ label: labels[value], value }))
 })
 
 const holidayItems = computed(() =>

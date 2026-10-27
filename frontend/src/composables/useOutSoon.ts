@@ -26,6 +26,8 @@ import { type OutRow, outSoon } from '@/utils/leaveHome'
 
 export function useOutSoon(days: number, limit: number) {
   const rows = ref<OutRow[]>([])
+  /** People past the limit. */
+  const more = ref(0)
   const loading = ref(false)
   const error = ref('')
 
@@ -37,9 +39,12 @@ export function useOutSoon(days: number, limit: number) {
       const { data } = await api.get<CalendarRead>('/v1/leave/calendar', {
         params: { start, end: addDays(start, days - 1) },
       })
-      rows.value = outSoon(data.entries, start, days, limit)
+      const result = outSoon(data.entries, start, days, limit)
+      rows.value = result.rows
+      more.value = result.more
     } catch (err) {
       rows.value = []
+      more.value = 0
       error.value = extractApiError(err, "Couldn't load who's out.")
     } finally {
       loading.value = false
@@ -48,5 +53,5 @@ export function useOutSoon(days: number, limit: number) {
 
   onMounted(load)
 
-  return { rows, loading, error }
+  return { rows, more, loading, error }
 }

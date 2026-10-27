@@ -55,7 +55,7 @@
 import { computed } from 'vue'
 import LeaveStatusChip from '@/components/leave/LeaveStatusChip.vue'
 import type { LeaveRequestRead } from '@/types/leave'
-import { formatDays, HALF_DAY_LABELS, lopLabel, requestTypeLabel, STATUS_META, toNumber } from '@/utils/leave'
+import { lopLabel, requestLength, requestTypeLabel, STATUS_META } from '@/utils/leave'
 import { formatDayRange } from '@/utils/leaveDates'
 import { dateBadge } from '@/utils/leaveHome'
 
@@ -65,12 +65,7 @@ const emit = defineEmits<(e: 'cancel', row: LeaveRequestRead) => void>()
 const badge = computed(() => dateBadge(props.row.start_date))
 const lop = computed(() => lopLabel(props.row.lop_days))
 
-const when = computed(() => {
-  const days = toNumber(props.row.days)
-  const parts = [formatDayRange(props.row.start_date, props.row.end_date), `${formatDays(days)} ${days === 1 ? 'day' : 'days'}`]
-  if (props.row.half_day !== 'none') parts.push(HALF_DAY_LABELS[props.row.half_day])
-  return parts.join(' · ')
-})
+const when = computed(() => `${formatDayRange(props.row.start_date, props.row.end_date)} · ${requestLength(props.row)}`)
 
 const approver = computed(() => {
   const row = props.row

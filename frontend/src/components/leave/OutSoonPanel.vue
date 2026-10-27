@@ -14,10 +14,10 @@
  * limitations under the License.
  -->
 
-<!-- My leave sidebar: other people out in the next seven days. Says leave or
-     WFH, never the leave type. -->
+<!-- My leave sidebar: other people out in the next seven days, counted from
+     today. Says leave or WFH, never the leave type. -->
 <template>
-  <AppPanel title="Out this week">
+  <AppPanel :title="`Out in the next ${WINDOW_DAYS} days`">
     <template #action><router-link :to="{ name: 'leave-team' }">Calendar</router-link></template>
     <p v-if="out.error.value" class="out__empty">{{ out.error.value }}</p>
     <ul v-else-if="out.rows.value.length" class="out">
@@ -32,7 +32,10 @@
         <span class="out__label">{{ row.label }}<template v-if="row.pending">, pending</template></span>
       </li>
     </ul>
-    <p v-else-if="!out.loading.value" class="out__empty">Nobody else is out this week.</p>
+    <p v-if="!out.error.value && out.more.value" class="out__more">+{{ out.more.value }} more on the calendar</p>
+    <p v-else-if="!out.error.value && !out.rows.value.length && !out.loading.value" class="out__empty">
+      Nobody else is out in the next {{ WINDOW_DAYS }} days.
+    </p>
   </AppPanel>
 </template>
 
@@ -82,6 +85,11 @@ const out = useOutSoon(WINDOW_DAYS, LIMIT)
 .out__label {
   color: rgb(var(--v-theme-ink-2));
   white-space: nowrap;
+}
+.out__more {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: rgb(var(--v-theme-on-surface-variant));
 }
 .out__empty {
   margin: 0;

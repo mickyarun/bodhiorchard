@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { CalendarEntry, LeaveSummary } from '@/types/leave'
-import { dateBadge, outSoon, policyNotes } from '@/utils/leaveHome'
+import { approversOf, dateBadge, outSoon, policyNotes } from '@/utils/leaveHome'
 
 function entry(over: Partial<CalendarEntry>): CalendarEntry {
   return {
@@ -38,7 +38,7 @@ describe('outSoon', () => {
   const today = '2026-10-28'
 
   it('keeps other people out in the window, soonest first', () => {
-    const rows = outSoon(
+    const { rows, more } = outSoon(
       [
         entry({ request_id: 'b', start_date: '2026-11-02', end_date: '2026-11-06', user: { user_id: 'u2', name: 'Tom' } }),
         entry({ request_id: 'a', kind: 'wfh', status: 'pending', start_date: '2026-10-29', end_date: '2026-10-29' }),
@@ -52,18 +52,20 @@ describe('outSoon', () => {
       5,
     )
     expect(rows.map(r => r.id)).toEqual(['a', 'b'])
+    expect(more).toBe(0)
     expect(rows[0]).toMatchObject({ label: 'WFH', pending: true })
     expect(rows[1]).toMatchObject({ label: 'Leave', pending: false, name: 'Tom' })
   })
 
-  it('includes leave already under way and caps the list', () => {
-    const rows = outSoon(
+  it('includes leave already under way, caps the list and counts the rest', () => {
+    const { rows, more } = outSoon(
       [entry({ request_id: 'x', start_date: '2026-10-26', end_date: '2026-10-30' }), entry({ request_id: 'y' })],
       today,
       7,
       1,
     )
     expect(rows.map(r => r.id)).toEqual(['x'])
+    expect(more).toBe(1)
   })
 })
 
@@ -83,16 +85,30 @@ describe('policyNotes', () => {
 
   it('names the approvers and the WFH and backdating rules', () => {
     expect(policyNotes(summary)).toEqual([
-      'Your requests go to Daniel Okafor for approval.',
+      'Requests that need approval go to Daniel Okafor.',
       'Up to 2 days of work from home a month are approved automatically.',
-      'You can request leave for days up to 30 days back.',
+      'Requests can go back up to 30 days.',
       "If a request needs more days than you have left, you'll see that before you send it.",
     ])
   })
 
   it('says HR when the policy routes there, and skips WFH for remote people', () => {
     const notes = policyNotes({ ...summary, routes_to_hr: true, work_arrangement: 'remote' } as LeaveSummary)
-    expect(notes[0]).toBe('Your requests go to HR for approval.')
+    expect(notes[0]).toBe('Requests that need approval go to HR.')
     expect(notes.some(n => n.includes('work from home'))).toBe(false)
+  })
+})
+
+describe('approversOf', () => {
+  const base = { approvers: [{ user_id: 'a', name: 'A' }, { user_id: 'b', name: 'B' }], routes_to_hr: false }
+
+  it('names the approvers', () => {
+    expect(approversOf(base as unknown as LeaveSummary)).toBe('A and B')
+  })
+
+  it('says HR when routed there, with nobody set, or before the summary loads', () => {
+    expect(approversOf({ ...base, routes_to_hr: true } as unknown as LeaveSummary)).toBe('HR')
+    expect(approversOf({ ...base, approvers: [] } as unknown as LeaveSummary)).toBe('HR')
+    expect(approversOf(null)).toBe('HR')
   })
 })

@@ -30,17 +30,21 @@ export interface OutRow {
 
 /**
  * Other people out from `today` through the next `days - 1` days, approved
- * or pending, soonest first. The caller's own requests are left out: they
- * are in "My requests" already.
+ * or pending, soonest first: the first `limit`, and how many more there are.
+ * The caller's own requests are left out: they are in "My requests" already.
  */
-export function outSoon(entries: CalendarEntry[], today: string, days: number, limit: number): OutRow[] {
+export function outSoon(
+  entries: CalendarEntry[],
+  today: string,
+  days: number,
+  limit: number,
+): { rows: OutRow[]; more: number } {
   const last = addDays(today, days - 1)
-  return entries
+  const all = entries
     .filter(e => !e.is_own && (e.status === 'approved' || e.status === 'pending'))
     .filter(e => e.end_date >= today && e.start_date <= last)
     .sort((a, b) => a.start_date.localeCompare(b.start_date) || a.user.name.localeCompare(b.user.name))
-    .slice(0, limit)
-    .map(e => ({
+  const rows = all.slice(0, limit).map(e => ({
       id: e.request_id,
       name: e.user.name,
       start: e.start_date,
@@ -48,6 +52,7 @@ export function outSoon(entries: CalendarEntry[], today: string, days: number, l
       label: e.kind === 'wfh' ? 'WFH' : 'Leave',
       pending: e.status === 'pending',
     }))
+  return { rows, more: all.length - rows.length }
 }
 
 /** { month: 'Dec', day: '21' } for the date badge on a request row. */
@@ -56,15 +61,17 @@ export function dateBadge(iso: string): { month: string; day: string } {
   return { month: MONTH_SHORT[date.getMonth()], day: String(date.getDate()) }
 }
 
+/** Who decides the caller's requests: "Daniel Okafor", "A and B", or "HR"
+ *  when the policy routes to HR, nobody is set, or the summary isn't loaded. */
+export function approversOf(summary: LeaveSummary | null): string {
+  if (!summary || summary.routes_to_hr || !summary.approvers.length) return 'HR'
+  return joinWithAnd(summary.approvers.map(a => a.name))
+}
+
 /** Plain sentences about how the caller's policy handles requests. */
 export function policyNotes(summary: LeaveSummary): string[] {
-  const notes: string[] = []
+  const notes: string[] = [`Requests that need approval go to ${approversOf(summary)}.`]
   const policy = summary.policy
-  if (summary.routes_to_hr || !summary.approvers.length) {
-    notes.push('Your requests go to HR for approval.')
-  } else {
-    notes.push(`Your requests go to ${joinWithAnd(summary.approvers.map(a => a.name))} for approval.`)
-  }
   if (summary.work_arrangement !== 'remote') {
     if (policy.wfh_approval === 'auto') notes.push('Work from home is approved automatically.')
     if (policy.wfh_approval === 'auto_within_allowance') {
@@ -74,7 +81,7 @@ export function policyNotes(summary: LeaveSummary): string[] {
     }
   }
   if (policy.backdate_limit_days > 0) {
-    notes.push(`You can request leave for days up to ${pluralDays(policy.backdate_limit_days)} back.`)
+    notes.push(`Requests can go back up to ${pluralDays(policy.backdate_limit_days)}.`)
   }
   notes.push("If a request needs more days than you have left, you'll see that before you send it.")
   return notes

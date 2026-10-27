@@ -81,7 +81,7 @@ function leftLabel(b: Balance): string {
   gap: 10px;
   padding: 10px 12px;
   border-radius: 10px;
-  border: 1px solid rgba(var(--v-border-color), 0.24);
+  border: 1px solid rgb(var(--v-theme-rule));
   background: rgb(var(--v-theme-surface));
   cursor: pointer;
   min-width: 0;
