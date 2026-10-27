@@ -14,423 +14,113 @@
  * limitations under the License.
  -->
 
+<!-- Features: what the product already does, mapped from the code. Shows
+     the setup steps while nothing is mapped, otherwise filters and a grid
+     of feature cards. -->
 <template>
-  <div class="features-view">
-    <header class="features-view__head">
-      <div class="features-view__title-block">
-        <h1 class="features-view__title">Features</h1>
-        <p class="features-view__subtitle">
-          <strong>{{ store.total }}</strong>
-          {{ subtitleNoun }}
-          {{ subtitleScope }}
-        </p>
-      </div>
-
-      <div class="features-view__controls">
-        <v-text-field
-          v-model="searchQuery"
-          placeholder="Search features..."
-          prepend-inner-icon="mdi-magnify"
-          variant="outlined"
-          density="compact"
-          hide-details
-          clearable
-          class="features-view__search"
-          @click:clear="onClearSearch"
-        />
-        <v-select
-          v-model="selectedRepoId"
-          :items="repoOptions"
-          item-title="label"
-          item-value="value"
-          variant="outlined"
-          density="compact"
-          hide-details
-          label="Repository"
-          class="features-view__select"
-          :disabled="activeRepos.length === 0"
-        />
-        <v-select
-          v-model="visibilityMode"
-          :items="VISIBILITY_OPTIONS"
-          item-title="label"
-          item-value="value"
-          variant="outlined"
-          density="compact"
-          hide-details
-          label="Show"
-          class="features-view__select"
-        />
-        <v-select
-          v-model="lastTouchedSort"
-          :items="LAST_TOUCHED_OPTIONS"
-          item-title="label"
-          item-value="value"
-          variant="outlined"
-          density="compact"
-          hide-details
-          label="Last touched"
-          class="features-view__select"
-        />
-      </div>
-    </header>
-
-    <v-progress-linear
-      :active="store.loading"
-      indeterminate
-      color="primary"
-      class="features-view__progress"
-      height="2"
+  <AppPage title="Features" :subtitle="subtitle">
+    <FeatureFilters
+      v-if="!(hasLoadedOnce && nothingMapped)"
+      v-model:query="query"
+      v-model:repo-id="repoId"
+      v-model:mode="mode"
+      v-model:touched-sort="touchedSort"
+      :repos="activeRepos"
     />
 
-    <TopContributorsPanel
-      v-if="selectedRepoId"
-      :contributors="contributors"
-      :loading="contributorsLoading"
-    />
+    <v-progress-linear :active="store.loading && hasLoadedOnce" indeterminate color="primary" height="2" />
 
-    <div v-if="store.loading && !hasLoadedOnce" class="features-view__initial-loading">
-      <v-progress-circular indeterminate color="primary" />
+    <AppCallout v-if="store.error" variant="error" title="Features didn't load">
+      {{ store.error }}
+      <template #actions><v-btn variant="outlined" size="small" @click="reload">Retry</v-btn></template>
+    </AppCallout>
+
+    <AppCallout v-if="focusedId" variant="info">
+      Showing one feature, linked from a BUD.
+      <template #actions><v-btn variant="text" size="small" @click="clearFocus">Show all features</v-btn></template>
+    </AppCallout>
+
+    <div v-if="!hasLoadedOnce" class="features-page__loading">
+      <v-progress-circular indeterminate color="primary" aria-label="Loading features" />
     </div>
 
-    <v-alert v-if="store.error" type="error" variant="tonal" class="mb-4" closable>
-      {{ store.error }}
-    </v-alert>
+    <template v-else-if="!store.loading || store.items.length">
+      <FeaturesEmptyState v-if="nothingMapped" :repos="settingsStore.repos" :can-configure="canViewCodeSettings" />
 
-    <v-alert
-      v-if="focusedFeatureId"
-      type="info"
-      variant="tonal"
-      density="compact"
-      class="mb-4 d-flex align-center"
-    >
-      <div class="d-flex align-center ga-2 flex-wrap">
-        <span>Showing one feature — deep-linked from a BUD.</span>
-        <v-btn size="x-small" variant="text" @click="clearFocus">
-          Show all features
-        </v-btn>
-      </div>
-    </v-alert>
+      <p v-else-if="store.items.length === 0" class="features-page__none">
+        {{ query.trim() ? 'No features match that search.' : 'No features match these filters.' }}
+      </p>
 
-    <template v-if="hasLoadedOnce">
-      <div
-        v-if="store.items.length === 0 && !store.loading"
-        class="features-view__empty"
-      >
-        <v-icon
-          icon="mdi-feature-search-outline"
-          size="56"
-          class="features-view__empty-icon"
-        />
-        <div class="features-view__empty-title">
-          {{ searchQuery.trim() ? 'No matching features' : 'No features synthesised yet' }}
+      <template v-else>
+        <TopContributorsPanel v-if="repoId" :contributors="contributors" :loading="contributorsLoading" />
+        <div class="features-page__grid">
+          <FeatureCard v-for="feature in store.items" :key="feature.id" :feature="feature" />
         </div>
-        <div class="features-view__empty-body">
-          {{
-            searchQuery.trim()
-              ? 'Try a different search term.'
-              : 'Run a scan from Settings to index your repositories.'
-          }}
-        </div>
-      </div>
-
-      <div v-else class="features-view__grid">
-        <FeatureCard v-for="feature in store.items" :key="feature.id" :feature="feature" />
-      </div>
-
-      <div v-if="pageCount > 1" class="features-view__pagination">
-        <v-pagination
-          v-model="page"
-          :length="pageCount"
-          :total-visible="7"
-          density="comfortable"
-        />
-      </div>
+        <v-pagination v-if="pageCount > 1" v-model="page" :length="pageCount" :total-visible="5" density="comfortable" />
+      </template>
     </template>
-  </div>
+  </AppPage>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { PAGE_SIZE, useFeaturesStore, type FeatureViewMode } from '@/stores/features'
-import { useSettingsStore } from '@/stores/settings'
-import type { RepoContributor, RepoInfo } from '@/types'
+import { computed } from 'vue'
+import AppCallout from '@/components/common/AppCallout.vue'
+import AppPage from '@/components/common/AppPage.vue'
 import FeatureCard from '@/components/features/FeatureCard.vue'
+import FeatureFilters from '@/components/features/FeatureFilters.vue'
+import FeaturesEmptyState from '@/components/features/FeaturesEmptyState.vue'
 import TopContributorsPanel from '@/components/features/TopContributorsPanel.vue'
+import { useFeatureList } from '@/composables/useFeatureList'
+import { usePermissions } from '@/composables/usePermissions'
+import { useSettingsStore } from '@/stores/settings'
 
-const store = useFeaturesStore()
+const {
+  store, repoId, query, mode, touchedSort, page, pageCount, hasLoadedOnce, focusedId,
+  activeRepos, nothingMapped, contributors, contributorsLoading, clearFocus, reload,
+} = useFeatureList()
 const settingsStore = useSettingsStore()
-const route = useRoute()
-const router = useRouter()
+const { canViewCodeSettings } = usePermissions()
 
-const selectedRepoId = ref('')
-const searchQuery = ref('')
-const debouncedQuery = ref('')
-const page = ref(1)
-const hasLoadedOnce = ref(false)
+const MODE_NOUN: Record<string, [string, string]> = {
+  active: ['live feature', 'live features'],
+  all: ['feature', 'features'],
+  in_progress: ['feature in progress', 'features in progress'],
+  deactivated: ['deactivated feature', 'deactivated features'],
+}
 
-// Focused-feature mode. When the URL carries ``?id=<uuid>`` we fetch
-// that one feature directly (e.g. clicking a BUD's Linked-features
-// row deep-links here) and render it in isolation. Clearing the
-// filter drops the query param and the normal listing reload fires.
-const focusedFeatureId = ref<string | null>(null)
-
-// Exclusive view modes — pick ONE filter, not a cumulative widening.
-// Each mode answers a different question:
-//
-//   * ``all``         — default; the at-a-glance "what does this
-//                        codebase have?" view. Mixes shipped + BUD
-//                        work-in-progress, hides soft-deleted.
-//   * ``active``      — only shipped/live rows (excludes BUD WIP).
-//   * ``in_progress`` — only BUD work-in-progress rows. Use this
-//                        when you want to triage what's currently
-//                        being built.
-//   * ``deactivated`` — only soft-deleted rows. Audit surface.
-//
-// Backend mirrors these as ``mode=<value>``.
-const VISIBILITY_OPTIONS: Array<{ label: string; value: FeatureViewMode }> = [
-  { label: 'All (active + in progress)', value: 'all' },
-  { label: 'Active only', value: 'active' },
-  { label: 'In progress', value: 'in_progress' },
-  { label: 'Deactivated', value: 'deactivated' },
-]
-const visibilityMode = ref<FeatureViewMode>('active')
-
-const LAST_TOUCHED_OPTIONS: Array<{ label: string; value: 'asc' | 'desc' }> = [
-  { label: 'Asc', value: 'asc' },
-  { label: 'Desc', value: 'desc' },
-]
-const lastTouchedSort = ref<'asc' | 'desc'>('desc')
-
-let searchTimeout: ReturnType<typeof setTimeout> | null = null
-
-const activeRepos = computed<RepoInfo[]>(() =>
-  settingsStore.repos.filter((r) => r.status !== 'removed'),
-)
-
-const repoOptions = computed(() => [
-  { label: 'All repos', value: '' },
-  ...activeRepos.value.map((r) => ({ label: r.name, value: r.id })),
-])
-
-const pageCount = computed(() => Math.max(1, Math.ceil(store.total / PAGE_SIZE)))
-
-// Subtitle noun reflects the active view mode so the count number
-// always reads as "<N> <mode-specific noun>". Keeps the header
-// honest when the dropdown is on "Deactivated" and the page shows
-// historical rather than current features.
-const subtitleNoun = computed(() => {
+// "12 live features across 3 repositories", scoped to the repository filter.
+const subtitle = computed(() => {
+  if (!hasLoadedOnce.value || nothingMapped.value) return 'What your product already does, mapped from your code'
   const n = store.total
-  const plural = n !== 1
-  switch (visibilityMode.value) {
-    case 'active':
-      return plural ? 'active features' : 'active feature'
-    case 'in_progress':
-      return plural ? 'in-progress features' : 'in-progress feature'
-    case 'deactivated':
-      return plural ? 'deactivated features' : 'deactivated feature'
-    default:
-      return plural ? 'features' : 'feature'
-  }
-})
-
-// Header subtitle scopes the count to the active filter so a user
-// drilling into one repo doesn't see "12 features across 7 repos".
-const subtitleScope = computed(() => {
-  const repoLabel = repoOptions.value.find((o) => o.value === selectedRepoId.value)?.label
-  if (selectedRepoId.value && repoLabel) return `in ${repoLabel}`
-  if (debouncedQuery.value) return `matching "${debouncedQuery.value}"`
-  const n = activeRepos.value.length
-  return `across ${n} ${n === 1 ? 'repo' : 'repos'}`
-})
-
-const contributors = computed<RepoContributor[]>(
-  () => store.contributorsByRepo[selectedRepoId.value] ?? [],
-)
-const contributorsLoading = computed(
-  () => !!selectedRepoId.value && !(selectedRepoId.value in store.contributorsByRepo),
-)
-
-async function reload(): Promise<void> {
-  await store.fetchPage({
-    page: page.value,
-    repoId: selectedRepoId.value || undefined,
-    q: debouncedQuery.value || undefined,
-    mode: visibilityMode.value,
-    touchedSort: lastTouchedSort.value,
-  })
-  if (selectedRepoId.value) {
-    void store.fetchTopContributors(selectedRepoId.value)
-  }
-  hasLoadedOnce.value = true
-}
-
-function onClearSearch(): void {
-  searchQuery.value = ''
-}
-
-watch(searchQuery, (q) => {
-  if (searchTimeout) clearTimeout(searchTimeout)
-  searchTimeout = setTimeout(() => {
-    debouncedQuery.value = q.trim()
-  }, 300)
-})
-
-// Filter changes reset to page 1; the page watcher fires the reload.
-watch([selectedRepoId, debouncedQuery, visibilityMode, lastTouchedSort], () => {
-  if (page.value === 1) {
-    void reload()
-  } else {
-    page.value = 1
-  }
-})
-
-watch(page, () => {
-  void reload()
-})
-
-async function loadFocusedFeature(id: string): Promise<void> {
-  focusedFeatureId.value = id
-  await store.fetchFeature(id)
-  // Replace the items list with the single feature so the existing
-  // grid renders it without a separate code path. Clearing
-  // focused-mode triggers a full reload via the route watcher below.
-  if (store.selectedFeature) {
-    store.items = [store.selectedFeature]
-    store.total = 1
-  } else {
-    store.items = []
-    store.total = 0
-  }
-  hasLoadedOnce.value = true
-}
-
-function clearFocus(): void {
-  if (focusedFeatureId.value == null) return
-  // Drop the query param — the route watcher below will detect the
-  // change and run a normal listing reload.
-  void router.replace({ query: { ...route.query, id: undefined } })
-}
-
-watch(
-  () => route.query.id,
-  async (next) => {
-    const id = typeof next === 'string' ? next : null
-    if (id) {
-      await loadFocusedFeature(id)
-    } else if (focusedFeatureId.value != null) {
-      focusedFeatureId.value = null
-      await reload()
-    }
-  },
-)
-
-onMounted(async () => {
-  void settingsStore.fetchRepos()
-  const initialId = typeof route.query.id === 'string' ? route.query.id : null
-  if (initialId) {
-    await loadFocusedFeature(initialId)
-  } else {
-    void reload()
-  }
+  const [one, many] = MODE_NOUN[mode.value]
+  const count = `${n} ${n === 1 ? one : many}`
+  const repo = activeRepos.value.find(r => r.id === repoId.value)
+  if (repo) return `${count} in ${repo.name}`
+  const repos = activeRepos.value.length
+  return repos ? `${count} across ${repos} ${repos === 1 ? 'repository' : 'repositories'}` : count
 })
 </script>
 
 <style scoped>
-.features-view {
-  padding: 24px 28px 40px;
-}
-
-.features-view__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-  flex-wrap: wrap;
-  margin-bottom: 22px;
-}
-.features-view__title-block {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.features-view__title {
-  margin: 0;
-  font-size: 1.625rem;
-  font-weight: 700;
-  font-family: var(--font-display, 'Geist', sans-serif);
-  color: rgb(var(--v-theme-on-surface));
-  letter-spacing: var(--tracking-display, -0.02em);
-}
-.features-view__subtitle {
-  margin: 0;
-  font-size: 0.9rem;
-  color: rgb(var(--v-theme-on-surface-variant));
-}
-.features-view__subtitle strong {
-  color: rgb(var(--v-theme-on-surface));
-  font-weight: 600;
-}
-
-.features-view__controls {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.features-view__search {
-  min-width: 280px;
-}
-.features-view__select {
-  min-width: 200px;
-}
-
-.features-view__progress {
-  margin-bottom: 16px;
-}
-
-.features-view__initial-loading {
+.features-page__loading {
   display: flex;
   justify-content: center;
   padding: 56px 0;
 }
-
-.features-view__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  gap: 14px;
-  align-content: start;
-}
-
-.features-view__pagination {
-  display: flex;
-  justify-content: center;
-  margin-top: 28px;
-}
-
-.features-view__empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 64px 24px;
-  border-radius: 14px;
-  background: rgb(var(--v-theme-surface-bright));
-  border: 1px solid rgb(var(--v-theme-rule));
+.features-page__none {
+  margin: 0;
+  padding: 40px 16px;
   text-align: center;
-}
-.features-view__empty-icon {
+  font-size: 14px;
   color: rgb(var(--v-theme-on-surface-variant));
-  margin-bottom: 8px;
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid rgb(var(--v-theme-rule));
+  border-radius: 12px;
 }
-.features-view__empty-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: rgb(var(--v-theme-on-surface));
-}
-.features-view__empty-body {
-  font-size: 0.875rem;
-  color: rgb(var(--v-theme-on-surface-variant));
+.features-page__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 14px;
+  align-items: start;
 }
 </style>
