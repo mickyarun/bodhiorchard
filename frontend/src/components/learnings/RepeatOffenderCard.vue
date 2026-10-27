@@ -14,153 +14,57 @@
  * limitations under the License.
  -->
 
-<!--
-  Phases whose median drift across the last 50 closes is above the
-  +30% threshold. Each row gets a red-tinted background, a large
-  drift percentage, and a horizontal bar visualizing how many of the
-  recent BUDs overran. Parent controls whether to render this card —
-  empty arrays show nothing rather than an empty heading.
--->
-
+<!-- Stages whose median overrun across recent closes is above the +30%
+     line the recap also uses. The parent hides the panel when none are. -->
 <template>
-  <section class="card">
-    <header class="card__head">
-      <v-icon icon="mdi-alert-circle-outline" size="18" color="warning" />
-      <div class="card__title">Repeat-offender phases</div>
-      <div class="card__sub">
-        Phases whose median drift across the last 50 closes is above
-        the +30% threshold the recap also uses to flag drift.
-      </div>
-    </header>
-    <div class="list">
-      <article
-        v-for="row in offenders"
-        :key="row.phase"
-        class="offender"
-      >
-        <div class="offender-phase">{{ row.phase }}</div>
-        <div class="offender-drift">
-          +{{ row.median_drift_pct.toFixed(0) }}%
-          <span class="offender-drift__label">median drift</span>
-        </div>
-        <div class="offender-ratio">
-          {{ row.buds_over_estimate }} of {{ row.buds_total }} BUDs
-          over estimate
-        </div>
-        <div class="offender-bar">
-          <div
-            class="offender-bar__fill"
-            :style="{
-              width: `${(row.buds_over_estimate / Math.max(1, row.buds_total)) * 100}%`,
-            }"
-          />
-        </div>
-      </article>
-    </div>
-  </section>
+  <AppPanel title="Stages that run over" note="Median overrun against the estimate, last 50 closed BUDs" flush>
+    <ul class="offenders">
+      <li v-for="row in offenders" :key="row.phase" class="offender">
+        <span class="offender__stage">{{ stageLabel(row.phase) }}</span>
+        <span class="offender__ratio">{{ row.buds_over_estimate }} of {{ row.buds_total }} BUDs over estimate</span>
+        <AppTag color="warning">+{{ row.median_drift_pct.toFixed(0) }}%</AppTag>
+      </li>
+    </ul>
+  </AppPanel>
 </template>
 
 <script setup lang="ts">
+import AppPanel from '@/components/common/AppPanel.vue'
+import AppTag from '@/components/common/AppTag.vue'
 import type { RepeatOffender } from '@/composables/useLearningsOverview'
+import { stageLabel } from '@/utils/learningsOverview'
 
 defineProps<{ offenders: RepeatOffender[] }>()
 </script>
 
 <style scoped>
-.card {
-  border: 1px solid rgb(var(--v-theme-rule));
-  border-radius: 12px;
-  padding: 18px 20px 20px;
-  background: rgb(var(--v-theme-surface));
+.offenders {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
-
-.card__head {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  column-gap: 10px;
-  row-gap: 2px;
-  margin-bottom: 14px;
-}
-
-.card__head > .v-icon {
-  grid-row: 1 / span 2;
-  align-self: start;
-  margin-top: 2px;
-}
-
-.card__title {
-  font-size: 15px;
-  font-weight: 500;
-}
-
-.card__sub {
-  font-size: 12px;
-  color: rgb(var(--v-theme-on-surface-variant));
-  opacity: 0.85;
-  max-width: 720px;
-}
-
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
 .offender {
   display: grid;
-  grid-template-columns: 140px auto 1fr;
-  grid-template-rows: auto auto;
-  column-gap: 16px;
-  row-gap: 4px;
-  align-items: baseline;
-  padding: 10px 12px;
-  border: 1px solid rgba(var(--v-theme-error), 0.16);
-  border-radius: 8px;
-  background: rgba(var(--v-theme-error), 0.05);
+  grid-template-columns: minmax(0, 160px) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 20px;
+  border-top: 1px solid rgb(var(--v-theme-rule));
+  font-size: 14px;
 }
-
-.offender-phase {
+.offender__stage {
+  font-weight: 500;
+}
+.offender__ratio {
   font-size: 13px;
-  font-weight: 500;
-  grid-row: 1 / span 2;
-  align-self: center;
+  color: rgb(var(--v-theme-ink-2));
 }
-
-.offender-drift {
-  font-size: 18px;
-  font-weight: 500;
-  color: rgb(var(--v-theme-error));
-  font-variant-numeric: tabular-nums;
-}
-
-.offender-drift__label {
-  font-size: 11px;
-  font-weight: 400;
-  color: rgb(var(--v-theme-on-surface-variant));
-  margin-left: 6px;
-}
-
-.offender-ratio {
-  font-size: 12px;
-  color: rgb(var(--v-theme-on-surface-variant));
-  grid-row: 2;
-  grid-column: 2;
-}
-
-.offender-bar {
-  grid-row: 1 / span 2;
-  align-self: center;
-  height: 6px;
-  background: rgba(var(--v-theme-error), 0.12);
-  border-radius: 3px;
-  overflow: hidden;
-  max-width: 240px;
-}
-
-.offender-bar__fill {
-  height: 100%;
-  background: rgb(var(--v-theme-error));
-  opacity: 0.7;
-  transition: width 0.2s ease;
+@media (max-width: 480px) {
+  .offender {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .offender__ratio {
+    grid-column: 1;
+  }
 }
 </style>

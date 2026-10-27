@@ -18,6 +18,7 @@
  * Scores arrive from the API as 0–1 expertise weights per code module.
  */
 import type { ModuleSkill, SkillProfile } from '@/types'
+import { plural } from '@/utils/format'
 
 export type SkillLevel = 'Expert' | 'Strong' | 'Familiar'
 
@@ -54,10 +55,6 @@ export function scorePercent(score: number): number {
 
 export function sortByScore<T extends { score: number }>(items: T[]): T[] {
   return [...items].sort((a, b) => b.score - a.score)
-}
-
-export function plural(n: number, word: string, many = `${word}s`): string {
-  return `${n} ${n === 1 ? word : many}`
 }
 
 /** First path segment of a module name: ``payments/refunds`` → ``payments``. */

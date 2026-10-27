@@ -57,7 +57,8 @@
 import { computed, ref } from 'vue'
 import AppTag from '@/components/common/AppTag.vue'
 import SkillMeter from './SkillMeter.vue'
-import { plural, rankColour, type SkillArea } from '@/utils/skillProfiles'
+import { plural } from '@/utils/format'
+import { rankColour, type SkillArea } from '@/utils/skillProfiles'
 
 const PREVIEW_COUNT = 3
 

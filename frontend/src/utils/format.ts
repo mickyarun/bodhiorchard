@@ -20,3 +20,8 @@
 export function formatSP(sp: number): string {
   return Number.isInteger(sp) ? sp.toString() : sp.toFixed(2)
 }
+
+/** A count with its noun: ``plural(1, 'person', 'people')`` → "1 person". */
+export function plural(n: number, word: string, many = `${word}s`): string {
+  return `${n} ${n === 1 ? word : many}`
+}

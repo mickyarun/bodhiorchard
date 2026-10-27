@@ -14,81 +14,53 @@
  * limitations under the License.
  -->
 
-<!--
-  Org-level Learnings overview. Composes five cards backed by
-  GET /v1/learnings/overview: a KPI hero row plus four visualisation
-  sections (phase rollup, repeat offenders, velocity trend, top
-  contributors). Each section lives in its own component so the
-  individual visualisations stay independently reviewable + the
-  overview shell stays under the project's ~200-line file budget.
--->
-
+<!-- Org-level Learnings: trends across closed BUDs from
+     GET /v1/learnings/overview — headline numbers, where the days go by
+     stage, shipped per week, stages that overrun and top contributors. -->
 <template>
-  <div class="learnings-overview pa-6">
-    <header class="overview-header">
-      <div class="overview-title-wrap">
-        <div class="overview-eyebrow">Organization</div>
-        <h1 class="overview-title">Learnings</h1>
-        <div class="overview-sub">
-          Trends across closed BUDs in this org. Updated as the Learning
-          Agent processes each close.
-        </div>
-      </div>
-      <v-btn
-        variant="text"
-        density="comfortable"
-        prepend-icon="mdi-refresh"
-        :loading="loading"
-        class="text-none"
-        @click="refresh"
-      >
-        Refresh
-      </v-btn>
-    </header>
+  <AppPage
+    title="Learnings"
+    subtitle="What shipped work teaches us. The Learning agent writes up every BUD when it closes."
+  >
+    <template #actions>
+      <v-btn variant="outlined" prepend-icon="mdi-refresh" :loading="loading" @click="refresh">Refresh</v-btn>
+    </template>
 
-    <v-progress-linear v-if="loading && !overview" indeterminate color="primary" />
+    <AppCallout v-if="error" variant="error">{{ error }}</AppCallout>
 
-    <AppCallout
-      v-else-if="overviewIsEmpty"
-      variant="info"
-      eyebrow="No data yet"
-      icon="mdi-book-open-page-variant-outline"
-    >
-      Close at least one BUD with <code>auto_generate_phases.closed</code>
-      enabled and the dashboard fills in automatically. The Learning
-      Agent writes per-phase actuals on every close, so even a handful
-      of shipped BUDs produces meaningful trends within a week or two.
+    <v-progress-linear v-if="loading && !overview" indeterminate color="primary" aria-label="Loading learnings" />
+
+    <AppCallout v-else-if="overviewIsEmpty && !error" variant="info" title="No learnings yet" icon="mdi-book-open-page-variant-outline">
+      Close at least one BUD with <code>auto_generate_phases.closed</code> enabled and this page fills in.
+      The Learning agent records how long each stage took on every close, so a handful of shipped BUDs
+      shows useful trends within a week or two.
     </AppCallout>
 
     <template v-else-if="overview">
-      <LearningsKpiRow
-        :total-buds-shipped="totalBudsShipped"
-        :median-cycle="medianCycle"
-        :repeat-offender-count="overview.repeat_offender_phases.length"
-        :complexity-bucket-count="overview.complexity_buckets.length"
-      />
-      <PhaseRollupCard :buckets="overview.complexity_buckets" />
-      <RepeatOffenderCard
-        v-if="overview.repeat_offender_phases.length"
-        :offenders="overview.repeat_offender_phases"
-      />
-      <VelocityTrendCard :points="overview.velocity_trend" />
+      <LearningsKpiRow :kpis="kpis" />
+      <div class="learnings-pair">
+        <StageBreakdownCard :buckets="overview.complexity_buckets" />
+        <ShippedPerWeekCard :points="overview.velocity_trend" />
+      </div>
+      <RepeatOffenderCard v-if="overview.repeat_offender_phases.length" :offenders="overview.repeat_offender_phases" />
       <TopContributorsCard :contributors="overview.top_contributors" />
     </template>
-  </div>
+  </AppPage>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
+import AppPage from '@/components/common/AppPage.vue'
 import LearningsKpiRow from '@/components/learnings/LearningsKpiRow.vue'
-import PhaseRollupCard from '@/components/learnings/PhaseRollupCard.vue'
 import RepeatOffenderCard from '@/components/learnings/RepeatOffenderCard.vue'
+import ShippedPerWeekCard from '@/components/learnings/ShippedPerWeekCard.vue'
+import StageBreakdownCard from '@/components/learnings/StageBreakdownCard.vue'
 import TopContributorsCard from '@/components/learnings/TopContributorsCard.vue'
-import VelocityTrendCard from '@/components/learnings/VelocityTrendCard.vue'
 import { useLearningsOverview } from '@/composables/useLearningsOverview'
+import { learningsKpis } from '@/utils/learningsOverview'
 
-const { overview, loading, fetchOverview, isEmpty } = useLearningsOverview()
+const { overview, loading, error, fetchOverview, isEmpty } = useLearningsOverview()
 
 onMounted(() => {
   void fetchOverview()
@@ -100,56 +72,23 @@ function refresh(): void {
 
 const overviewIsEmpty = computed(() => !loading.value && isEmpty(overview.value))
 
-const totalBudsShipped = computed(() =>
-  (overview.value?.top_contributors ?? []).reduce((sum, c) => sum + c.buds_shipped_30d, 0),
-)
-
-const medianCycle = computed<number | null>(() => {
-  const points = overview.value?.velocity_trend ?? []
-  if (points.length === 0) return null
-  const sorted = [...points].map((p) => p.avg_cycle_days).sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / 2)
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+const kpis = computed(() => {
+  const view = overview.value
+  if (!view) return []
+  return learningsKpis(view.velocity_trend, view.complexity_buckets, view.repeat_offender_phases)
 })
 </script>
 
 <style scoped>
-.learnings-overview {
-  max-width: 1180px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
+.learnings-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
   gap: 20px;
+  align-items: start;
 }
-
-.overview-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 8px;
-}
-
-.overview-eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgb(var(--v-theme-on-surface-variant));
-  opacity: 0.7;
-}
-
-.overview-title {
-  font-size: 24px;
-  font-weight: 600;
-  font-family: var(--font-display, 'Geist', sans-serif);
-  letter-spacing: var(--tracking-display, -0.02em);
-  line-height: 1.1;
-  margin: 2px 0 4px;
-}
-
-.overview-sub {
-  font-size: 13px;
-  color: rgb(var(--v-theme-on-surface-variant));
-  max-width: 560px;
+@media (max-width: 1100px) {
+  .learnings-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

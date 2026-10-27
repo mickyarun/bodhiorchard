@@ -14,111 +14,71 @@
  * limitations under the License.
  -->
 
-<!--
-  Hero KPI row for the org-level Learnings overview. Four tiles
-  matching the AppCallout visual contract: 3px primary accent on the
-  left + soft surface-variant gradient + uppercase eyebrow label.
-
-  The "BUDs shipped" tile flips its accent to warning + shows a "cards
-  get sharper after ~5 BUDs" hint when totals are below the threshold,
-  so the user understands why the downstream cards look sparse.
--->
-
+<!-- Headline numbers for the Learnings page, four across on desktop. -->
 <template>
-  <section class="kpi-row">
-    <article class="kpi" :class="{ 'kpi--sparse': totalBudsShipped < 5 }">
-      <div class="kpi-label">BUDs shipped · 30d</div>
-      <div class="kpi-value">{{ totalBudsShipped }}</div>
-      <div v-if="totalBudsShipped < 5" class="kpi-hint">
-        Cards below get sharper after ~5 BUDs ship
-      </div>
-    </article>
-    <article class="kpi">
-      <div class="kpi-label">Median cycle</div>
-      <div class="kpi-value">
-        {{ medianCycle != null ? `${medianCycle.toFixed(1)}d` : '—' }}
-      </div>
-      <div class="kpi-hint">across last 12 weeks</div>
-    </article>
-    <article class="kpi">
-      <div class="kpi-label">Repeat-offender phases</div>
-      <div class="kpi-value kpi-value--warn">{{ repeatOffenderCount }}</div>
-      <div class="kpi-hint">consistently over estimate</div>
-    </article>
-    <article class="kpi">
-      <div class="kpi-label">Complexity buckets</div>
-      <div class="kpi-value">{{ complexityBucketCount }}</div>
-      <div class="kpi-hint">populated by the rollup</div>
-    </article>
+  <section aria-label="Key numbers" class="kpi-row">
+    <div v-for="kpi in kpis" :key="kpi.label" class="kpi">
+      <span class="kpi__label">{{ kpi.label }}</span>
+      <span class="kpi__value">{{ kpi.value }}</span>
+      <span class="kpi__sub">{{ kpi.sub }}</span>
+    </div>
   </section>
 </template>
 
 <script setup lang="ts">
-defineProps<{
-  totalBudsShipped: number
-  medianCycle: number | null
-  repeatOffenderCount: number
-  complexityBucketCount: number
-}>()
+import type { LearningsKpi } from '@/utils/learningsOverview'
+
+defineProps<{ kpis: LearningsKpi[] }>()
 </script>
 
 <style scoped>
 .kpi-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
 }
-
 .kpi {
-  position: relative;
-  padding: 14px 16px;
-  border: 1px solid rgb(var(--v-theme-rule));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 18px 20px;
   border-radius: 12px;
+  border: 1px solid rgb(var(--v-theme-rule));
   background: rgb(var(--v-theme-surface));
-  overflow: hidden;
 }
-
-.kpi::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 3px;
-  height: 100%;
-  background: rgb(var(--v-theme-primary));
-}
-
-.kpi--sparse::before {
-  background: rgb(var(--v-theme-warning));
-}
-
-.kpi-label {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.kpi__label {
+  font-size: 13px;
+  font-weight: 500;
   color: rgb(var(--v-theme-on-surface-variant));
-  opacity: 0.85;
-  margin-bottom: 4px;
 }
-
-.kpi-value {
-  font-family: var(--font-display, 'Geist', sans-serif);
-  font-size: 2rem;
+.kpi__value {
+  font-size: 30px;
+  line-height: 34px;
   font-weight: 600;
-  line-height: 1.1;
-  letter-spacing: -0.01em;
+  letter-spacing: var(--tracking-display);
   font-variant-numeric: tabular-nums;
-  margin-top: 2px;
+  overflow-wrap: anywhere;
 }
-
-.kpi-value--warn {
-  color: rgb(var(--v-theme-warning));
+.kpi__sub {
+  font-size: 13px;
+  color: rgb(var(--v-theme-ink-2));
 }
-
-.kpi-hint {
-  margin-top: 6px;
-  font-size: 11px;
-  color: rgb(var(--v-theme-on-surface-variant));
-  opacity: 0.75;
+@media (max-width: 1100px) {
+  .kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 480px) {
+  .kpi-row {
+    gap: 12px;
+  }
+  .kpi {
+    padding: 14px 16px;
+  }
+  .kpi__value {
+    font-size: 24px;
+    line-height: 30px;
+  }
 }
 </style>

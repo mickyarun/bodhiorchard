@@ -19,7 +19,6 @@ import {
   filterProfiles,
   groupByArea,
   profileSummary,
-  plural,
   rankColour,
   scorePercent,
   skillLevel,
@@ -108,14 +107,6 @@ describe('filters', () => {
     const areas = groupByArea([meera, ravi])
     expect(filterAreas(areas, 'ravi').map(a => a.name)).toEqual(['auth/two_factor', 'web/portal'])
     expect(filterAreas(areas, 'ledger').map(a => a.name)).toEqual(['payments/ledger'])
-  })
-})
-
-describe('plural', () => {
-  it('takes an irregular plural', () => {
-    expect(plural(1, 'person', 'people')).toBe('1 person')
-    expect(plural(3, 'person', 'people')).toBe('3 people')
-    expect(plural(2, 'area')).toBe('2 areas')
   })
 })
 

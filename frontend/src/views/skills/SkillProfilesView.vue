@@ -68,7 +68,8 @@ import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import SkillAreaCard from '@/components/skills/SkillAreaCard.vue'
 import SkillPersonCard from '@/components/skills/SkillPersonCard.vue'
 import { useSkillsStore } from '@/stores/skills'
-import { filterAreas, filterProfiles, groupByArea, plural } from '@/utils/skillProfiles'
+import { plural } from '@/utils/format'
+import { filterAreas, filterProfiles, groupByArea } from '@/utils/skillProfiles'
 
 type ViewMode = 'people' | 'areas'
 
