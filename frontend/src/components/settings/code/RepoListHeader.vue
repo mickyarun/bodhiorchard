@@ -93,17 +93,12 @@
     </v-btn>
   </div>
 
-  <v-alert
-    v-if="scanStore.startError || scanStore.error"
-    type="error"
-    variant="tonal"
-    density="compact"
-    class="mx-5 mb-3"
-    closable
-    @click:close="scanStore.clearErrors()"
-  >
+  <AppCallout v-if="scanStore.startError || scanStore.error" variant="error" class="mx-5 mb-3">
     {{ scanStore.startError || scanStore.error }}
-  </v-alert>
+    <template #actions>
+      <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="scanStore.clearErrors()" />
+    </template>
+  </AppCallout>
 
   <ConfirmDialog
     v-model="cancelDialogOpen"
@@ -118,6 +113,7 @@
 </template>
 
 <script setup lang="ts">
+import AppCallout from '@/components/common/AppCallout.vue'
 import { computed, ref } from 'vue'
 import { useReposcanV2ScansStore } from '@/stores/reposcanv2Scans'
 import { useScanProgress } from '@/composables/useScanProgress'

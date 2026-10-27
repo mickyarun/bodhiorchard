@@ -76,27 +76,15 @@
         </v-chip-group>
       </div>
 
-      <v-alert
-        v-if="store.error"
-        type="error"
-        variant="tonal"
-        class="mt-4"
-        density="compact"
-        closable
-      >
+      <AppCallout v-if="store.error" variant="error" class="mt-4">
         {{ store.error }}
-      </v-alert>
-      <v-alert
-        v-if="store.saveSuccess"
-        type="success"
-        variant="tonal"
-        class="mt-4"
-        density="compact"
-        closable
-        @click:close="store.saveSuccess = false"
-      >
+      </AppCallout>
+      <AppCallout v-if="store.saveSuccess" variant="success" class="mt-4">
         Saved.
-      </v-alert>
+        <template #actions>
+          <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="store.saveSuccess = false" />
+        </template>
+      </AppCallout>
     </header>
 
     <!-- Content -->
@@ -128,10 +116,7 @@
         >
           <!-- Section header -->
           <div class="group-header">
-            <div
-              class="group-icon-wrap"
-              :style="{ '--accent': agentAccent(group.agentType) }"
-            >
+            <div class="group-icon-wrap">
               <v-icon :icon="agentIcon(group.agentType)" size="20" />
             </div>
             <div class="group-meta">
@@ -510,6 +495,7 @@
 </template>
 
 <script setup lang="ts">
+import AppCallout from '@/components/common/AppCallout.vue'
 import { ref, computed, onMounted } from 'vue'
 import {
   useAgentSkillsStore,
@@ -579,22 +565,6 @@ const AGENT_ICONS: Record<AgentType, string> = {
   slackFeatureQa: 'mdi-message-question-outline',
 }
 
-const AGENT_ACCENTS: Record<AgentType, string> = {
-  triage: 'rgb(120, 180, 255)',
-  bud: 'rgb(120, 220, 150)',
-  status: 'rgb(180, 200, 120)',
-  standup: 'rgb(220, 180, 100)',
-  learning: 'rgb(180, 140, 220)',
-  bugLinker: 'rgb(240, 130, 130)',
-  reassignment: 'rgb(220, 180, 100)',
-  skill: 'rgb(100, 200, 180)',
-  techPlan: 'rgb(140, 180, 240)',
-  testPlan: 'rgb(160, 220, 160)',
-  design: 'rgb(230, 150, 220)',
-  slackTriage: 'rgb(180, 140, 220)',
-  slackFeatureQa: 'rgb(140, 200, 230)',
-}
-
 const AGENT_BLURBS: Record<AgentType, string> = {
   triage: 'Classifies inbound items into BUDs vs noise',
   bud: 'Writes the PRD when a BUD is opened',
@@ -613,10 +583,6 @@ const AGENT_BLURBS: Record<AgentType, string> = {
 
 function agentIcon(at: AgentType): string {
   return AGENT_ICONS[at] ?? 'mdi-robot-outline'
-}
-
-function agentAccent(at: AgentType): string {
-  return AGENT_ACCENTS[at] ?? 'rgb(46, 125, 50)'
 }
 
 function agentBlurb(at: AgentType): string {
@@ -950,12 +916,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
-}
-
-.group-icon-wrap .v-icon {
-  color: var(--accent);
+  background: rgb(var(--v-theme-surface-variant));
+  color: rgb(var(--v-theme-ink-2));
 }
 
 .group-meta { flex: 1; min-width: 0; }

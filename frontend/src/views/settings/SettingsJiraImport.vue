@@ -35,9 +35,9 @@
         </v-btn>
       </div>
 
-      <v-alert v-if="store.error" type="error" variant="tonal" class="mt-4" closable>
+      <AppCallout v-if="store.error" variant="error" class="mt-4">
         {{ store.error }}
-      </v-alert>
+      </AppCallout>
     </div>
 
     <!-- Content -->

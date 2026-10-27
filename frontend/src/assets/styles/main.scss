@@ -16,6 +16,7 @@
 
 @use './markdown-body';
 @use './race-pills';
+@use './settings-card';
 
 body {
   font-family: var(--font-body, 'Geist', sans-serif);

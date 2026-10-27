@@ -27,20 +27,14 @@
     @success-close="settingsStore.saveSuccess = false"
   >
         <!-- ─── TIMEZONE-NOT-SET WARNING ─────────────────────── -->
-        <v-alert
-          v-if="presence.timezone === null"
-          type="warning"
-          variant="tonal"
-          class="mb-6"
-          icon="mdi-earth-off"
-        >
+        <AppCallout v-if="presence.timezone === null" variant="warning" class="mb-6">
           <div class="text-body-2 font-weight-medium">No timezone configured</div>
           <div class="text-caption">
             The simulator currently uses the server's local time. Set a primary
             office timezone below so Saturday-office or non-9-to-5 schedules
             work correctly for every team member.
           </div>
-        </v-alert>
+        </AppCallout>
 
         <!-- ─── AUTO MODE CARD ────────────────────────────── -->
         <v-card class="pa-6 mb-6" color="surface" border>
@@ -229,6 +223,7 @@
 </template>
 
 <script setup lang="ts">
+import AppCallout from '@/components/common/AppCallout.vue'
 import { computed, onMounted } from 'vue'
 import SettingsPageShell from '@/components/settings/SettingsPageShell.vue'
 import { useSettingsStore } from '@/stores/settings'

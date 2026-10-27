@@ -15,41 +15,17 @@
  -->
 
 <!--
-  Tiny presentational chip that mirrors the GitHub App lifecycle state.
-  Splits out of GitHubAppConnectionCard so the orchestrator file can
-  stay under the project's 200-line ceiling.
+  Status tag for the GitHub App lifecycle. Shared by the GitHub App card
+  and the Integrations page so both say the same thing.
 -->
 <template>
-  <v-chip :color="color" size="x-small" variant="tonal">
-    {{ label }}
-  </v-chip>
+  <AppTag :color="githubStatus(status).color">{{ githubStatus(status).label }}</AppTag>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { GITHUB_APP_STATUS, type GitHubAppStatus } from '@/types/connections'
+import AppTag from '@/components/common/AppTag.vue'
+import type { GitHubAppStatus } from '@/types/connections'
+import { githubStatus } from '@/utils/integrations'
 
-const props = defineProps<{ status: GitHubAppStatus }>()
-
-const color = computed(() => {
-  switch (props.status) {
-    case GITHUB_APP_STATUS.READY:
-      return 'success'
-    case GITHUB_APP_STATUS.AWAITING_INSTALL:
-      return 'warning'
-    default:
-      return 'grey'
-  }
-})
-
-const label = computed(() => {
-  switch (props.status) {
-    case GITHUB_APP_STATUS.READY:
-      return 'Connected'
-    case GITHUB_APP_STATUS.AWAITING_INSTALL:
-      return 'Install pending'
-    default:
-      return 'Not set up'
-  }
-})
+defineProps<{ status: GitHubAppStatus }>()
 </script>

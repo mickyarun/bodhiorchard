@@ -22,29 +22,16 @@
 -->
 <template>
   <div>
-    <v-alert
-      v-if="errorMessage"
-      type="error"
-      variant="tonal"
-      density="compact"
-      icon="mdi-alert-circle-outline"
-      closable
-      class="mb-3"
-      @click:close="dismissError"
-    >
+    <AppCallout v-if="errorMessage" variant="error" class="mb-3">
       {{ errorMessage }}
-    </v-alert>
+      <template #actions>
+        <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="dismissError" />
+      </template>
+    </AppCallout>
 
-    <v-alert
-      v-if="showValidatedNotice"
-      type="success"
-      variant="tonal"
-      density="compact"
-      icon="mdi-check-decagram"
-      class="mb-3"
-    >
+    <AppCallout v-if="showValidatedNotice" variant="success" class="mb-3">
       Credentials validated. Now install the App on GitHub.
-    </v-alert>
+    </AppCallout>
 
     <v-text-field
       v-model.number="appId"
@@ -70,15 +57,15 @@
       persistent-hint
     />
 
-    <v-text-field
+    <PasswordField
       v-model="webhookSecret"
       label="Webhook Secret"
       placeholder="Set during GitHub App creation"
       prepend-inner-icon="mdi-shield-key-outline"
       density="compact"
       variant="outlined"
+      autocomplete="off"
       class="mb-3"
-      type="password"
     />
 
     <v-chip
@@ -95,10 +82,10 @@
     <div class="text-caption text-medium-emphasis setup-steps">
       <v-icon icon="mdi-help-circle-outline" size="14" class="mr-1" />
       <strong>How to set up:</strong>
-      <ol class="pl-4 mt-1 mb-0" style="line-height: 1.8;">
+      <ol class="pl-4 mt-1 mb-0 setup-steps__list">
         <li>
           Go to your GitHub <strong>org settings</strong> &rarr; Developer settings &rarr; GitHub Apps &rarr;
-          <a :href="GITHUB_NEW_APP_URL" target="_blank" rel="noopener" class="text-primary">New GitHub App</a>
+          <a :href="GITHUB_NEW_APP_URL" target="_blank" rel="noopener" class="gh-link">New GitHub App</a>
         </li>
         <li>Set <strong>Webhook URL</strong> to <code>{{ webhookUrl }}</code></li>
         <li>Set <strong>Webhook Secret</strong> &mdash; generate one with <code>openssl rand -hex 32</code> and paste it in both GitHub and here</li>
@@ -114,6 +101,8 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import AppCallout from '@/components/common/AppCallout.vue'
+import PasswordField from '@/components/common/PasswordField.vue'
 import { useSettingsStore } from '@/stores/settings'
 import { GITHUB_APP_STATUS } from '@/types/connections'
 import {
@@ -126,6 +115,14 @@ const PRIVATE_KEY_PLACEHOLDER =
   '-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----'
 const WEBHOOK_PATH = '/api/v1/webhooks/github'
 const SUCCESS_NOTICE_TIMEOUT_MS = 4000
+
+const props = withDefaults(
+  defineProps<{
+    /** Show store errors here. Off while another card's save is the one that failed. */
+    listenToStoreErrors?: boolean
+  }>(),
+  { listenToStoreErrors: true },
+)
 
 const settingsStore = useSettingsStore()
 const github = computed(() => settingsStore.connections.github)
@@ -157,16 +154,18 @@ watch([appId, privateKey, webhookSecret], () => {
 // Translate the settings store's last error into a typed alert when it
 // looks like a Phase J validation envelope. The store stores the
 // ``detail`` body verbatim, so we parse it conservatively — anything
-// that isn't a known envelope falls back to the raw string.
+// that isn't a known envelope falls back to the raw string. Synchronous so
+// the parent's "is this our save" flag is still set when the error lands.
 watch(
   () => settingsStore.error,
   (next) => {
-    if (!next) return
+    if (!next || !props.listenToStoreErrors) return
     const parsed = parseConnectionError(next)
     errorMessage.value = parsed
       ? friendlyConnectionErrorMessage(parsed)
       : next
   },
+  { flush: 'sync' },
 )
 
 // Surface a transient success notice when the org transitions to
@@ -245,3 +244,12 @@ function clearSensitiveFields(): void {
 
 defineExpose({ flushCredentials, clearSensitiveFields })
 </script>
+
+<style scoped>
+.setup-steps__list {
+  line-height: 1.8;
+}
+.gh-link {
+  color: var(--color-accent-text);
+}
+</style>

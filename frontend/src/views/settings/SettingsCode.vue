@@ -34,16 +34,12 @@
         </div>
       </div>
 
-      <v-alert
-        v-if="settingsStore.error"
-        type="error"
-        variant="tonal"
-        class="mt-4"
-        closable
-        @click:close="settingsStore.error = null"
-      >
+      <AppCallout v-if="settingsStore.error" variant="error" class="mt-4">
         {{ settingsStore.error }}
-      </v-alert>
+        <template #actions>
+          <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="settingsStore.error = null" />
+        </template>
+      </AppCallout>
     </div>
 
     <div class="settings-content px-6 pb-6">
@@ -81,6 +77,7 @@
 </template>
 
 <script setup lang="ts">
+import AppCallout from '@/components/common/AppCallout.vue'
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useReposcanV2ScansStore } from '@/stores/reposcanv2Scans'

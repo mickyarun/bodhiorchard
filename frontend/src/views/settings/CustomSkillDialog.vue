@@ -48,15 +48,9 @@
 
       <!-- Body -->
       <div class="dialog-body">
-        <v-alert
-          v-if="errorMessage"
-          type="error"
-          variant="tonal"
-          density="compact"
-          class="mb-3"
-        >
+        <AppCallout v-if="errorMessage" variant="error" class="mb-3">
           {{ errorMessage }}
-        </v-alert>
+        </AppCallout>
 
         <!-- Import bar — accepts a .md file with YAML frontmatter and splits
              it across the right fields, so pasting an off-the-shelf skill
@@ -245,6 +239,7 @@
 </template>
 
 <script setup lang="ts">
+import AppCallout from '@/components/common/AppCallout.vue'
 import { computed, ref, watch } from 'vue'
 import {
   AGENT_TYPE_LABELS,

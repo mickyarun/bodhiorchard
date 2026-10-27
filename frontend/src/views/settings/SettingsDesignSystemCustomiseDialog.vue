@@ -15,6 +15,7 @@
  -->
 
 <script setup lang="ts">
+import AppCallout from '@/components/common/AppCallout.vue'
 import { ref, watch } from 'vue'
 import { useDesignSystemStore, type DesignSystemItem } from '@/stores/designSystem'
 
@@ -101,16 +102,12 @@ async function reset(): Promise<void> {
 - ..."
         class="customise-editor"
       />
-      <v-alert
-        v-if="errorText"
-        type="error"
-        variant="tonal"
-        class="mt-3"
-        closable
-        @click:close="errorText = ''"
-      >
+      <AppCallout v-if="errorText" variant="error" class="mt-3">
         {{ errorText }}
-      </v-alert>
+        <template #actions>
+          <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="errorText = ''" />
+        </template>
+      </AppCallout>
       <v-card-actions class="pa-0 mt-4">
         <v-btn
           v-if="target?.is_customised"

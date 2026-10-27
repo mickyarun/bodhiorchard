@@ -14,433 +14,167 @@
  * limitations under the License.
  -->
 
+<!-- Settings → Integrations: the AI provider, GitHub, Slack and the MCP
+     token for Claude Code. Each card opens its own settings and saves on
+     its own; one card is open at a time. -->
 <template>
-  <div class="settings-page">
-    <!-- Fixed header -->
-    <div class="settings-header pa-6 pb-4">
-      <div class="d-flex align-center justify-space-between">
-        <div>
-          <div class="text-h5 font-weight-bold bo-display">Settings</div>
-          <div class="text-body-2 text-medium-emphasis">
-            Manage connections, integrations, and AI configuration
-          </div>
-        </div>
-        <v-btn
-          color="primary"
-          prepend-icon="mdi-content-save-outline"
-          :loading="settingsStore.saving"
-          @click="save"
-        >
-          Save Changes
-        </v-btn>
-      </div>
+  <AppPage title="Settings" subtitle="Workspace settings and connections">
+    <div class="settings-layout">
+      <SettingsSectionNav class="settings-layout__nav" />
 
-      <!-- Alerts in header area -->
-      <v-alert v-if="settingsStore.error" type="error" variant="tonal" class="mt-4" closable>
-        {{ settingsStore.error }}
-      </v-alert>
-      <v-alert
-        v-if="settingsStore.saveSuccess"
-        type="success"
-        variant="tonal"
-        class="mt-4"
-        closable
-        @click:close="settingsStore.saveSuccess = false"
-      >
-        Settings saved successfully.
-      </v-alert>
+      <div class="settings-layout__main">
+        <header>
+          <h2 class="settings-title">Integrations</h2>
+          <p class="settings-sub">Connect the tools your team already uses. Each one saves on its own.</p>
+        </header>
+
+        <AppCallout v-if="settingsStore.error" variant="error">{{ settingsStore.error }}</AppCallout>
+        <AppCallout v-if="settingsStore.saveSuccess" variant="success">
+          Settings saved.
+          <template #actions>
+            <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="settingsStore.saveSuccess = false" />
+          </template>
+        </AppCallout>
+
+        <div v-if="settingsStore.loading && !settingsStore.connectionsLoaded" class="d-flex justify-center py-12">
+          <v-progress-circular indeterminate color="primary" aria-label="Loading settings" />
+        </div>
+        <template v-else>
+          <IntegrationCard
+            :open="openId === 'ai'"
+            @update:open="v => setOpen('ai', v)"
+            name="AI provider"
+            icon="mdi-console"
+            :description="aiSummary"
+            :status="statuses.ai"
+            connect-label="Set up"
+            :primary="primary === 'ai'"
+          >
+            <SettingsClaudeCode @test="t => (aiTest = t)" @summary="s => (aiSummary = s)" />
+          </IntegrationCard>
+          <IntegrationCard
+            :open="openId === 'github'"
+            @update:open="v => setOpen('github', v)"
+            name="GitHub"
+            icon="mdi-github"
+            description="Track pull requests, run agent code reviews and link merges to BUDs."
+            :status="statuses.github"
+            connect-label="Connect GitHub"
+            :primary="primary === 'github'"
+          >
+            <GitHubAppPanel standalone />
+          </IntegrationCard>
+          <IntegrationCard
+            :open="openId === 'slack'"
+            @update:open="v => setOpen('slack', v)"
+            name="Slack"
+            icon="mdi-slack"
+            description="Turn messages into BUDs, send leave approvals and post celebrations."
+            :status="statuses.slack"
+            connect-label="Connect Slack"
+            :primary="primary === 'slack'"
+          >
+            <SettingsSlack />
+          </IntegrationCard>
+          <IntegrationCard
+            :open="openId === 'mcp'"
+            @update:open="v => setOpen('mcp', v)"
+            name="MCP for Claude Code"
+            icon="mdi-connection"
+            description="Let Claude Code on your laptop read BUDs, knowledge and team context, and update tasks."
+            :status="statuses.mcp"
+            connect-label="Set up"
+            :primary="primary === 'mcp'"
+          >
+            <McpTokenPanel v-model:has-token="mcpTokenSet" />
+          </IntegrationCard>
+          <p class="settings-sub">Bitbucket, GitLab and Telegram are coming later.</p>
+        </template>
+      </div>
     </div>
-
-    <!-- Scrollable content -->
-    <div class="settings-content px-6 pb-6">
-      <!-- Loading -->
-      <div v-if="settingsStore.loading" class="d-flex justify-center py-12">
-        <v-progress-circular indeterminate color="primary" />
-      </div>
-
-      <template v-if="!settingsStore.loading">
-      <!-- ─── MCP INTEGRATION ─────────────────────────────────── -->
-      <div class="section-header mb-3">
-        <v-icon icon="mdi-api" size="18" color="primary" />
-        <span class="text-body-2 font-weight-medium">MCP Integration</span>
-      </div>
-
-      <v-card class="pa-5 settings-card mb-6" color="surface">
-        <div class="d-flex align-center ga-3 mb-4">
-          <v-avatar size="36" color="surface-variant" rounded="lg">
-            <v-icon icon="mdi-connection" size="22" />
-          </v-avatar>
-          <div>
-            <div class="text-body-2 font-weight-medium">Claude Code MCP</div>
-            <div class="text-caption text-medium-emphasis">
-              Connect Claude Code to Glideship for BUDs, knowledge, and team context
-            </div>
-          </div>
-        </div>
-
-        <!-- Token status -->
-        <div class="d-flex align-center ga-3 mb-4">
-          <v-chip
-            :color="mcpTokenSet ? 'success' : 'warning'"
-            variant="tonal"
-            size="small"
-            :prepend-icon="mcpTokenSet ? 'mdi-check-circle-outline' : 'mdi-alert-circle-outline'"
-          >
-            {{ mcpTokenSet ? 'Token configured' : 'No token set' }}
-          </v-chip>
-          <v-btn
-            variant="tonal"
-            density="compact"
-            size="small"
-            color="primary"
-            class="text-none"
-            :loading="regeneratingToken"
-            @click="regenerateMcpToken"
-          >
-            {{ mcpTokenSet ? 'Regenerate Token' : 'Generate Token' }}
-          </v-btn>
-        </div>
-
-        <!-- Token display (one-time) -->
-        <v-expand-transition>
-          <v-alert
-            v-if="newMcpToken"
-            type="info"
-            variant="tonal"
-            density="compact"
-            class="mb-4"
-          >
-            <div class="text-body-2 font-weight-medium mb-1">
-              Your MCP token (copy now — it won't be shown again):
-            </div>
-            <div class="d-flex align-center ga-2">
-              <code class="flex-grow-1 pa-2" style="background: rgb(var(--v-theme-background)); border-radius: 4px; word-break: break-all;">
-                {{ newMcpToken }}
-              </code>
-              <v-btn
-                icon="mdi-content-copy"
-                variant="text"
-                size="small"
-                @click="copyToken"
-              />
-            </div>
-          </v-alert>
-        </v-expand-transition>
-
-        <!-- Setup instructions -->
-        <div class="text-body-2 font-weight-medium mb-2">Setup</div>
-        <div class="text-caption text-medium-emphasis mb-3">
-          MCP is auto-configured in your repos during scanning (<code>.mcp.json</code>).
-          To activate, set your token as a persistent environment variable:
-        </div>
-        <div class="config-snippet pa-3 rounded mb-3" style="background: rgb(var(--v-theme-background)); position: relative;">
-          <v-btn
-            icon="mdi-content-copy"
-            variant="text"
-            size="x-small"
-            style="position: absolute; top: 4px; right: 4px;"
-            @click="copyConfig"
-          />
-          <pre class="text-caption" style="white-space: pre-wrap; margin: 0;">{{ envVarSnippet }}</pre>
-        </div>
-
-        <v-expansion-panels variant="accordion" class="mb-2">
-          <v-expansion-panel>
-            <v-expansion-panel-title class="text-caption py-1">
-              <v-icon icon="mdi-apple" size="14" class="mr-1" /> macOS
-            </v-expansion-panel-title>
-            <v-expansion-panel-text>
-              <pre class="text-caption" style="white-space: pre-wrap; margin: 0;">{{ macInstructions }}</pre>
-            </v-expansion-panel-text>
-          </v-expansion-panel>
-          <v-expansion-panel>
-            <v-expansion-panel-title class="text-caption py-1">
-              <v-icon icon="mdi-linux" size="14" class="mr-1" /> Linux (Ubuntu)
-            </v-expansion-panel-title>
-            <v-expansion-panel-text>
-              <pre class="text-caption" style="white-space: pre-wrap; margin: 0;">{{ linuxInstructions }}</pre>
-            </v-expansion-panel-text>
-          </v-expansion-panel>
-          <v-expansion-panel>
-            <v-expansion-panel-title class="text-caption py-1">
-              <v-icon icon="mdi-microsoft-windows" size="14" class="mr-1" /> Windows
-            </v-expansion-panel-title>
-            <v-expansion-panel-text>
-              <pre class="text-caption" style="white-space: pre-wrap; margin: 0;">{{ windowsInstructions }}</pre>
-            </v-expansion-panel-text>
-          </v-expansion-panel>
-        </v-expansion-panels>
-
-        <div class="text-caption text-medium-emphasis">
-          After adding, restart your terminal and Claude Code for the change to take effect.
-        </div>
-      </v-card>
-
-      <!-- ─── GIT PROVIDERS ────────────────────────────────────── -->
-      <div class="section-header mb-3">
-        <v-icon icon="mdi-git" size="18" color="primary" />
-        <span class="text-body-2 font-weight-medium">Git Providers</span>
-      </div>
-
-      <v-row class="mb-6">
-        <!-- GitHub App -->
-        <v-col cols="12" md="6">
-          <GitHubAppConnectionCard ref="githubCardRef" />
-        </v-col>
-
-        <!-- Coming Soon -->
-        <v-col cols="12" md="6">
-          <div class="d-flex flex-column ga-3 h-100">
-            <v-card class="pa-4 coming-soon-card flex-grow-1" color="surface" variant="outlined">
-              <div class="d-flex align-center ga-3">
-                <v-avatar size="36" rounded="lg" class="coming-soon-avatar">
-                  <v-icon icon="mdi-bitbucket" size="20" />
-                </v-avatar>
-                <div class="flex-grow-1">
-                  <div class="text-body-2 font-weight-medium">Bitbucket</div>
-                  <div class="text-caption text-medium-emphasis">Cloud &amp; Server PR tracking</div>
-                </div>
-                <v-chip size="x-small" variant="tonal" color="grey">Soon</v-chip>
-              </div>
-            </v-card>
-            <v-card class="pa-4 coming-soon-card flex-grow-1" color="surface" variant="outlined">
-              <div class="d-flex align-center ga-3">
-                <v-avatar size="36" rounded="lg" class="coming-soon-avatar">
-                  <v-icon icon="mdi-gitlab" size="20" />
-                </v-avatar>
-                <div class="flex-grow-1">
-                  <div class="text-body-2 font-weight-medium">GitLab</div>
-                  <div class="text-caption text-medium-emphasis">SaaS &amp; self-managed MR tracking</div>
-                </div>
-                <v-chip size="x-small" variant="tonal" color="grey">Soon</v-chip>
-              </div>
-            </v-card>
-          </div>
-        </v-col>
-      </v-row>
-
-      <!-- ─── MESSAGING ──────────────────────────────────────── -->
-      <div class="section-header mb-3">
-        <v-icon icon="mdi-message-text-outline" size="18" color="primary" />
-        <span class="text-body-2 font-weight-medium">Messaging</span>
-      </div>
-
-      <v-row class="mb-6">
-        <!-- Slack -->
-        <v-col cols="12" md="6">
-          <SettingsSlack />
-        </v-col>
-
-        <!-- Telegram coming soon -->
-        <v-col cols="12" md="6">
-          <v-card class="pa-4 coming-soon-card h-100 d-flex align-center" color="surface" variant="outlined">
-            <div class="d-flex align-center ga-3 w-100">
-              <v-avatar size="36" rounded="lg" class="coming-soon-avatar">
-                <v-icon icon="mdi-send" size="20" />
-              </v-avatar>
-              <div class="flex-grow-1">
-                <div class="text-body-2 font-weight-medium">Telegram</div>
-                <div class="text-caption text-medium-emphasis">Notifications &amp; workflow triggers</div>
-              </div>
-              <v-chip size="x-small" variant="tonal" color="grey">Soon</v-chip>
-            </div>
-          </v-card>
-        </v-col>
-      </v-row>
-
-      <!-- ─── AI CONFIGURATION ───────────────────────────────── -->
-      <div class="section-header mb-3">
-        <v-icon icon="mdi-robot-outline" size="18" color="primary" />
-        <span class="text-body-2 font-weight-medium">AI Configuration</span>
-      </div>
-
-      <SettingsAiConfig />
-
-      <!-- Bottom save button -->
-      <div class="d-flex justify-end">
-        <v-btn
-          color="primary"
-          prepend-icon="mdi-content-save-outline"
-          :loading="settingsStore.saving"
-          @click="save"
-        >
-          Save Changes
-        </v-btn>
-      </div>
-    </template>
-    </div>
-  </div>
+  </AppPage>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import AppCallout from '@/components/common/AppCallout.vue'
+import AppPage from '@/components/common/AppPage.vue'
+import GitHubAppPanel from '@/components/settings/connections/GitHubAppPanel.vue'
+import IntegrationCard from '@/components/settings/connections/IntegrationCard.vue'
+import McpTokenPanel from '@/components/settings/connections/McpTokenPanel.vue'
+import SettingsSectionNav from '@/components/settings/SettingsSectionNav.vue'
 import { useSettingsStore } from '@/stores/settings'
-import api from '@/services/api'
+import { providerSummary } from '@/utils/aiProviderOptions'
+import {
+  aiStatus,
+  githubStatus,
+  mcpStatus,
+  primaryIntegration,
+  slackStatus,
+  type IntegrationId,
+  type ProviderTest,
+} from '@/utils/integrations'
+import SettingsClaudeCode from './SettingsClaudeCode.vue'
 import SettingsSlack from './SettingsSlack.vue'
-import SettingsAiConfig from './SettingsAiConfig.vue'
-import GitHubAppConnectionCard from '@/components/settings/connections/GitHubAppConnectionCard.vue'
+
+const ORDER: IntegrationId[] = ['ai', 'github', 'slack', 'mcp']
 
 const settingsStore = useSettingsStore()
 
-// GitHub App card exposes flush/clear hooks for the page-level Save button
-const githubCardRef = ref<InstanceType<typeof GitHubAppConnectionCard> | null>(null)
-
-// MCP token state
+const aiTest = ref<ProviderTest>('idle')
+const aiSummary = ref(providerSummary(undefined, undefined))
 const mcpTokenSet = ref(false)
-const newMcpToken = ref('')
-const regeneratingToken = ref(false)
 
-const envVarSnippet = computed(() => {
-  const token = newMcpToken.value || '<your-bodhiorchard-token>'
-  return `export BODHIORCHARD_MCP_TOKEN="${token}"`
-})
-
-const macInstructions = computed(() => {
-  const token = newMcpToken.value || '<your-bodhiorchard-token>'
-  return `# Add to ~/.zshrc (default shell on macOS)
-echo 'export BODHIORCHARD_MCP_TOKEN="${token}"' >> ~/.zshrc
-source ~/.zshrc`
-})
-
-const linuxInstructions = computed(() => {
-  const token = newMcpToken.value || '<your-bodhiorchard-token>'
-  return `# Add to ~/.bashrc (or ~/.zshrc if using zsh)
-echo 'export BODHIORCHARD_MCP_TOKEN="${token}"' >> ~/.bashrc
-source ~/.bashrc`
-})
-
-const windowsInstructions = computed(() => {
-  const token = newMcpToken.value || '<your-bodhiorchard-token>'
-  return `# PowerShell — set permanently for current user
-[Environment]::SetEnvironmentVariable("BODHIORCHARD_MCP_TOKEN", "${token}", "User")
-
-# Or via CMD
-setx BODHIORCHARD_MCP_TOKEN "${token}"`
-})
-
-onMounted(async () => {
-  await settingsStore.fetchConnections()
-  checkMcpTokenStatus()
-})
-
-async function save(): Promise<void> {
-  // Inject GitHub App credentials into the payload before saving
-  githubCardRef.value?.flushCredentials()
-  await settingsStore.saveConnections()
-  // Clear sensitive fields after save
-  githubCardRef.value?.clearSensitiveFields()
+// One card open at a time: opening one closes the rest.
+const openId = ref<IntegrationId | null>(null)
+function setOpen(id: IntegrationId, open: boolean): void {
+  openId.value = open ? id : null
 }
 
-async function checkMcpTokenStatus(): Promise<void> {
-  try {
-    const { data } = await api.get('/v1/settings/mcp-token/status')
-    mcpTokenSet.value = data.has_token
-  } catch {
-    // Token status check is non-critical
-  }
-}
+const statuses = computed(() => ({
+  ai: aiStatus(aiTest.value),
+  github: githubStatus(settingsStore.connections.github.status),
+  slack: slackStatus(settingsStore.connections.slack.connected),
+  mcp: mcpStatus(mcpTokenSet.value),
+}))
+const primary = computed(() => primaryIntegration(ORDER, statuses.value, openId.value))
 
-async function regenerateMcpToken(): Promise<void> {
-  regeneratingToken.value = true
-  try {
-    const { data } = await api.post('/v1/settings/mcp-token')
-    newMcpToken.value = data.mcp_token
-    mcpTokenSet.value = true
-  } catch {
-    settingsStore.error = 'Failed to generate MCP token.'
-  } finally {
-    regeneratingToken.value = false
-  }
-}
-
-function copyToken(): void {
-  navigator.clipboard.writeText(newMcpToken.value)
-}
-
-function copyConfig(): void {
-  navigator.clipboard.writeText(envVarSnippet.value)
-}
+onMounted(() => {
+  settingsStore.saveSuccess = false
+  void settingsStore.fetchConnections()
+})
 </script>
 
 <style scoped>
-.settings-page {
+.settings-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.settings-layout__main {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  gap: 16px;
+  min-width: 0;
+  max-width: 960px;
 }
-
-.settings-header {
-  flex-shrink: 0;
-  border-bottom: 1px solid rgb(var(--v-theme-rule));
-  background: rgb(var(--v-theme-background));
-  z-index: 1;
+.settings-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
 }
-
-.settings-content {
-  flex: 1;
-  overflow-y: auto;
-  padding-top: 24px;
+.settings-sub {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: rgb(var(--v-theme-on-surface-variant));
 }
-
-.section-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgb(var(--v-theme-rule));
-}
-</style>
-
-<style>
-/* Global (not scoped) — used by child components and Vuetify portals */
-.settings-card {
-  border: 1px solid rgb(var(--v-theme-rule));
-  transition: border-color 0.2s ease;
-}
-
-.coming-soon-card {
-  opacity: 0.45;
-  border-style: dashed !important;
-  border-color: rgb(var(--v-theme-rule)) !important;
-  transition: opacity 0.2s ease;
-}
-
-.coming-soon-card:hover {
-  opacity: 0.6;
-}
-
-.coming-soon-avatar {
-  background: rgb(var(--v-theme-surface-bright));
-}
-
-.settings-card--active {
-  border-color: rgba(var(--v-theme-primary), 0.4);
-}
-
-.scan-tooltip {
-  color: #fff !important;
-  background: #1e1e2e !important;
-  font-size: 13px !important;
-  line-height: 1.5 !important;
-  padding: 10px 14px !important;
-}
-
-.preset-card {
-  border: 1px solid rgb(var(--v-theme-rule));
-  transition: border-color 0.2s ease, background-color 0.2s ease;
-}
-
-.preset-card--active {
-  border-color: rgb(var(--v-theme-primary)) !important;
-  background: rgba(var(--v-theme-primary), 0.04) !important;
-}
-
-.index-stat {
-  min-width: 64px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: rgb(var(--v-theme-surface-bright));
-  border: 1px solid rgb(var(--v-theme-rule));
-  text-align: center;
+@media (max-width: 960px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-layout__nav {
+    display: none;
+  }
 }
 </style>

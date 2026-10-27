@@ -44,39 +44,23 @@
         minute for very large orgs).
       </div>
 
-      <v-alert
-        v-if="lastResult"
-        type="success"
-        variant="tonal"
-        density="compact"
-        class="mb-3"
-        closable
-        @click:close="lastResult = null"
-      >
+      <AppCallout v-if="lastResult" variant="success" class="mb-3">
         Wiped {{ lastResult.profilesDeleted }}, upserted
         {{ lastResult.profilesUpserted }} across {{ lastResult.reposWalked }}
         repo(s); {{ lastResult.unmatchedEmails }} unmatched email(s).
-      </v-alert>
+        <template #actions>
+          <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="lastResult = null" />
+        </template>
+      </AppCallout>
 
-      <v-alert
-        v-if="errorMessage"
-        type="error"
-        variant="tonal"
-        density="compact"
-        class="mb-3"
-        closable
-        @click:close="errorMessage = null"
-      >
+      <AppCallout v-if="errorMessage" variant="error" class="mb-3">
         {{ errorMessage }}
-      </v-alert>
+        <template #actions>
+          <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="errorMessage = null" />
+        </template>
+      </AppCallout>
 
-      <v-alert
-        v-if="running"
-        type="info"
-        variant="tonal"
-        density="compact"
-        class="mb-3"
-      >
+      <AppCallout v-if="running" variant="info" class="mb-3">
         <div class="d-flex align-center ga-2">
           <v-progress-circular indeterminate size="16" width="2" />
           <span>{{ progressMessage || 'Walking repositories…' }}</span>
@@ -89,7 +73,7 @@
           class="mt-2"
           rounded
         />
-      </v-alert>
+      </AppCallout>
 
       <div class="text-caption text-medium-emphasis mb-2">
         Type
@@ -122,6 +106,7 @@
 </template>
 
 <script setup lang="ts">
+import AppCallout from '@/components/common/AppCallout.vue'
 import { computed, onUnmounted, ref } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useJobSocket } from '@/composables/useJobSocket'
