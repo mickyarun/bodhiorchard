@@ -50,6 +50,8 @@ export const useMinigamesStore = defineStore('minigames', () => {
   const loading = ref(false)
   const error = ref('')
   const leaderboards = ref<Record<string, LeaderboardEntry[]>>({})
+  // Per game, so one board's failure doesn't show on another.
+  const leaderboardErrors = ref<Record<string, string>>({})
 
   async function fetchStatus(): Promise<void> {
     loading.value = true
@@ -66,6 +68,7 @@ export const useMinigamesStore = defineStore('minigames', () => {
   }
 
   async function fetchLeaderboard(game: string): Promise<void> {
+    leaderboardErrors.value = { ...leaderboardErrors.value, [game]: '' }
     try {
       const { data } = await api.get<{ entries: LeaderboardEntry[] }>(
         '/v1/minigames/leaderboard',
@@ -74,6 +77,7 @@ export const useMinigamesStore = defineStore('minigames', () => {
       leaderboards.value = { ...leaderboards.value, [game]: data.entries }
     } catch {
       error.value = 'Failed to load leaderboard'
+      leaderboardErrors.value = { ...leaderboardErrors.value, [game]: error.value }
     }
   }
 
@@ -83,6 +87,7 @@ export const useMinigamesStore = defineStore('minigames', () => {
     loading,
     error,
     leaderboards,
+    leaderboardErrors,
     fetchStatus,
     fetchLeaderboard,
   }

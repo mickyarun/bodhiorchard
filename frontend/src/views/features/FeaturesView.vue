@@ -47,7 +47,7 @@
       <FeaturesEmptyState v-if="nothingMapped" :repos="settingsStore.repos" :can-configure="canViewCodeSettings" />
 
       <p v-else-if="store.items.length === 0" class="features-page__none">
-        {{ query.trim() ? 'No features match that search.' : 'No features match these filters.' }}
+        {{ emptyListText({ searching: !!query.trim(), repoFiltered: !!repoId, mode }) }}
       </p>
 
       <template v-else>
@@ -72,6 +72,7 @@ import TopContributorsPanel from '@/components/features/TopContributorsPanel.vue
 import { useFeatureList } from '@/composables/useFeatureList'
 import { usePermissions } from '@/composables/usePermissions'
 import { useSettingsStore } from '@/stores/settings'
+import { emptyListText } from '@/utils/featureSetup'
 
 const {
   store, repoId, query, mode, touchedSort, page, pageCount, hasLoadedOnce, focusedId,

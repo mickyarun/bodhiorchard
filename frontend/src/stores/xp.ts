@@ -29,6 +29,8 @@ export const useXPStore = defineStore('xp', () => {
   const history = ref<RewardEvent[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
+  // The leaderboard's own load failure, so the board can say it didn't load.
+  const leaderboardError = ref<string | null>(null)
 
   async function fetchProfile(): Promise<void> {
     loading.value = true
@@ -45,10 +47,12 @@ export const useXPStore = defineStore('xp', () => {
   }
 
   async function fetchLeaderboard(): Promise<void> {
+    leaderboardError.value = null
     try {
       const { data } = await api.get<LeaderboardEntry[]>('/v1/xp/leaderboard')
       leaderboard.value = data
     } catch (err) {
+      leaderboardError.value = 'Failed to load the XP leaderboard'
       console.error('[XPStore] fetchLeaderboard failed:', err)
     }
   }
@@ -87,6 +91,7 @@ export const useXPStore = defineStore('xp', () => {
   return {
     profile,
     leaderboard,
+    leaderboardError,
     history,
     loading,
     error,

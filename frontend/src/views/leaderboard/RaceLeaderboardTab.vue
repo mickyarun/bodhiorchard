@@ -21,6 +21,8 @@
     :label="`Circuit times, ${lapLabel(distance)}`"
     :empty-text="`No circuit times yet at ${lapLabel(distance)}. Race a colleague in the dashboard's 3D view to set the first one.`"
     :loading="loading"
+    :error="store.error"
+    @retry="store.fetchLeaderboard(distance)"
   />
 </template>
 

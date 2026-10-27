@@ -22,6 +22,8 @@
     :label="`${gameName} scores`"
     :empty-text="`No scores yet for ${gameName}. Play it in the dashboard's 3D view to take the top spot.`"
     :loading="loading"
+    :error="store.leaderboardErrors[game]"
+    @retry="load(game)"
   />
 </template>
 

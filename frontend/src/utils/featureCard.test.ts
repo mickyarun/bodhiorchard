@@ -26,7 +26,7 @@ import {
   lineageRow,
   showLastTouched,
 } from './featureCard'
-import { featureSetupSteps } from './featureSetup'
+import { emptyListText, featureSetupSteps } from './featureSetup'
 
 function feature(over: Partial<Feature> = {}): Feature {
   return {
@@ -107,5 +107,18 @@ describe('featureSetupSteps', () => {
   })
   it('points at the map after a scan', () => {
     expect(states([{ status: 'active', lastScanned: '2026-10-01' }])).toEqual(['done', 'done', 'next'])
+  })
+})
+
+describe('emptyListText', () => {
+  it('blames the filter only when one is set', () => {
+    expect(emptyListText({ searching: true, repoFiltered: true, mode: 'active' })).toBe('No features match that search.')
+    expect(emptyListText({ searching: false, repoFiltered: true, mode: 'active' })).toBe('No features match these filters.')
+    expect(emptyListText({ searching: false, repoFiltered: false, mode: 'active' })).toBe(
+      "The last scan didn't find any live features yet.",
+    )
+    expect(emptyListText({ searching: false, repoFiltered: false, mode: 'deactivated' })).toBe(
+      'No features have been deactivated.',
+    )
   })
 })

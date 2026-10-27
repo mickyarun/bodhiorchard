@@ -38,6 +38,9 @@ export const useQuizStore = defineStore('quiz', () => {
   const loading = ref(false)
   const submitting = ref(false)
   const error = ref('')
+  // The monthly board's own load state, apart from the quiz itself.
+  const monthlyLoading = ref(false)
+  const monthlyError = ref('')
 
   async function fetchActive(): Promise<void> {
     loading.value = true
@@ -80,6 +83,8 @@ export const useQuizStore = defineStore('quiz', () => {
   }
 
   async function fetchMonthly(month?: string): Promise<void> {
+    monthlyLoading.value = true
+    monthlyError.value = ''
     try {
       const { data } = await api.get<QuizLeaderboardEntry[]>('/v1/quiz/leaderboard', {
         params: month ? { month } : undefined,
@@ -87,6 +92,9 @@ export const useQuizStore = defineStore('quiz', () => {
       monthly.value = data
     } catch {
       error.value = 'Failed to load the leaderboard'
+      monthlyError.value = error.value
+    } finally {
+      monthlyLoading.value = false
     }
   }
 
@@ -105,6 +113,8 @@ export const useQuizStore = defineStore('quiz', () => {
     active,
     reveal,
     monthly,
+    monthlyLoading,
+    monthlyError,
     recap,
     loading,
     submitting,

@@ -17,7 +17,14 @@
 <!-- XP standings: every member ranked by XP from real dev work, with a
      bar relative to the leader. -->
 <template>
-  <LeaderboardBoard :entries="entries" label="Everyone by XP" empty-text="No XP earned yet." :loading="loading" />
+  <LeaderboardBoard
+    :entries="entries"
+    label="Everyone by XP"
+    empty-text="No XP earned yet."
+    :loading="loading"
+    :error="xpStore.leaderboardError"
+    @retry="load"
+  />
 </template>
 
 <script setup lang="ts">
@@ -33,8 +40,11 @@ const loading = ref(true)
 
 const entries = computed(() => xpBoard(xpStore.leaderboard, authStore.user?.id ?? ''))
 
-onMounted(async () => {
+async function load(): Promise<void> {
+  loading.value = true
   await xpStore.fetchLeaderboard()
   loading.value = false
-})
+}
+
+onMounted(load)
 </script>

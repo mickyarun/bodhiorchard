@@ -15,10 +15,15 @@
  -->
 
 <!-- One board: the top three as cards and everyone else in a ranked list,
-     a loading spinner the first time, or a plain empty message. -->
+     a loading spinner the first time, a load error with Retry, or a plain
+     empty message. -->
 <template>
   <div class="lb-board">
-    <div v-if="loading && !entries.length" class="lb-board__loading">
+    <AppCallout v-if="error" variant="error">
+      {{ error }}
+      <template #actions><v-btn variant="outlined" size="small" :loading="loading" @click="emit('retry')">Retry</v-btn></template>
+    </AppCallout>
+    <div v-else-if="loading && !entries.length" class="lb-board__loading">
       <v-progress-circular indeterminate color="primary" :aria-label="`Loading ${label}`" />
     </div>
     <p v-else-if="!entries.length" class="lb-board__empty">{{ emptyText }}</p>
@@ -31,11 +36,13 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import AppCallout from '@/components/common/AppCallout.vue'
 import { splitPodium, type BoardEntry } from '@/utils/leaderboard'
 import LeaderboardPodium from './LeaderboardPodium.vue'
 import LeaderboardRows from './LeaderboardRows.vue'
 
-const props = defineProps<{ entries: BoardEntry[]; label: string; emptyText: string; loading?: boolean }>()
+const props = defineProps<{ entries: BoardEntry[]; label: string; emptyText: string; loading?: boolean; error?: string | null }>()
+const emit = defineEmits<{ retry: [] }>()
 
 const split = computed(() => splitPodium(props.entries))
 </script>

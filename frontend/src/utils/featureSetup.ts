@@ -45,3 +45,20 @@ export function featureSetupSteps(repos: RepoSummary[]): FeatureSetupStep[] {
     },
   ]
 }
+
+const EMPTY_MODE_TEXT: Record<string, string> = {
+  active: "The last scan didn't find any live features yet.",
+  all: "The last scan didn't find any features yet.",
+  in_progress: 'No features are in progress.',
+  deactivated: 'No features have been deactivated.',
+}
+
+/**
+ * Why the list is empty once something has been scanned: the search or
+ * repository filter when one is set, otherwise what the Show filter asked for.
+ */
+export function emptyListText(opts: { searching: boolean; repoFiltered: boolean; mode: string }): string {
+  if (opts.searching) return 'No features match that search.'
+  if (opts.repoFiltered) return 'No features match these filters.'
+  return EMPTY_MODE_TEXT[opts.mode] ?? 'No features match these filters.'
+}

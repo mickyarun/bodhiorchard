@@ -47,7 +47,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import type { Feature } from '@/types'
 import { copyText } from '@/utils/clipboard'
 import { codeLocations, codeLocationsText, featureCapabilities } from '@/utils/featureCard'
@@ -58,12 +58,16 @@ const capabilities = computed(() => featureCapabilities(props.feature))
 const locations = computed(() => codeLocations(props.feature))
 const locationsText = computed(() => codeLocationsText(locations.value))
 const copied = ref(false)
+let copiedTimer: ReturnType<typeof setTimeout> | undefined
 
 async function copy(): Promise<void> {
   if (!(await copyText(locationsText.value))) return
   copied.value = true
-  setTimeout(() => (copied.value = false), 1500)
+  clearTimeout(copiedTimer)
+  copiedTimer = setTimeout(() => (copied.value = false), 1500)
 }
+
+onBeforeUnmount(() => clearTimeout(copiedTimer))
 </script>
 
 <style scoped>

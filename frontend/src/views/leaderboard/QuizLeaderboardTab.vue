@@ -19,7 +19,14 @@
 <template>
   <div class="quiz-board">
     <p class="quiz-board__note">The top scorer this month earns SP. The quiz never awards XP.</p>
-    <LeaderboardBoard :entries="entries" label="Quiz points this month" empty-text="No points on the board yet this month." />
+    <LeaderboardBoard
+      :entries="entries"
+      label="Quiz points this month"
+      empty-text="No points on the board yet this month."
+      :loading="store.monthlyLoading"
+      :error="store.monthlyError"
+      @retry="store.fetchMonthly()"
+    />
   </div>
 </template>
 
