@@ -678,6 +678,22 @@ async def run_claude_code(
         # agents emit markdown without persisting.
         "--settings",
         build_inline_settings_json(),
+        # Leave the host user's ``~/.claude/settings.json`` out of the
+        # subprocess. That file is where a developer enables plugins, and
+        # plugin hooks MERGE with ours rather than being replaced by the
+        # inline settings above — so a learning / explanatory output-style
+        # plugin's SessionStart hook kept injecting ``★ Insight`` blocks and
+        # chat framing into agent output despite ``outputStyle: "default"``.
+        # The inline ``--settings`` hooks above still load, and the auth
+        # paths we support (keychain ``claude login``, and the API key /
+        # OAuth token env vars ``build_claude_env`` forwards) don't live in
+        # that file. What does no longer reach the subprocess: the user
+        # file's ``env`` block, ``apiKeyHelper``, and its ``model`` default.
+        # A repo's own ``.claude/settings{,.local}.json`` still loads, so a
+        # plugin enabled there can still leak in — the result handlers
+        # strip insight blocks as the backstop.
+        "--setting-sources",
+        "project,local",
     ]
 
     # stream-json requires --verbose (Claude CLI constraint)

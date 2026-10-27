@@ -140,6 +140,7 @@
               </div>
             </div>
             <v-btn
+              v-if="canAddLocalRepos"
               size="small"
               variant="flat"
               color="warning"
@@ -149,6 +150,9 @@
             >
               Add as tracked
             </v-btn>
+            <span v-else class="text-caption text-medium-emphasis flex-shrink-0">
+              Ask an org admin to track it
+            </span>
           </div>
         </v-alert>
       </div>
@@ -327,6 +331,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useBudActivity } from '@/composables/useBudActivity'
+import { usePermissions } from '@/composables/usePermissions'
 import { useSettingsStore } from '@/stores/settings'
 import { fileColor, fileIcon, parseFiles, timeAgo } from '@/utils/dev-activity-helpers'
 import type { DevActivity, UntrackedRepo } from '@/types'
@@ -351,6 +356,8 @@ const {
 } = useBudActivity(props.budId, { role: 'qa' })
 
 const settingsStore = useSettingsStore()
+// Tracking a repo by path needs settings:edit; QA testers usually lack it.
+const { canAddLocalRepos } = usePermissions()
 
 // ── UI state ──────────────────────────────────────────────────────────
 

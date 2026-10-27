@@ -175,6 +175,12 @@ class TestClaudeRunnerIntegration:
         idx = argv.index("--add-dir")
         assert argv[idx + 1] == str(tmp_path)
 
+        # The host user's settings file (where plugins with SessionStart
+        # hooks are enabled) must stay out of the subprocess.
+        assert "--setting-sources" in argv, f"missing --setting-sources in {argv}"
+        sources = argv[argv.index("--setting-sources") + 1]
+        assert "user" not in str(sources).split(",")
+
     @pytest.mark.asyncio
     async def test_env_passed_to_spawn_excludes_secrets(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: object

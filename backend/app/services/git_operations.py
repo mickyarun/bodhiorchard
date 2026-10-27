@@ -107,8 +107,7 @@ async def _detect_main_branch(repo_path: str) -> str | None:
         if candidate in stdout:
             return candidate.split("/", 1)[1]
     # Fallback: check local branches (for repos without a remote)
-    stdout, _, _ = await run_git(["branch"], cwd=repo_path)
-    local_branches = {b.strip().lstrip("* ") for b in stdout.splitlines()}
+    local_branches = set(await list_local_branches(repo_path))
     for candidate in ("main", "master"):
         if candidate in local_branches:
             return candidate
@@ -133,8 +132,7 @@ async def _detect_develop_branch(repo_path: str) -> str | None:
         if candidate in stdout:
             return candidate.split("/", 1)[1]
     # Fallback: check local branches
-    stdout, _, _ = await run_git(["branch"], cwd=repo_path)
-    local_branches = {b.strip().lstrip("* ") for b in stdout.splitlines()}
+    local_branches = set(await list_local_branches(repo_path))
     for candidate in ("develop", "dev"):
         if candidate in local_branches:
             return candidate
@@ -329,6 +327,24 @@ async def get_github_repo_full_name(repo_path: str) -> str | None:
     if match:
         return match.group(1)
     return None
+
+
+async def list_local_branches(repo_path: str) -> list[str]:
+    """List local branch names, sorted.
+
+    Reads refs directly rather than parsing ``git branch``: its output marks
+    the current branch with ``*`` and a branch checked out in another
+    worktree with ``+``. Onboarding checks ``develop`` out under
+    ``.bodhiorchard/``, so parsing that text missed exactly the branch the
+    develop detection looks for.
+
+    Args:
+        repo_path: Absolute path to the git repository.
+    """
+    stdout, _, _ = await run_git(
+        ["for-each-ref", "--format=%(refname:short)", "refs/heads"], cwd=repo_path
+    )
+    return sorted({line.strip() for line in stdout.splitlines() if line.strip()})
 
 
 async def list_remote_branches(repo_path: str) -> list[str]:

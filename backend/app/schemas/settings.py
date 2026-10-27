@@ -604,6 +604,16 @@ class RepoBranchList(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class LocalRepoBranches(BaseModel):
+    """Branches of a not-yet-tracked local checkout, with main/develop guesses."""
+
+    branches: list[str]
+    detected_main: str | None = Field(None, alias="detectedMain")
+    detected_develop: str | None = Field(None, alias="detectedDevelop")
+
+    model_config = {"populate_by_name": True}
+
+
 class AddRepoRequest(BaseModel):
     """Request to add a repository path."""
 

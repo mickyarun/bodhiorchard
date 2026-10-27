@@ -14,27 +14,21 @@
 
 """First-time setup endpoint: creates org, admin user, auto-adds repo, triggers scan."""
 
-import asyncio
-import contextlib
-import os
-from pathlib import Path
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.ai_settings import serialize_provider, with_dynamic_models
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.organization import AIProvider
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.repositories.user import UserRepository
 from app.schemas.setup import (
-    BrowseDirectoriesResponse,
     ClaudeCheckRequest,
-    DirectoryEntry,
     FinalizeWithReposRequest,
     FinalizeWithReposResponse,
     InitOrgRequest,
@@ -55,8 +49,6 @@ from app.services.claude_env import (
 )
 from app.services.claude_runner import test_claude_connection
 from app.services.deployment_info import deployment_info
-from app.services.git_operations import list_remote_branches
-from app.services.repo_scanner import _detect_develop_branch, _detect_main_branch
 from app.services.scan_progress import get_active_scan_for_org
 from app.services.setup_finalize import setup_finalize_with_repos
 from app.services.setup_init import setup_init_org
@@ -86,186 +78,15 @@ async def setup_status(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     return {"is_setup_complete": True, "org_slug": org.slug}
 
 
-def _list_directory_sync(target: Path) -> list[DirectoryEntry]:
-    """Walk ``target`` one level deep, flagging git repos and monorepos.
-
-    Runs synchronously — callers from async endpoints must wrap this in
-    ``asyncio.to_thread`` so the event loop doesn't block on the stat
-    calls (users with deep home dirs can have hundreds of entries).
-    """
-    entries: list[DirectoryEntry] = []
-    for child in sorted(target.iterdir()):
-        if child.name.startswith(".") or not child.is_dir():
-            continue
-        is_git = (child / ".git").exists()
-        # For a git repo, peek one level down to flag monorepos — short-
-        # circuits at the first nested `.git`, so the cost is one
-        # iterdir call plus at most a handful of stats per repo.
-        has_sub_repos = False
-        if is_git:
-            with contextlib.suppress(PermissionError, OSError):
-                has_sub_repos = any(
-                    (gc / ".git").exists()
-                    for gc in child.iterdir()
-                    if gc.is_dir() and not gc.name.startswith(".")
-                )
-        entries.append(
-            DirectoryEntry(
-                name=child.name,
-                path=str(child),
-                is_git_repo=is_git,
-                has_sub_repos=has_sub_repos,
-            )
-        )
-    return entries
-
-
-def picker_roots() -> tuple[Path, ...]:
-    """Directories the setup picker is allowed to walk.
-
-    The home directory, which is where development checkouts live in
-    practice. Kept as a function rather than a constant so tests can
-    point it somewhere hermetic, and so adding a root later is one edit.
-    """
-    return (Path.home(),)
-
-
-@router.get("/browse-directories", response_model=BrowseDirectoriesResponse)
-async def browse_directories(
-    path: str = Query(default="", description="Directory path to list. Defaults to home."),
-    db: AsyncSession = Depends(get_db),
-) -> BrowseDirectoriesResponse:
-    """List subdirectories at a given path for the file picker.
-
-    Returns the resolved current path, parent path, and child directories.
-    Only directories are listed — no file contents are exposed.
-
-    Unauthenticated, because the setup wizard needs a directory picker
-    before an org or a JWT exists — so it is gated on setup being
-    incomplete, like every other pre-auth endpoint here. Without that
-    gate it stays reachable for the life of the deployment and walks the
-    whole filesystem for anyone who can reach the port.
-
-    Confined to :func:`picker_roots` as well, so the window while setup is
-    open is a picker over the home directory rather than over the host.
-    """
-    await _require_setup_incomplete(db)
-    # Containment check, inline and on the raw string. Two things matter
-    # here and both are the result of CodeQL rejecting the tidier forms:
-    # it runs before any pathlib call touches the filesystem (it flagged
-    # `Path(path).expanduser()` as the sink), and it sits in the same
-    # function as the sinks below, because the barrier is not carried
-    # across a call — which is why `core.paths.safe_join`, doing exactly
-    # this, does not satisfy the query in `file_storage.py` either.
-    # `realpath` collapses `..` and resolves symlinks; `commonpath` then
-    # confirms the result is still nested under a permitted root.
-    candidate = os.path.realpath(os.path.expanduser(path or str(Path.home())))
-    within = False
-    for root in picker_roots():
-        base = os.path.realpath(str(root))
-        try:
-            within = os.path.commonpath([base, candidate]) == base
-        except ValueError:
-            within = False  # unrelated roots / different drives
-        if within:
-            break
-    if not within:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Path is outside the directories the setup picker may browse.",
-        )
-    target = Path(candidate)
-
-    if not target.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Path does not exist: {target}",
-        )
-    if not target.is_dir():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Path is not a directory: {target}",
-        )
-
-    try:
-        entries = await asyncio.to_thread(_list_directory_sync, target)
-    except PermissionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Permission denied: {target}",
-        ) from exc
-
-    parent = str(target.parent) if target != target.parent else None
-
-    return BrowseDirectoriesResponse(
-        current_path=str(target),
-        parent_path=parent,
-        directories=entries,
-    )
-
-
-@router.get("/repo-branches")
-async def get_repo_branches(
-    path: str = Query(..., description="Absolute path to a git repository"),
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    """List branches for a repo by path (no auth — used during setup).
-
-    Gated on setup being incomplete for the same reason as
-    :func:`browse_directories`: it takes a caller-chosen path and runs git
-    against it, which is a filesystem probe for anything that is not a
-    repository.
-
-    Confined to :func:`picker_roots` for the same reason.
-
-    Args:
-        path: Absolute path to the git repository.
-        db: Session used only to check whether setup is still open.
-
-    Returns:
-        Dict with branches list and auto-detected main/develop.
-    """
-    await _require_setup_incomplete(db)
-    # Containment check, inline and on the raw string. Two things matter
-    # here and both are the result of CodeQL rejecting the tidier forms:
-    # it runs before any pathlib call touches the filesystem (it flagged
-    # `Path(path).expanduser()` as the sink), and it sits in the same
-    # function as the sinks below, because the barrier is not carried
-    # across a call — which is why `core.paths.safe_join`, doing exactly
-    # this, does not satisfy the query in `file_storage.py` either.
-    # `realpath` collapses `..` and resolves symlinks; `commonpath` then
-    # confirms the result is still nested under a permitted root.
-    candidate = os.path.realpath(os.path.expanduser(path))
-    within = False
-    for root in picker_roots():
-        base = os.path.realpath(str(root))
-        try:
-            within = os.path.commonpath([base, candidate]) == base
-        except ValueError:
-            within = False  # unrelated roots / different drives
-        if within:
-            break
-    if not within:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Path is outside the directories the setup picker may browse.",
-        )
-    repo_path = Path(candidate)
-    if not repo_path.exists() or not (repo_path / ".git").exists():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Not a git repository: {path}",
-        )
-
-    branches = await list_remote_branches(str(repo_path))
-    detected_main = await _detect_main_branch(str(repo_path))
-    detected_dev = await _detect_develop_branch(str(repo_path))
-
-    return {
-        "branches": branches,
-        "detectedMain": detected_main,
-        "detectedDevelop": detected_dev,
-    }
+# Removed: GET /setup/browse-directories, GET /setup/repo-branches.
+# The wizard only reaches its Repositories step after init-org has created
+# the org and minted a JWT, by which point _require_setup_incomplete made
+# both of these 403 — so the local-path picker could never work. They are
+# now served, authenticated and behind settings:edit, by
+# settings_repos_local.py:
+#   GET /v1/settings/repos/browse-directories — same BrowseDirectoriesResponse.
+#   GET /v1/settings/repos/local-branches     — same {branches, detectedMain,
+#                                               detectedDevelop} shape.
 
 
 async def _require_setup_incomplete(db: AsyncSession) -> None:
@@ -497,6 +318,7 @@ async def init_org(
     "/finalize-with-repos",
     response_model=FinalizeWithReposResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permissions("settings:edit"))],
 )
 async def finalize_with_repos(
     body: FinalizeWithReposRequest,
@@ -509,6 +331,10 @@ async def finalize_with_repos(
     org membership is enforced through
     :meth:`OrganizationRepository.get_for_user`. The two payload arms
     are XOR-validated by the schema's ``model_validator``.
+
+    Needs ``settings:edit``, like the other ways of registering repos:
+    the local-path arm takes caller-chosen filesystem paths. The wizard
+    runs as the org owner, who holds every permission.
     """
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_for_user(current_user)

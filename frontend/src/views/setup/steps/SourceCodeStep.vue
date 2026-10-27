@@ -595,6 +595,7 @@ import { useSetupStore } from '@/stores/setup'
 import type { SetupRepoConfig } from '@/types/setup'
 import type { BulkOnboardJobTerminalResult } from '@/types/repoOnboard'
 import api from '@/services/api'
+import { needsPathBranchLookup } from '@/utils/setupRepoBranches'
 import RepoOnboardBulkTab from '@/components/settings/code/onboard/RepoOnboardBulkTab.vue'
 
 const TAB_GITHUB = 'github'
@@ -850,11 +851,9 @@ function addRepo(
     branchOptions[idx] = branches
     if (detectedMain) repo.mainBranch = detectedMain
   }
-  // Fetch branches + infer develop only when the caller hasn't already
-  // resolved develop. The local-path add validates via /setup/repo-branches
-  // up front and passes detectedDevelop here (so re-fetching would hit the
-  // endpoint twice); the clone flow passes no develop and still needs this.
-  if (detectedDevelop === undefined) {
+  // Only a local folder picked without validation still needs a path lookup;
+  // the typed-path add and the clone response both arrive with develop.
+  if (needsPathBranchLookup(source, detectedDevelop)) {
     fetchBranches(idx, path)
   }
 }
@@ -885,23 +884,27 @@ async function addPathToList(): Promise<void> {
     // it to the list. A missing or non-git path returns 400 here; we surface
     // that inline instead of silently adding an unusable, branch-less entry
     // (the previous behaviour, where fetchBranches swallowed the 400).
-    const { data } = await api.get('/setup/repo-branches', { params: { path: p } })
+    const { data } = await api.get('/v1/settings/repos/local-branches', { params: { path: p } })
     // Pass detectedDevelop (even if null) so addRepo doesn't re-hit
-    // /setup/repo-branches — we already have branches + develop from here.
+    // local-branches — we already have branches + develop from here.
     addRepo(p, data.detectedMain, data.branches, 'local-path', data.detectedDevelop ?? null)
     inputPath.value = ''
   } catch (err: unknown) {
     let detail = ''
+    let statusCode: number | undefined
     if (err && typeof err === 'object' && 'response' in err) {
-      const axiosErr = err as { response?: { data?: { detail?: string } } }
+      const axiosErr = err as { response?: { status?: number; data?: { detail?: string } } }
       detail = axiosErr.response?.data?.detail || ''
+      statusCode = axiosErr.response?.status
     }
-    // Backend says e.g. "Not a git repository: <path>"; append the actionable
-    // hint since the #1 cause is pointing at a downloaded ZIP (no .git).
-    localPathError.value =
-      (detail || `Couldn't add "${p}".`)
-      + ' Point to an absolute path to a git checkout (a folder containing .git).'
-      + ' A downloaded ZIP has no git history — use "git clone" instead.'
+    // A 400 is "not a git repository": the #1 cause is a downloaded ZIP (no
+    // .git), so add the actionable hint. Other errors (a 403 for a path
+    // outside the allowed folders) already say what to do.
+    const gitHint = statusCode === 400 || !detail
+      ? ' Point to an absolute path to a git checkout (a folder containing .git).'
+        + ' A downloaded ZIP has no git history — use "git clone" instead.'
+      : ''
+    localPathError.value = (detail || `Couldn't add "${p}".`) + gitHint
   } finally {
     addingPath.value = false
   }
@@ -933,9 +936,10 @@ async function handleClone(): Promise<void> {
       }
 
       try {
-        // POST returns RepoInfo on success; failures surface as 4xx via the
-        // catch block below. The branch list is fetched separately because
-        // the auth endpoint keeps the clone response and the branch list
+        // POST returns RepoInfo on success, with main and develop already
+        // detected on the clone; failures surface as 4xx via the catch block
+        // below. The branch list is fetched separately by repo id because the
+        // auth endpoint keeps the clone response and the branch list
         // decoupled (see settings_repos.py: /repos/{id}/branches).
         const { data: repo } = await api.post('/v1/settings/repos/clone', payload, {
           timeout: 120_000,
@@ -950,7 +954,7 @@ async function handleClone(): Promise<void> {
           // Branch fetch is best-effort — clone already succeeded.
         }
         item.status = 'done'
-        addRepo(repo.path, repo.mainBranch || '', branches, 'github-clone')
+        addRepo(repo.path, repo.mainBranch || '', branches, 'github-clone', repo.developBranch ?? null)
       } catch (err: unknown) {
         item.status = 'error'
         if (err && typeof err === 'object' && 'response' in err) {
@@ -993,7 +997,7 @@ async function copyDeployKey(): Promise<void> {
 async function fetchBranches(idx: number, path: string): Promise<void> {
   branchLoading[idx] = true
   try {
-    const { data } = await api.get('/setup/repo-branches', { params: { path } })
+    const { data } = await api.get('/v1/settings/repos/local-branches', { params: { path } })
     branchOptions[idx] = data.branches || []
     const repo = setupStore.state.sourceCode.repos[idx]
     if (repo && data.detectedMain && !repo.mainBranch) {
@@ -1012,7 +1016,7 @@ async function fetchBranches(idx: number, path: string): Promise<void> {
 async function browse(path?: string): Promise<void> {
   browseLoading.value = true
   try {
-    const { data } = await api.get('/setup/browse-directories', {
+    const { data } = await api.get('/v1/settings/repos/browse-directories', {
       params: { path: path || '' },
     })
     currentDir.value = data.current_path

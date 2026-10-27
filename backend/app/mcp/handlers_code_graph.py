@@ -42,17 +42,20 @@ knowledge handlers.
 from __future__ import annotations
 
 import unicodedata
-import uuid
 from typing import Any
 
 import networkx as nx
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.mcp.code_graph_repo import (
+    RepoLookupError,
+    not_scanned_message,
+    resolve_graph_repo,
+)
 from app.models.organization import Organization
 from app.repositories.cluster_cache import ClusterCacheRepository
 from app.repositories.repo_graph_cache import RepoGraphCacheRepository
-from app.repositories.tracked_repository import TrackedRepoRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -92,9 +95,10 @@ async def handle_code_impact(
         return _err("direction must be 'upstream', 'downstream', or 'both'")
     depth = min(int(params.get("depth") or _DEFAULT_DEPTH), _MAX_DEPTH)
 
-    graph, head_sha = await _load_graph(db, org, repo_id_raw)
-    if graph is None:
-        return _err("no cached graph for this repo")
+    loaded = await _load_graph(db, org, repo_id_raw)
+    if isinstance(loaded, str):
+        return _err(loaded)
+    graph, head_sha = loaded
 
     matches = _find_nodes(graph, target)
     if not matches:
@@ -139,9 +143,10 @@ async def handle_code_query(
         return _err("query and repo_id are required")
     limit = min(int(params.get("limit") or _DEFAULT_LIMIT), _MAX_LIMIT)
 
-    graph, head_sha = await _load_graph(db, org, repo_id_raw)
-    if graph is None:
-        return _err("no cached graph for this repo")
+    loaded = await _load_graph(db, org, repo_id_raw)
+    if isinstance(loaded, str):
+        return _err(loaded)
+    graph, head_sha = loaded
 
     terms = _split_query(query)
     scored = _score_nodes(graph, terms)[:limit]
@@ -177,9 +182,10 @@ async def handle_code_context(
     if not target or not repo_id_raw:
         return _err("symbol and repo_id are required")
 
-    graph, head_sha = await _load_graph(db, org, repo_id_raw)
-    if graph is None:
-        return _err("no cached graph for this repo")
+    loaded = await _load_graph(db, org, repo_id_raw)
+    if isinstance(loaded, str):
+        return _err(loaded)
+    graph, head_sha = loaded
 
     matches = _find_nodes(graph, target)
     if not matches:
@@ -214,17 +220,15 @@ async def handle_code_community(
     repo_id_raw = params.get("repo_id")
     if not cluster_id or not repo_id_raw:
         return _err("cluster_id and repo_id are required")
-    try:
-        repo_id = uuid.UUID(str(repo_id_raw))
-    except ValueError:
-        return _err("repo_id is not a valid UUID")
-
-    head_sha = await _resolve_head_sha(db, org, repo_id)
+    repo = await resolve_graph_repo(db, org, repo_id_raw)
+    if isinstance(repo, RepoLookupError):
+        return _err(repo.message)
+    head_sha = repo.head_sha
     if not head_sha:
-        return _err("repo has no cached scan")
+        return _err(not_scanned_message(repo))
 
     cc_repo = ClusterCacheRepository(db, org_id=org.id)
-    rows = await cc_repo.list_for_repo_sha(repo_id=repo_id, head_sha=head_sha)
+    rows = await cc_repo.list_for_repo_sha(repo_id=repo.repo_id, head_sha=head_sha)
     match = next((r for r in rows if r.cluster_id == cluster_id), None)
     if match is None:
         return {"cluster_id": cluster_id, "found": False, "head_sha": head_sha}
@@ -258,9 +262,10 @@ async def handle_code_god_nodes(
         return _err("repo_id is required")
     limit = min(int(params.get("limit") or 20), _MAX_LIMIT)
 
-    graph, head_sha = await _load_graph(db, org, repo_id_raw)
-    if graph is None:
-        return _err("no cached graph for this repo")
+    loaded = await _load_graph(db, org, repo_id_raw)
+    if isinstance(loaded, str):
+        return _err(loaded)
+    graph, head_sha = loaded
 
     nodes_by_degree = sorted(graph.degree, key=lambda kv: kv[1], reverse=True)[:limit]
     return {
@@ -291,9 +296,10 @@ async def handle_code_stats(
     if not repo_id_raw:
         return _err("repo_id is required")
 
-    graph, head_sha = await _load_graph(db, org, repo_id_raw)
-    if graph is None:
-        return _err("no cached graph for this repo")
+    loaded = await _load_graph(db, org, repo_id_raw)
+    if isinstance(loaded, str):
+        return _err(loaded)
+    graph, head_sha = loaded
 
     file_counts: dict[str, int] = {}
     for _nid, data in graph.nodes(data=True):
@@ -320,31 +326,22 @@ async def _load_graph(
     db: AsyncSession,
     org: Organization,
     repo_id_raw: Any,
-) -> tuple[nx.Graph | None, str | None]:
-    """Resolve repo_id → latest head_sha → cached graph."""
-    try:
-        repo_id = uuid.UUID(str(repo_id_raw))
-    except ValueError:
-        return None, None
-    head_sha = await _resolve_head_sha(db, org, repo_id)
-    if not head_sha:
-        return None, None
+) -> tuple[nx.Graph, str] | str:
+    """Resolve repo_id → latest head_sha → cached graph.
+
+    Returns ``(graph, head_sha)``, or the error message to hand back to the
+    agent — a bad/unknown repo_id and a missing graph get distinct text.
+    """
+    repo = await resolve_graph_repo(db, org, repo_id_raw)
+    if isinstance(repo, RepoLookupError):
+        return repo.message
+    if not repo.head_sha:
+        return not_scanned_message(repo)
     rg_repo = RepoGraphCacheRepository(db, org_id=org.id)
-    graph = await rg_repo.get_for_sha(repo_id=repo_id, head_sha=head_sha)
-    return graph, head_sha
-
-
-async def _resolve_head_sha(
-    db: AsyncSession,
-    org: Organization,
-    repo_id: uuid.UUID,
-) -> str | None:
-    """Pick head_sha from tracked_repositories, fall back to cluster_cache latest."""
-    tracked = await TrackedRepoRepository(db, org_id=org.id).get_by_id(repo_id)
-    if tracked is not None and tracked.head_sha:
-        return tracked.head_sha
-    cc = ClusterCacheRepository(db, org_id=org.id)
-    return await cc.latest_head_sha(repo_id=repo_id)
+    graph = await rg_repo.get_for_sha(repo_id=repo.repo_id, head_sha=repo.head_sha)
+    if graph is None:
+        return not_scanned_message(repo)
+    return graph, repo.head_sha
 
 
 def _strip_diacritics(text: str) -> str:

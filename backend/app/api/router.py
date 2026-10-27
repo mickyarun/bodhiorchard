@@ -89,6 +89,7 @@ from app.api.v1.settings_claude import router as settings_claude_router
 from app.api.v1.settings_github_members import router as settings_gh_members_router
 from app.api.v1.settings_mcp_tokens import router as settings_mcp_tokens_router
 from app.api.v1.settings_repos import router as settings_repos_router
+from app.api.v1.settings_repos_local import router as settings_repos_local_router
 from app.api.v1.settings_slack import router as settings_slack_router
 from app.api.v1.setup import router as setup_router
 from app.api.v1.skills import router as skills_router
@@ -191,6 +192,7 @@ engineering_router.include_router(design_system_router, prefix="/api/v1/design-s
 engineering_router.include_router(features_router, prefix="/api/v1/features")
 engineering_router.include_router(agent_skills_router, prefix="/api/v1/settings/agent-skills")
 engineering_router.include_router(settings_repos_router, prefix="/api/v1/settings")
+engineering_router.include_router(settings_repos_local_router, prefix="/api/v1/settings")
 engineering_router.include_router(settings_slack_router, prefix="/api/v1/settings")
 engineering_router.include_router(settings_claude_router, prefix="/api/v1/settings")
 engineering_router.include_router(ai_settings_router, prefix="/api/v1/settings")
