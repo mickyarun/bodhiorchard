@@ -143,7 +143,7 @@
       <div v-if="bugsStore.currentBug.budNumber" class="text-caption text-medium-emphasis">
         <strong>BUD:</strong>
         <v-chip size="small" variant="tonal" color="primary" class="ml-2">
-          BUD-{{ String(bugsStore.currentBug.budNumber).padStart(3, '0') }}
+          {{ budRef(bugsStore.currentBug.budNumber) }}
         </v-chip>
       </div>
 
@@ -201,7 +201,7 @@ import { useBugsStore } from '@/stores/bugs'
 import { useFeaturesStore } from '@/stores/features'
 import { useMembersStore } from '@/stores/members'
 import { usePermissions } from '@/composables/usePermissions'
-import { BUG_SEVERITY_COLORS, type BugStatusValue } from '@/types'
+import { BUG_SEVERITY_COLORS, budRef, type BugStatusValue } from '@/types'
 import { formatDateTime } from '@/utils/date'
 import BugAttachments from './BugAttachments.vue'
 import BugComments from './BugComments.vue'

@@ -73,7 +73,7 @@ def compose_high_score_announcement(
         "🏆 *New Garden Games record!*\n"
         f"*{who}* just topped *{game_name}* with *{score}* "
         f"— beating {holder}'s {previous_best}.\n"
-        f"Think you can take it back? Play in the garden: {link}"
+        f"Think you can take it back? Play from your dashboard: {link}"
     )
 
 

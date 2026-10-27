@@ -52,7 +52,11 @@ const ICONS: Record<Tone, string> = {
 }
 const LIMIT = 5
 
-const props = defineProps<{ activity: AgentActivityItem[] }>()
+const props = defineProps<{
+  activity: AgentActivityItem[]
+  /** When the activity was loaded; the running count is as of then. */
+  asOf: Date | null
+}>()
 
 function tone(status: string): Tone {
   if (status === 'failed') return 'failed'
@@ -65,8 +69,11 @@ const recent = computed(() =>
 )
 const working = computed(() => props.activity.filter(a => tone(a.status) === 'working').length)
 const workingLabel = computed(() => {
-  if (!working.value) return 'All quiet'
-  return working.value === 1 ? '1 agent working' : `${working.value} agents working`
+  const count = working.value === 1 ? '1 agent working' : `${working.value} agents working`
+  const label = working.value ? count : 'None working'
+  if (!props.asOf) return label
+  const time = props.asOf.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  return `${label} · as of ${time}`
 })
 </script>
 

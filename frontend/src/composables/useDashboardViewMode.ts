@@ -19,6 +19,9 @@ export type DashboardViewMode = 'overview' | 'graph' | 'garden'
 
 const MODES: readonly DashboardViewMode[] = ['overview', 'graph', 'garden']
 
+/** The dashboard opened on the 3D garden, where races and games start from. */
+export const GARDEN_ROUTE = { path: '/dashboard', query: { view: 'garden' } } as const
+
 /**
  * The dashboard view, kept in ``?view=`` so a link or reload returns to it.
  * Overview is the default and leaves the query clean. Switching replaces

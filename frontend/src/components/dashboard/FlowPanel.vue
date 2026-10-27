@@ -14,32 +14,30 @@
  * limitations under the License.
  -->
 
-<!-- Flow: one stacked bar of open BUDs by stage, with a count per stage
-     underneath. Each stage keeps its lifecycle colour from the board. -->
+<!-- Flow: one stacked bar of BUDs not yet closed, by stage, with a count
+     per stage underneath. Each stage keeps its lifecycle colour from the board. -->
 <template>
-  <AppPanel title="Flow" note="Where every open BUD is right now">
+  <AppPanel title="Flow" note="Every BUD not yet closed, by stage">
     <template #action><router-link to="/buds">Open board</router-link></template>
 
     <div class="flow__bar" role="img" :aria-label="summary">
       <span
-        v-for="stage in filled"
+        v-for="stage in loading ? [] : filled"
         :key="stage.status"
         class="flow__segment"
         :style="{ flexGrow: stage.count, background: swatch(stage.color) }"
       />
-      <span v-if="!filled.length" class="flow__segment flow__segment--empty" />
+      <span v-if="loading || !filled.length" class="flow__segment flow__segment--empty" />
     </div>
 
     <div class="flow__legend-box">
       <ul class="flow__legend" :style="{ '--stage-count': stages.length }">
-        <li v-for="stage in stages" :key="stage.status">
-          <router-link to="/buds" class="flow__stage">
-            <span class="flow__name">
-              <span class="flow__dot" :style="{ background: swatch(stage.color) }" aria-hidden="true" />
-              {{ stage.label }}
-            </span>
-            <span class="flow__count">{{ stage.count }}</span>
-          </router-link>
+        <li v-for="stage in stages" :key="stage.status" class="flow__stage">
+          <span class="flow__name">
+            <span class="flow__dot" :style="{ background: swatch(stage.color) }" aria-hidden="true" />
+            {{ stage.label }}
+          </span>
+          <span class="flow__count">{{ loading ? '–' : stage.count }}</span>
         </li>
       </ul>
     </div>
@@ -51,7 +49,7 @@ import { computed } from 'vue'
 import AppPanel from '@/components/common/AppPanel.vue'
 import type { FlowStage } from '@/utils/dashboardOverview'
 
-const props = defineProps<{ stages: FlowStage[] }>()
+const props = defineProps<{ stages: FlowStage[]; loading: boolean }>()
 
 const filled = computed(() => props.stages.filter(s => s.count > 0))
 const summary = computed(() =>
@@ -107,16 +105,8 @@ function swatch(themeColor: string): string {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 8px;
-  border-radius: 8px;
-  color: inherit;
-  text-decoration: none;
-}
-.flow__stage:hover {
-  background: rgb(var(--v-theme-surface-variant));
-}
-.flow__stage:focus-visible {
-  outline: 2px solid var(--color-focus);
+  padding: 8px 4px 8px 0;
+  min-width: 0;
 }
 .flow__name {
   display: flex;

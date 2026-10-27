@@ -18,24 +18,23 @@
   <v-app>
     <!-- Phones get a top bar; the sidebar opens over the page from its
          menu button instead of taking a third of the screen. -->
-    <MobileTopBar v-if="phone" v-model:drawer="drawerOpen" />
+    <MobileTopBar v-if="compact" v-model:drawer="overlayOpen" />
 
     <!-- Sidebar -->
     <v-navigation-drawer
-      :model-value="phone ? drawerOpen : true"
-      :rail="rail && !phone"
-      :permanent="!phone"
-      :temporary="phone"
+      :model-value="compact ? overlayOpen : true"
+      :rail="rail"
+      :permanent="!compact"
+      :temporary="compact"
       color="surface"
       :width="248"
       rail-width="68"
-      :expand-on-hover="!phone && !notificationMenuOpen"
+      :expand-on-hover="!compact && !notificationMenuOpen"
       class="app-sidebar"
-      @update:model-value="drawerOpen = $event"
-      @update:rail="rail = $event"
+      @update:model-value="overlayOpen = $event"
     >
       <div
-        v-if="!phone"
+        v-if="!compact"
         class="pa-4 pb-2 d-flex align-center"
         :class="rail ? 'justify-center' : 'justify-space-between'"
       >
@@ -74,9 +73,9 @@
         <UserMenu :rail="rail" />
 
         <!-- Collapse / expand toggle — sticky bottom of the drawer. -->
-        <v-divider v-if="!phone" />
+        <v-divider v-if="!compact" />
         <div
-          v-if="!phone"
+          v-if="!compact"
           class="d-flex pa-1"
           :class="rail ? 'justify-center' : 'justify-end pe-2'"
         >
@@ -115,9 +114,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { useDisplay } from 'vuetify'
+import { onMounted, ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import BrandLogo from '@/components/common/BrandLogo.vue'
 import NotificationBell from '@/components/common/NotificationBell.vue'
@@ -127,6 +124,7 @@ import MobileTopBar from '@/components/layout/MobileTopBar.vue'
 import PeopleNav from '@/components/layout/PeopleNav.vue'
 import SettingsNav from '@/components/layout/SettingsNav.vue'
 import UserMenu from '@/components/layout/UserMenu.vue'
+import { useAppDrawer } from '@/composables/useAppDrawer'
 import { usePermissions } from '@/composables/usePermissions'
 import { useNavigationProgress } from '@/composables/useNavigationProgress'
 
@@ -136,20 +134,9 @@ const { canAccessEngineering, canManageMembers } = usePermissions()
 // Driven by the router guards — true while any route navigation resolves.
 const { navigating } = useNavigationProgress()
 
-// Collapsed-sidebar preference, persisted across reloads. `expand-on-hover`
-// on the drawer means even in rail mode the user can peek labels without
-// flipping this flag.
-const RAIL_KEY = 'bodhiorchard_sidebar_rail'
-const rail = ref(localStorage.getItem(RAIL_KEY) === 'true')
-
-// Below this width the sidebar becomes an overlay opened from the top bar.
-const PHONE_MAX = 767
-const display = useDisplay()
-const phone = computed(() => display.width.value <= PHONE_MAX)
-const drawerOpen = ref(false)
-// Picking a page from the overlay closes it.
-const route = useRoute()
-watch(() => route.fullPath, () => { drawerOpen.value = false })
+// Rail on wide screens (`expand-on-hover` still peeks the labels), an
+// overlay opened from the top bar on phones and small tablets.
+const { compact, rail, overlayOpen, toggleRail } = useAppDrawer()
 
 // While the notification bell's dropdown is open, freeze the drawer's
 // auto-collapse behaviour. Without this, moving the mouse off the
@@ -157,11 +144,6 @@ watch(() => route.fullPath, () => { drawerOpen.value = false })
 // which unmounts the bell trigger and dismisses the menu before the
 // click lands.
 const notificationMenuOpen = ref(false)
-watch(rail, (v) => localStorage.setItem(RAIL_KEY, String(v)))
-
-function toggleRail(): void {
-  rail.value = !rail.value
-}
 
 onMounted(() => {
   if (authStore.isAuthenticated && !authStore.user) {

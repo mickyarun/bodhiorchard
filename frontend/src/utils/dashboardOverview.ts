@@ -16,6 +16,7 @@
 import {
   BUD_PRIORITY_WEIGHTS,
   BUD_STATUS_COLORS,
+  BUD_STATUS_ORDER,
   BUD_STATUS_LABELS,
   budRef,
   type BUDListItem,
@@ -47,12 +48,16 @@ export interface FlowStage {
   color: string
 }
 
-/** Open BUDs per stage, in lifecycle order, through prod. */
+/**
+ * BUDs not yet closed, per stage, in lifecycle order through prod. A stage
+ * the org has switched off still shows while BUDs sit in it.
+ */
 export function flowStages(buds: BUDListItem[], phaseOrder: BUDStatus[]): FlowStage[] {
   const counts = new Map<BUDStatus, number>()
   for (const bud of buds) counts.set(bud.status, (counts.get(bud.status) ?? 0) + 1)
-  return phaseOrder
+  return BUD_STATUS_ORDER
     .filter(s => s !== 'closed' && s !== 'discarded')
+    .filter(s => phaseOrder.includes(s) || counts.has(s))
     .map(status => ({
       status,
       label: stageShortLabel(status),
@@ -83,13 +88,12 @@ export function overviewKpis(
   uatEnabled: boolean,
 ): Kpi[] {
   const inFlight = buds.filter(isInFlight)
-  const reviewStages: BUDStatus[] = uatEnabled ? ['code_review', 'uat'] : ['code_review']
   const last: Kpi = pendingLeave === null
     ? {
         label: 'Open bugs',
         value: inFlight.reduce((n, b) => n + b.open_bug_count, 0),
         sub: 'On BUDs in flight',
-        to: '/bugs',
+        to: '/buds',
       }
     : { label: 'Leave requests', value: pendingLeave, sub: 'Waiting for your approval', to: '/leave/approvals' }
   return [
@@ -107,7 +111,8 @@ export function overviewKpis(
     },
     {
       label: 'Waiting on review',
-      value: countIn(buds, reviewStages),
+      // UAT counts even when switched off, for BUDs that were already in it.
+      value: countIn(buds, ['code_review', 'uat']),
       sub: uatEnabled ? 'Code review and UAT' : 'Code review',
       to: '/buds',
     },
@@ -130,29 +135,42 @@ const REASONS: Partial<Record<BUDStatus, { why: string; action: string }>> = {
   uat: { why: 'needs sign-off', action: 'Sign off' },
 }
 
+export interface AttentionList {
+  /** The first ``limit`` items. */
+  items: AttentionItem[]
+  /** How many need attention in all, shown or not. */
+  total: number
+}
+
 /**
  * BUDs that need a person: anything in code review or UAT, and every P0
  * still in flight. Highest priority first, then the longest untouched.
+ * People who can't pass a phase gate (``canApprove`` false) get "Open"
+ * rather than "Review" or "Sign off".
  */
-export function attentionItems(buds: BUDListItem[], limit: number): AttentionItem[] {
-  return buds
+export function attentionItems(
+  buds: BUDListItem[],
+  limit: number,
+  canApprove: boolean,
+): AttentionList {
+  const waiting = buds
     .filter(b => !!REASONS[b.status] || (b.priority === 'P0' && isInFlight(b)))
     .sort((a, b) =>
       BUD_PRIORITY_WEIGHTS[a.priority] - BUD_PRIORITY_WEIGHTS[b.priority]
       || a.updated_at.localeCompare(b.updated_at))
-    .slice(0, limit)
-    .map(b => {
-      const reason = REASONS[b.status] ?? { why: 'highest priority', action: 'Open' }
-      return {
-        key: b.id,
-        ref: budRef(b.bud_number),
-        priority: b.priority,
-        title: b.title,
-        meta: [BUD_STATUS_LABELS[b.status], b.assignee_name ?? 'Unassigned', reason.why].join(' · '),
-        action: reason.action,
-        to: `/buds/${b.id}`,
-      }
-    })
+  const items = waiting.slice(0, limit).map(b => {
+    const reason = REASONS[b.status] ?? { why: 'highest priority', action: 'Open' }
+    return {
+      key: b.id,
+      ref: budRef(b.bud_number),
+      priority: b.priority,
+      title: b.title,
+      meta: [BUD_STATUS_LABELS[b.status], b.assignee_name ?? 'Unassigned', reason.why].join(' · '),
+      action: canApprove ? reason.action : 'Open',
+      to: `/buds/${b.id}`,
+    }
+  })
+  return { items, total: waiting.length }
 }
 
 /** "Good morning" / "Good afternoon" / "Good evening" for the hour. */

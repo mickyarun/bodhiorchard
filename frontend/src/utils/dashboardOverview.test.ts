@@ -44,6 +44,11 @@ describe('flowStages', () => {
     const order = BUD_STATUS_ORDER.filter(s => s !== 'uat')
     expect(flowStages([], order).some(s => s.status === 'uat')).toBe(false)
   })
+
+  it('keeps a disabled stage while BUDs are still in it', () => {
+    const order = BUD_STATUS_ORDER.filter(s => s !== 'uat')
+    expect(flowStages([bud({ status: 'uat' })], order).find(s => s.status === 'uat')?.count).toBe(1)
+  })
 })
 
 describe('overviewKpis', () => {
@@ -61,11 +66,11 @@ describe('overviewKpis', () => {
 
   it('shows open bugs on work in flight to everyone else', () => {
     const last = overviewKpis(buds, null, true)[3]
-    expect(last).toMatchObject({ label: 'Open bugs', value: 2, to: '/bugs' })
+    expect(last).toMatchObject({ label: 'Open bugs', value: 2, to: '/buds' })
   })
 
-  it('leaves UAT out of the review count when the org has no UAT stage', () => {
-    expect(overviewKpis(buds, null, false)[2]).toMatchObject({ value: 1, sub: 'Code review' })
+  it('names only code review when the org has no UAT stage', () => {
+    expect(overviewKpis(buds, null, false)[2]).toMatchObject({ value: 2, sub: 'Code review' })
   })
 })
 
@@ -76,15 +81,22 @@ describe('attentionItems', () => {
       bud({ status: 'development', priority: 'P0', title: 'urgent', assignee_name: 'Meera Iyer' }),
       bud({ status: 'prod', priority: 'P0', title: 'already live' }),
       bud({ status: 'development', priority: 'P1', title: 'just working' }),
-    ], 5)
-    expect(items.map(i => i.title)).toEqual(['urgent', 'review me'])
-    expect(items[0]).toMatchObject({ action: 'Open', meta: 'Development · Meera Iyer · highest priority' })
-    expect(items[1].action).toBe('Review')
+    ], 5, true)
+    expect(items.items.map(i => i.title)).toEqual(['urgent', 'review me'])
+    expect(items.items[0]).toMatchObject({ action: 'Open', meta: 'Development · Meera Iyer · highest priority' })
+    expect(items.items[1].action).toBe('Review')
   })
 
-  it('caps the list', () => {
+  it('caps the list but still counts everything waiting', () => {
     const many = Array.from({ length: 8 }, () => bud({ status: 'uat' }))
-    expect(attentionItems(many, 5)).toHaveLength(5)
+    const list = attentionItems(many, 5, true)
+    expect(list.items).toHaveLength(5)
+    expect(list.total).toBe(8)
+  })
+
+  it('offers only Open to people who cannot pass a phase gate', () => {
+    const list = attentionItems([bud({ status: 'code_review' }), bud({ status: 'uat' })], 5, false)
+    expect(list.items.map(i => i.action)).toEqual(['Open', 'Open'])
   })
 })
 

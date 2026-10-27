@@ -19,7 +19,8 @@
 <template>
   <AppPanel title="Time off coming up">
     <template #action><router-link to="/leave/team">Calendar</router-link></template>
-    <ul v-if="entries.length" class="time-off">
+    <p v-if="error" class="time-off__empty">{{ error }}</p>
+    <ul v-else-if="entries.length" class="time-off">
       <li v-for="entry in entries" :key="entry.request_id" class="time-off__row">
         <v-avatar size="30" color="primary" variant="tonal" class="time-off__avatar" aria-hidden="true">
           {{ initialsOf(entry.user.name) }}
@@ -42,7 +43,7 @@ import type { CalendarEntry } from '@/types/leave'
 import { initialsOf } from '@/utils/avatar'
 import { formatDayRange } from '@/utils/leaveDates'
 
-defineProps<{ entries: CalendarEntry[] }>()
+defineProps<{ entries: CalendarEntry[]; error: string }>()
 </script>
 
 <style scoped>

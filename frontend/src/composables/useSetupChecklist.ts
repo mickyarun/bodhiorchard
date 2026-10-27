@@ -17,7 +17,7 @@ import api from '@/services/api'
 import { useScanSocket, type RepoScanWarning, type ScanStatusData } from '@/composables/useScanSocket'
 import { useScanStore } from '@/stores/scan'
 import type { SetupChecklistStatus } from '@/types/setup'
-import { setupChecklistItems, type SetupStep } from '@/utils/setupChecklist'
+import { setupChecklistItems, setupPollingDone, type SetupStep } from '@/utils/setupChecklist'
 
 // Storage key predates the rename; installs already carry it.
 const DISMISS_KEY = 'bodhiorchard_checklist_dismissed'
@@ -54,7 +54,6 @@ export function useSetupChecklist() {
   )
   const doneCount = computed(() => steps.value.filter(s => s.done).length)
   const nextStep = computed(() => steps.value.find(s => !s.done) ?? null)
-  const requiredDone = computed(() => steps.value.every(s => s.done || s.optional))
   const visible = computed(() => !dismissed.value && !!status.value && !!nextStep.value)
 
   function track(scanId: string): void {
@@ -98,7 +97,7 @@ export function useSetupChecklist() {
         startPolling()
       }
       if (data.scanInProgress && data.scanId) track(data.scanId)
-      if (requiredDone.value && !data.scanInProgress) stopPolling()
+      if (setupPollingDone(data)) stopPolling()
     } catch {
       // The card is a convenience; a failed poll just leaves the last state.
     }

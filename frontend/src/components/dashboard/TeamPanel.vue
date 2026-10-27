@@ -43,7 +43,8 @@ import AppPanel from '@/components/common/AppPanel.vue'
 import type { MemberActivity } from '@/types/dashboard'
 
 const props = defineProps<{
-  members: MemberActivity[]
+  /** Null while presence is unknown (not loaded, or failed). */
+  members: MemberActivity[] | null
   quizPlayable: boolean
   streak: number
 }>()
@@ -51,7 +52,8 @@ const props = defineProps<{
 const emit = defineEmits<{ quiz: []; games: [] }>()
 
 const counts = computed(() => {
-  const by = (p: MemberActivity['presence']) => props.members.filter(m => m.presence === p).length
+  const by = (p: MemberActivity['presence']): string =>
+    props.members ? String(props.members.filter(m => m.presence === p).length) : '–'
   return [
     { label: 'Online', value: by('active') },
     { label: 'On a break', value: by('on_break') },

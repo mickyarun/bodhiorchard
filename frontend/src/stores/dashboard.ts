@@ -21,6 +21,8 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const treeData = ref<TreeData | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
+  /** When ``treeData`` was last fetched. */
+  const loadedAt = ref<Date | null>(null)
 
   async function fetchTreeData(refresh = false): Promise<void> {
     loading.value = true
@@ -30,8 +32,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
       if (refresh) params.refresh = 'true'
       const { data } = await api.get('/v1/dashboard/tree-data', { params, timeout: 120000 })
       treeData.value = data
+      loadedAt.value = new Date()
     } catch {
-      error.value = 'Failed to load tree data.'
+      error.value = "Couldn't load the code map. Reload to try again."
     } finally {
       loading.value = false
     }
@@ -41,6 +44,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     treeData,
     loading,
     error,
+    loadedAt,
     fetchTreeData,
   }
 })

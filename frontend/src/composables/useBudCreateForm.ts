@@ -55,6 +55,9 @@ export function useBudCreateForm(open: Ref<boolean>) {
   const description = ref('')
   const priority = ref<BUDPriority>('P2')
   const creating = ref(false)
+  const error = ref('')
+  /** Which expansion panels are open; empty means Advanced is closed. */
+  const openPanels = ref<string[]>([])
   const stageSkillPicks = ref<Record<string, string | null>>({})
   const autoGenerate = ref<Record<string, boolean>>({})
   const skillsLoading = computed(() => skillsStore.loading)
@@ -82,6 +85,7 @@ export function useBudCreateForm(open: Ref<boolean>) {
     priority.value = 'P2'
     stageSkillPicks.value = {}
     autoGenerate.value = {}
+    openPanels.value = []
   }
 
   watch(open, async isOpen => {
@@ -98,6 +102,7 @@ export function useBudCreateForm(open: Ref<boolean>) {
   async function submit(): Promise<void> {
     if (!title.value.trim() || creating.value) return
     creating.value = true
+    error.value = ''
     // Only non-default picks are stored, so the BUD keeps following whatever
     // the org marks as default later instead of pinning today's skill.
     const overrides: Record<string, string> = {}
@@ -115,7 +120,10 @@ export function useBudCreateForm(open: Ref<boolean>) {
       priority.value,
     )
     creating.value = false
-    if (!bud) return
+    if (!bud) {
+      error.value = budStore.error || "Couldn't create the BUD. Try again."
+      return
+    }
     open.value = false
     reset()
     void router.push(`/buds/${bud.id}`)
@@ -126,6 +134,8 @@ export function useBudCreateForm(open: Ref<boolean>) {
     description,
     priority,
     creating,
+    error,
+    openPanels,
     stageSkillPicks,
     autoGenerate,
     skillsLoading,

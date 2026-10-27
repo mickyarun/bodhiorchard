@@ -17,18 +17,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useMemberDirectory } from '@/composables/useMemberDirectory'
-import { BUD_STATUS_LABELS, BUD_PRIORITIES } from '@/types'
+import { BUD_PRIORITIES, BUD_PRIORITY_COLORS, BUD_STATUS_LABELS, budRef } from '@/types'
 import type { BUDDocument, BUDStatus, BUDPriority } from '@/types'
 import { formatDate } from '@/utils/date'
-
-// Color contract for the priority chip — mirrors BUDBoard.vue so the
-// detail header and the kanban card use identical theme tokens.
-const PRIORITY_COLORS: Record<BUDPriority, string> = {
-  P0: 'error',
-  P1: 'warning',
-  P2: 'on-surface-variant',
-  P3: 'on-surface-variant',
-}
 
 const props = defineProps<{
   bud: BUDDocument
@@ -111,7 +102,7 @@ function saveTitle(): void {
     <div class="flex-grow-1">
       <div class="d-flex align-center ga-2 mb-1 flex-wrap">
         <span class="text-caption text-medium-emphasis">
-          BUD-{{ String(bud.bud_number).padStart(3, '0') }}
+          {{ budRef(bud.bud_number) }}
         </span>
         <v-chip :color="statusColor" variant="tonal" size="x-small" label>
           {{ BUD_STATUS_LABELS[bud.status] }}
@@ -124,7 +115,7 @@ function saveTitle(): void {
           <template #activator="{ props: priorityProps }">
             <v-chip
               v-bind="priorityProps"
-              :color="PRIORITY_COLORS[bud.priority]"
+              :color="BUD_PRIORITY_COLORS[bud.priority]"
               variant="tonal"
               size="x-small"
               label
@@ -148,7 +139,7 @@ function saveTitle(): void {
         </v-menu>
         <v-chip
           v-else
-          :color="PRIORITY_COLORS[bud.priority]"
+          :color="BUD_PRIORITY_COLORS[bud.priority]"
           variant="tonal"
           size="x-small"
           label

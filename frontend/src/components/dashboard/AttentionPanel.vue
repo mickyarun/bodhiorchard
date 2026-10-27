@@ -19,7 +19,7 @@
 <template>
   <AppPanel title="Needs your attention" :note="countLabel" flush>
     <ul v-if="total" class="attention">
-      <li v-for="item in items" :key="item.key" class="attention__row">
+      <li v-for="item in attention.items" :key="item.key" class="attention__row">
         <span class="attention__ref">{{ item.ref }}</span>
         <BudPriorityChip :priority="item.priority" />
         <span class="attention__text">
@@ -47,14 +47,14 @@
 import { computed } from 'vue'
 import AppPanel from '@/components/common/AppPanel.vue'
 import BudPriorityChip from '@/components/buds/BudPriorityChip.vue'
-import type { AttentionItem } from '@/utils/dashboardOverview'
+import type { AttentionList } from '@/utils/dashboardOverview'
 
 const props = defineProps<{
-  items: AttentionItem[]
+  attention: AttentionList
   pendingLeave: number | null
 }>()
 
-const total = computed(() => props.items.length + (props.pendingLeave ? 1 : 0))
+const total = computed(() => props.attention.total + (props.pendingLeave ? 1 : 0))
 const countLabel = computed(() => (total.value === 1 ? '1 item' : `${total.value} items`))
 const leaveTitle = computed(() =>
   props.pendingLeave === 1 ? '1 leave request waiting' : `${props.pendingLeave} leave requests waiting`,

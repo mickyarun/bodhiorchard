@@ -50,8 +50,11 @@ export function useGardenTakeover(target: Ref<TakeoverTarget | null>, active: ()
 
   function onKeyDown(e: KeyboardEvent): void {
     if (e.key !== 't' && e.key !== 'T') return
-    const tag = (e.target as HTMLElement | null)?.tagName
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+    const target = e.target as HTMLElement | null
+    if (!target) return
+    const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable
+    // Keys pressed inside a dialog or menu belong to it, not the garden.
+    if (typing || target.closest('.v-overlay')) return
     if (active()) toggle()
   }
 

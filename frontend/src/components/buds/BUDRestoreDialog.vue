@@ -57,7 +57,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useBUDStore } from '@/stores/bud'
-import { BUD_STATUS_LABELS } from '@/types'
+import { BUD_STATUS_LABELS, budRef } from '@/types'
 import type { BUDDocument, BUDListItem } from '@/types'
 
 const emit = defineEmits<{
@@ -74,11 +74,7 @@ const snackbar = ref(false)
 const message = ref('')
 const isError = ref(false)
 
-const targetLabel = computed(() => (target.value ? budRef(target.value) : ''))
-
-function budRef(bud: BUDListItem): string {
-  return `BUD-${String(bud.bud_number).padStart(3, '0')}`
-}
+const targetLabel = computed(() => (target.value ? budRef(target.value.bud_number) : ''))
 
 /** Open the confirmation for one discarded BUD. */
 function open(bud: BUDListItem): void {
@@ -97,7 +93,7 @@ async function confirm(): Promise<void> {
     // card moves column and the detail page re-renders on its own — the
     // only thing left is telling the user where the BUD went.
     message.value = result
-      ? `${budRef(bud)} restored to ${BUD_STATUS_LABELS[result.status]}`
+      ? `${budRef(bud.bud_number)} restored to ${BUD_STATUS_LABELS[result.status]}`
       : budStore.error || 'Failed to restore BUD'
     snackbar.value = true
     if (result) emit('restored', result)

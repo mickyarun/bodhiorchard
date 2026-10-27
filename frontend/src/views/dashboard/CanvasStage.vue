@@ -15,7 +15,7 @@
  -->
 
 <!-- The Graph or Garden canvas in a bordered frame, with its loading and
-     empty states, live race matches and the takeover hint. Exposes the
+     empty states and the takeover hint. Exposes the
      garden's controls so the dashboard can drive takeover and links. -->
 <template>
   <div class="canvas-stage">
@@ -25,9 +25,10 @@
     <div v-else-if="!data" class="canvas-stage__state">
       <BrandLogo :size="48" :show-text="false" class="canvas-stage__mark" />
       <p class="canvas-stage__title">No code map yet</p>
-      <p class="canvas-stage__hint">
+      <p v-if="canViewCodeSettings" class="canvas-stage__hint">
         Add a repository in <router-link to="/settings/code">Settings</router-link> and run a scan.
       </p>
+      <p v-else class="canvas-stage__hint">It appears once an admin adds a repository and runs a scan.</p>
     </div>
     <Transition v-else name="fade" mode="out-in">
       <TreeContent
@@ -48,8 +49,6 @@
       />
     </Transition>
 
-    <LiveMatchesPanel />
-
     <div v-if="mode === 'garden' && data" class="canvas-stage__hint-chip">
       <template v-if="inControl"><kbd>Esc</kbd> to exit</template>
       <template v-else>Press <kbd>T</kbd> to take control</template>
@@ -60,8 +59,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import BrandLogo from '@/components/common/BrandLogo.vue'
-import LiveMatchesPanel from '@/components/minigames/LiveMatchesPanel.vue'
 import type { DashboardViewMode } from '@/composables/useDashboardViewMode'
+import { usePermissions } from '@/composables/usePermissions'
 import type { TreeData } from '@/types/dashboard'
 import GraphContent from './GraphContent.vue'
 import TreeContent from './TreeContent.vue'
@@ -82,6 +81,7 @@ const emit = defineEmits<{
   'graph-selection': [selected: boolean]
 }>()
 
+const { canViewCodeSettings } = usePermissions()
 const treeRef = ref<InstanceType<typeof TreeContent> | null>(null)
 const graphRef = ref<InstanceType<typeof GraphContent> | null>(null)
 

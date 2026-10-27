@@ -19,19 +19,22 @@
      screens, people cards after the work cards. -->
 <template>
   <div class="overview">
-    <KpiTiles :kpis="overview.kpis.value" />
-    <AppCallout v-if="overview.error.value" variant="error">{{ overview.error.value }}</AppCallout>
+    <KpiTiles v-if="canViewBuds" :kpis="kpis" :loading="loading" />
+    <AppCallout v-if="budError" variant="error">{{ budError }}</AppCallout>
+    <AppCallout v-if="codeMapError" variant="error">
+      Couldn't load agent activity and team presence. Reload to try again.
+    </AppCallout>
     <div class="overview__grid">
       <div class="overview__col">
-        <FlowPanel :stages="overview.stages.value" />
-        <AttentionPanel :items="overview.attention.value" :pending-leave="overview.pendingLeave.value" />
-        <AgentActivityPanel :activity="treeData?.agent_activity ?? []" />
+        <FlowPanel v-if="canViewBuds" :stages="stages" :loading="loading" />
+        <AttentionPanel :attention="attention" :pending-leave="pendingLeave" />
+        <AgentActivityPanel v-if="codeMap" :activity="codeMap.agent_activity" :as-of="codeMapAsOf" />
       </div>
       <div class="overview__col">
         <SetupCard />
-        <TimeOffPanel :entries="overview.timeOff.value" />
+        <TimeOffPanel :entries="timeOff" :error="timeOffError" />
         <TeamPanel
-          :members="treeData?.members ?? []"
+          :members="codeMap?.members ?? null"
           :quiz-playable="quizPlayable"
           :streak="streak"
           @quiz="emit('quiz')"
@@ -51,12 +54,27 @@ import KpiTiles from '@/components/dashboard/KpiTiles.vue'
 import SetupCard from '@/components/dashboard/SetupCard.vue'
 import TeamPanel from '@/components/dashboard/TeamPanel.vue'
 import TimeOffPanel from '@/components/dashboard/TimeOffPanel.vue'
-import type { useDashboardOverview } from '@/composables/useDashboardOverview'
 import type { TreeData } from '@/types/dashboard'
+import type { AttentionList, FlowStage, Kpi } from '@/utils/dashboardOverview'
+import type { CalendarEntry } from '@/types/leave'
 
 defineProps<{
-  overview: ReturnType<typeof useDashboardOverview>
-  treeData: TreeData | null
+  /** Without it the BUD numbers and flow are left out. */
+  canViewBuds: boolean
+  kpis: Kpi[]
+  stages: FlowStage[]
+  attention: AttentionList
+  pendingLeave: number | null
+  timeOff: CalendarEntry[]
+  timeOffError: string
+  /** First load of the BUD list. */
+  loading: boolean
+  budError: string
+  /** Agent activity and presence; null until loaded or when it failed. */
+  codeMap: TreeData | null
+  codeMapError: string | null
+  /** When the code map was fetched; agent activity is as of then. */
+  codeMapAsOf: Date | null
   quizPlayable: boolean
   streak: number
 }>()

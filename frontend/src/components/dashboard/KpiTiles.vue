@@ -17,10 +17,10 @@
 <!-- Headline numbers: one linked tile each, four across on desktop, two
      on tablets, stacked pairs on phones. -->
 <template>
-  <section aria-label="Key numbers" class="kpi-tiles">
+  <section aria-label="Key numbers" class="kpi-tiles" :aria-busy="loading">
     <router-link v-for="kpi in kpis" :key="kpi.label" :to="kpi.to" class="kpi-tile">
       <span class="kpi-tile__label">{{ kpi.label }}</span>
-      <span class="kpi-tile__value">{{ kpi.value }}</span>
+      <span class="kpi-tile__value">{{ loading ? '–' : kpi.value }}</span>
       <span class="kpi-tile__sub">{{ kpi.sub }}</span>
     </router-link>
   </section>
@@ -29,7 +29,7 @@
 <script setup lang="ts">
 import type { Kpi } from '@/utils/dashboardOverview'
 
-defineProps<{ kpis: Kpi[] }>()
+defineProps<{ kpis: Kpi[]; loading: boolean }>()
 </script>
 
 <style scoped>

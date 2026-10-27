@@ -34,8 +34,12 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import type { DashboardViewMode } from '@/composables/useDashboardViewMode'
+import { useAuthStore } from '@/stores/auth'
+import { greetingFor } from '@/utils/dashboardOverview'
+import { firstName } from '@/utils/leave'
 
 const VIEW_OPTIONS: { label: string; value: DashboardViewMode }[] = [
   { label: 'Overview', value: 'overview' },
@@ -43,15 +47,31 @@ const VIEW_OPTIONS: { label: string; value: DashboardViewMode }[] = [
   { label: 'Garden', value: 'garden' },
 ]
 
-defineProps<{
-  greeting: string
-  subtitle: string
+const props = defineProps<{
+  /** BUDs in flight; null for people who can't see BUDs. */
+  inFlight: number | null
+  /** People assigned to those BUDs. */
+  people: number
   standupOpen: boolean
   canCreate: boolean
 }>()
 
 const view = defineModel<DashboardViewMode>({ required: true })
 const emit = defineEmits<{ standup: []; 'new-bud': [] }>()
+const auth = useAuthStore()
+
+const greeting = computed(() => {
+  const name = auth.user?.name ? `, ${firstName(auth.user.name)}` : ''
+  return `${greetingFor(new Date().getHours())}${name}`
+})
+
+const subtitle = computed(() => {
+  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
+  if (props.inFlight === null) return today
+  const buds = props.inFlight === 1 ? '1 BUD' : `${props.inFlight} BUDs`
+  const across = props.people ? ` across ${props.people === 1 ? '1 person' : `${props.people} people`}` : ''
+  return `${today} · ${buds} in flight${across}`
+})
 </script>
 
 <style scoped>

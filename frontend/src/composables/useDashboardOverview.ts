@@ -14,12 +14,14 @@
 
 import { computed, onMounted, ref } from 'vue'
 import api from '@/services/api'
+import { usePermissions } from '@/composables/usePermissions'
 import { usePhaseOrder } from '@/composables/usePhaseOrder'
 import { useBUDStore } from '@/stores/bud'
 import { useLeaveStore } from '@/stores/leave'
 import { useSettingsStore } from '@/stores/settings'
 import type { CalendarEntry, CalendarRead } from '@/types/leave'
 import { attentionItems, flowStages, isInFlight, overviewKpis } from '@/utils/dashboardOverview'
+import { extractApiError } from '@/utils/errors'
 import { addDays, toIsoDate } from '@/utils/leaveDates'
 
 const ATTENTION_LIMIT = 5
@@ -36,8 +38,13 @@ export function useDashboardOverview() {
   const settingsStore = useSettingsStore()
   const { phaseOrder } = usePhaseOrder()
   const leaveStore = useLeaveStore()
+  const { hasPermission, canViewConnections } = usePermissions()
+  /** Support and other roles without it see the people cards only. */
+  const canViewBuds = computed(() => hasPermission('buds:view'))
+  const budLoadError = ref('')
 
   const timeOff = ref<CalendarEntry[]>([])
+  const timeOffError = ref('')
 
   /** The approver's queue size; null for people who approve nothing. */
   const pendingLeave = computed(() =>
@@ -50,10 +57,12 @@ export function useDashboardOverview() {
   )
   const kpis = computed(() => overviewKpis(budStore.buds, pendingLeave.value, uatEnabled.value))
   const stages = computed(() => flowStages(budStore.buds, phaseOrder.value))
-  const attention = computed(() => attentionItems(budStore.buds, ATTENTION_LIMIT))
+  const attention = computed(() =>
+    attentionItems(budStore.buds, ATTENTION_LIMIT, hasPermission('buds:approve')))
 
   async function loadTimeOff(): Promise<void> {
     const start = toIsoDate(new Date())
+    timeOffError.value = ''
     try {
       const { data } = await api.get<CalendarRead>('/v1/leave/calendar', {
         params: { start, end: addDays(start, TIME_OFF_DAYS) },
@@ -62,22 +71,33 @@ export function useDashboardOverview() {
         .filter(e => e.kind !== 'wfh' && (e.status === 'approved' || e.status === 'pending'))
         .sort((a, b) => a.start_date.localeCompare(b.start_date))
         .slice(0, TIME_OFF_LIMIT)
-    } catch {
+    } catch (err) {
       timeOff.value = []
+      timeOffError.value = extractApiError(err, "Couldn't load upcoming time off.")
     }
   }
 
+  async function loadBuds(): Promise<void> {
+    await budStore.fetchBUDs()
+    // Read once here: the store's error is shared with create and update.
+    budLoadError.value = budStore.error
+  }
+
   onMounted(() => {
-    void budStore.fetchBUDs()
-    // The phase order needs the org's UAT setting.
-    if (!settingsStore.connectionsLoaded) void settingsStore.fetchConnections()
+    if (canViewBuds.value) void loadBuds()
+    // The phase order needs the org's UAT setting; without access to it
+    // the phase order assumes UAT is on, as the board does.
+    if (canViewConnections.value && !settingsStore.connectionsLoaded) {
+      void settingsStore.fetchConnections()
+    }
     void leaveStore.fetchApprovalCount()
     void loadTimeOff()
   })
 
   return {
+    canViewBuds,
     loading: computed(() => budStore.loading && budStore.buds.length === 0),
-    error: computed(() => budStore.error),
+    error: budLoadError,
     inFlightCount: computed(() => inFlight.value.length),
     peopleInFlight,
     kpis,
@@ -85,5 +105,6 @@ export function useDashboardOverview() {
     attention,
     pendingLeave,
     timeOff,
+    timeOffError,
   }
 }

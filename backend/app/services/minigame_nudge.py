@@ -126,7 +126,7 @@ def compose_digest(
     header = (
         f"🎮 *Garden Games* — hey {first}!" if first else "🎮 *Garden Games* — your daily nudge"
     )
-    footer = f"Play in the garden: {link}"
+    footer = f"Play from your dashboard: {link}"
     return "\n".join([header, *lines, footer])
 
 

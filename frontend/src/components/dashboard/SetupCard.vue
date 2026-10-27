@@ -21,6 +21,14 @@
   <AppPanel v-if="setup.visible.value" title="Finish setting up">
     <template #action>
       <span class="setup-card__count">{{ setup.doneCount.value }} of {{ setup.steps.value.length }}</span>
+      <v-btn
+        icon="mdi-close"
+        variant="text"
+        size="x-small"
+        aria-label="Hide setup card"
+        class="ml-1"
+        @click="setup.dismiss"
+      />
     </template>
 
     <v-progress-linear
@@ -41,6 +49,7 @@
     </div>
     <p v-else-if="next" class="setup-card__line">
       Next: <strong>{{ next.label }}</strong>. {{ next.why }}
+      <template v-if="next.route && !canDo(next)">An admin can finish this step.</template>
     </p>
 
     <AppCallout v-if="setup.warnings.value.length" variant="warning" class="mt-3">
@@ -60,7 +69,7 @@
       >
         Resume scan
       </v-btn>
-      <v-btn v-else-if="next?.route" variant="outlined" :to="next.route">{{ next.label }}</v-btn>
+      <v-btn v-else-if="next && canDo(next)" variant="outlined" :to="next.route">{{ next.label }}</v-btn>
       <v-btn variant="text" :aria-expanded="showAll" @click="showAll = !showAll">
         {{ showAll ? 'Hide steps' : 'See all steps' }}
       </v-btn>
@@ -74,13 +83,10 @@
           size="18"
           aria-hidden="true"
         />
-        <router-link v-if="step.route && !step.done" :to="step.route">{{ step.label }}</router-link>
+        <router-link v-if="!step.done && canDo(step)" :to="step.route!">{{ step.label }}</router-link>
         <span v-else :class="{ 'setup-card__done': step.done }">{{ step.label }}</span>
         <span v-if="step.optional" class="setup-card__optional">Optional</span>
         <span class="d-sr-only">{{ step.done ? 'done' : 'not done' }}</span>
-      </li>
-      <li class="setup-card__hide">
-        <v-btn variant="text" size="small" @click="setup.dismiss">Hide this card</v-btn>
       </li>
     </ul>
   </AppPanel>
@@ -91,9 +97,17 @@ import { computed, ref } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import AppPanel from '@/components/common/AppPanel.vue'
 import ScanPhaseTimeline from '@/components/scan/ScanPhaseTimeline.vue'
+import { usePermissions } from '@/composables/usePermissions'
 import { useSetupChecklist } from '@/composables/useSetupChecklist'
+import type { SetupStep } from '@/utils/setupChecklist'
 
 const setup = useSetupChecklist()
+const { hasPermission } = usePermissions()
+
+/** Whether this person can open the page where the step is done. */
+function canDo(step: SetupStep): boolean {
+  return !!step.route && (!step.permission || hasPermission(step.permission))
+}
 const showAll = ref(false)
 
 const next = computed(() => setup.nextStep.value)
@@ -151,8 +165,5 @@ const percent = computed(() => {
   margin-left: auto;
   font-size: 12px;
   color: rgb(var(--v-theme-on-surface-variant));
-}
-.setup-card__hide {
-  margin-top: 4px;
 }
 </style>

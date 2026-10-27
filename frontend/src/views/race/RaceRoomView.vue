@@ -139,6 +139,7 @@ import RaceThemeBackdrop from '@/components/race/RaceThemeBackdrop.vue'
 import CheckerFlagIcon from '@/components/race/CheckerFlagIcon.vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import RaceStaminaIntroDialog from '@/components/race/RaceStaminaIntroDialog.vue'
+import { GARDEN_ROUTE } from '@/composables/useDashboardViewMode'
 
 const props = defineProps<{
   roomId: string
@@ -216,7 +217,7 @@ async function connect(roomId: string): Promise<void> {
     cancelledToastOpen.value = true
     // Short delay so the toast is visible during the route change; once
     // the room is gone there's nothing useful to render on this page.
-    window.setTimeout(() => router.push('/dashboard'), 1200)
+    window.setTimeout(() => router.push(GARDEN_ROUTE), 1200)
   }
   try {
     await fresh.joinById(roomId, {
@@ -279,7 +280,7 @@ function confirmCancelAndLeave(): void {
 }
 
 function leaveImmediate(): void {
-  router.push('/dashboard')
+  router.push(GARDEN_ROUTE)
 }
 </script>
 

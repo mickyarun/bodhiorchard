@@ -47,7 +47,7 @@
         />
       </div>
 
-      <v-expansion-panels variant="accordion" class="mt-3">
+      <v-expansion-panels v-model="form.openPanels.value" variant="accordion" multiple class="mt-3">
         <v-expansion-panel value="advanced">
           <v-expansion-panel-title>
             <v-icon icon="mdi-tune-variant" size="20" class="mr-2" />
@@ -97,6 +97,8 @@
           </v-expansion-panel-text>
         </v-expansion-panel>
       </v-expansion-panels>
+
+      <AppCallout v-if="form.error.value" variant="error" class="mt-4">{{ form.error.value }}</AppCallout>
 
       <v-card-actions class="pa-0 mt-4">
         <v-spacer />

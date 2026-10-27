@@ -209,7 +209,7 @@
                   <v-chip
                     size="x-small"
                     variant="tonal"
-                    :color="priorityColor(bud.priority)"
+                    :color="BUD_PRIORITY_COLORS[bud.priority]"
                     :title="`Priority ${bud.priority}`"
                     label
                   >
@@ -324,7 +324,13 @@ import { useNotificationStore } from '@/stores/notifications'
 import { storeToRefs } from 'pinia'
 import { useSettingsStore } from '@/stores/settings'
 import { useTeamsStore } from '@/stores/teams'
-import { BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_PRIORITIES } from '@/types'
+import {
+  BUD_PRIORITIES,
+  BUD_PRIORITY_COLORS,
+  BUD_PRIORITY_WEIGHTS,
+  BUD_STATUS_COLORS,
+  BUD_STATUS_LABELS,
+} from '@/types'
 import type { BUDStatus, BUDPriority } from '@/types'
 import { usePhaseOrder } from '@/composables/usePhaseOrder'
 import { usePermissions } from '@/composables/usePermissions'
@@ -332,16 +338,6 @@ import BUDCreateDialog from '@/components/buds/BUDCreateDialog.vue'
 import BUDRestoreDialog from '@/components/buds/BUDRestoreDialog.vue'
 import YieldOfferNotice from '@/components/buds/YieldOfferNotice.vue'
 
-// Theme-token color for each priority. Used by the chip on each card
-// AND by the filter / sort surface so the visual contract is identical
-// across the board.
-const PRIORITY_COLORS: Record<BUDPriority, string> = {
-  P0: 'error',
-  P1: 'warning',
-  P2: 'on-surface-variant',
-  P3: 'on-surface-variant',
-}
-const PRIORITY_WEIGHTS: Record<BUDPriority, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }
 
 const budStore = useBUDStore()
 const settingsStore = useSettingsStore()
@@ -438,7 +434,7 @@ const filteredBudsByStatus = computed<Record<string, typeof budStore.buds>>(() =
       return numericQ !== '' && num.includes(numericQ)
     })
     out[status] = sort
-      ? [...filtered].sort((a, b) => PRIORITY_WEIGHTS[a.priority] - PRIORITY_WEIGHTS[b.priority])
+      ? [...filtered].sort((a, b) => BUD_PRIORITY_WEIGHTS[a.priority] - BUD_PRIORITY_WEIGHTS[b.priority])
       : filtered
   }
   return out
@@ -487,10 +483,6 @@ function formatDate(dateStr: string): string {
 
 function initials(name: string): string {
   return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
-}
-
-function priorityColor(priority: BUDPriority): string {
-  return PRIORITY_COLORS[priority]
 }
 
 // Phase order filtered by org settings (e.g. UAT may be disabled). The
