@@ -16,7 +16,7 @@ import { log } from "./lib/ui.js";
 const require = createRequire(import.meta.url);
 const { version } = require("../package.json") as { version: string };
 
-const DEFAULT_DIR = "bodhiorchard";
+const DEFAULT_DIR = "glideship";
 
 /** Run a command, translating expected failures into clean exits and unexpected
  *  ones into a single error line (no stack spew). */
@@ -36,10 +36,10 @@ async function run(action: () => Promise<void>): Promise<void> {
 
 const program = new Command();
 program
-  .name("bodhiorchard")
-  .description("Pull and run the Bodhiorchard stack locally with one command.")
+  .name("glideship")
+  .description("Pull and run the Glideship stack locally with one command.")
   .version(version)
-  .option("--project-dir <path>", "directory holding the install (defaults to ./bodhiorchard)");
+  .option("--project-dir <path>", "directory holding the install (defaults to ./glideship)");
 
 /** Resolve the working directory for a command from the global flag, defaulting
  *  to the current directory (the `init` hint tells users to cd into it). */

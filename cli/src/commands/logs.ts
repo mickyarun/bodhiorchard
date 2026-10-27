@@ -1,4 +1,4 @@
-// `bodhiorchard logs [service]` — follow container logs.
+// `glideship logs [service]` — follow container logs.
 import path from "node:path";
 import { preflight } from "../lib/preflight.js";
 import { PROJECT_NAME } from "../lib/config.js";

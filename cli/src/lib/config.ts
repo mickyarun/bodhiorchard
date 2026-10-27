@@ -3,6 +3,11 @@
 import fs from "fs-extra";
 import path from "node:path";
 
+// The product is now Glideship, but these two keep the original name on
+// purpose: docker compose prefixes every volume with PROJECT_NAME and every
+// command reads CONFIG_DIR, so renaming either would make existing installs
+// look empty. The Postgres user and database names in compose.ts and env.ts
+// stay for the same reason.
 export const PROJECT_NAME = "bodhiorchard";
 export const CONFIG_DIR = ".bodhiorchard";
 export const CONFIG_FILE = "config.json";
@@ -40,7 +45,7 @@ export async function readConfig(projectDir: string): Promise<ProjectConfig> {
   const file = configPath(projectDir);
   if (!(await fs.pathExists(file))) {
     throw new Error(
-      `No installer config found at ${file}. Run \`bodhiorchard init\` first, then run this ` +
+      `No installer config found at ${file}. Run \`glideship init\` first, then run this ` +
         `command from the install directory (or pass --project-dir <path>).`,
     );
   }
@@ -48,7 +53,7 @@ export async function readConfig(projectDir: string): Promise<ProjectConfig> {
   if (config.version !== CONFIG_VERSION) {
     throw new Error(
       `Config version ${config.version} is not supported by this CLI (expects ${CONFIG_VERSION}). ` +
-        `Re-run \`bodhiorchard init\`.`,
+        `Re-run \`glideship init\`.`,
     );
   }
   return config;

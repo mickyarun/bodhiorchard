@@ -1,4 +1,4 @@
-// `bodhiorchard start` — bring the stack up from persisted config, wait for
+// `glideship start` — bring the stack up from persisted config, wait for
 // readiness, then open the in-app setup wizard.
 import path from "node:path";
 import { preflight } from "../lib/preflight.js";
@@ -21,7 +21,7 @@ export async function startCommand(projectDir: string): Promise<void> {
   // Default: always pull so users track the published images. BODHIORCHARD_PULL
   // can relax this to "missing"/"never" for air-gapped or locally-built images.
   const pull = resolvePullPolicy(process.env.BODHIORCHARD_PULL);
-  log.step(pull === "always" ? "Starting Bodhiorchard (pulling any newer images)…" : "Starting Bodhiorchard…");
+  log.step(pull === "always" ? "Starting Glideship (pulling any newer images)…" : "Starting Glideship…");
   const up = await compose(dir, ["-p", PROJECT_NAME, "up", "-d", "--pull", pull], {
     inherit: true,
   });
@@ -37,8 +37,8 @@ export async function startCommand(projectDir: string): Promise<void> {
 
   const healthSpin = spinner("Waiting for services to become ready…").start();
   const ready = await waitForHealth(config.services.backend.hostPort, frontendPort);
-  if (ready) healthSpin.succeed("Bodhiorchard is ready.");
-  else healthSpin.warn("Services didn't report ready within 60s — check `bodhiorchard logs`.");
+  if (ready) healthSpin.succeed("Glideship is ready.");
+  else healthSpin.warn("Services didn't report ready within 60s — check `glideship logs`.");
 
   log.plain();
   log.info(`Open the setup wizard: ${setupUrl}`);

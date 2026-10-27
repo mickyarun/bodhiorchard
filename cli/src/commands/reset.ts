@@ -1,4 +1,4 @@
-// `bodhiorchard reset` — tear down the stack AND delete its data volumes.
+// `glideship reset` — tear down the stack AND delete its data volumes.
 // Destructive: drops postgres_data, repos_data, ssh_data.
 import path from "node:path";
 import inquirer from "inquirer";

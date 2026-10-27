@@ -100,7 +100,7 @@ async function verifyPgvector(asyncpgUrl: string): Promise<void> {
   if (!res.stdout.trim().startsWith("1")) {
     throw new Error(
       "The existing Postgres does not have the pgvector extension available, which " +
-        "Bodhiorchard requires (and the connecting role must be able to CREATE EXTENSION). " +
+        "Glideship requires (and the connecting role must be able to CREATE EXTENSION). " +
         "Re-run init and choose a different host port so the bundled pgvector image is used instead.",
     );
   }

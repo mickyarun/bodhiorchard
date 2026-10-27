@@ -19,7 +19,7 @@ const HR_KEYRING_ISSUED_FILE = "hr-keyring-issued";
 
 // The .env holds the at-rest encryption key and JWT secret. If the install dir
 // is (or becomes) a git repo, this keeps those out of version control.
-const GITIGNORE_CONTENTS = "# Bodhiorchard install — never commit local secrets.\n.env\n";
+const GITIGNORE_CONTENTS = "# Glideship install — never commit local secrets.\n.env\n";
 
 export function composeFilePath(projectDir: string): string {
   return path.join(projectDir, COMPOSE_FILE);
@@ -60,7 +60,7 @@ export async function materialize(
 export async function loadSecrets(projectDir: string): Promise<InfraSecrets> {
   const file = envFilePath(projectDir);
   if (!(await fs.pathExists(file))) {
-    throw new Error(`Missing ${ENV_FILE} in ${projectDir}. Run \`bodhiorchard init\` first.`);
+    throw new Error(`Missing ${ENV_FILE} in ${projectDir}. Run \`glideship init\` first.`);
   }
   const secrets = parseSecretsFromEnv(await fs.readFile(file, "utf8"));
   const hrKeyringLost =

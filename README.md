@@ -31,12 +31,12 @@
 The fastest path — no clone, no build. Needs only **Docker (running)** and **Node.js 18+**:
 
 ```bash
-npx bodhiorchard init     # detect ports, generate secrets, pull prebuilt images
-cd bodhiorchard
-npx bodhiorchard start    # start the stack and open the setup wizard
+npx glideship init     # detect ports, generate secrets, pull prebuilt images
+cd glideship
+npx glideship start    # start the stack and open the setup wizard
 ```
 
-The wizard opens at **http://localhost:3000/setup** — finish there (organization, admin account, AI provider, repositories). `bodhiorchard stop` brings it down; your data volumes persist.
+The wizard opens at **http://localhost:3000/setup** — finish there (organization, admin account, AI provider, repositories). `glideship stop` brings it down; your data volumes persist.
 
 Prefer to build from source?
 
@@ -268,7 +268,7 @@ if it isn't running, re-scans fall back to a direct scan.
 
 ## Roadmap
 
-- **Shipped** — core platform (auth, multi-tenant, RBAC), BUD lifecycle, feature registry with vector search, repo scanning + code intelligence, skill profiling, 3D Living Tree, Slack-native triage **and real-time Slack bot conversations**, **GitHub webhook pipeline** (PR-merge → BUD status + repo re-scan), **automated test-plan generation from BUDs** (unit / integration / e2e / security / UAT), **CI/CD integration** (QA-automation repo wired via MCP; test commits flow back to the BUD), MCP server, 12 agent definitions, `npx bodhiorchard` installer, **People workspace** (leave and WFH with Slack approvals, holidays per location, offices and remote work, loss of pay, encrypted employee records)
+- **Shipped** — core platform (auth, multi-tenant, RBAC), BUD lifecycle, feature registry with vector search, repo scanning + code intelligence, skill profiling, 3D Living Tree, Slack-native triage **and real-time Slack bot conversations**, **GitHub webhook pipeline** (PR-merge → BUD status + repo re-scan), **automated test-plan generation from BUDs** (unit / integration / e2e / security / UAT), **CI/CD integration** (QA-automation repo wired via MCP; test commits flow back to the BUD), MCP server, 12 agent definitions, `npx glideship` installer, **People workspace** (leave and WFH with Slack approvals, holidays per location, offices and remote work, loss of pay, encrypted employee records)
 - **Next** — autonomous agent execution engine: small, low-risk BUDs run tech spec → code → review → test end to end, with a human approval gate before release (deliberately not lights-out)
 - **Future** — multi-org marketplace, custom agent builder, analytics dashboards, mobile companion, plugin ecosystem
 

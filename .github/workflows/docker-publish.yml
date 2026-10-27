@@ -1,6 +1,9 @@
 name: Publish Docker images
 
-# Builds and pushes the prebuilt images the `bodhiorchard` npm installer pulls.
+# Builds and pushes the prebuilt images the `glideship` npm installer pulls.
+# Each image is also pushed under its old `bodhiorchard-*` name so installs
+# still on the old `bodhiorchard` CLI keep receiving updates; drop the
+# legacy_image entries once those installs have moved over.
 # These are expensive multi-arch builds, so they publish only on a deliberate
 # git tag: `git tag v1.2.3 && git push origin v1.2.3`. Can also be dispatched
 # manually for a specific version.
@@ -19,7 +22,7 @@ permissions:
 
 jobs:
   publish:
-    # Only the repo that owns the bodhiorchard Docker Hub namespace publishes.
+    # Only the repo that owns the mickyarun Docker Hub namespace publishes.
     # Forks skip this job cleanly instead of double-publishing or erroring.
     if: github.repository == 'mickyarun/glideship'
     runs-on: ubuntu-latest
@@ -29,19 +32,22 @@ jobs:
       matrix:
         include:
           - name: backend
-            image: mickyarun/bodhiorchard-backend
+            image: mickyarun/glideship-backend
+            legacy_image: mickyarun/bodhiorchard-backend
             context: ./backend
             dockerfile: ./backend/Dockerfile
             build_args: ""
           - name: frontend
-            image: mickyarun/bodhiorchard-frontend
+            image: mickyarun/glideship-frontend
+            legacy_image: mickyarun/bodhiorchard-frontend
             # Context is the repo root: the frontend image copies shared/.
             context: .
             dockerfile: ./frontend/Dockerfile
             build_args: |
               VITE_API_BASE_URL=/api
           - name: multiplayer
-            image: mickyarun/bodhiorchard-multiplayer
+            image: mickyarun/glideship-multiplayer
+            legacy_image: mickyarun/bodhiorchard-multiplayer
             # Context is the repo root: the multiplayer image copies shared/.
             context: .
             dockerfile: ./multiplayer/Dockerfile
@@ -72,7 +78,9 @@ jobs:
       - uses: docker/metadata-action@v6
         id: meta
         with:
-          images: ${{ matrix.image }}
+          images: |
+            ${{ matrix.image }}
+            ${{ matrix.legacy_image }}
           tags: |
             type=raw,value=latest
             type=raw,value=${{ steps.ver.outputs.version }}
