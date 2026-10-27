@@ -121,8 +121,10 @@ function select(value: T): void {
   align-items: center;
   justify-content: center;
 }
+/* Hover shades the track towards the surface ink, which keeps the label
+   at about 6.0:1 on the light theme and 8.1:1 on the dark one. */
 .app-pill-toggle__option:hover:not(.app-pill-toggle__option--active) {
-  background: rgba(var(--v-theme-on-primary), 0.14);
+  background: rgba(var(--v-theme-on-surface), 0.12);
 }
 /* The active pill is a surface-coloured cut-out showing the primary ink:
    5.2:1 on the light theme, 7.0:1 on the dark theme. */
@@ -132,7 +134,8 @@ function select(value: T): void {
   cursor: default;
 }
 .app-pill-toggle__option:focus-visible {
+  /* No offset, so the whole ring sits on the track rather than past it. */
   outline: 2px solid rgb(var(--v-theme-on-primary));
-  outline-offset: 2px;
+  outline-offset: 0;
 }
 </style>

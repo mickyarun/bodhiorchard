@@ -33,13 +33,13 @@
         </p>
       </div>
     </main>
-    <LoginBrandPanel class="auth-shell__panel" />
+    <AuthBrandPanel class="auth-shell__panel" />
   </div>
 </template>
 
 <script setup lang="ts">
 import BrandLogo from '@/components/common/BrandLogo.vue'
-import LoginBrandPanel from '@/components/auth/LoginBrandPanel.vue'
+import AuthBrandPanel from '@/components/auth/AuthBrandPanel.vue'
 
 defineProps<{
   title: string

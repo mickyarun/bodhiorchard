@@ -77,6 +77,8 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
     localStorage.removeItem('bodhiorchard_token')
     localStorage.removeItem('bodhiorchard_refresh_token')
+    // A message from the last sign-in mustn't greet the next visit to login.
+    loginError.value = null
     // Never send whoever signs in next to this person's page.
     forgetReturnTo()
   }
@@ -93,14 +95,10 @@ export const useAuthStore = defineStore('auth', () => {
       mustChangePassword.value = false
       return null
     } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { status?: number; data?: { detail?: string } } }
-        if (axiosErr.response?.status === 401) {
-          return 'Session expired. Please log in again.'
-        }
-        return axiosErr.response?.data?.detail || 'Failed to change password.'
-      }
-      return 'Network error. Please check your connection.'
+      const status = (err as { response?: { status?: number } } | null)?.response?.status
+      return status === 401
+        ? 'Session expired. Please log in again.'
+        : extractApiError(err, 'Failed to change password.')
     }
   }
 

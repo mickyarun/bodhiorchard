@@ -29,11 +29,11 @@
       <PasswordField
         v-model="newPassword"
         label="New password"
-        hint="At least 8 characters"
+        :hint="`At least ${PASSWORD_MIN_LENGTH} characters`"
         persistent-hint
         autocomplete="new-password"
         autofocus
-        :rules="[(v: string) => v.length >= 8 || 'Min 8 characters']"
+        :rules="[passwordLengthRule]"
       />
       <PasswordField
         v-model="confirmPassword"
@@ -64,6 +64,7 @@ import { afterSignIn } from '@/utils/afterSignIn'
 import AppCallout from '@/components/common/AppCallout.vue'
 import PasswordField from '@/components/common/PasswordField.vue'
 import AuthShell from '@/components/auth/AuthShell.vue'
+import { PASSWORD_MIN_LENGTH, passwordLengthRule } from '@/utils/passwordLength'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -74,7 +75,9 @@ const loading = ref(false)
 const errorMsg = ref('')
 
 const canSubmit = computed(
-  () => newPassword.value.length >= 8 && newPassword.value === confirmPassword.value,
+  () =>
+    passwordLengthRule(newPassword.value) === true
+    && newPassword.value === confirmPassword.value,
 )
 
 async function handleSubmit() {

@@ -17,17 +17,10 @@
 <!-- Sign-in, in the shared signed-out frame (AuthShell). -->
 <template>
   <AuthShell title="Sign in" lede="Welcome back to your workspace.">
-    <AppCallout v-if="errorMessage" variant="error" role="alert">
+    <!-- Keyed on the attempt so a repeated error is announced again.
+         No dismiss: the next submit clears it. -->
+    <AppCallout v-if="errorMessage" :key="attempt" variant="error" role="alert">
       {{ errorMessage }}
-      <template #actions>
-        <v-btn
-          icon="mdi-close"
-          aria-label="Dismiss"
-          variant="text"
-          size="x-small"
-          @click="dismissError"
-        />
-      </template>
     </AppCallout>
 
     <v-form class="login-form" @submit.prevent="handleLogin">
@@ -35,7 +28,7 @@
         v-model="email"
         label="Work email"
         type="email"
-        autocomplete="email"
+        autocomplete="username"
         autofocus
         :rules="[rules.required, rules.email]"
       />
@@ -82,14 +75,21 @@ const email = ref('')
 const password = ref('')
 const loading = ref(false)
 const orgSlug = ref('')
-// Set when the workspace couldn't be looked up, so a submit says why
-// nothing happened instead of doing nothing.
-const unreachable = ref(false)
+// Counts submits, to re-announce an error that repeats.
+const attempt = ref(0)
 
-const UNREACHABLE_MESSAGE = "Can't reach Glideship right now. Check your connection and reload."
+// The workspace lookup on arrival. A submit made while it's still pending
+// waits for it rather than reporting the server as unreachable.
+type WorkspaceLookup = 'loading' | 'ready' | 'unreachable'
+const lookup = ref<WorkspaceLookup>('loading')
+let lookupDone: Promise<void> = Promise.resolve()
+// Only after a submit: arriving offline isn't an error until they try.
+const showUnreachable = ref(false)
+
+const UNREACHABLE_MESSAGE = "Can't reach Glideship right now. Check your connection and try again."
 
 const errorMessage = computed(
-  () => authStore.loginError ?? (unreachable.value ? UNREACHABLE_MESSAGE : null),
+  () => authStore.loginError ?? (showUnreachable.value ? UNREACHABLE_MESSAGE : null),
 )
 
 const rules = {
@@ -97,9 +97,11 @@ const rules = {
   email: (v: string) => /.+@.+\..+/.test(v) || 'Enter a valid email',
 }
 
-onMounted(async () => {
+async function lookUpWorkspace(): Promise<void> {
+  lookup.value = 'loading'
   try {
     const { data } = await api.get('/setup/status')
+    lookup.value = 'ready'
     if (!data.is_setup_complete) {
       router.replace({ name: 'setup' })
       return
@@ -108,23 +110,33 @@ onMounted(async () => {
       orgSlug.value = data.org_slug
     }
   } catch {
-    // Backend unreachable: say so if they try to sign in.
+    lookup.value = 'unreachable'
   }
-})
-
-function dismissError(): void {
-  authStore.loginError = null
-  unreachable.value = false
 }
+
+onMounted(() => {
+  // Nothing from an earlier visit (or another tab's sign-in) carries over.
+  authStore.loginError = null
+  lookupDone = lookUpWorkspace()
+})
 
 async function handleLogin(): Promise<void> {
   if (!email.value.trim() || !password.value) return
-  if (!orgSlug.value) {
-    unreachable.value = true
+  attempt.value += 1
+  showUnreachable.value = false
+  loading.value = true
+  // A failed lookup is retried, so signing in works once the server is back.
+  if (lookup.value === 'unreachable') lookupDone = lookUpWorkspace()
+  await lookupDone
+  if (lookup.value === 'unreachable') {
+    showUnreachable.value = true
+    loading.value = false
     return
   }
-  unreachable.value = false
-  loading.value = true
+  if (!orgSlug.value) {
+    loading.value = false
+    return
+  }
   const success = await authStore.login(email.value.trim(), password.value, orgSlug.value)
   loading.value = false
   if (success) {

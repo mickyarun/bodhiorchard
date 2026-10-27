@@ -14,8 +14,8 @@
  * limitations under the License.
  -->
 
-<!-- The navy brand panel beside the sign-in form, the same panel the setup
-     wizard uses. Decorative only, so it's hidden from assistive tech. -->
+<!-- The navy brand panel beside the signed-out forms (sign-in, password
+     change). Decorative only, so it's hidden from assistive tech. -->
 <template>
   <aside class="login-brand" aria-hidden="true">
     <span class="login-brand__eyebrow">Agent-driven development</span>
