@@ -101,7 +101,7 @@ The gamification layer rebuilds developer skill profiles nightly — skills comp
 
 | | | | |
 |---|---|---|---|
-| ![Developer skill profile — rebuilt nightly](docs/images/skills-ui.webp) | ![Ship quality, earn XP, grow your tree](docs/images/gamification-ui.webp) | ![Leaderboard ranked by shipped value](docs/images/LeaderBoard-ui.webp) | ![Unlocks — do the work, unlock the world](docs/images/unlocks-ui.webp) |
+| ![Developer skill profile — rebuilt nightly](docs/images/skills-ui.webp) | ![Ship quality, earn XP, level up](docs/images/gamification-ui.webp) | ![Leaderboard ranked by shipped value](docs/images/LeaderBoard-ui.webp) | ![Unlocks — do the work, unlock the world](docs/images/unlocks-ui.webp) |
 
 And yes — your codebase is a living orchard. Repos as trees, features as fruit, your team walking the garden:
 
@@ -125,9 +125,9 @@ The rest of the company can use Bodhiorchard too. HR and Sales staff get a Peopl
 - **Team calendar and a daily Slack post.** One calendar for who is out and who is at home. A short post every working morning lists names only, never the leave type or reason, and nobody on leave is @mentioned.
 - **Employee records.** Work and personal details, bank and ID numbers, and documents. Sensitive fields and files are encrypted with AES-256-GCM under a separate HR key. Bank and ID numbers stay masked until someone reveals them, every reveal and download is logged, and each employee can see who opened their records.
 
-| Leave home — balances and loss of pay | Request dialog — days counted before you send |
+| Leave home — balances per leave type | Request dialog — days counted before you send |
 |---|---|
-| ![Leave home with balances per leave type and a loss-of-pay card](docs/images/people-leave-home-ui.webp) | ![Request dialog showing working days and a loss-of-pay warning](docs/images/people-request-dialog-ui.webp) |
+| ![Leave home with balances per leave type](docs/images/people-leave-home-ui.webp) | ![Request dialog counting working days and the balance left after the request](docs/images/people-request-dialog-ui.webp) |
 
 | Approvals — balance and overlaps on every card | Team calendar — leave, WFH and holidays |
 |---|---|
