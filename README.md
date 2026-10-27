@@ -1,6 +1,6 @@
 <div align="center">
 
-# Glideship
+# Glideship&trade;
 
 ### Ship software, not Scrum ceremonies.
 
@@ -298,6 +298,6 @@ Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 If Glideship helps your team, give it a ⭐ and spread the word.
 
-<sub>&copy; 2025-2026 Arun Rajkumar. Glideship is a trademark of Arun Rajkumar.<br>Independent open-source project — not affiliated with any employer or client.</sub>
+<sub>&copy; 2025-2026 Arun Rajkumar. Glideship&trade; is a trademark of Arun Rajkumar.<br>Independent open-source project — not affiliated with any employer or client.</sub>
 
 </div>
