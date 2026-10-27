@@ -14,75 +14,66 @@
  * limitations under the License.
  -->
 
-<!-- Leave home: the caller's balances and requests. The landing page for
-     every member outside the engineering workspace (sales, HR). -->
+<!-- My leave: the caller's balances and requests, who else is out this
+     week and how their policy works. The landing page for every member
+     outside the engineering workspace (sales, HR). -->
 <template>
-  <div class="pa-6 leave-home">
-    <div class="d-flex align-start justify-space-between flex-wrap ga-3 mb-6">
-      <div>
-        <h1 class="text-h5 font-weight-bold bo-display">Leave</h1>
-        <p class="text-body-2 text-medium-emphasis">{{ subtitle }}</p>
-      </div>
-      <div class="d-flex flex-wrap ga-2">
-        <v-btn color="primary" prepend-icon="mdi-plus" :disabled="!summary" @click="open('leave')">
-          Request leave
-        </v-btn>
-        <v-btn
-          v-if="summary?.work_arrangement !== 'remote'"
-          variant="tonal"
-          prepend-icon="mdi-home-outline"
-          :disabled="!summary"
-          @click="open('wfh')"
-        >
-          Work from home
-        </v-btn>
-        <v-btn variant="text" prepend-icon="mdi-calendar-month-outline" :to="{ name: 'leave-team' }">
-          Team calendar
-        </v-btn>
-      </div>
-    </div>
+  <LeavePage title="My leave" :subtitle="subtitle">
+    <template #actions>
+      <v-btn variant="text" :to="{ name: 'leave-team' }">Team calendar</v-btn>
+      <v-btn v-if="summary?.work_arrangement !== 'remote'" variant="outlined" :disabled="!summary" @click="open('wfh')">
+        Work from home
+      </v-btn>
+      <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" :disabled="!summary" @click="open('leave')">
+        Request leave
+      </v-btn>
+    </template>
 
     <SlackStatusConnect />
-    <v-progress-linear v-if="store.summaryLoading && !summary" indeterminate color="primary" class="mb-4" />
-    <AppCallout v-if="store.summaryError" variant="error" class="mb-4">{{ store.summaryError }}</AppCallout>
+    <v-progress-linear v-if="store.summaryLoading && !summary" indeterminate color="primary" />
+    <AppCallout v-if="store.summaryError" variant="error">{{ store.summaryError }}</AppCallout>
 
     <template v-if="summary">
-      <AppCallout v-if="summary.high_leave" :variant="highLeaveVariant(summary.high_leave)" class="mb-4">
+      <AppCallout v-if="summary.high_leave" :variant="highLeaveVariant(summary.high_leave)">
         {{ highLeaveForSelf(summary.high_leave, false) }}
       </AppCallout>
-      <AppCallout v-if="!summary.balances.length && canConfigureLeave" variant="info" class="mb-6">
+      <AppCallout v-if="!summary.balances.length && canConfigureLeave" variant="info">
         No leave types yet. Add them so people can request leave.
         <template #actions>
-          <v-btn size="small" variant="tonal" color="primary" :to="{ name: 'settings-leave' }">
-            Set up leave types
-          </v-btn>
+          <v-btn size="small" variant="outlined" :to="{ name: 'settings-leave' }">Set up leave types</v-btn>
         </template>
       </AppCallout>
-      <AppCallout v-else-if="!summary.balances.length" variant="info" class="mb-6">
-        {{ noTypesText }}
-      </AppCallout>
+      <AppCallout v-else-if="!summary.balances.length" variant="info">{{ noTypesText }}</AppCallout>
       <BalanceGrid
         v-else
         :balances="summary.balances"
         :optional="summary.optional_holidays"
         :lop-days="summary.lop_days"
-        class="mb-8"
       />
     </template>
 
-    <MyRequestsTable :pending-with="pendingWith" @cancelled="notify('Request cancelled')" />
+    <div class="leave-home__columns">
+      <MyRequestsTable :pending-with="pendingWith" @cancelled="notify('Request cancelled')" />
+      <aside class="leave-home__aside">
+        <OutSoonPanel />
+        <PolicyNotesPanel v-if="summary" :summary="summary" />
+      </aside>
+    </div>
 
-    <LeaveRequestDialog v-model="dialogOpen" :preset="preset" @sent="notify('Request sent')" />
+    <LeaveRequestPanel v-model="panelOpen" :preset="preset" @sent="notify('Request sent')" />
     <v-snackbar v-model="snackbar" color="success" :timeout="3000">{{ snackbarText }}</v-snackbar>
-  </div>
+  </LeavePage>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import BalanceGrid from '@/components/leave/BalanceGrid.vue'
-import LeaveRequestDialog from '@/components/leave/LeaveRequestDialog.vue'
+import LeavePage from '@/components/leave/LeavePage.vue'
+import LeaveRequestPanel from '@/components/leave/LeaveRequestPanel.vue'
 import MyRequestsTable from '@/components/leave/MyRequestsTable.vue'
+import OutSoonPanel from '@/components/leave/OutSoonPanel.vue'
+import PolicyNotesPanel from '@/components/leave/PolicyNotesPanel.vue'
 import SlackStatusConnect from '@/components/leave/SlackStatusConnect.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useLeaveStore } from '@/stores/leave'
@@ -95,7 +86,7 @@ const store = useLeaveStore()
 const { canConfigureLeave } = usePermissions()
 
 const summary = computed(() => store.summary)
-const dialogOpen = ref(false)
+const panelOpen = ref(false)
 const preset = ref<LeaveKind>('leave')
 const snackbar = ref(false)
 const snackbarText = ref('')
@@ -120,7 +111,7 @@ const pendingWith = computed(() => {
 
 function open(kind: LeaveKind): void {
   preset.value = kind
-  dialogOpen.value = true
+  panelOpen.value = true
 }
 
 function notify(text: string): void {
@@ -135,7 +126,21 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.leave-home {
-  max-width: 1120px;
+.leave-home__columns {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.leave-home__aside {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+@media (max-width: 1100px) {
+  .leave-home__columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

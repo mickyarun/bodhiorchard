@@ -14,108 +14,101 @@
  * limitations under the License.
  -->
 
-<!-- Request leave, work from home or an optional holiday, with a live
-     preview of the cost and the approver before sending. -->
+<!-- Request leave, work from home or an optional holiday, in a panel from
+     the right (full screen on phones), with a live preview of the cost and
+     the approver before sending. -->
 <template>
-  <v-dialog
+  <AppSideSheet
     :model-value="modelValue"
-    max-width="560"
-    :fullscreen="xs"
+    :title="TITLES[form.kind.value]"
     @update:model-value="emit('update:modelValue', $event)"
   >
-    <v-card class="pa-0">
-      <div class="d-flex align-center justify-space-between pa-6 pb-3">
-        <h2 class="text-h6 font-weight-bold">New request</h2>
-        <v-btn icon="mdi-close" variant="text" size="small" aria-label="Close" @click="close" />
+    <v-form class="request-form" @submit.prevent="submit">
+      <AppPillToggle
+        v-if="kindOptions.length > 1"
+        v-model="form.kind.value"
+        :options="kindOptions"
+        aria-label="Request type"
+        class="align-self-start"
+      />
+      <LeaveBalanceStrip v-if="summary" :summary="summary" :kind="form.kind.value" :selected-type-id="form.leaveTypeId.value" />
+      <LeaveTypePicker v-if="form.kind.value === 'leave'" v-model="form.leaveTypeId.value" :balances="summary?.balances ?? []" />
+      <v-select
+        v-if="form.kind.value === 'optional_holiday'"
+        v-model="form.holidayId.value"
+        :items="holidayItems"
+        label="Holiday"
+        no-data-text="No optional holidays left this year."
+        v-bind="field"
+      />
+      <div v-else class="request-form__dates">
+        <v-text-field v-model="form.startDate.value" label="From" type="date" v-bind="field" />
+        <v-text-field v-model="form.endDate.value" label="To" type="date" :min="form.startDate.value" v-bind="field" />
       </div>
-      <v-form class="px-6 d-flex flex-column ga-4" @submit.prevent="submit">
-        <AppPillToggle v-if="kindOptions.length > 1" v-model="form.kind.value" :options="kindOptions" class="align-self-start" />
-        <LeaveBalanceStrip v-if="summary" :summary="summary" :kind="form.kind.value" :selected-type-id="form.leaveTypeId.value" />
-        <v-select
-          v-if="form.kind.value === 'leave'"
-          v-model="form.leaveTypeId.value"
-          :items="typeItems"
-          label="Leave type"
-          no-data-text="HR hasn't added leave types yet."
-          v-bind="field"
-        />
-        <v-select
-          v-if="form.kind.value === 'optional_holiday'"
-          v-model="form.holidayId.value"
-          :items="holidayItems"
-          label="Holiday"
-          no-data-text="No optional holidays left this year."
-          v-bind="field"
-        />
-        <div v-else class="date-row">
-          <v-text-field v-model="form.startDate.value" label="From" type="date" v-bind="field" />
-          <v-text-field
-            v-model="form.endDate.value"
-            label="To"
-            type="date"
-            :min="form.startDate.value"
-            v-bind="field"
-          />
-        </div>
-        <AppPillToggle
-          v-if="form.singleDay.value && form.kind.value !== 'optional_holiday'"
-          v-model="form.halfDay.value"
-          :options="HALF_DAY_OPTIONS"
-          size="sm"
-          class="align-self-start"
-        />
-        <v-textarea
-          v-model="form.reason.value"
-          label="Reason (optional)"
-          rows="2"
-          auto-grow
-          counter="500"
-          maxlength="500"
-          hint="Only your managers and HR can see this."
-          persistent-hint
-          v-bind="field"
-        />
-        <LeavePreviewPanel
-          :preview="form.preview.value"
-          :previewing="form.previewing.value"
-          :error="form.previewError.value"
-          :kind="form.kind.value"
-          :policy="summary?.policy ?? null"
-          :type-name="selectedTypeName"
-          placeholder="Pick the dates to see how many days this uses."
-        />
-        <AppCallout v-if="error" variant="error">{{ error }}</AppCallout>
-      </v-form>
-      <div class="d-flex justify-end ga-2 pa-6 pt-4">
-        <v-btn variant="text" @click="close">Cancel</v-btn>
-        <v-btn color="primary" :loading="sending" :disabled="!form.canSend.value" @click="submit">
-          Send request
-        </v-btn>
-      </div>
-    </v-card>
-  </v-dialog>
+      <AppPillToggle
+        v-if="form.singleDay.value && form.kind.value !== 'optional_holiday'"
+        v-model="form.halfDay.value"
+        :options="HALF_DAY_OPTIONS"
+        size="sm"
+        aria-label="Part of the day"
+        class="align-self-start"
+      />
+      <v-textarea
+        v-model="form.reason.value"
+        label="Reason (optional)"
+        rows="3"
+        auto-grow
+        counter="500"
+        maxlength="500"
+        hint="Only your managers and HR can see this."
+        persistent-hint
+        v-bind="field"
+      />
+      <LeavePreviewPanel
+        :preview="form.preview.value"
+        :previewing="form.previewing.value"
+        :error="form.previewError.value"
+        :kind="form.kind.value"
+        :policy="summary?.policy ?? null"
+        :type-name="selectedTypeName"
+        placeholder="Pick the dates to see how many days this uses."
+      />
+      <AppCallout v-if="error" variant="error">{{ error }}</AppCallout>
+    </v-form>
+    <template #actions>
+      <v-btn variant="outlined" @click="close">Cancel</v-btn>
+      <v-btn color="primary" variant="flat" :loading="sending" :disabled="!form.canSend.value" @click="submit">
+        Send request
+      </v-btn>
+    </template>
+  </AppSideSheet>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useDisplay } from 'vuetify'
 import AppCallout from '@/components/common/AppCallout.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
+import AppSideSheet from '@/components/common/AppSideSheet.vue'
 import LeaveBalanceStrip from '@/components/leave/LeaveBalanceStrip.vue'
 import LeavePreviewPanel from '@/components/leave/LeavePreviewPanel.vue'
+import LeaveTypePicker from '@/components/leave/LeaveTypePicker.vue'
 import { useLeaveRequestForm } from '@/composables/useLeaveRequestForm'
 import { useLeaveStore } from '@/stores/leave'
 import type { HalfDay, LeaveKind } from '@/types/leave'
-import { formatDays, HALF_DAY_LABELS, KIND_LABELS, pillOptions, toNumber } from '@/utils/leave'
+import { HALF_DAY_LABELS, KIND_LABELS, pillOptions } from '@/utils/leave'
 import { formatDayRange } from '@/utils/leaveDates'
 
 const props = defineProps<{ modelValue: boolean; preset: LeaveKind }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; sent: [] }>()
 
-const { xs } = useDisplay()
 const store = useLeaveStore()
 const form = useLeaveRequestForm()
 const field = { variant: 'outlined', density: 'compact', hideDetails: 'auto' } as const
+const TITLES: Record<LeaveKind, string> = {
+  leave: 'Request leave',
+  wfh: 'Work from home',
+  optional_holiday: 'Take an optional holiday',
+}
 const HALF_DAY_OPTIONS: { label: string; value: HalfDay }[] = pillOptions(HALF_DAY_LABELS)
 const sending = ref(false)
 const error = ref('')
@@ -128,15 +121,6 @@ const kindOptions = computed(() => {
   if ((summary.value?.optional_holidays.quota ?? 0) > 0) kinds.push('optional_holiday')
   return kinds.map(value => ({ label: KIND_LABELS[value], value }))
 })
-
-const typeItems = computed(() =>
-  (summary.value?.balances ?? []).map(b => ({
-    title: b.available === null
-      ? `${b.leave_type.name} · No limit`
-      : `${b.leave_type.name} · ${formatDays(toNumber(b.available))} days left`,
-    value: b.leave_type.id,
-  })),
-)
 
 const holidayItems = computed(() =>
   (summary.value?.optional_holidays.holidays ?? []).map(h => ({
@@ -187,7 +171,12 @@ async function submit(): Promise<void> {
 </script>
 
 <style scoped>
-.date-row {
+.request-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.request-form__dates {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;

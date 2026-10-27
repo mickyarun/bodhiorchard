@@ -18,26 +18,31 @@
      preview. Problems explain why it can't be sent yet. -->
 <template>
   <div class="preview" aria-live="polite">
-    <div v-if="previewing" class="d-flex align-center ga-2 text-body-2 text-medium-emphasis">
+    <div v-if="previewing" class="d-flex align-center ga-2 preview__muted">
       <v-progress-circular indeterminate size="14" width="2" />
       Checking dates…
     </div>
     <AppCallout v-else-if="error" variant="error">{{ error }}</AppCallout>
     <template v-else-if="preview">
-      <div class="text-body-2 font-weight-medium">
-        {{ daysLine }}<span v-if="skips" class="text-medium-emphasis font-weight-regular"> · {{ skips }}</span>
+      <div class="preview__row">
+        <span class="preview__label">Working days</span>
+        <span class="preview__value">{{ daysLine }}</span>
       </div>
-      <div v-if="balanceLine" class="text-body-2 mt-1">{{ balanceLine }}</div>
-      <AppCallout v-if="lopLine" variant="warning" class="mt-2">{{ lopLine }}</AppCallout>
-      <AppCallout v-if="preview.high_leave" :variant="highLeaveVariant(preview.high_leave)" class="mt-2">
+      <div v-if="balance" class="preview__row">
+        <span class="preview__label">{{ typeName }} after this</span>
+        <span class="preview__value">{{ balance }}</span>
+      </div>
+      <p v-if="approval" class="preview__approval">{{ approval }}.</p>
+      <p v-if="skips" class="preview__note">{{ skips }}</p>
+      <AppCallout v-if="lopLine" variant="warning">{{ lopLine }}</AppCallout>
+      <AppCallout v-if="preview.high_leave" :variant="highLeaveVariant(preview.high_leave)">
         {{ highLeaveForSelf(preview.high_leave, true) }}
       </AppCallout>
-      <div v-if="approval" class="text-body-2 text-medium-emphasis mt-1">{{ approval }}</div>
-      <AppCallout v-if="preview.problems.length" variant="error" class="mt-3">
+      <AppCallout v-if="preview.problems.length" variant="error">
         <div v-for="problem in preview.problems" :key="problem.code">{{ problem.message }}</div>
       </AppCallout>
     </template>
-    <div v-else class="text-body-2 text-medium-emphasis">{{ placeholder }}</div>
+    <div v-else class="preview__muted">{{ placeholder }}</div>
   </div>
 </template>
 
@@ -68,12 +73,14 @@ const props = defineProps<{
 
 const daysLine = computed(() => {
   const days = toNumber(props.preview?.days)
-  return `${formatDays(days)} working ${days === 1 ? 'day' : 'days'}`
+  return `${formatDays(days)} ${days === 1 ? 'day' : 'days'}`
 })
 
-const skips = computed(() =>
-  props.preview ? excludedSummary(props.preview.excluded, props.policy?.working_days ?? []) : '',
-)
+// "Skips Sat, Sun and Diwali", as a sentence under the numbers.
+const skips = computed(() => {
+  const text = props.preview ? excludedSummary(props.preview.excluded, props.policy?.working_days ?? []) : ''
+  return text ? `${text[0].toUpperCase()}${text.slice(1)}.` : ''
+})
 
 // Days past the balance aren't refused: they're unpaid.
 const lopLine = computed(() => {
@@ -83,12 +90,13 @@ const lopLine = computed(() => {
   return lop ? `${lop}: these days are past your ${props.typeName ?? 'leave'} balance, so they're unpaid.` : ''
 })
 
-const balanceLine = computed(() => {
+// "10 → 6 days left".
+const balance = computed(() => {
   if (props.kind !== 'leave' || !props.preview) return ''
   const before = toNumberOrNull(props.preview.balance_before)
   const after = toNumberOrNull(props.preview.balance_after)
   if (before === null || after === null) return ''
-  return `${props.typeName} ${formatDays(before)} → ${formatDays(after)} ${after === 1 ? 'day' : 'days'} left`
+  return `${formatDays(before)} → ${formatDays(after)} ${after === 1 ? 'day' : 'days'} left`
 })
 
 const approval = computed(() =>
@@ -98,9 +106,36 @@ const approval = computed(() =>
 
 <style scoped>
 .preview {
-  padding: 12px 14px;
+  padding: 14px 16px;
   border-radius: 10px;
-  background: rgba(var(--v-theme-on-surface), 0.04);
+  background: rgb(var(--v-theme-surface-variant));
   min-height: 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: var(--text-sm);
+}
+.preview__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.preview__label {
+  color: rgb(var(--v-theme-ink-2));
+}
+.preview__value {
+  font-weight: 600;
+  text-align: right;
+}
+.preview__approval {
+  margin: 0;
+  color: rgb(var(--v-theme-ink-2));
+}
+.preview__note,
+.preview__muted {
+  margin: 0;
+  font-size: 13px;
+  color: rgb(var(--v-theme-on-surface-variant));
 }
 </style>

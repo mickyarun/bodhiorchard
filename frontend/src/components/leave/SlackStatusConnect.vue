@@ -18,23 +18,23 @@
      finish when Slack sends them back (#slackCode=…&slackState=…, or
      ?slackStatus=… if they cancelled). Renders nothing when HR hasn't set it up. -->
 <template>
-  <AppCallout v-if="outcome" :variant="outcome.ok ? 'success' : 'warning'" class="mb-4">
+  <AppCallout v-if="outcome" :variant="outcome.ok ? 'success' : 'warning'">
     {{ outcome.text }}
   </AppCallout>
-  <AppCallout v-if="status.error.value" variant="error" class="mb-4">{{ status.error.value }}</AppCallout>
-  <AppCallout v-if="mine?.available && !mine.connected" variant="info" class="mb-6">
+  <AppCallout v-if="status.error.value" variant="error">{{ status.error.value }}</AppCallout>
+  <AppCallout v-if="mine?.available && !mine.connected" variant="info">
     Show "Working from home" and "On leave" as your Slack status on those days. It's cleared
     automatically, and never says the type of leave.
     <template v-if="!mine.linked">
       Sign in to the Slack account that uses the same email as your profile here.
     </template>
     <template #actions>
-      <v-btn size="small" variant="tonal" color="primary" :loading="status.busy.value" @click="status.connect">
+      <v-btn size="small" variant="outlined" :loading="status.busy.value" @click="status.connect">
         Connect Slack
       </v-btn>
     </template>
   </AppCallout>
-  <div v-else-if="mine?.connected" class="d-flex align-center ga-2 mb-6 text-body-2 text-medium-emphasis">
+  <div v-else-if="mine?.connected" class="d-flex align-center ga-2 text-body-2 text-medium-emphasis">
     <v-icon icon="mdi-slack" size="18" />
     {{ mine.available ? 'Your Slack status shows WFH and leave days.' : 'Slack status is switched off for your team.' }}
     <v-btn size="small" variant="text" :loading="status.busy.value" @click="status.disconnect">Turn off</v-btn>
