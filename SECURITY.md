@@ -17,7 +17,7 @@ Bodhiorchard is in early public release. Only the latest `0.1.x` line receives s
 
 The preferred channel is GitHub's private vulnerability reporting:
 
-➡️  **[Report a vulnerability](https://github.com/mickyarun/bodhiorchard/security/advisories/new)**
+➡️  **[Report a vulnerability](https://github.com/mickyarun/glideship/security/advisories/new)**
 
 If GitHub Security Advisories are not an option for you, email **mickyarunr@gmail.com** with the subject line `SECURITY:` and a clear description of the issue.
 

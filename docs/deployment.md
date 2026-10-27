@@ -104,8 +104,8 @@ To stop everything when you're done, run `bodhiorchard stop` (your database and 
 ### Full Docker mode (one command)
 
 ```bash
-git clone https://github.com/mickyarun/bodhiorchard.git
-cd bodhiorchard
+git clone https://github.com/mickyarun/glideship.git
+cd glideship
 docker compose up
 ```
 
@@ -131,8 +131,8 @@ Keep the `secrets_data` volume with your database: without its `encryption_key` 
 ### Hybrid mode (hot reload)
 
 ```bash
-git clone https://github.com/mickyarun/bodhiorchard.git
-cd bodhiorchard
+git clone https://github.com/mickyarun/glideship.git
+cd glideship
 npm install        # frontend + multiplayer deps via workspaces
 npm run setup      # Python venv, .env files, infra, migrations
 npm run dev        # backend + frontend + multiplayer, one terminal

@@ -41,8 +41,8 @@ The wizard opens at **http://localhost:3000/setup** — finish there (organizati
 Prefer to build from source?
 
 ```bash
-git clone https://github.com/mickyarun/bodhiorchard.git
-cd bodhiorchard
+git clone https://github.com/mickyarun/glideship.git
+cd glideship
 docker compose up
 ```
 
