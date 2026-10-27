@@ -17,8 +17,8 @@ import { budRef, type BugListItem, type BugSeverity, type BugStatusValue, type B
 import type { FilterOption } from '@/utils/budBoard'
 
 export type BugScope = BugType | 'all'
-/** Status filter: still open (open, in progress, blocked), resolved, or closed. */
-export type BugStatusGroup = 'open' | 'resolved' | 'closed'
+/** Status filter: still open (open, in progress, blocked), resolved, closed, or rejected as a false positive. */
+export type BugStatusGroup = 'open' | 'resolved' | 'closed' | 'rejected'
 
 export const BUG_SCOPE_OPTIONS: Array<{ label: string; value: BugScope }> = [
   { label: 'Production', value: 'production' },
@@ -37,6 +37,7 @@ export const BUG_STATUS_GROUP_OPTIONS: FilterOption<BugStatusGroup>[] = [
   { value: 'open', label: 'Open' },
   { value: 'resolved', label: 'Resolved' },
   { value: 'closed', label: 'Closed' },
+  { value: 'rejected', label: 'Rejected' },
 ]
 
 export const BUG_TYPE_LABELS: Record<BugType, string> = { production: 'Production', testing: 'Testing' }
@@ -58,7 +59,51 @@ export function severityLabel(severity: BugSeverity): string {
 
 export function statusGroupOf(status: string): BugStatusGroup {
   if (STILL_OPEN.has(status)) return 'open'
-  return status === 'resolved' ? 'resolved' : 'closed'
+  if (status === 'resolved' || status === 'rejected') return status
+  return 'closed'
+}
+
+/**
+ * Status tags stay neutral so severity carries the colour in a row; only
+ * a blocked bug, which needs someone to act, is tinted.
+ */
+export function statusTagColor(status: string): string | undefined {
+  return status === 'blocked' ? 'warning' : undefined
+}
+
+/** Moves that need a confirm: they stamp the resolve time or settle QA SP and can't be taken back cleanly. */
+const CONFIRM_STATUS: Partial<Record<BugStatusValue, { title: string; body: string; action: string }>> = {
+  resolved: {
+    title: 'Mark as resolved?',
+    body: 'A resolved bug is awaiting QA validation; the assignee should be notified.',
+    action: 'Mark resolved',
+  },
+  closed: {
+    title: 'Close this bug?',
+    body: 'Closed bugs leave the open list. Closing a production bug reported by QA awards the reporter SP, which stays awarded if the bug is reopened.',
+    action: 'Close bug',
+  },
+  rejected: {
+    title: 'Reject this bug?',
+    body: 'Rejecting marks the report as a false positive. A QA reporter loses SP for it.',
+    action: 'Reject bug',
+  },
+}
+
+export function statusConfirm(status: BugStatusValue): { title: string; body: string; action: string } | null {
+  return CONFIRM_STATUS[status] ?? null
+}
+
+/** The board endpoint returns at most this many bugs (``BugRepository.list_board``). */
+export const BOARD_LIMIT = 500
+/** The BUD-filtered list endpoint's page-size ceiling. */
+export const BUD_LIST_LIMIT = 100
+
+/** "Showing the newest 100 of 140 bugs." when a list was cut short; null otherwise. */
+export function truncationNote(shown: number, total: number | null, limit: number): string | null {
+  if (total !== null && total > shown) return `Showing the newest ${shown} of ${total} bugs.`
+  if (total === null && shown >= limit) return `Showing the newest ${limit} bugs; older ones aren't listed.`
+  return null
 }
 
 export function openCount(bugs: Pick<BugListItem, 'status'>[]): number {

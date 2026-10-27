@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import api from '@/services/api'
 import { extractApiError } from '@/utils/errors'
 import {
@@ -63,22 +63,15 @@ export const useBugsStore = defineStore('bugs', () => {
   const error = ref<string | null>(null)
   const currentBug = ref<BugRead | null>(null)
   const board = ref<Record<BugStatusValue, BugListItem[]>>(emptyBoard())
-  const boardTotal = ref(0)
+  // Load failures for the list and board, kept apart from ``error`` (a
+  // failed save, comment or attachment) so a page can show them in place.
+  const loadError = ref<string | null>(null)
   const comments = ref<BugComment[]>([])
   const commentsLoading = ref(false)
 
-  const boardColumns = computed(() => BUG_BOARD_COLUMNS)
-
-  // The filters each list was last loaded with, so a refresh after an
-  // edit (updateBug, createBug) reloads the same view instead of the
-  // unfiltered default.
-  let lastBugFilters: BugListFilters | undefined
-  let lastBoardFilters: BugBoardFilters | undefined
-
-  async function fetchBugs(filters: BugListFilters | undefined = lastBugFilters): Promise<void> {
-    lastBugFilters = filters
+  async function fetchBugs(filters?: BugListFilters): Promise<void> {
     loading.value = true
-    error.value = null
+    loadError.value = null
     try {
       const params: Record<string, string | number> = {}
       if (filters?.status) params.status = filters.status
@@ -94,16 +87,15 @@ export const useBugsStore = defineStore('bugs', () => {
       page.value = data.page
       pageSize.value = data.pageSize
     } catch (err) {
-      error.value = extractApiError(err, 'Failed to load bugs.')
+      loadError.value = extractApiError(err, 'Failed to load bugs.')
     } finally {
       loading.value = false
     }
   }
 
-  async function fetchBoard(filters: BugBoardFilters | undefined = lastBoardFilters): Promise<void> {
-    lastBoardFilters = filters
+  async function fetchBoard(filters?: BugBoardFilters): Promise<void> {
     boardLoading.value = true
-    error.value = null
+    loadError.value = null
     try {
       const params: Record<string, string> = {}
       if (filters?.bugType) params.bugType = filters.bugType
@@ -117,9 +109,8 @@ export const useBugsStore = defineStore('bugs', () => {
         merged[col] = data.columns[col] ?? []
       }
       board.value = merged
-      boardTotal.value = data.total
     } catch (err) {
-      error.value = extractApiError(err, 'Failed to load bug board.')
+      loadError.value = extractApiError(err, 'Failed to load bugs.')
     } finally {
       boardLoading.value = false
     }
@@ -150,7 +141,6 @@ export const useBugsStore = defineStore('bugs', () => {
     error.value = null
     try {
       const { data } = await api.post<BugRead>('/v1/bugs', body)
-      await fetchBugs()
       return data
     } catch (err) {
       error.value = extractApiError(err, 'Failed to create bug.')
@@ -166,9 +156,6 @@ export const useBugsStore = defineStore('bugs', () => {
     try {
       const { data } = await api.patch<BugRead>(`/v1/bugs/${bugId}`, body)
       currentBug.value = data
-      // List + board may both be open at once (e.g. drawer open over board);
-      // refresh in parallel so neither stale-renders for a frame.
-      await Promise.all([fetchBugs(), fetchBoard()])
       return data
     } catch (err) {
       error.value = extractApiError(err, 'Failed to update bug.')
@@ -176,46 +163,7 @@ export const useBugsStore = defineStore('bugs', () => {
     }
   }
 
-  /**
-   * Optimistic Kanban move: applies the column change locally first
-   * so the dragged card stays put on drop, then PATCHes the backend.
-   * On failure the move is reverted and ``error`` is surfaced.
-   */
-  async function moveBugStatus(
-    bug: BugListItem,
-    targetStatus: BugStatusValue,
-  ): Promise<boolean> {
-    if (bug.status === targetStatus) return true
-    const sourceStatus = bug.status
-    const sourceList = board.value[sourceStatus]
-    const targetList = board.value[targetStatus]
-    if (!sourceList || !targetList) return false
-
-    // Optimistic — remove from source, add to top of target. Bail
-    // early if the bug isn't where the caller said it was; without
-    // this guard the rollback path would re-insert at index 0 on a
-    // stale call and cause silent ordering drift.
-    const idx = sourceList.findIndex((b) => b.id === bug.id)
-    if (idx < 0) return false
-    sourceList.splice(idx, 1)
-    const movedCard: BugListItem = { ...bug, status: targetStatus }
-    targetList.unshift(movedCard)
-
-    error.value = null
-    try {
-      await api.patch<BugRead>(`/v1/bugs/${bug.id}`, { status: targetStatus })
-      return true
-    } catch (err) {
-      // Rollback — pop from target, restore to source's original slot.
-      const targetIdx = targetList.findIndex((b) => b.id === bug.id)
-      if (targetIdx >= 0) targetList.splice(targetIdx, 1)
-      sourceList.splice(idx, 0, bug)
-      error.value = extractApiError(err, 'Failed to move bug.')
-      return false
-    }
-  }
-
-  async function fetchBugsForBud(budId: string): Promise<BugListItem[]> {
+    async function fetchBugsForBud(budId: string): Promise<BugListItem[]> {
     try {
       const { data } = await api.get<BugListResponse>('/v1/bugs', {
         params: { budId, pageSize: 100 },
@@ -332,8 +280,7 @@ export const useBugsStore = defineStore('bugs', () => {
     error,
     currentBug,
     board,
-    boardTotal,
-    boardColumns,
+    loadError,
     comments,
     commentsLoading,
     // bug ops
@@ -342,7 +289,6 @@ export const useBugsStore = defineStore('bugs', () => {
     fetchBug,
     createBug,
     updateBug,
-    moveBugStatus,
     fetchBugsForBud,
     // comment ops
     fetchComments,

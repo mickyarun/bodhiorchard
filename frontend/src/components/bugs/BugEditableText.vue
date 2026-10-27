@@ -15,7 +15,8 @@
  -->
 
 <!-- Text that editors can change in place: the value with an Edit button,
-     which swaps it for a labelled field with Save and Cancel. -->
+     which swaps it for a labelled field with Save and Cancel. The field
+     stays open, with the draft, until ``save`` reports success. -->
 <template>
   <div class="bug-text">
     <template v-if="editing">
@@ -30,10 +31,10 @@
         hide-details
         autofocus
       />
-      <v-text-field v-else v-model="draft" :label="label" variant="outlined" density="compact" hide-details autofocus @keyup.enter="save" />
+      <v-text-field v-else v-model="draft" :label="label" variant="outlined" density="compact" hide-details autofocus @keyup.enter="submit" />
       <div class="bug-text__actions">
         <v-btn variant="text" size="small" @click="editing = false">Cancel</v-btn>
-        <v-btn variant="outlined" size="small" :disabled="required && !draft.trim()" @click="save">Save</v-btn>
+        <v-btn variant="outlined" size="small" :loading="saving" :disabled="required && !draft.trim()" @click="submit">Save</v-btn>
       </div>
     </template>
     <div v-else class="bug-text__row">
@@ -54,12 +55,20 @@
 import { ref } from 'vue'
 
 const props = withDefaults(
-  defineProps<{ value: string; label: string; editable: boolean; multiline?: boolean; required?: boolean; emptyText?: string }>(),
+  defineProps<{
+    value: string
+    label: string
+    editable: boolean
+    save: (value: string) => Promise<boolean>
+    multiline?: boolean
+    required?: boolean
+    emptyText?: string
+  }>(),
   { multiline: false, required: false, emptyText: '' },
 )
-const emit = defineEmits<{ save: [value: string] }>()
 
 const editing = ref(false)
+const saving = ref(false)
 const draft = ref('')
 
 function start(): void {
@@ -67,11 +76,13 @@ function start(): void {
   editing.value = true
 }
 
-function save(): void {
+async function submit(): Promise<void> {
   const value = props.multiline ? draft.value : draft.value.trim()
-  if (props.required && !value.trim()) return
-  emit('save', value)
-  editing.value = false
+  if (saving.value || (props.required && !value.trim())) return
+  saving.value = true
+  const ok = await props.save(value)
+  saving.value = false
+  if (ok) editing.value = false
 }
 </script>
 

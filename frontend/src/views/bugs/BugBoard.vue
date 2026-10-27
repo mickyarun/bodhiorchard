@@ -35,14 +35,21 @@
       </span>
     </div>
 
-    <div v-if="loading && !loaded.length" class="bugs-page__loading">
+    <AppCallout v-if="loadError" variant="error" title="Bugs didn't load">
+      {{ loadError }}
+      <template #actions><v-btn variant="outlined" size="small" :loading="loading" @click="load">Retry</v-btn></template>
+    </AppCallout>
+    <div v-else-if="loading && !loaded.length" class="bugs-page__loading">
       <v-progress-circular indeterminate color="primary" aria-label="Loading bugs" />
     </div>
     <p v-else-if="!rows.length" class="bugs-page__empty">{{ emptyText }}</p>
-    <BugTable v-else :bugs="rows" :now="now" :show-type="scope === 'all'" :label="budId ? `Bugs for ${budLabel}` : 'Bugs'" @open="openBug" />
+    <template v-else>
+      <BugTable :bugs="rows" :now="now" :show-type="scope === 'all'" :label="budId ? `Bugs for ${budLabel}` : 'Bugs'" @open="openBug" />
+      <p v-if="truncated" class="bugs-page__note">{{ truncated }}</p>
+    </template>
 
     <AppSideSheet v-model="showDetail" :title="detailTitle" :width="600">
-      <BugDetailPanel />
+      <BugDetailPanel @saved="load" />
     </AppSideSheet>
 
     <BugCreateDialog
@@ -60,6 +67,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import AppCallout from '@/components/common/AppCallout.vue'
 import AppPage from '@/components/common/AppPage.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import AppSideSheet from '@/components/common/AppSideSheet.vue'
@@ -73,8 +81,10 @@ import type { BugListItem } from '@/types'
 import { BUG_SCOPE_OPTIONS, BUG_SEVERITY_OPTIONS, BUG_STATUS_GROUP_OPTIONS, bugRef } from '@/utils/bugList'
 import BugCreateDialog from './BugCreateDialog.vue'
 
-const { bugsStore, scope, severity, status, budId, budLabel, loading, loaded, rows, open, filtering, load, clearBud } =
-  useBugList()
+const {
+  bugsStore, scope, severity, status, budId, budLabel, loading, loadError, loaded, rows, open, filtering, truncated, load,
+  clearBud,
+} = useBugList()
 const { canReportBugs } = usePermissions()
 const now = useNow()
 
@@ -83,7 +93,7 @@ const showDetail = ref(false)
 
 const subtitle = computed(() => {
   const count = open.value === 1 ? '1 open' : `${open.value} open`
-  return `${count} · new bugs are linked to the BUD that caused them automatically`
+  return `${count} · production bugs are linked to the closest feature automatically`
 })
 
 const emptyText = computed(() => {
@@ -132,6 +142,11 @@ watch(budId, () => (showDetail.value = false))
   display: flex;
   justify-content: center;
   padding: 48px 0;
+}
+.bugs-page__note {
+  margin: 0;
+  font-size: 13px;
+  color: rgb(var(--v-theme-on-surface-variant));
 }
 .bugs-page__empty {
   margin: 0;

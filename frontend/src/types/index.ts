@@ -768,7 +768,7 @@ export interface BUDReleaseStage {
 
 // ── Bug Types ────────────────────────────────────────────────────
 export type BugSeverity = 'low' | 'medium' | 'high' | 'critical'
-export type BugStatusValue = 'open' | 'in-progress' | 'resolved' | 'closed' | 'blocked'
+export type BugStatusValue = 'open' | 'in-progress' | 'resolved' | 'closed' | 'blocked' | 'rejected'
 export type BugType = 'testing' | 'production'
 
 export interface BugListItem {
@@ -875,13 +875,15 @@ export interface BugCommentListResponse {
   total: number
 }
 
-// Order matches the production Kanban left-to-right.
+// Every bug status, in lifecycle order. ``rejected`` marks a false
+// positive (the backend docks the reporter's SP for it).
 export const BUG_BOARD_COLUMNS: BugStatusValue[] = [
   'open',
   'in-progress',
   'blocked',
   'resolved',
   'closed',
+  'rejected',
 ]
 
 export const BUG_STATUS_LABELS: Record<BugStatusValue, string> = {
@@ -890,6 +892,7 @@ export const BUG_STATUS_LABELS: Record<BugStatusValue, string> = {
   blocked: 'Blocked',
   resolved: 'Resolved',
   closed: 'Closed',
+  rejected: 'Rejected',
 }
 
 // Severity shares the priority scale (theme colours ``priority-p0``…``p3``).
@@ -906,6 +909,7 @@ export const BUG_STATUS_COLORS: Record<BugStatusValue, string> = {
   resolved: 'success',
   closed: 'muted', // theme token, not raw Material grey
   blocked: 'info', // theme token, not raw Material purple
+  rejected: 'muted',
 }
 
 // One hue per lifecycle stage (theme colours ``stage-*``, defined in

@@ -17,7 +17,7 @@
 <!-- The open bug (``bugsStore.currentBug``), shown in the Bugs side sheet:
      severity and environment, the title and description (editable in place
      for editors), status / owner / feature, the facts, attachments and the
-     comment thread. -->
+     comment thread. Emits ``saved`` after each successful edit. -->
 <template>
   <div v-if="bug" class="bug-detail">
     <div class="bug-detail__tags">
@@ -31,7 +31,7 @@
       :editable="canEditBugs"
       required
       class="bug-detail__title"
-      @save="bugsStore.updateBug(bug.id, { title: $event })"
+      :save="title => save({ title })"
     />
     <BugEditableText
       :value="bug.description ?? ''"
@@ -39,10 +39,10 @@
       :editable="canEditBugs"
       multiline
       :empty-text="canEditBugs ? 'Add a description' : 'No description'"
-      @save="bugsStore.updateBug(bug.id, { description: $event })"
+      :save="description => save({ description })"
     />
 
-    <BugDetailFields v-if="canEditBugs || canAssignBugs" :bug="bug" />
+    <BugDetailFields v-if="canEditBugs || canAssignBugs" :bug="bug" :save="save" />
 
     <dl class="bug-detail__facts">
       <template v-for="fact in facts" :key="fact.label">
@@ -72,6 +72,8 @@ import BugComments from './BugComments.vue'
 import BugDetailFields from './BugDetailFields.vue'
 import BugEditableText from './BugEditableText.vue'
 
+const emit = defineEmits<{ saved: [] }>()
+
 const bugsStore = useBugsStore()
 const { canEditBugs, canAssignBugs, canReportBugs } = usePermissions()
 const bug = computed(() => bugsStore.currentBug)
@@ -79,6 +81,14 @@ const bug = computed(() => bugsStore.currentBug)
 // Reporters attach evidence too, not just editors; the backend gates the
 // upload route the same way.
 const canAttachToBugs = computed(() => canReportBugs.value || canEditBugs.value)
+
+// Every edit goes through here so the list can refresh once it's saved.
+async function save(body: Record<string, unknown>): Promise<boolean> {
+  if (!bug.value) return false
+  const ok = (await bugsStore.updateBug(bug.value.id, body)) !== null
+  if (ok) emit('saved')
+  return ok
+}
 
 const facts = computed(() => {
   const b = bug.value

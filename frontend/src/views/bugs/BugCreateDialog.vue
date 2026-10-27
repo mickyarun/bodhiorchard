@@ -38,47 +38,13 @@
         didn't upload. Retry below, or close and add them from the bug.
       </AppCallout>
 
-      <v-text-field
-        v-model="title"
+      <BugReportFields
+        v-model:title="title"
+        v-model:description="description"
+        v-model:severity="severity"
+        v-model:module="module"
         :disabled="!!createdBug"
-        label="Title *"
-        variant="outlined"
-        density="compact"
-        class="mb-3"
-        :rules="[v => !!v?.trim() || 'Title is required']"
       />
-
-      <v-textarea
-        v-model="description"
-        :disabled="!!createdBug"
-        label="Description"
-        variant="outlined"
-        density="compact"
-        rows="3"
-        class="mb-3"
-        placeholder="Steps to reproduce, expected vs actual behavior..."
-      />
-
-      <div class="d-flex flex-wrap ga-3 mb-3">
-        <v-select
-          v-model="severity"
-          :disabled="!!createdBug"
-          :items="severityOptions"
-          label="Severity"
-          variant="outlined"
-          density="compact"
-          style="flex: 1 1 180px"
-        />
-        <v-text-field
-          v-model="module"
-          :disabled="!!createdBug"
-          label="Module / Area"
-          variant="outlined"
-          density="compact"
-          style="flex: 1 1 180px"
-          placeholder="e.g. payments, auth"
-        />
-      </div>
 
       <!-- BUD link path: only shown when the dialog is opened from a
         BUD context (BUDBugsPanel passes ``budId``). The parent BUD
@@ -90,21 +56,11 @@
 
       <!-- Feature picker — production-bug surface only. -->
       <template v-else-if="resolvedBugType === 'production'">
-        <v-autocomplete
+        <BugFeaturePicker
           v-model="selectedFeatureId"
-          :items="featureOptions"
-          :loading="featureLoading"
-          item-title="label"
-          item-value="value"
           label="Feature (optional)"
-          variant="outlined"
-          density="compact"
-          placeholder="Search features…"
           hint="Left empty, Glideship links the closest feature itself."
-          persistent-hint
-          clearable
           class="mb-3"
-          @update:search="onFeatureSearch"
         />
       </template>
 
@@ -133,12 +89,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import BugAttachments from '@/components/bugs/BugAttachments.vue'
+import BugFeaturePicker from '@/components/bugs/BugFeaturePicker.vue'
+import BugReportFields from '@/components/bugs/BugReportFields.vue'
 import { useBugsStore } from '@/stores/bugs'
-import { useFeaturesStore } from '@/stores/features'
-import type { BugRead } from '@/types'
+import type { BugRead, BugSeverity } from '@/types'
 
 const props = defineProps<{
   modelValue: boolean
@@ -152,11 +109,10 @@ const emit = defineEmits<{
 }>()
 
 const bugsStore = useBugsStore()
-const featuresStore = useFeaturesStore()
 
 const title = ref('')
 const description = ref('')
-const severity = ref('medium')
+const severity = ref<BugSeverity>('medium')
 const module = ref('')
 const selectedFeatureId = ref<string | null>(null)
 const stagedFiles = ref<File[]>([])
@@ -165,16 +121,7 @@ const attachmentsRef = ref<InstanceType<typeof BugAttachments> | null>(null)
 // upload. Its presence is what stops a second press from filing a
 // duplicate, and what flips the dialog into "retry" mode.
 const createdBug = ref<BugRead | null>(null)
-const featureLoading = ref(false)
 const saving = ref(false)
-let featureSearchTimer: ReturnType<typeof setTimeout> | null = null
-
-const severityOptions = [
-  { title: 'Low', value: 'low' },
-  { title: 'Medium', value: 'medium' },
-  { title: 'High', value: 'high' },
-  { title: 'Critical', value: 'critical' },
-]
 
 // When opened from a BUD detail panel the bug is by definition a
 // testing bug; otherwise inherit the board's current scope (production
@@ -183,34 +130,6 @@ const resolvedBugType = computed(() => {
   if (props.budId) return 'testing'
   return props.defaultBugType ?? 'production'
 })
-
-const featureOptions = computed(() =>
-  featuresStore.items.map((f) => ({
-    label: f.featureTitle,
-    value: f.id,
-  })),
-)
-
-watch(
-  () => props.modelValue,
-  async (open) => {
-    if (!open) return
-    if (!props.budId && featuresStore.items.length === 0) {
-      featureLoading.value = true
-      await featuresStore.fetchPage({ mode: 'active' })
-      featureLoading.value = false
-    }
-  },
-)
-
-function onFeatureSearch(query: string): void {
-  if (featureSearchTimer) clearTimeout(featureSearchTimer)
-  featureSearchTimer = setTimeout(async () => {
-    featureLoading.value = true
-    await featuresStore.fetchPage({ q: query || undefined, mode: 'active' })
-    featureLoading.value = false
-  }, 250)
-}
 
 async function submit(): Promise<void> {
   // Retry path: the bug already exists, so only the leftover files go.

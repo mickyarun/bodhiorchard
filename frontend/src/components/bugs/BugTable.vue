@@ -15,8 +15,9 @@
  -->
 
 <!-- The bug list: title (opens the bug), severity, status, the BUD it's
-     linked to, when it was reported and who owns it. On phones each row
-     stacks into a small card. -->
+     linked to, when it was reported and who owns it. When the list itself
+     is narrow (a phone, or a laptop with the sidebar open) each row stacks
+     into a small card. -->
 <template>
   <section class="bug-table" :aria-label="label">
     <table>
@@ -40,7 +41,7 @@
             <AppTag :color="BUG_SEVERITY_COLORS[bug.severity]" sr-prefix="Severity:">{{ severityLabel(bug.severity) }}</AppTag>
           </td>
           <td>
-            <AppTag :color="BUG_STATUS_COLORS[bug.status] ?? 'muted'" sr-prefix="Status:">
+            <AppTag :color="statusTagColor(bug.status)" sr-prefix="Status:">
               {{ BUG_STATUS_LABELS[bug.status] ?? bug.status }}
             </AppTag>
           </td>
@@ -48,12 +49,14 @@
             <router-link v-if="bug.budId && bug.budNumber" :to="`/buds/${bug.budId}`" class="bug-table__bud">
               {{ budRef(bug.budNumber) }}
             </router-link>
-            <span v-else class="bug-table__muted">Not linked</span>
+            <span v-else class="bug-table__muted">Not linked<span class="bug-table__cell-label"> to a BUD</span></span>
           </td>
           <td class="bug-table__when" :title="formatDateTime(bug.createdAt)">
             <span class="bug-table__cell-label">Reported </span>{{ relativeTime(bug.createdAt, now) }}
           </td>
-          <td :class="{ 'bug-table__muted': !bug.assigneeName }">{{ bug.assigneeName || 'Unassigned' }}</td>
+          <td :class="{ 'bug-table__muted': !bug.assigneeName }">
+            <span class="bug-table__cell-label">Owner </span>{{ bug.assigneeName || 'Unassigned' }}
+          </td>
         </tr>
       </tbody>
     </table>
@@ -62,8 +65,8 @@
 
 <script setup lang="ts">
 import AppTag from '@/components/common/AppTag.vue'
-import { BUG_SEVERITY_COLORS, BUG_STATUS_COLORS, BUG_STATUS_LABELS, budRef, type BugListItem } from '@/types'
-import { BUG_TYPE_LABELS, bugRef, bugWhere, severityLabel } from '@/utils/bugList'
+import { BUG_SEVERITY_COLORS, BUG_STATUS_LABELS, budRef, type BugListItem } from '@/types'
+import { BUG_TYPE_LABELS, bugRef, bugWhere, severityLabel, statusTagColor } from '@/utils/bugList'
 import { formatDateTime, relativeTime } from '@/utils/date'
 
 // ``showType`` names each bug's environment when both are listed.
@@ -73,6 +76,7 @@ const emit = defineEmits<{ open: [bug: BugListItem] }>()
 
 <style scoped>
 .bug-table {
+  container-type: inline-size;
   overflow: hidden;
   background: rgb(var(--v-theme-surface));
   border: 1px solid rgb(var(--v-theme-rule));
@@ -142,9 +146,9 @@ td.bug-table__muted {
 .bug-table__cell-label {
   display: none;
 }
-/* Phones: each row becomes a card; the column headings give way to the
-   tags and a "Reported" prefix. */
-@media (max-width: 760px) {
+/* Narrow list: each row becomes a card; the column headings give way to
+   the tags and small prefixes on the other values. */
+@container (max-width: 820px) {
   thead {
     position: absolute;
     width: 1px;

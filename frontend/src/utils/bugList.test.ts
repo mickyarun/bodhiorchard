@@ -23,7 +23,10 @@ import {
   isScope,
   openCount,
   severityLabel,
+  statusConfirm,
   statusGroupOf,
+  statusTagColor,
+  truncationNote,
 } from './bugList'
 
 function bug(over: Partial<BugListItem> = {}): BugListItem {
@@ -46,6 +49,7 @@ describe('bugList', () => {
     expect(['open', 'in-progress', 'blocked'].map(statusGroupOf)).toEqual(['open', 'open', 'open'])
     expect(statusGroupOf('resolved')).toBe('resolved')
     expect(statusGroupOf('closed')).toBe('closed')
+    expect(statusGroupOf('rejected')).toBe('rejected')
     expect(openCount([bug(), bug({ status: 'blocked' }), bug({ status: 'closed' })])).toBe(2)
   })
 
@@ -79,5 +83,24 @@ describe('bugList', () => {
     expect(budFilterLabel('x', [{ id: 'x', bud_number: 14, title: 'Board' }], [])).toBe('BUD-014 · Board')
     expect(budFilterLabel('x', [], [bug({ budId: 'x', budNumber: 3 })])).toBe('BUD-003')
     expect(budFilterLabel('x', [], [])).toBe('one BUD')
+  })
+
+  it('tints only blocked status tags', () => {
+    expect(statusTagColor('blocked')).toBe('warning')
+    expect(statusTagColor('open')).toBeUndefined()
+  })
+
+  it('asks before moves that stamp or settle SP', () => {
+    expect(statusConfirm('closed')?.action).toBe('Close bug')
+    expect(statusConfirm('resolved')?.title).toBe('Mark as resolved?')
+    expect(statusConfirm('rejected')).not.toBeNull()
+    expect(statusConfirm('in-progress')).toBeNull()
+  })
+
+  it('says when a list was cut short', () => {
+    expect(truncationNote(100, 140, 100)).toBe('Showing the newest 100 of 140 bugs.')
+    expect(truncationNote(40, 40, 100)).toBeNull()
+    expect(truncationNote(500, null, 500)).toBe("Showing the newest 500 bugs; older ones aren't listed.")
+    expect(truncationNote(20, null, 500)).toBeNull()
   })
 })

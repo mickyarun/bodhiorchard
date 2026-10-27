@@ -27,17 +27,17 @@ import { useBUDStore } from '@/stores/bud'
 import { useBugsStore } from '@/stores/bugs'
 import type { BugSeverity } from '@/types'
 import {
+  BOARD_LIMIT,
+  BUD_LIST_LIMIT,
   budFilterLabel,
   filterBugs,
   flattenBoard,
   isScope,
   openCount,
+  truncationNote,
   type BugScope,
   type BugStatusGroup,
 } from '@/utils/bugList'
-
-// The list endpoint's page-size ceiling; a BUD rarely has more bugs.
-const BUD_BUGS_PAGE = 100
 
 function queryString(value: unknown): string | null {
   return typeof value === 'string' && value ? value : null
@@ -58,31 +58,50 @@ export function useBugList() {
   const severity = ref<BugSeverity | null>(null)
   const status = ref<BugStatusGroup | null>('open')
 
+  // Which list the store holds. Until a load for the current BUD (or
+  // environment) finishes, rows from the previous one aren't shown.
+  const wantedKey = computed(() => (budId.value ? `bud:${budId.value}` : `board:${scope.value}:${featureId.value ?? ''}`))
+  const loadedKey = ref<string | null>(null)
+  const current = computed(() => loadedKey.value === wantedKey.value)
+
   const loading = computed(() => (budId.value ? bugsStore.loading : bugsStore.boardLoading))
+  const loadError = computed(() => bugsStore.loadError)
   // Everything loaded for the current environment and BUD, before the
   // severity and status filters.
-  const loaded = computed(() => {
-    const all = budId.value ? bugsStore.bugs : flattenBoard(bugsStore.board)
-    return filterBugs(all, { scope: scope.value, severity: null, status: null })
+  const fetched = computed(() => {
+    if (!current.value) return []
+    return budId.value ? bugsStore.bugs : flattenBoard(bugsStore.board)
   })
+  const loaded = computed(() => filterBugs(fetched.value, { scope: scope.value, severity: null, status: null }))
   const rows = computed(() => filterBugs(loaded.value, { scope: 'all', severity: severity.value, status: status.value }))
   const open = computed(() => openCount(loaded.value))
   const filtering = computed(() => severity.value !== null || status.value !== 'open')
   const budLabel = computed(() => (budId.value ? budFilterLabel(budId.value, budStore.buds, bugsStore.bugs) : ''))
+  const truncated = computed(() =>
+    budId.value
+      ? truncationNote(fetched.value.length, bugsStore.total, BUD_LIST_LIMIT)
+      : truncationNote(fetched.value.length, null, BOARD_LIMIT),
+  )
 
   async function load(): Promise<void> {
+    const key = wantedKey.value
     if (budId.value) {
-      await bugsStore.fetchBugs({ budId: budId.value, pageSize: BUD_BUGS_PAGE, page: 1 })
+      await bugsStore.fetchBugs({ budId: budId.value, pageSize: BUD_LIST_LIMIT, page: 1 })
     } else {
       await bugsStore.fetchBoard({ bugType: scope.value, featureId: featureId.value ?? undefined })
     }
+    // A slower earlier load must not mark a newer list as loaded.
+    if (key === wantedKey.value && !bugsStore.loadError) loadedKey.value = key
   }
 
   function clearBud(): void {
     void router.replace({ query: { ...route.query, budId: undefined } })
   }
 
-  watch([budId, featureId, () => (budId.value ? null : scope.value)], () => void load(), { immediate: true })
+  watch(wantedKey, () => void load(), { immediate: true })
 
-  return { bugsStore, scope, severity, status, budId, budLabel, loading, loaded, rows, open, filtering, load, clearBud }
+  return {
+    bugsStore, scope, severity, status, budId, budLabel, loading, loadError, loaded, rows, open, filtering,
+    truncated, load, clearBud,
+  }
 }
