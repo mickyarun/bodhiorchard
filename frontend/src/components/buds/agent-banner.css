@@ -33,3 +33,34 @@
 .agent-banner__progress {
   max-width: 120px;
 }
+
+.agent-banner__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.agent-banner__text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+}
+
+.agent-banner__name {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.agent-banner__msg {
+  font-size: 12px;
+  color: rgb(var(--v-theme-on-surface-variant));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .agent-banner__progress {
+    display: none;
+  }
+}

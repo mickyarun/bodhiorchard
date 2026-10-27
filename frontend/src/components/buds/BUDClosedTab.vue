@@ -19,6 +19,7 @@ import { computed } from 'vue'
 import { BUD_STATUS_COLORS, BUD_STATUS_LABELS } from '@/types'
 import type { BUDDocument, BUDStatus, TimelineEvent } from '@/types'
 import { formatDateTime } from '@/utils/date'
+import AppCallout from '@/components/common/AppCallout.vue'
 
 const props = defineProps<{
   bud: BUDDocument
@@ -41,95 +42,118 @@ const closedReason = computed(() => (closedEvent.value?.detail?.reason as string
 const closedFrom = computed(() => (closedEvent.value?.detail?.from as string) || null)
 
 const isDiscarded = computed(() => props.bud.status === 'discarded')
+
+function statusLabel(status: unknown): string {
+  const s = String(status ?? '')
+  return BUD_STATUS_LABELS[s as BUDStatus] || s || 'unknown'
+}
 </script>
 
 <template>
-  <div class="pa-4">
-    <v-alert
-      :type="isDiscarded ? 'error' : 'info'"
-      variant="tonal"
-      density="compact"
-      class="mb-5"
+  <div class="closed-tab">
+    <AppCallout
+      :variant="isDiscarded ? 'error' : 'success'"
+      :icon="isDiscarded ? 'mdi-delete-outline' : 'mdi-check-circle-outline'"
+      :title="isDiscarded ? 'This BUD was discarded' : 'This BUD is closed'"
     >
-      <div class="d-flex align-center ga-2">
-        <v-icon :icon="isDiscarded ? 'mdi-delete-outline' : 'mdi-check-circle-outline'" />
-        <div class="flex-grow-1">
-          <div class="font-weight-medium">
-            {{ isDiscarded ? 'This BUD was discarded' : 'This BUD is closed' }}
-          </div>
-          <div v-if="closedEvent" class="text-caption text-medium-emphasis">
-            {{ closedEvent.actor_name || 'System' }} &middot; {{ formatDateTime(closedEvent.created_at) }}
-          </div>
-        </div>
-      </div>
-    </v-alert>
+      <template v-if="closedEvent">{{ closedEvent.actor_name || 'System' }} · {{ formatDateTime(closedEvent.created_at) }}</template>
+    </AppCallout>
 
-    <!-- Release / closure date -->
-    <div v-if="closedEvent" class="mb-5">
-      <div class="text-overline text-medium-emphasis mb-2">
-        {{ isDiscarded ? 'Discarded on' : 'Completed on' }}
-      </div>
-      <div class="d-flex align-center ga-2">
-        <v-icon icon="mdi-calendar-check" size="18" color="success" />
-        <span class="text-body-1 font-weight-medium">
-          {{ formatDateTime(closedEvent.created_at) }}
-        </span>
-      </div>
-    </div>
+    <dl class="closed-tab__facts">
+      <template v-if="closedEvent">
+        <dt>{{ isDiscarded ? 'Discarded on' : 'Completed on' }}</dt>
+        <dd>{{ formatDateTime(closedEvent.created_at) }}</dd>
+      </template>
+      <!-- From the status_override or status_change detail. -->
+      <template v-if="closedReason">
+        <dt>Reason</dt>
+        <dd class="closed-tab__reason">{{ closedReason }}</dd>
+      </template>
+      <template v-if="closedFrom">
+        <dt>{{ isDiscarded ? 'Discarded from' : 'Closed from' }}</dt>
+        <dd><v-chip variant="tonal" :color="BUD_STATUS_COLORS[closedFrom as BUDStatus] || 'muted'" size="small">{{ statusLabel(closedFrom) }}</v-chip></dd>
+      </template>
+    </dl>
 
-    <!-- Closure reason (from status_override or status_change detail) -->
-    <div v-if="closedReason" class="mb-5">
-      <div class="text-overline text-medium-emphasis mb-2">Reason</div>
-      <v-card variant="outlined" class="pa-3">
-        <div class="text-body-2">{{ closedReason }}</div>
-      </v-card>
-    </div>
-
-    <!-- Previous status before closure -->
-    <div v-if="closedFrom" class="mb-5">
-      <div class="text-overline text-medium-emphasis mb-2">Closed from</div>
-      <v-chip
-        variant="tonal"
-        :color="BUD_STATUS_COLORS[closedFrom as BUDStatus] || 'grey'"
-        size="small"
-      >
-        {{ BUD_STATUS_LABELS[closedFrom as BUDStatus] || closedFrom }}
-      </v-chip>
-    </div>
-
-    <!-- Closure timeline events -->
-    <div v-if="closureEvents.length" class="mb-5">
-      <div class="text-overline text-medium-emphasis mb-2">Timeline</div>
-      <div class="d-flex flex-column ga-2">
-        <div
-          v-for="event in closureEvents"
-          :key="event.id"
-          class="d-flex align-center ga-2 pa-2 rounded closure-row"
-        >
+    <section v-if="closureEvents.length" aria-labelledby="closed-tab-timeline">
+      <h3 id="closed-tab-timeline" class="closed-tab__heading">Timeline</h3>
+      <ul class="closed-tab__events">
+        <li v-for="event in closureEvents" :key="event.id" class="closed-tab__event">
           <v-icon
             :icon="event.event_type === 'status_change' ? 'mdi-swap-horizontal' : 'mdi-information-outline'"
             size="18"
             color="primary"
           />
-          <div class="flex-grow-1">
-            <span class="text-body-2">
+          <div>
+            <div>
               {{ event.event_type === 'status_change'
-                ? `Status changed: ${event.detail?.from || '?'} → ${event.detail?.to || '?'}`
-                : event.event_type.replace(/_/g, ' ')
-              }}
-            </span>
-            <div class="text-caption text-medium-emphasis">
-              {{ event.actor_name || 'System' }} &middot; {{ formatDateTime(event.created_at) }}
+                ? `Moved from ${statusLabel(event.detail?.from)} to ${statusLabel(event.detail?.to)}`
+                : event.event_type.replace(/_/g, ' ') }}
             </div>
+            <div class="closed-tab__meta">{{ event.actor_name || 'System' }} · {{ formatDateTime(event.created_at) }}</div>
           </div>
-        </div>
-      </div>
-    </div>
+        </li>
+      </ul>
+    </section>
   </div>
 </template>
 
 <style scoped>
-.closure-row {
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+.closed-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+}
+.closed-tab__facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 12px;
+  font-size: 14px;
+}
+.closed-tab__facts dt,
+.closed-tab__meta {
+  color: rgb(var(--v-theme-on-surface-variant));
+}
+.closed-tab__facts dd {
+  margin: 0;
+}
+.closed-tab__reason {
+  white-space: pre-wrap;
+}
+.closed-tab__heading {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.closed-tab__events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.closed-tab__event {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+  border: 1px solid rgb(var(--v-theme-rule));
+  border-radius: var(--radius-input);
+}
+.closed-tab__meta {
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  .closed-tab__facts {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .closed-tab__facts dd {
+    margin-bottom: 8px;
+  }
 }
 </style>

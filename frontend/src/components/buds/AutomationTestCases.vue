@@ -31,7 +31,7 @@
             <div class="d-flex align-center ga-2 flex-grow-1">
               <v-chip
                 size="x-small"
-                :color="priorityColor[tc.priority] || 'grey'"
+                :color="priorityColor[tc.priority] || 'muted'"
                 variant="tonal"
               >
                 {{ tc.priority }}
@@ -100,7 +100,7 @@ const priorityColor: Record<string, string> = {
   critical: 'error',
   high: 'warning',
   medium: 'info',
-  low: 'grey',
+  low: 'muted',
 }
 
 const groupedCases = computed(() => {

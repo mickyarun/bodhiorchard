@@ -89,7 +89,7 @@
               v-if="repo.branch"
               size="x-small"
               variant="tonal"
-              color="orange"
+              color="warning"
               prepend-icon="mdi-source-branch"
             >
               {{ repo.branch }}
@@ -116,22 +116,14 @@
     <!-- Has events -->
     <template v-else>
       <!-- Status banner -->
-      <v-alert
-        :color="data.status === 'passed' ? 'grey' : 'success'"
-        variant="tonal"
-        density="compact"
+      <AppCallout
+        :variant="data.status === 'passed' ? 'info' : 'success'"
+        :icon="data.status === 'passed' ? 'mdi-check-all' : 'mdi-check-circle-outline'"
+        :title="statusBannerTitle"
         class="mb-4"
       >
-        <div class="d-flex align-center ga-2">
-          <v-icon :icon="data.status === 'passed' ? 'mdi-check-all' : 'mdi-check-circle-outline'" />
-          <div class="flex-grow-1">
-            <div class="font-weight-medium">{{ statusBannerTitle }}</div>
-            <div v-if="data.firstReachedAt" class="text-caption text-medium-emphasis">
-              First reached {{ formatDate(data.firstReachedAt) }}
-            </div>
-          </div>
-        </div>
-      </v-alert>
+        <template v-if="data.firstReachedAt">First reached {{ formatDate(data.firstReachedAt) }}</template>
+      </AppCallout>
 
       <!-- Impacted repos with release status -->
       <div v-if="repoStatusList.length" class="mb-5">
@@ -155,7 +147,7 @@
               v-if="repo.branch"
               size="x-small"
               variant="tonal"
-              :color="repo.hasReleasePR ? 'success' : 'orange'"
+              :color="repo.hasReleasePR ? 'success' : 'warning'"
               prepend-icon="mdi-source-branch"
             >
               {{ repo.branch }}
@@ -166,7 +158,7 @@
             <v-chip
               size="x-small"
               variant="tonal"
-              :color="repo.hasReleasePR ? 'success' : 'grey'"
+              :color="repo.hasReleasePR ? 'success' : 'muted'"
             >
               {{ repo.hasReleasePR ? 'Released' : 'Pending' }}
             </v-chip>
@@ -275,6 +267,7 @@
 </template>
 
 <script setup lang="ts">
+import AppCallout from '@/components/common/AppCallout.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import api from '@/services/api'
 import BUDStageBranchOverride from '@/components/buds/BUDStageBranchOverride.vue'

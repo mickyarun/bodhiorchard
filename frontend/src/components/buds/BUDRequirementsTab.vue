@@ -77,23 +77,14 @@ async function copyPrompt(): Promise<void> {
       @blur="emit('save')"
     />
     <template v-else-if="bud.requirements_md">
-      <v-alert
-        v-if="showEnrichHint"
-        type="info"
-        variant="tonal"
-        density="compact"
-        class="mx-4 mt-3 mb-0"
-      >
-        <div class="d-flex align-center ga-3">
-          <div class="text-caption flex-grow-1">
-            Imported from Jira — use AI to expand into a full PRD with acceptance criteria
-          </div>
-          <v-btn size="small" variant="flat" color="primary" @click="emit('enrich')">
-            <v-icon start size="15">mdi-creation-outline</v-icon>
+      <AppCallout v-if="showEnrichHint" variant="info" class="mx-4 mt-3 mb-0">
+        Imported from Jira. Use AI to expand it into full requirements with acceptance criteria.
+        <template #actions>
+          <v-btn size="small" variant="outlined" prepend-icon="mdi-creation-outline" @click="emit('enrich')">
             Enrich
           </v-btn>
-        </div>
-      </v-alert>
+        </template>
+      </AppCallout>
       <div class="rendered-markdown" v-html="renderMarkdown(bud.requirements_md)" />
     </template>
     <!-- Empty state — prompt panel + generate button -->

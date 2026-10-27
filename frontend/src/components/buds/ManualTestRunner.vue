@@ -259,17 +259,12 @@
                    failed upload / delete / blob-fetch lands next to
                    the action that triggered it rather than at the
                    top of the panel where it's visually orphaned. -->
-              <v-alert
-                v-if="evidenceError && evidenceError.testCaseId === tc.id"
-                type="error"
-                variant="tonal"
-                density="compact"
-                class="mb-3"
-                closable
-                @click:close="emit('clear-evidence-error', tc.id)"
-              >
+              <AppCallout v-if="evidenceError && evidenceError.testCaseId === tc.id" variant="error" class="mb-3">
                 {{ evidenceError.message }}
-              </v-alert>
+                <template #actions>
+                  <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="emit('clear-evidence-error', tc.id)" />
+                </template>
+              </AppCallout>
 
               <!-- Evidence section (with drag-and-drop) -->
               <div
@@ -368,6 +363,7 @@
 </template>
 
 <script setup lang="ts">
+import AppCallout from '@/components/common/AppCallout.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import type { ManualTestCase, TestEvidence } from '@/types'
@@ -441,11 +437,11 @@ function setCaseRef(id: string, el: Element | ComponentPublicInstance | null): v
 // ── Lookup tables ─────────────────────────────────────────────────────
 
 const resultColor: Record<ManualResult, string> = {
-  pending: 'grey',
+  pending: 'muted',
   pass: 'success',
   fail: 'error',
   blocked: 'warning',
-  skipped: 'grey',
+  skipped: 'muted',
 }
 
 const resultIcon: Record<ManualResult, string> = {
@@ -460,14 +456,14 @@ const priorityColor: Record<ManualTestCase['priority'], string> = {
   critical: 'error',
   high: 'warning',
   medium: 'info',
-  low: 'grey',
+  low: 'muted',
 }
 
 const resultOptions: { value: SetResult; label: string; icon: string; color: string; key: string }[] = [
   { value: 'pass', label: 'Pass', icon: 'mdi-check-circle', color: 'success', key: 'P' },
   { value: 'fail', label: 'Fail', icon: 'mdi-close-circle', color: 'error', key: 'F' },
   { value: 'blocked', label: 'Blocked', icon: 'mdi-block-helper', color: 'warning', key: 'B' },
-  { value: 'skipped', label: 'Skip', icon: 'mdi-skip-next', color: 'grey', key: 'S' },
+  { value: 'skipped', label: 'Skip', icon: 'mdi-skip-next', color: 'muted', key: 'S' },
 ]
 
 // ── Derived state ─────────────────────────────────────────────────────
@@ -487,7 +483,7 @@ const passRate = computed(() => {
 })
 
 const progressColor = computed(() => {
-  if (props.cases.length === 0) return 'grey'
+  if (props.cases.length === 0) return 'muted'
   const pct = (counts.value.completed / props.cases.length) * 100
   if (pct === 100) return counts.value.fail === 0 ? 'success' : 'warning'
   if (pct > 50) return 'primary'
@@ -869,7 +865,7 @@ watch(filteredCases, (list) => {
 }
 
 .test-case-card.open {
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  border-color: rgba(var(--v-theme-primary), 0.4);
 }
 
 /* ── Case header ────────────────────────────────────────────────────── */
@@ -971,15 +967,15 @@ watch(filteredCases, (list) => {
 }
 
 .precondition-box {
-  background: rgba(255, 193, 7, 0.08);
-  border-left: 3px solid rgba(255, 193, 7, 0.6);
+  background: rgba(var(--v-theme-warning), 0.08);
+  border-left: 3px solid rgba(var(--v-theme-warning), 0.6);
   padding: 8px 12px;
   border-radius: 0 4px 4px 0;
 }
 
 .expected-box {
-  background: rgba(76, 175, 80, 0.08);
-  border-left: 3px solid rgba(76, 175, 80, 0.6);
+  background: rgba(var(--v-theme-success), 0.08);
+  border-left: 3px solid rgba(var(--v-theme-success), 0.6);
   padding: 8px 12px;
   border-radius: 0 4px 4px 0;
 }
@@ -1074,6 +1070,6 @@ watch(filteredCases, (list) => {
 /* ── Lightbox ───────────────────────────────────────────────────────── */
 
 .lightbox-card :deep(.v-img) {
-  background: rgba(0, 0, 0, 0.85);
+  background: rgb(var(--v-theme-surface-variant));
 }
 </style>

@@ -15,82 +15,46 @@
  -->
 
 <template>
-  <v-card variant="outlined" class="pa-4">
-    <div class="d-flex align-center mb-3">
-      <v-icon icon="mdi-bug-outline" size="20" class="mr-2" />
-      <span class="text-subtitle-2 font-weight-medium">Bugs</span>
-      <v-chip v-if="bugs.length" size="x-small" variant="tonal" color="error" class="ml-2">
-        {{ openBugCount }}/{{ threshold }}
-      </v-chip>
-      <v-spacer />
-      <v-btn
-        variant="tonal"
-        size="small"
-        color="error"
-        prepend-icon="mdi-bug-outline"
-        @click="showCreate = true"
-      >
-        Report Bug
-      </v-btn>
-    </div>
+  <AppPanel title="Bugs" :note="bugs.length ? `${openBugCount} open · sends back at ${threshold}` : undefined">
+    <template #action>
+      <v-btn variant="outlined" size="small" prepend-icon="mdi-bug-outline" @click="showCreate = true">Report bug</v-btn>
+    </template>
 
-    <!-- Threshold warning (testing phase only) -->
-    <v-alert
+    <!-- Testing only: how close the open bugs are to the send-back threshold. -->
+    <AppCallout
       v-if="budStatus === 'testing' && openBugCount > 0"
-      :type="openBugCount >= threshold ? 'error' : 'warning'"
-      variant="tonal"
-      density="compact"
+      :variant="openBugCount >= threshold ? 'error' : 'warning'"
       class="mb-3"
     >
       <template v-if="openBugCount >= threshold">
-        Bug threshold reached ({{ openBugCount }}/{{ threshold }}) — BUD sent back to development.
+        Bug threshold reached ({{ openBugCount }} of {{ threshold }}). The BUD went back to development.
       </template>
       <template v-else>
-        {{ openBugCount }}/{{ threshold }} open bugs — {{ threshold - openBugCount }} more will send this BUD back to development.
+        {{ openBugCount }} of {{ threshold }} open bugs. {{ threshold - openBugCount }} more will send this BUD back to development.
       </template>
-    </v-alert>
+    </AppCallout>
 
-    <!-- Returned from testing banner (development phase with open bugs) -->
-    <v-alert
-      v-if="budStatus === 'development' && openBugCount > 0"
-      type="warning"
-      variant="tonal"
-      density="compact"
-      class="mb-3"
-    >
-      Returned from testing — {{ openBugCount }} open bug{{ openBugCount !== 1 ? 's' : '' }} must be resolved before re-submitting.
-    </v-alert>
+    <!-- Back in development with open bugs: they block the next submit. -->
+    <AppCallout v-if="budStatus === 'development' && openBugCount > 0" variant="warning" class="mb-3">
+      Returned from testing. Resolve {{ openBugCount === 1 ? 'the open bug' : `all ${openBugCount} open bugs` }} before submitting again.
+    </AppCallout>
 
     <div v-if="loading" class="d-flex justify-center py-4">
-      <v-progress-circular indeterminate size="20" width="2" />
+      <v-progress-circular indeterminate size="20" width="2" aria-label="Loading bugs" />
     </div>
-    <div v-else-if="bugs.length === 0" class="text-caption text-medium-emphasis text-center py-2">
-      No bugs linked to this BUD
-    </div>
-    <div v-else class="d-flex flex-column ga-1">
-      <div
-        v-for="bug in bugs"
-        :key="bug.id"
-        class="d-flex align-center ga-2 pa-2 rounded"
-        style="border: 1px solid rgb(var(--v-theme-rule)); cursor: pointer"
-        @click="$router.push('/bugs')"
-      >
-        <v-chip :color="BUG_SEVERITY_COLORS[bug.severity]" size="x-small" variant="tonal">
-          {{ bug.severity }}
-        </v-chip>
-        <span class="text-body-2 flex-grow-1 text-truncate">{{ bug.title }}</span>
-        <v-chip :color="BUG_STATUS_COLORS[bug.status]" size="x-small" variant="tonal">
-          {{ bug.status }}
-        </v-chip>
-      </div>
-    </div>
+    <p v-else-if="bugs.length === 0" class="bugs-panel__empty">No bugs linked to this BUD</p>
+    <ul v-else class="bugs-panel__list">
+      <li v-for="bug in bugs" :key="bug.id">
+        <router-link to="/bugs" class="bugs-panel__row">
+          <v-chip :color="BUG_SEVERITY_COLORS[bug.severity]" size="x-small" variant="tonal">{{ bug.severity }}</v-chip>
+          <span class="bugs-panel__title">{{ bug.title }}</span>
+          <v-chip :color="BUG_STATUS_COLORS[bug.status]" size="x-small" variant="tonal">{{ bug.status }}</v-chip>
+        </router-link>
+      </li>
+    </ul>
 
-    <BugCreateDialog
-      v-model="showCreate"
-      :bud-id="budId"
-      @created="loadBugs"
-    />
-  </v-card>
+    <BugCreateDialog v-model="showCreate" :bud-id="budId" @created="loadBugs" />
+  </AppPanel>
 </template>
 
 <script setup lang="ts">
@@ -100,6 +64,8 @@ import { useSettingsStore } from '@/stores/settings'
 import { BUG_SEVERITY_COLORS, BUG_STATUS_COLORS } from '@/types'
 import type { BugListItem, BUDStatus } from '@/types'
 import BugCreateDialog from '@/views/bugs/BugCreateDialog.vue'
+import AppCallout from '@/components/common/AppCallout.vue'
+import AppPanel from '@/components/common/AppPanel.vue'
 
 const props = defineProps<{
   budId: string
@@ -130,3 +96,42 @@ async function loadBugs(): Promise<void> {
 
 onMounted(() => loadBugs())
 </script>
+
+<style scoped>
+.bugs-panel__empty {
+  margin: 0;
+  padding: 8px 0;
+  text-align: center;
+  font-size: 13px;
+  color: rgb(var(--v-theme-on-surface-variant));
+}
+.bugs-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bugs-panel__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgb(var(--v-theme-rule));
+  border-radius: var(--radius-input);
+  color: inherit;
+  text-decoration: none;
+}
+.bugs-panel__row:hover {
+  border-color: rgba(var(--v-theme-primary), 0.55);
+}
+.bugs-panel__title {
+  flex-grow: 1;
+  min-width: 0;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>

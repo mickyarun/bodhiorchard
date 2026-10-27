@@ -366,12 +366,12 @@ function formatBufferDays(days: number | null | undefined): string {
 .phase-dot--buffer {
   background: rgb(var(--v-theme-warning));
   opacity: 0.6;
-  border: 1px dashed rgba(255, 255, 255, 0.4);
+  border: 1px dashed rgba(var(--v-theme-on-surface), 0.4);
 }
 
 .commit-date {
   font-size: 0.875rem;
   text-align: right;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(var(--v-theme-on-surface), 0.85);
 }
 </style>

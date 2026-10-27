@@ -48,7 +48,7 @@
         v-if="canEdit"
         size="small"
         variant="tonal"
-        color="teal"
+        color="primary"
         prepend-icon="mdi-plus"
         :disabled="store.loading"
         @click="pickerOpen = true"
@@ -81,14 +81,14 @@
         <template #default>
           <div class="d-flex align-center flex-wrap ga-2">
             <span class="text-body-2 font-weight-medium">{{ row.title }}</span>
-            <v-chip v-if="row.repoName" size="x-small" variant="tonal" color="grey">
+            <v-chip v-if="row.repoName" size="x-small" variant="tonal" color="muted">
               {{ row.repoName }}
             </v-chip>
             <v-chip
               v-if="row.source !== 'pm_agent'"
               size="x-small"
               variant="tonal"
-              :color="row.source === 'manual' ? 'blue' : 'purple'"
+              :color="row.source === 'manual' ? 'info' : 'brand'"
             >
               {{ row.source === 'manual' ? 'manual' : 'tech-arch' }}
             </v-chip>

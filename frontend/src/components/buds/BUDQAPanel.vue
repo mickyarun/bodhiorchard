@@ -37,7 +37,7 @@
 
     <!-- Empty state: no test cases yet -->
     <div v-if="!hasTestCases" class="empty-state">
-      <v-icon icon="mdi-test-tube" size="48" color="purple" class="mb-3 opacity-40" />
+      <v-icon icon="mdi-test-tube" size="48" color="brand" class="mb-3 opacity-40" />
       <div class="text-h6 font-weight-medium mb-2">Ready for QA</div>
       <div class="text-body-2 text-medium-emphasis mb-4" style="max-width: 440px;">
         Test cases are being generated. Once ready, configure MCP and start testing on a
@@ -87,13 +87,13 @@
           </v-card>
         </v-col>
         <v-col cols="3">
-          <v-card variant="tonal" color="blue" class="pa-3 text-center">
+          <v-card variant="tonal" color="info" class="pa-3 text-center">
             <div class="text-h5 font-weight-bold">{{ automationCases.length }}</div>
             <div class="text-caption">Automation</div>
           </v-card>
         </v-col>
         <v-col cols="3">
-          <v-card variant="tonal" color="purple" class="pa-3 text-center">
+          <v-card variant="tonal" color="brand" class="pa-3 text-center">
             <div class="text-h5 font-weight-bold">{{ manualCases.length }}</div>
             <div class="text-caption">Manual</div>
           </v-card>
@@ -169,17 +169,12 @@
                  render INSIDE the matching test card via
                  ``evidence-error`` and ``evidenceError`` so the
                  message lives next to the action that triggered it. -->
-            <v-alert
-              v-if="error"
-              type="error"
-              variant="tonal"
-              density="compact"
-              class="mb-3"
-              closable
-              @click:close="error = null"
-            >
+            <AppCallout v-if="error" variant="error" class="mb-3">
               {{ error }}
-            </v-alert>
+              <template #actions>
+                <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="error = null" />
+              </template>
+            </AppCallout>
             <ManualTestRunner
               :cases="manualCases"
               :evidence="evidence"
@@ -200,6 +195,7 @@
 </template>
 
 <script setup lang="ts">
+import AppCallout from '@/components/common/AppCallout.vue'
 import { ref, computed, onMounted } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'

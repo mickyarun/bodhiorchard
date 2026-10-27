@@ -77,7 +77,7 @@ function statusColor(s: string): string {
   if (s === 'completed') return 'success'
   if (s === 'in_progress') return 'primary'
   if (s === 'blocked') return 'error'
-  return 'grey'
+  return 'muted'
 }
 
 function statusIcon(s: string): string {

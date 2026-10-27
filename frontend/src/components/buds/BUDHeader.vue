@@ -14,37 +14,134 @@
  * limitations under the License.
  -->
 
+<!-- BUD detail header: breadcrumb, reference / priority / stage, the
+     title (click to rename), who owns it and when it moved, and the
+     actions: history, AI chat, move to the next stage, and the overflow
+     menu. -->
+<template>
+  <header class="bud-header">
+    <nav aria-label="Breadcrumb" class="bud-header__crumbs">
+      <router-link to="/buds">Board</router-link>
+      <span aria-hidden="true">/</span>
+      <span aria-current="page" class="bud-header__mono">{{ budRef(bud.bud_number) }}</span>
+    </nav>
+
+    <div class="bud-header__row">
+      <div class="bud-header__main">
+        <div class="bud-header__tags">
+          <span class="bud-header__mono">{{ budRef(bud.bud_number) }}</span>
+          <BUDPriorityMenu :priority="bud.priority" :editable="canEditPriority" @change="emit('change-priority', $event)" />
+          <span class="bud-header__stage" :style="{ '--stage': `var(--v-theme-${BUD_STATUS_COLORS[bud.status]})` }">
+            <span class="bud-header__stage-dot" />{{ BUD_STATUS_LABELS[bud.status] }}
+          </span>
+        </div>
+
+        <h1
+          v-if="!editingTitle"
+          class="bud-header__title"
+          :class="{ 'bud-header__title--locked': agentLocked }"
+          :title="agentLocked ? undefined : 'Click to rename'"
+          @click="startEditTitle"
+        >
+          {{ bud.title }}
+        </h1>
+        <v-text-field
+          v-else
+          v-model="editTitle"
+          label="Title"
+          variant="outlined"
+          density="compact"
+          autofocus
+          hide-details
+          class="bud-header__title-field"
+          @blur="saveTitle"
+          @keyup.enter="saveTitle"
+          @keyup.escape="editingTitle = false"
+        />
+
+        <div class="bud-header__meta">
+          <BUDAssigneeMenu :assignee-id="bud.assignee_id" @change="emit('change-assignee', $event)">
+            <template #activator="{ props: menuProps }">
+              <button v-bind="menuProps" type="button" class="bud-header__assignee" :aria-label="assigneeLabel">
+                <span class="bud-header__avatar" :class="{ 'bud-header__avatar--empty': !bud.assignee_name }">
+                  {{ bud.assignee_name ? initialsOf(bud.assignee_name) : '' }}
+                </span>
+                {{ bud.assignee_name || 'Unassigned' }}
+              </button>
+            </template>
+          </BUDAssigneeMenu>
+          <span>Created {{ formatDate(bud.created_at) }}</span>
+          <span>Updated {{ formatDate(bud.updated_at) }}</span>
+          <span v-if="bud.prod_p70_date && !isClosed">Ships by {{ formatDate(bud.prod_p70_date) }} · 70% likely</span>
+        </div>
+      </div>
+
+      <div class="bud-header__actions">
+        <v-btn variant="text" prepend-icon="mdi-history" title="View edit history and restore earlier versions" @click="emit('open-history')">
+          History
+        </v-btn>
+        <v-btn
+          variant="outlined"
+          prepend-icon="mdi-creation-outline"
+          :aria-pressed="chatOpen"
+          :color="chatOpen ? 'primary' : undefined"
+          :disabled="agentLocked || !chatable"
+          :title="!chatable && !agentLocked ? 'Chat is not available for this section in the current stage.' : undefined"
+          @click="emit('update:chatOpen', !chatOpen)"
+        >
+          Ask AI
+        </v-btn>
+        <v-btn
+          v-if="nextStatus && canEditBuds"
+          color="primary"
+          variant="flat"
+          :disabled="agentLocked"
+          @click="emit('update-status', nextStatus)"
+        >
+          Move to {{ BUD_STATUS_LABELS[nextStatus] }}
+        </v-btn>
+        <BUDMoreMenu
+          :status="bud.status"
+          :status-items="statusItems"
+          :is-closed="isClosed"
+          :agent-locked="agentLocked"
+          :can-edit-buds="canEditBuds"
+          @update-status="emit('update-status', $event)"
+          @restore="emit('restore')"
+          @open-skill-settings="emit('open-skill-settings')"
+          @delete="emit('delete')"
+        />
+      </div>
+    </div>
+  </header>
+</template>
+
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useMemberDirectory } from '@/composables/useMemberDirectory'
-import { BUD_PRIORITIES, BUD_PRIORITY_COLORS, BUD_STATUS_LABELS, budRef } from '@/types'
-import type { BUDDocument, BUDStatus, BUDPriority } from '@/types'
+import { computed, ref } from 'vue'
+import BUDAssigneeMenu from './detail/BUDAssigneeMenu.vue'
+import BUDMoreMenu from './detail/BUDMoreMenu.vue'
+import BUDPriorityMenu from './detail/BUDPriorityMenu.vue'
+import { BUD_STATUS_COLORS, BUD_STATUS_LABELS, budRef } from '@/types'
+import type { BUDDocument, BUDPriority, BUDStatus } from '@/types'
+import { initialsOf } from '@/utils/avatar'
 import { formatDate } from '@/utils/date'
 
 const props = defineProps<{
   bud: BUDDocument
-  statusColor: string
   statusItems: ReadonlyArray<{ title: string; value: BUDStatus }>
+  /** The stage the primary button moves to; null hides it. */
+  nextStatus: BUDStatus | null
   isClosed: boolean
   agentLocked: boolean
   chatOpen: boolean
-  // ``false`` when the active section isn't chattable in the current
-  // BUD stage (mirrors the backend 409 gate). Locks the AI button so
-  // the user can't even open the panel for a section that would be
-  // rejected on first send.
+  /** False when the open section can't be chatted about at this stage (the backend would 409). */
   chatable: boolean
-  // True when the current user is allowed to edit the BUD's priority
-  // (tech lead / PM / org owner roles). When false, the chip is
-  // read-only and the menu activator is suppressed.
   canEditPriority: boolean
-  // True when the current user holds ``buds:edit``. Gates the restore
-  // action on a discarded BUD, mirroring the backend permission on
-  // POST /buds/{id}/restore.
+  /** buds:edit — gates moving stages from the header and restoring a discarded BUD. */
   canEditBuds: boolean
 }>()
 
 const emit = defineEmits<{
-  back: []
   'update:chatOpen': [value: boolean]
   'change-assignee': [memberId: string | null]
   'change-priority': [priority: BUDPriority]
@@ -56,19 +153,12 @@ const emit = defineEmits<{
   'open-history': []
 }>()
 
-// Assignee picker reads the permission-free member directory rather than
-// the admin-only /members list (gated by team:manage). Roles that can edit
-// a BUD — e.g. PM — have buds:* but not team:manage, so the full list 403s
-// and leaves the dropdown empty. The directory only needs an authenticated
-// org member, so any assigner can populate it.
-const { entries: directoryMembers, ensureLoaded: ensureDirectory } = useMemberDirectory()
-onMounted(() => {
-  void ensureDirectory()
-})
+const assigneeLabel = computed(() =>
+  `${props.bud.assignee_name ? `Assigned to ${props.bud.assignee_name}` : 'Unassigned'}. Change assignee`,
+)
 
 const editingTitle = ref(false)
 const editTitle = ref('')
-const assigneeSearch = ref('')
 
 function startEditTitle(): void {
   if (props.agentLocked) return
@@ -78,260 +168,9 @@ function startEditTitle(): void {
 
 function saveTitle(): void {
   const trimmed = editTitle.value.trim()
-  if (!trimmed) {
-    editingTitle.value = false
-    return
-  }
-  if (trimmed !== props.bud.title) {
-    emit('save-title', trimmed)
-  }
+  if (trimmed && trimmed !== props.bud.title) emit('save-title', trimmed)
   editingTitle.value = false
 }
 </script>
 
-<template>
-  <div class="bud-header">
-    <div class="d-flex align-start ga-3 mb-1">
-      <v-btn
-        icon="mdi-arrow-left"
-        variant="text"
-        size="small"
-        class="mt-1"
-        @click="emit('back')"
-      />
-    <div class="flex-grow-1">
-      <div class="d-flex align-center ga-2 mb-1 flex-wrap">
-        <span class="text-caption text-medium-emphasis">
-          {{ budRef(bud.bud_number) }}
-        </span>
-        <v-chip :color="statusColor" variant="tonal" size="x-small" label>
-          {{ BUD_STATUS_LABELS[bud.status] }}
-        </v-chip>
-        <!-- Priority chip: read-only badge for most users; clickable
-             menu for tech lead / PM / org owner. The menu directly
-             emits ``change-priority`` so the parent can call updateBUD
-             without us caring about API plumbing here. -->
-        <v-menu v-if="canEditPriority" location="bottom">
-          <template #activator="{ props: priorityProps }">
-            <v-chip
-              v-bind="priorityProps"
-              :color="BUD_PRIORITY_COLORS[bud.priority]"
-              variant="tonal"
-              size="x-small"
-              label
-              class="cursor-pointer"
-              :title="`Priority ${bud.priority} — click to change`"
-            >
-              <v-icon start size="12">mdi-flag-outline</v-icon>
-              {{ bud.priority }}
-            </v-chip>
-          </template>
-          <v-list density="compact" min-width="120">
-            <v-list-item
-              v-for="p in BUD_PRIORITIES"
-              :key="p"
-              :active="bud.priority === p"
-              @click="emit('change-priority', p)"
-            >
-              <v-list-item-title class="text-body-2">{{ p }}</v-list-item-title>
-            </v-list-item>
-          </v-list>
-        </v-menu>
-        <v-chip
-          v-else
-          :color="BUD_PRIORITY_COLORS[bud.priority]"
-          variant="tonal"
-          size="x-small"
-          label
-          :title="`Priority ${bud.priority}`"
-        >
-          <v-icon start size="12">mdi-flag-outline</v-icon>
-          {{ bud.priority }}
-        </v-chip>
-        <v-menu location="bottom" :close-on-content-click="false">
-          <template #activator="{ props: assigneeProps }">
-            <v-chip
-              v-bind="assigneeProps"
-              :color="bud.assignee_name ? 'info' : 'default'"
-              variant="tonal"
-              size="x-small"
-              label
-              class="cursor-pointer"
-            >
-              <v-icon start size="12">
-                {{ bud.assignee_name ? 'mdi-account' : 'mdi-account-outline' }}
-              </v-icon>
-              {{ bud.assignee_name || 'Unassigned' }}
-            </v-chip>
-          </template>
-          <v-card min-width="280" max-width="340" class="pa-2">
-            <v-text-field
-              v-model="assigneeSearch"
-              variant="outlined"
-              density="comfortable"
-              placeholder="Search members..."
-              hide-details
-              prepend-inner-icon="mdi-magnify"
-              class="mb-2"
-              autofocus
-            />
-            <v-list max-height="280" class="overflow-y-auto">
-              <v-list-item
-                v-if="bud.assignee_id"
-                @click="emit('change-assignee', null)"
-              >
-                <template #prepend>
-                  <v-icon size="20" color="error">mdi-account-remove</v-icon>
-                </template>
-                <v-list-item-title class="text-body-2">Unassign</v-list-item-title>
-              </v-list-item>
-              <v-list-item
-                v-for="m in directoryMembers.filter(
-                  mm => mm.name.toLowerCase().includes(assigneeSearch.toLowerCase())
-                )"
-                :key="m.id"
-                :active="bud.assignee_id === m.id"
-                @click="emit('change-assignee', m.id)"
-              >
-                <template #prepend>
-                  <v-avatar size="28" color="surface-variant" class="mr-2">
-                    <span class="text-body-2">{{ (m.name || '?').charAt(0).toUpperCase() }}</span>
-                  </v-avatar>
-                </template>
-                <v-list-item-title class="text-body-2">{{ m.name }}</v-list-item-title>
-                <v-list-item-subtitle class="text-caption">{{ m.email }}</v-list-item-subtitle>
-              </v-list-item>
-            </v-list>
-          </v-card>
-        </v-menu>
-        <v-menu>
-          <template #activator="{ props: menuProps }">
-            <v-btn v-bind="menuProps" icon="mdi-dots-vertical" variant="text" size="x-small" />
-          </template>
-          <v-list density="compact" min-width="180">
-            <v-list-subheader>Change Status</v-list-subheader>
-            <!-- Discarded is recoverable, closed is not: closed BUDs have
-                 already run their close-out side effects (XP, SP, learning
-                 recap), so reopening one would let those re-fire. -->
-            <v-list-item
-              v-if="bud.status === 'discarded' && canEditBuds"
-              @click="emit('restore')"
-            >
-              <div class="d-flex align-center">
-                <v-icon icon="mdi-restore" size="18" class="mr-2" />
-                Restore BUD
-              </div>
-            </v-list-item>
-            <v-list-item v-else-if="isClosed" disabled>
-              <span class="text-caption text-medium-emphasis">
-                {{ bud.status === 'discarded' ? 'Discarded' : 'Closed' }} — cannot change status
-              </span>
-            </v-list-item>
-            <template v-else>
-              <v-list-item
-                v-for="s in statusItems"
-                :key="s.value"
-                :title="s.title"
-                :active="bud.status === s.value"
-                :disabled="agentLocked"
-                @click="emit('update-status', s.value)"
-              />
-            </template>
-            <v-divider class="my-1" />
-            <v-list-item
-              :disabled="isClosed"
-              @click="emit('open-skill-settings')"
-            >
-              <div class="d-flex align-center">
-                <v-icon icon="mdi-tune-variant" size="18" class="mr-2" />
-                AI skills…
-              </div>
-            </v-list-item>
-            <v-divider class="my-1" />
-            <v-list-item
-              base-color="error"
-              class="delete-item"
-              :disabled="agentLocked"
-              @click="emit('delete')"
-            >
-              <div class="d-flex align-center">
-                <v-icon icon="mdi-delete-outline" size="18" class="mr-2" />
-                Delete BUD
-              </div>
-            </v-list-item>
-          </v-list>
-        </v-menu>
-        <v-btn
-          variant="tonal"
-          size="x-small"
-          class="header-action-btn"
-          title="View edit history and restore previous versions"
-          @click="emit('open-history')"
-        >
-          <v-icon start size="14">mdi-history</v-icon>
-          History
-        </v-btn>
-        <v-btn
-          :variant="chatOpen ? 'flat' : 'tonal'"
-          :color="chatOpen ? 'primary' : 'default'"
-          size="x-small"
-          class="header-action-btn ai-chat-btn"
-          :disabled="agentLocked || !chatable"
-          :title="!chatable && !agentLocked
-            ? 'Chat is not available for this section in the current stage.'
-            : ''"
-          @click="emit('update:chatOpen', !chatOpen)"
-        >
-          <v-icon start size="14">mdi-creation-outline</v-icon>
-          AI
-        </v-btn>
-      </div>
-      <div
-        v-if="!editingTitle"
-        class="text-h5 font-weight-bold bo-display"
-        :class="agentLocked ? 'prd-locked-title' : 'cursor-pointer'"
-        @click="startEditTitle"
-      >
-        {{ bud.title }}
-      </div>
-      <v-text-field
-        v-else
-        v-model="editTitle"
-        variant="outlined"
-        density="compact"
-        autofocus
-        hide-details
-        class="mt-1"
-        style="max-width: 500px;"
-        @blur="saveTitle"
-        @keyup.enter="saveTitle"
-        @keyup.escape="editingTitle = false"
-      />
-    </div>
-  </div>
-
-    <div class="text-caption text-medium-emphasis mb-3 ml-12">
-      Created {{ formatDate(bud.created_at) }} &middot; Updated {{ formatDate(bud.updated_at) }}
-    </div>
-  </div>
-</template>
-
-<style scoped>
-.header-action-btn {
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 600;
-  font-size: 13px;
-}
-.ai-chat-btn {
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.prd-locked-title {
-  opacity: 0.5;
-  pointer-events: none;
-}
-</style>
+<style scoped src="./detail/bud-header.css"></style>

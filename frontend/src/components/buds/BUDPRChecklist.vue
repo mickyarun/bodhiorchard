@@ -47,8 +47,8 @@ function statusColor(status: string) {
   switch (status) {
     case 'merged': return 'success'
     case 'open': return 'info'
-    case 'no_pr': return 'grey'
-    default: return 'grey'
+    case 'no_pr': return 'muted'
+    default: return 'muted'
   }
 }
 </script>
@@ -93,7 +93,7 @@ function statusColor(status: string) {
               <v-icon size="small">mdi-open-in-new</v-icon>
             </v-btn>
           </template>
-          <v-chip v-else size="x-small" color="grey" variant="tonal">
+          <v-chip v-else size="x-small" color="muted" variant="tonal">
             No PR
           </v-chip>
         </template>

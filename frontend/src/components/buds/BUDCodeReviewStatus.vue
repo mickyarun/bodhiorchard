@@ -200,7 +200,7 @@ function stateColor(repo: CodeReviewRepoStatus): string {
   switch (repo.pr_state) {
     case 'merged': return 'success'
     case 'open': return 'info'
-    case 'closed': return 'grey'
+    case 'closed': return 'muted'
     case 'not_raised': return 'warning'
   }
 }
@@ -306,16 +306,9 @@ function commentBadgeTooltip(repo: CodeReviewRepoStatus): string {
          failed or its output was unparseable. The typed message comes
          from the backend (bud_code_review_status._PARSE_FAILURE_MESSAGES)
          so the user sees a *specific* fix hint, not generic prose. -->
-    <v-alert
-      v-if="showRunBanner && lastRunMessage"
-      type="error"
-      variant="tonal"
-      density="compact"
-      class="mb-3"
-      icon="mdi-alert-circle-outline"
-    >
+    <AppCallout v-if="showRunBanner && lastRunMessage" variant="error" class="mb-3">
       {{ lastRunMessage }}
-    </v-alert>
+    </AppCallout>
 
     <!-- Repo selection: the BUD reached code_review manually so no repos
          are confirmed with a clone path. Let the user pick which to review
@@ -352,15 +345,9 @@ function commentBadgeTooltip(repo: CodeReviewRepoStatus): string {
             </v-chip>
           </template>
         </v-checkbox>
-        <v-alert
-          v-if="startReviewError"
-          type="error"
-          variant="tonal"
-          density="compact"
-          class="mt-2"
-        >
+        <AppCallout v-if="startReviewError" variant="error" class="mt-2">
           {{ startReviewError }}
-        </v-alert>
+        </AppCallout>
         <div class="d-flex align-center ga-3 mt-3">
           <v-btn
             color="primary"
@@ -455,15 +442,9 @@ function commentBadgeTooltip(repo: CodeReviewRepoStatus): string {
             placeholder="e.g. Docs-only change — no PR required; or: merged via hotfix process"
             :disabled="submitting"
           />
-          <v-alert
-            v-if="overrideError"
-            type="error"
-            variant="tonal"
-            density="compact"
-            class="mt-2"
-          >
+          <AppCallout v-if="overrideError" variant="error" class="mt-2">
             {{ overrideError }}
-          </v-alert>
+          </AppCallout>
         </v-card-text>
         <v-card-actions class="px-4 pb-3 pt-0">
           <v-spacer />
@@ -511,15 +492,9 @@ function commentBadgeTooltip(repo: CodeReviewRepoStatus): string {
             Use this if the PR has new commits since the last review, or if
             the previous run went off the rails.
           </p>
-          <v-alert
-            v-if="rerunError"
-            type="error"
-            variant="tonal"
-            density="compact"
-            class="mt-3"
-          >
+          <AppCallout v-if="rerunError" variant="error" class="mt-3">
             {{ rerunError }}
-          </v-alert>
+          </AppCallout>
         </v-card-text>
         <v-card-actions class="px-4 pb-3 pt-0">
           <v-spacer />

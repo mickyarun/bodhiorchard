@@ -45,15 +45,9 @@
       <v-divider />
 
       <div class="dialog-body">
-        <v-alert
-          v-if="errorMessage"
-          type="error"
-          variant="tonal"
-          density="compact"
-          class="mb-3"
-        >
+        <AppCallout v-if="errorMessage" variant="error" class="mb-3">
           {{ errorMessage }}
-        </v-alert>
+        </AppCallout>
 
         <div v-if="loading" class="d-flex justify-center py-6">
           <v-progress-circular indeterminate size="22" color="primary" />

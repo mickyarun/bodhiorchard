@@ -15,6 +15,7 @@
  -->
 
 <script setup lang="ts">
+import AppCallout from '@/components/common/AppCallout.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useBUDTodosStore } from '@/stores/bud_todos'
 import { useAuthStore } from '@/stores/auth'
@@ -188,7 +189,7 @@ async function doRegenerate() {
 </script>
 
 <template>
-  <v-card variant="outlined" class="mb-4">
+  <section class="todo-board" aria-label="Implementation TODOs">
     <div class="todo-board__header">
       <div class="todo-board__title">
         <v-icon size="small" class="mr-2">mdi-format-list-checks</v-icon>
@@ -249,14 +250,12 @@ async function doRegenerate() {
       </v-btn>
     </div>
 
-    <v-alert
-      v-if="lastFailure"
-      type="error"
-      variant="tonal"
-      class="ma-3"
-      closable
-      @click:close="lastFailure = null"
-    >{{ lastFailure }}</v-alert>
+    <AppCallout v-if="lastFailure" variant="error" class="ma-3">
+      {{ lastFailure }}
+      <template #actions>
+        <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="lastFailure = null" />
+      </template>
+    </AppCallout>
 
     <v-progress-linear
       v-if="progress.total"
@@ -278,12 +277,7 @@ async function doRegenerate() {
       <v-progress-circular indeterminate size="24" />
     </div>
 
-    <v-alert
-      v-else-if="todosStore.error"
-      type="error"
-      variant="tonal"
-      class="ma-3"
-    >{{ todosStore.error }}</v-alert>
+    <AppCallout v-else-if="todosStore.error" variant="error" class="ma-3">{{ todosStore.error }}</AppCallout>
 
     <div
       v-else-if="todosStore.todos.length === 0"
@@ -317,27 +311,32 @@ async function doRegenerate() {
         </v-card-actions>
       </v-card>
     </v-dialog>
-  </v-card>
+  </section>
 </template>
 
 <style scoped>
+.todo-board {
+  border-bottom: 1px solid rgb(var(--v-theme-rule));
+}
 .todo-board__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  padding: 12px 16px;
-  gap: 12px;
+  padding: 14px 20px;
+  gap: 8px 12px;
 }
 .todo-board__title {
   display: flex;
   align-items: center;
-  font-size: 15px;
-  font-weight: 500;
+  font-size: var(--text-base);
+  font-weight: 600;
 }
 .todo-board__actions {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 4px 12px;
 }
 .todo-board__tool-hint {
   font-size: 12px;
@@ -349,9 +348,9 @@ async function doRegenerate() {
   align-items: center;
   gap: 8px;
   padding: 8px 16px 12px;
-  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.06);
+  border-top: 1px solid rgb(var(--v-theme-rule));
 }
 .todo-board__list {
-  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.06);
+  border-top: 1px solid rgb(var(--v-theme-rule));
 }
 </style>

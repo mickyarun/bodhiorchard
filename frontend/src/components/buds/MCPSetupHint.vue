@@ -53,15 +53,9 @@
       </span>
     </div>
 
-    <v-alert
-      v-if="error"
-      type="error"
-      density="compact"
-      variant="tonal"
-      class="mt-2"
-    >
+    <AppCallout v-if="error" variant="error" class="mt-2">
       {{ error }}
-    </v-alert>
+    </AppCallout>
 
     <!-- Post-generation: copy + run steps -->
     <v-expand-transition>
@@ -147,6 +141,7 @@
 </template>
 
 <script setup lang="ts">
+import AppCallout from '@/components/common/AppCallout.vue'
 import { computed, ref } from 'vue'
 import api from '@/services/api'
 import { extractApiError } from '@/utils/errors'
@@ -171,7 +166,7 @@ const showInstructions = ref(false)
 // ── Derived ─────────────────────────────────────────────────────────
 
 const iconColor = computed(() =>
-  props.purpose === 'testing' ? 'purple' : 'primary',
+  props.purpose === 'testing' ? 'brand' : 'primary',
 )
 
 const introText = computed(() =>

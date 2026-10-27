@@ -157,40 +157,22 @@
       </AppCallout>
       <!-- Stage-gate banner: BUD is in the wrong status for this section.
            Input is disabled; no optimistic local push. -->
-      <v-alert
-        v-else-if="stageGateMessage"
-        type="warning"
-        density="compact"
-        variant="tonal"
-        class="mb-2"
-      >
+      <AppCallout v-else-if="stageGateMessage" variant="warning" class="mb-2">
         {{ stageGateMessage }}
-      </v-alert>
+      </AppCallout>
       <!-- Chat-in-progress banner: another client is already chatting in
            this section. Informational only — input stays enabled, and
            the banner clears itself when the watched job ends. Chained
            with ``v-else-if`` so the hard stage-gate alert wins when
            both apply, and so the retry banner below stays mutually
            exclusive with both. -->
-      <v-alert
-        v-else-if="chatInProgressBanner"
-        type="info"
-        density="compact"
-        variant="tonal"
-        class="mb-2"
-      >
+      <AppCallout v-else-if="chatInProgressBanner" variant="info" class="mb-2">
         {{ chatInProgressBanner }}
-      </v-alert>
+      </AppCallout>
       <!-- Manual retry banner after a second consecutive parse-unparseable error. -->
-      <v-alert
-        v-else-if="retryPrompt"
-        type="error"
-        density="compact"
-        variant="tonal"
-        class="mb-2"
-      >
+      <AppCallout v-else-if="retryPrompt" variant="error" class="mb-2">
         Reply was malformed. <a href="#" @click.prevent="$emit('retry')">Try again</a>
-      </v-alert>
+      </AppCallout>
       <!-- Image previews -->
       <div v-if="pastedImages.length" class="image-previews d-flex ga-2 mb-2">
         <div v-for="(img, idx) in pastedImages" :key="idx" class="image-thumb">

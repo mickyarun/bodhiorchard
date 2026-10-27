@@ -279,11 +279,11 @@ function sourceColor(source: BUDVersionSummary['source']): string {
     case 'ui':
       return 'primary'
     case 'mcp':
-      return 'deep-purple'
+      return 'brand'
     case 'agent':
       return 'success'
     case 'migration':
-      return 'grey'
+      return 'muted'
     case 'revert':
       return 'warning'
   }
@@ -587,13 +587,13 @@ watch(
   min-width: 0;
 }
 .diff-line--added {
-  background: rgba(46, 160, 67, 0.16);
+  background: rgba(var(--v-theme-success), 0.16);
 }
 .diff-line--added .diff-line__marker {
   color: rgb(var(--v-theme-success));
 }
 .diff-line--removed {
-  background: rgba(248, 81, 73, 0.16);
+  background: rgba(var(--v-theme-error), 0.16);
 }
 .diff-line--removed .diff-line__marker {
   color: rgb(var(--v-theme-error));

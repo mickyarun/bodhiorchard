@@ -42,7 +42,7 @@
 
         <div class="mt-3" style="min-height: 240px; max-height: 360px; overflow-y: auto;">
           <div v-if="searching" class="d-flex justify-center py-6">
-            <v-progress-circular indeterminate size="24" color="teal" />
+            <v-progress-circular indeterminate size="24" color="primary" />
           </div>
 
           <div v-else-if="results.length === 0" class="text-body-2 text-medium-emphasis py-4 text-center">
@@ -73,16 +73,16 @@
           </v-list>
         </div>
 
-        <v-alert v-if="errorText" type="error" variant="tonal" density="compact" class="mt-2">
+        <AppCallout v-if="errorText" variant="error" class="mt-2">
           {{ errorText }}
-        </v-alert>
+        </AppCallout>
       </v-card-text>
 
       <v-card-actions>
         <v-spacer />
         <v-btn variant="text" @click="close">Cancel</v-btn>
         <v-btn
-          color="teal"
+          color="primary"
           variant="flat"
           :disabled="selectedIds.length === 0 || submitting"
           :loading="submitting"
@@ -96,6 +96,7 @@
 </template>
 
 <script setup lang="ts">
+import AppCallout from '@/components/common/AppCallout.vue'
 import { ref, watch } from 'vue'
 import api from '@/services/api'
 import type { Feature, FeaturePage } from '@/types'

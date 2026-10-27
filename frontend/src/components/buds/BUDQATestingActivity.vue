@@ -21,13 +21,13 @@
          even when activity is already populated by someone else. -->
     <div class="section-header">
       <div class="d-flex align-center ga-2">
-        <v-icon icon="mdi-test-tube" size="18" color="purple" />
+        <v-icon icon="mdi-test-tube" size="18" color="brand" />
         <span class="text-subtitle-2 font-weight-medium">QA Automation Activity</span>
         <v-chip
           v-if="hasActivity"
           size="x-small"
           variant="tonal"
-          color="purple"
+          color="brand"
         >
           {{ stats.total_commits }} commit{{ stats.total_commits !== 1 ? 's' : '' }}
         </v-chip>
@@ -50,12 +50,12 @@
 
     <!-- Loading -->
     <div v-if="loading" class="d-flex justify-center py-6">
-      <v-progress-circular indeterminate size="20" width="2" color="purple" />
+      <v-progress-circular indeterminate size="20" width="2" color="brand" />
     </div>
 
     <!-- Empty state — show inline MCP hint -->
     <div v-else-if="!hasActivity && untrackedRepos.length === 0" class="empty-state">
-      <v-icon icon="mdi-clipboard-clock-outline" size="36" color="purple" class="mb-2 opacity-40" />
+      <v-icon icon="mdi-clipboard-clock-outline" size="36" color="brand" class="mb-2 opacity-40" />
       <div class="text-body-2 text-medium-emphasis mb-3">
         No QA automation activity yet.
       </div>
@@ -76,42 +76,32 @@
       <!-- Stats row -->
       <div class="stats-row mb-4">
         <div class="stat-card">
-          <v-icon icon="mdi-source-commit" size="18" color="purple" class="mb-1" />
+          <v-icon icon="mdi-source-commit" size="18" color="brand" class="mb-1" />
           <div class="stat-value">{{ stats.total_commits }}</div>
           <div class="stat-label">Commits</div>
         </div>
         <div class="stat-card">
-          <v-icon icon="mdi-file-multiple" size="18" color="teal" class="mb-1" />
+          <v-icon icon="mdi-file-multiple" size="18" color="primary" class="mb-1" />
           <div class="stat-value">{{ stats.total_files_changed }}</div>
           <div class="stat-label">Files</div>
         </div>
         <div class="stat-card">
-          <v-icon icon="mdi-pulse" size="18" color="blue" class="mb-1" />
+          <v-icon icon="mdi-pulse" size="18" color="info" class="mb-1" />
           <div class="stat-value">{{ activities.length }}</div>
           <div class="stat-label">Events</div>
         </div>
         <div class="stat-card">
-          <v-icon icon="mdi-source-repository" size="18" color="grey" class="mb-1" />
+          <v-icon icon="mdi-source-repository" size="18" color="muted" class="mb-1" />
           <div class="stat-value">{{ stats.repos_touched + untrackedRepos.length }}</div>
           <div class="stat-label">Repos</div>
         </div>
       </div>
 
       <!-- Prompt when events flow but no commits yet -->
-      <v-alert
-        v-if="stats.total_commits === 0 && activities.length > 0"
-        variant="tonal"
-        density="compact"
-        color="info"
-        icon="mdi-information-outline"
-        class="mb-4"
-      >
-        <div class="text-body-2">
-          Activity is flowing ({{ activities.length }} event{{ activities.length !== 1 ? 's' : '' }} tracked).
-          Commits will appear here once code is committed on a
-          <code>bud-{{ String(budNumber || 0).padStart(3, '0') }}/</code> branch.
-        </div>
-      </v-alert>
+      <AppCallout v-if="stats.total_commits === 0 && activities.length > 0" variant="info" class="mb-4">
+        Activity is coming in ({{ activities.length }} event{{ activities.length !== 1 ? 's' : '' }} tracked).
+        Commits show up here once code is committed on a <code>{{ branchPrefix(budNumber) }}</code> branch.
+      </AppCallout>
 
       <!-- Untracked repos warning — rendered above contributors so a new
            tester immediately sees the prompt to add their repo. Each row
@@ -121,36 +111,27 @@
         <div class="text-caption text-medium-emphasis mb-2">
           Untracked repositories
         </div>
-        <v-alert
+        <AppCallout
           v-for="repo in untrackedRepos"
           :key="repo.repo_path"
-          color="warning"
-          variant="tonal"
-          density="compact"
-          class="untracked-row mb-2"
+          variant="warning"
           icon="mdi-source-repository-multiple"
+          :title="repo.name || repo.repo_path"
+          class="untracked-row mb-2"
         >
-          <div class="d-flex align-center ga-3">
-            <div class="flex-grow-1 min-width-0">
-              <div class="text-body-2 font-weight-medium text-truncate">
-                {{ repo.name || repo.repo_path }}
-              </div>
-              <div class="text-caption text-medium-emphasis text-truncate">
-                <code>{{ repo.repo_path }}</code> · {{ repo.commit_count }} commit{{ repo.commit_count !== 1 ? 's' : '' }}
-              </div>
-            </div>
+          <code>{{ repo.repo_path }}</code> · {{ repo.commit_count }} commit{{ repo.commit_count !== 1 ? 's' : '' }}
+          <template #actions>
             <v-btn
               size="small"
-              variant="flat"
-              color="warning"
+              variant="outlined"
               prepend-icon="mdi-plus"
               :disabled="addingRepoPath === repo.repo_path"
               @click="confirmAddRepo(repo)"
             >
               Add as tracked
             </v-btn>
-          </div>
-        </v-alert>
+          </template>
+        </AppCallout>
       </div>
 
       <!-- Tracked repo chips — same pattern as the dev panel -->
@@ -331,6 +312,8 @@ import { useSettingsStore } from '@/stores/settings'
 import { fileColor, fileIcon, parseFiles, timeAgo } from '@/utils/dev-activity-helpers'
 import type { DevActivity, UntrackedRepo } from '@/types'
 import MCPSetupHint from './MCPSetupHint.vue'
+import AppCallout from '@/components/common/AppCallout.vue'
+import { branchPrefix } from '@/utils/budDetail'
 
 const props = defineProps<{
   budId: string
@@ -439,10 +422,10 @@ function eventIcon(a: DevActivity): string {
 function eventColor(a: DevActivity): string {
   const et = a.event_type || ''
   if (et === 'tool_error' || et === 'api_error') return 'error'
-  if (et === 'commit') return 'purple'
+  if (et === 'commit') return 'brand'
   if (et === 'session_start') return 'success'
-  if (et === 'session_end') return 'grey'
-  if (et === 'user_prompt') return 'blue'
+  if (et === 'session_end') return 'muted'
+  if (et === 'user_prompt') return 'info'
   if (a.status === 'failed') return 'error'
   if (a.status === 'completed') return 'success'
   return 'info'
@@ -521,13 +504,10 @@ watch(() => props.budId, () => load())
   flex-direction: column;
 }
 
-.untracked-row :deep(.v-alert__content) {
-  width: 100%;
-}
-
 .untracked-row code {
   font-size: 11px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
 }
 
 .path-display {

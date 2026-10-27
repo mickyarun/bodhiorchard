@@ -15,29 +15,14 @@
  -->
 
 <template>
-  <div>
+  <div class="workflow-actions">
     <!-- Sticky last-phase-failure banner. Surfaces the most recent
          unresolved `skill_failed` event for this BUD (e.g. pert_estimator
          timeout, server-restart recovery). Dismiss persists server-side
-         so the banner stays gone across refreshes. Using an explicit
-         close button (not v-alert's `closable`) so the click goes
-         straight to our handler — `closable` toggles v-alert's internal
-         modelValue too, which can race with the v-if condition. -->
-    <v-alert
-      v-if="bud.last_phase_failure"
-      type="error"
-      variant="tonal"
-      class="mx-12 mb-3"
-    >
-      <div class="d-flex align-start ga-2">
-        <div class="flex-grow-1">
-          <div class="text-body-2 font-weight-medium">
-            {{ phaseFailureTitle }}
-          </div>
-          <div v-if="phaseFailureMessage" class="text-body-2 mt-1">
-            {{ phaseFailureMessage }}
-          </div>
-        </div>
+         so the banner stays gone across refreshes. -->
+    <AppCallout v-if="bud.last_phase_failure" variant="error" :title="phaseFailureTitle">
+      <template v-if="phaseFailureMessage">{{ phaseFailureMessage }}</template>
+      <template #actions>
         <v-btn
           variant="text"
           size="small"
@@ -46,27 +31,16 @@
           aria-label="Dismiss failure"
           @click="handleDismissPhaseFailure"
         />
-      </div>
-    </v-alert>
+      </template>
+    </AppCallout>
 
     <!-- Reassignment Button (development phase, current assignee only) -->
-    <v-alert
-      v-if="bud.status === 'development' && isCurrentAssignee"
-      type="warning"
-      variant="tonal"
-      class="mx-12 mb-3"
-    >
-      <div class="d-flex align-center ga-2">
-        <div class="flex-grow-1">
-          Need to hand this off? Request reassignment to another developer.
-        </div>
-        <v-btn variant="tonal" size="small" @click="showReassignDialog = true">
-          <v-icon start size="16">mdi-swap-horizontal</v-icon>
-          Request Reassignment
-        </v-btn>
-      </div>
-    </v-alert>
-
+    <AppCallout v-if="bud.status === 'development' && isCurrentAssignee" variant="warning" icon="mdi-swap-horizontal">
+      Need to hand this off? Ask for the BUD to be reassigned to another developer.
+      <template #actions>
+        <v-btn variant="outlined" size="small" @click="showReassignDialog = true">Request reassignment</v-btn>
+      </template>
+    </AppCallout>
 
     <!-- Reassignment dialog -->
     <v-dialog v-model="showReassignDialog" max-width="440">
@@ -103,6 +77,7 @@ import { useJobSocket } from '@/composables/useJobSocket'
 import { subscribe, unsubscribe } from '@/services/socket'
 import { friendlyAgentError } from '@/types/agentErrors'
 import { ROLE_LABELS } from '@/types'
+import AppCallout from '@/components/common/AppCallout.vue'
 import type { BUDDocument, UserRoleName } from '@/types'
 
 const props = defineProps<{
@@ -458,3 +433,10 @@ defineExpose({
   stopAgentActivity,
 })
 </script>
+
+<style scoped>
+/* The callouts take part in the detail page's own column spacing. */
+.workflow-actions {
+  display: contents;
+}
+</style>

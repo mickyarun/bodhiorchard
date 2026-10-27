@@ -36,7 +36,7 @@
   <!-- Multi-design sub-tabs when designs exist -->
   <div v-if="designs.length > 0" class="design-multi-panel">
     <div class="design-sub-tabs-row">
-      <v-tabs v-model="activeDesignTab" density="compact" color="teal" class="design-sub-tabs">
+      <v-tabs v-model="activeDesignTab" density="compact" color="primary" class="design-sub-tabs">
         <v-tab v-for="d in designs" :key="d.id" :value="d.id">
           {{ d.repo_name || 'Default' }}
           <v-icon
@@ -746,7 +746,7 @@ defineExpose({
   width: 100%;
   min-height: 600px;
   border: none;
-  background: #0D1B0F;
+  background: rgb(var(--v-theme-surface));
 }
 
 .section-empty {

@@ -14,58 +14,48 @@
  * limitations under the License.
  -->
 
+<!-- The BUD's activity, newest first: the latest few events, and the rest
+     on request. The timeline endpoint returns events oldest first. -->
+<template>
+  <AppPanel title="Activity" :note="events.length ? `${events.length} events` : undefined">
+    <template v-if="events.length > RECENT" #action>
+      <button type="button" class="activity__toggle" :aria-expanded="showAll" @click="showAll = !showAll">
+        {{ showAll ? 'Show recent' : 'Show all' }}
+      </button>
+    </template>
+    <BUDTimeline :events="shown" :loading="loading" />
+  </AppPanel>
+</template>
+
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import AppPanel from '@/components/common/AppPanel.vue'
 import type { TimelineEvent } from '@/types'
 import BUDTimeline from './BUDTimeline.vue'
 
-defineProps<{
+const props = defineProps<{
   events: TimelineEvent[]
   loading: boolean
 }>()
 
-const open = ref(false)
+const RECENT = 6
+const showAll = ref(false)
+const shown = computed(() => {
+  const newestFirst = [...props.events].reverse()
+  return showAll.value ? newestFirst : newestFirst.slice(0, RECENT)
+})
 </script>
 
-<template>
-  <div class="timeline-section mt-4">
-    <button class="timeline-toggle" @click="open = !open">
-      <v-icon :icon="open ? 'mdi-chevron-down' : 'mdi-chevron-right'" size="18" />
-      <span class="text-subtitle-2 font-weight-medium">Activity</span>
-      <span class="text-caption text-medium-emphasis ml-1">({{ events.length }})</span>
-    </button>
-    <div v-if="open" class="timeline-body">
-      <BUDTimeline :events="events" :loading="loading" />
-    </div>
-  </div>
-</template>
-
 <style scoped>
-.timeline-section {
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  border-radius: 8px;
-  background: rgb(var(--v-theme-surface));
-}
-
-.timeline-toggle {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  width: 100%;
-  padding: 10px 14px;
-  background: none;
-  border: none;
+.activity__toggle {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--color-accent-text);
   cursor: pointer;
-  color: rgba(var(--v-theme-on-surface), 0.87);
-  text-align: left;
 }
-
-.timeline-toggle:hover {
-  background: rgba(var(--v-theme-on-surface), 0.04);
-  border-radius: 8px;
-}
-
-.timeline-body {
-  padding: 0 14px 14px;
+.activity__toggle:hover {
+  text-decoration: underline;
 }
 </style>

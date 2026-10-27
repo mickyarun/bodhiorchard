@@ -26,7 +26,7 @@
       <v-icon icon="mdi-code-braces" size="48" color="primary" class="mb-3 opacity-40" />
       <div class="text-h6 font-weight-medium mb-2">Ready for development</div>
       <div class="text-body-2 text-medium-emphasis mb-4" style="max-width: 440px;">
-        Start coding on a <code>bud-{{ budNumber }}/</code> branch. Commits will appear here
+        Start coding on a <code>{{ branchPrefix(budNumber) }}</code> branch. Commits will appear here
         automatically via git hooks.
       </div>
 
@@ -152,12 +152,12 @@
           <div class="stat-label">Commits</div>
         </div>
         <div class="stat-card">
-          <v-icon icon="mdi-file-multiple" size="18" color="teal" class="mb-1" />
+          <v-icon icon="mdi-file-multiple" size="18" color="primary" class="mb-1" />
           <div class="stat-value">{{ stats.total_files_changed }}</div>
           <div class="stat-label">Files</div>
         </div>
         <div class="stat-card">
-          <v-icon icon="mdi-account-group" size="18" color="blue" class="mb-1" />
+          <v-icon icon="mdi-account-group" size="18" color="info" class="mb-1" />
           <div class="stat-value">{{ sessionCount }}</div>
           <div class="stat-label">Sessions</div>
         </div>
@@ -296,6 +296,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import BUDImpactedReposDialog from '@/components/buds/BUDImpactedReposDialog.vue'
 import { useBudActivity } from '@/composables/useBudActivity'
 import { useSettingsStore } from '@/stores/settings'
+import { branchPrefix } from '@/utils/budDetail'
 import { fileColor, fileIcon, parseFiles, timeAgo } from '@/utils/dev-activity-helpers'
 import type { DevActivity } from '@/types'
 import MCPSetupHint from './MCPSetupHint.vue'
@@ -376,13 +377,12 @@ function eventColor(a: DevActivity): string {
   if (et === 'tool_error' || et === 'api_error') return 'error'
   if (et === 'commit') return 'primary'
   if (et === 'session_start') return 'success'
-  if (et === 'session_end') return 'grey'
+  if (et === 'session_end') return 'muted'
   return statusColor(a.status)
 }
 
 async function copyBranchName(): Promise<void> {
-  const name = `bud-${String(props.budNumber || 0).padStart(3, '0')}/`
-  await navigator.clipboard.writeText(name)
+  await navigator.clipboard.writeText(branchPrefix(props.budNumber))
   branchCopied.value = true
   setTimeout(() => { branchCopied.value = false }, 2000)
 }

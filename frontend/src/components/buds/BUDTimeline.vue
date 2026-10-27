@@ -39,7 +39,7 @@
                 <span>created this BUD</span>
               </div>
               <div v-if="event.detail?.source === 'slack_triage'" class="tl-meta">
-                <v-chip size="x-small" color="indigo" variant="tonal" label class="tl-badge">
+                <v-chip size="x-small" color="brand" variant="tonal" label class="tl-badge">
                   <v-icon start size="10">mdi-slack</v-icon>
                   Slack triage
                 </v-chip>
@@ -53,7 +53,7 @@
                 <span class="tl-actor">{{ event.detail?.requester_name ?? 'unknown' }}</span>
               </div>
               <div class="tl-meta">
-                <v-chip size="x-small" color="indigo" variant="tonal" label class="tl-badge">
+                <v-chip size="x-small" color="brand" variant="tonal" label class="tl-badge">
                   <v-icon start size="10">mdi-slack</v-icon>
                   {{ event.detail?.channel ?? 'Slack' }}
                 </v-chip>
@@ -114,7 +114,7 @@
                 <v-chip
                   v-if="event.detail?.method === 'auto_round_robin'"
                   size="x-small"
-                  color="teal"
+                  color="primary"
                   variant="tonal"
                   label
                   class="tl-badge"
@@ -159,7 +159,7 @@
               <div class="tl-primary">
                 <v-icon size="14" color="success" class="mr-1">mdi-check-circle</v-icon>
                 <span>AI</span>
-                <v-chip size="x-small" color="deep-purple" variant="tonal" label class="tl-badge">
+                <v-chip size="x-small" color="brand" variant="tonal" label class="tl-badge">
                   {{ formatAgent(String(event.detail?.agent ?? 'agent')) }}
                 </v-chip>
                 <span>completed on</span>
@@ -172,7 +172,7 @@
               <div class="tl-primary">
                 <v-icon size="14" color="error" class="mr-1">mdi-alert-circle</v-icon>
                 <span>AI</span>
-                <v-chip size="x-small" color="deep-purple" variant="tonal" label class="tl-badge">
+                <v-chip size="x-small" color="brand" variant="tonal" label class="tl-badge">
                   {{ formatAgent(String(event.detail?.agent ?? 'agent')) }}
                 </v-chip>
                 <span class="text-error">failed</span>
@@ -187,7 +187,7 @@
                 <span>Design wireframe generated</span>
               </div>
               <div v-if="event.detail?.repo_id" class="tl-meta">
-                <v-chip size="x-small" color="teal" variant="tonal" label class="tl-badge">
+                <v-chip size="x-small" color="primary" variant="tonal" label class="tl-badge">
                   <v-icon start size="10">mdi-source-repository</v-icon>
                   repo
                 </v-chip>
@@ -346,29 +346,29 @@ const EVENT_MAP: Record<string, EventConfig> = {
   requested: { icon: 'mdi-message-text', color: 'info', label: 'Requested' },
   approved: { icon: 'mdi-check-decagram', color: 'success', label: 'Approved' },
   status_change: { icon: 'mdi-swap-horizontal', color: 'primary', label: 'Status changed' },
-  assigned: { icon: 'mdi-account-check', color: 'teal', label: 'Assigned' },
-  unassigned: { icon: 'mdi-account-remove', color: 'grey', label: 'Unassigned' },
-  ai_agent_started: { icon: 'mdi-robot', color: 'blue', label: 'AI started' },
+  assigned: { icon: 'mdi-account-check', color: 'primary', label: 'Assigned' },
+  unassigned: { icon: 'mdi-account-remove', color: 'muted', label: 'Unassigned' },
+  ai_agent_started: { icon: 'mdi-robot', color: 'info', label: 'AI started' },
   ai_agent_completed: { icon: 'mdi-robot', color: 'success', label: 'AI completed' },
   ai_agent_failed: { icon: 'mdi-robot-off', color: 'error', label: 'AI failed' },
   content_updated: { icon: 'mdi-pencil', color: 'primary', label: 'Content updated' },
-  design_generated: { icon: 'mdi-palette', color: 'teal', label: 'Design generated' },
-  comment: { icon: 'mdi-comment-text', color: 'grey', label: 'Comment' },
+  design_generated: { icon: 'mdi-palette', color: 'primary', label: 'Design generated' },
+  comment: { icon: 'mdi-comment-text', color: 'muted', label: 'Comment' },
   pr_opened: { icon: 'mdi-source-pull', color: 'info', label: 'PR opened' },
   pr_merged: { icon: 'mdi-source-merge', color: 'success', label: 'PR merged' },
   all_prs_merged: { icon: 'mdi-check-all', color: 'success', label: 'All PRs merged' },
-  estimate_generated: { icon: 'mdi-chart-timeline-variant', color: 'blue', label: 'Estimate updated' },
-  estimate_overridden: { icon: 'mdi-calendar-edit', color: 'orange', label: 'Estimate overridden' },
+  estimate_generated: { icon: 'mdi-chart-timeline-variant', color: 'info', label: 'Estimate updated' },
+  estimate_overridden: { icon: 'mdi-calendar-edit', color: 'warning', label: 'Estimate overridden' },
   ac_verification_passed: { icon: 'mdi-check-decagram', color: 'success', label: 'ACs verified' },
   ac_verification_failed: { icon: 'mdi-alert-circle', color: 'error', label: 'ACs incomplete' },
-  status_override: { icon: 'mdi-shield-alert', color: 'orange', label: 'Manual override' },
+  status_override: { icon: 'mdi-shield-alert', color: 'warning', label: 'Manual override' },
   code_review_rerun: { icon: 'mdi-refresh', color: 'info', label: 'Code review re-run' },
-  feature_linked: { icon: 'mdi-link-plus', color: 'teal', label: 'Feature linked' },
-  feature_unlinked: { icon: 'mdi-link-off', color: 'grey', label: 'Feature unlinked' },
-  features_auto_linked: { icon: 'mdi-robot', color: 'teal', label: 'Features auto-linked' },
+  feature_linked: { icon: 'mdi-link-plus', color: 'primary', label: 'Feature linked' },
+  feature_unlinked: { icon: 'mdi-link-off', color: 'muted', label: 'Feature unlinked' },
+  features_auto_linked: { icon: 'mdi-robot', color: 'primary', label: 'Features auto-linked' },
 }
 
-const DEFAULT_CONFIG: EventConfig = { icon: 'mdi-circle-small', color: 'grey', label: 'Event' }
+const DEFAULT_CONFIG: EventConfig = { icon: 'mdi-circle-small', color: 'muted', label: 'Event' }
 
 const ROLE_LABELS: Record<string, string> = {
   pm: 'Product Manager',
@@ -401,7 +401,7 @@ function eventConfig(type: string): EventConfig {
 }
 
 function statusColor(s: string): string {
-  return BUD_STATUS_COLORS[s as BUDStatus] ?? 'grey'
+  return BUD_STATUS_COLORS[s as BUDStatus] ?? 'muted'
 }
 
 function statusLabel(s: string): string {
