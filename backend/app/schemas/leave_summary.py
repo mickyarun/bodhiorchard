@@ -57,6 +57,9 @@ class Balance(BaseModel):
     # Of ``allocated``, what is released so far (all of it when upfront).
     earned: Decimal | None
     adjustments: Decimal
+    # Of ``adjustments``, the days added: usable straight away. Days taken
+    # away only come off the year's total.
+    added: Decimal
     used: Decimal
     pending: Decimal
     available: Decimal | None

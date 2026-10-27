@@ -25,6 +25,7 @@ function balance(used: number, pending: number): Balance {
     allocated: 12,
     earned: 12,
     adjustments: 0,
+    added: 0,
     used,
     pending,
     available: 12 - used - pending,

@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.leave_policy import LeavePolicy
 from app.repositories.leave_ledger import LeaveLedgerRepository
+from app.repositories.leave_ledger_totals import NO_TOTALS
 from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.leave_usage import LeaveUsageRepository
 from app.services.leave.accrual import Booking
@@ -49,7 +50,6 @@ from app.services.leave.eligibility import usable_types
 from app.services.leave.policies import today_for
 from app.services.leave.reports.population import Person
 
-ZERO = Decimal("0")
 YearFor = Callable[[LeavePolicy], LeaveYearBounds]
 
 
@@ -112,12 +112,11 @@ async def balance_lines(
         on = day_in_year(today_for(p.policy), year)
         lines = []
         for t in usable_types(types.get(p.policy.id, []), p.profile):
-            stored, adjustments = ledger.get((p.user_id, t.id, year.label), (None, ZERO))
+            totals = ledger.get((p.user_id, t.id, year.label), NO_TOTALS)
             lines.append(
                 build_line(
                     t,
-                    stored,
-                    adjustments,
+                    totals,
                     bookings[(p.user_id, t.id)],
                     profile=p.profile,
                     year=year,

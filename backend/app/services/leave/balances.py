@@ -38,9 +38,10 @@ from app.models.leave_policy import LeavePolicy
 from app.models.leave_request import LeaveStatus
 from app.models.leave_type import LeaveType
 from app.repositories.leave_ledger import LeaveLedgerRepository
+from app.repositories.leave_ledger_totals import NO_TOTALS, YearTotals
 from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.leave_usage import LeaveUsageRepository
-from app.services.leave.accrual import Booking, earned_by, taken_by, usable_from
+from app.services.leave.accrual import Booking, earned_by, headroom_from, taken_by, usable_from
 from app.services.leave.allocation import ProrationRule, allocation_for_year
 from app.services.leave.calendar_math import LeaveYearBounds
 from app.services.leave.eligibility import usable_types
@@ -70,7 +71,10 @@ class BalanceLine:
     None = no limit. ``earned`` is how much of ``allocated`` is released by
     that day (all of it for an upfront type). ``available`` is what can still
     be booked from that day without overdrawing any later month; ``taken``
-    is the paid days of approved leave that has already started.
+    is the paid days of approved leave that has already started. ``short``
+    is how far booked paid days outrun the balance somewhere in the year:
+    zero unless it shrank under leave already booked. ``added`` is the part
+    of ``adjustments`` that was added (usable straight away).
     """
 
     leave_type: LeaveType
@@ -81,6 +85,8 @@ class BalanceLine:
     pending: Decimal
     available: Decimal | None
     taken: Decimal
+    short: Decimal = ZERO
+    added: Decimal = ZERO
 
 
 def booking(status: LeaveStatus, start: date, days: Decimal) -> Booking:
@@ -90,8 +96,7 @@ def booking(status: LeaveStatus, start: date, days: Decimal) -> Booking:
 
 def build_line(
     leave_type: LeaveType,
-    stored: Decimal | None,
-    adjustments: Decimal,
+    totals: YearTotals,
     bookings: Sequence[Booking],
     *,
     profile: EmployeeProfile | None,
@@ -101,10 +106,11 @@ def build_line(
 ) -> BalanceLine:
     """One type's balance as of ``on``; an unstored allocation is worked out live.
 
-    ``bookings`` are the type's active requests starting in ``year``.
+    ``totals`` is the type's ledger for ``year``; ``bookings`` are its
+    active requests starting in that year.
     """
     quota = leave_type.annual_quota_days
-    allocated = stored
+    stored = allocated = totals.allocation
     joined = effective_from(profile)
     if quota is None:
         allocated = None
@@ -113,21 +119,25 @@ def build_line(
     used = sum((b.days for b in bookings if b.approved), ZERO)
     pending = sum((b.days for b in bookings if not b.approved), ZERO)
     earned = available = None
+    short = ZERO
     if allocated is not None:
         accrual = leave_type.accrual
         earned = earned_by(allocated, accrual, joined, year.start, year.end, on)
-        available = usable_from(
-            allocated, accrual, joined, year.start, year.end, on, adjustments, bookings
-        )
+        shared = (allocated, accrual, joined, year.start, year.end)
+        changes = (totals.added, totals.removed, bookings)
+        available = usable_from(*shared, on, *changes)
+        short = max(-headroom_from(*shared, year.start, *changes), ZERO)
     return BalanceLine(
         leave_type=leave_type,
         allocated=allocated,
         earned=earned,
-        adjustments=adjustments,
+        adjustments=totals.adjustments,
         used=used,
         pending=pending,
         available=available,
         taken=taken_by(bookings, on),
+        short=short,
+        added=totals.added,
     )
 
 
@@ -163,15 +173,15 @@ async def balances_for(
     rule = proration_rule(policy)
     persist = next((t for t in types if t.id == persist_type_id), None)
     if persist is not None and persist.annual_quota_days is not None:
-        stored, adjustments = totals.get(persist.id, (None, ZERO))
-        if stored is None:
+        current = totals.get(persist.id, NO_TOTALS)
+        if current.allocation is None:
             joined = effective_from(profile)
             days = allocation_for_year(
                 persist.annual_quota_days, joined, year.start, year.end, rule
             )
             # Callers hold the member's lock, so nobody else writes it meanwhile.
             await ledger.ensure_allocation(user_id, persist.id, year.label, days)
-            totals[persist.id] = (days, adjustments)
+            totals[persist.id] = current._replace(allocation=days)
     rows = await LeaveUsageRepository(db, org_id=org_id).leave_days_by_start(
         {user_id}, {t.id for t in types}, year.start, year.end
     )
@@ -181,7 +191,7 @@ async def balances_for(
     return [
         build_line(
             t,
-            *totals.get(t.id, (None, ZERO)),
+            totals.get(t.id, NO_TOTALS),
             bookings[t.id],
             profile=profile,
             year=year,

@@ -27,7 +27,8 @@
         <p class="text-body-2 text-medium-emphasis">
           A year's allocation is fixed the first time leave is requested in it. If their joining
           date or the policy's new joiner rules changed since, this books the difference as a
-          correction in the ledger.
+          correction in the ledger. Leave already booked is then priced again, so any days the
+          balance doesn't cover become loss of pay.
         </p>
         <v-select v-model="typeId" :items="typeItems" label="Leave type" v-bind="field" />
         <AppCallout v-if="outcome" variant="success">{{ outcome }}</AppCallout>

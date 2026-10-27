@@ -147,6 +147,8 @@ class LeavePreview(BaseModel):
     excluded: list[ExcludedDate]
     balance_before: Decimal | None
     balance_after: Decimal | None
+    # Days left per leave type id on the start date (None: no limit).
+    balances_on_start: dict[uuid.UUID, Decimal | None] = Field(default_factory=dict)
     auto_approved: bool
     approvers: list[PersonRef]
     routes_to_hr: bool

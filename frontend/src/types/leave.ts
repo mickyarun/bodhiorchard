@@ -78,6 +78,8 @@ export interface Balance {
   /** Of `allocated`, what is released so far (all of it when upfront). */
   earned: Decimalish | null
   adjustments: Decimalish
+  /** Of `adjustments`, the days added: usable straight away. Days taken away only come off the year's total. */
+  added: Decimalish
   used: Decimalish
   pending: Decimalish
   available: Decimalish | null
@@ -148,6 +150,8 @@ export interface LeavePreview {
   excluded: ExcludedDate[]
   balance_before: Decimalish | null
   balance_after: Decimalish | null
+  /** Days left per leave type id on the start date (null: no limit). */
+  balances_on_start: Record<string, Decimalish | null>
   auto_approved: boolean
   approvers: PersonRef[]
   routes_to_hr: boolean

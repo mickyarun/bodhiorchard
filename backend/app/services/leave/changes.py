@@ -35,7 +35,7 @@ from app.services.leave.approvers import approvers_for, route_for
 from app.services.leave.cancellation import days_between
 from app.services.leave.errors import LeaveConflictError, LeaveForbiddenError, LeaveInvalidError
 from app.services.leave.lifecycle import load_request
-from app.services.leave.loss_of_pay import give_back
+from app.services.leave.loss_of_pay import rebalance
 from app.services.leave.policies import MemberPolicy, policy_for_request, today_for
 
 ZERO = Decimal("0")
@@ -116,5 +116,5 @@ async def withdraw(
         raise LeaveConflictError(CHANGED_MEANWHILE)
     await db.refresh(request)
     if request.leave_type_id is not None:
-        await give_back(db, member, request.user_id, request.leave_type_id, request.start_date)
+        await rebalance(db, member, request.user_id, request.leave_type_id, request.start_date)
     return request

@@ -18,15 +18,19 @@ import uuid
 from collections.abc import Collection
 from decimal import Decimal
 
-from sqlalchemy import func, select, text
+from sqlalchemy import case, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.leave_ledger import LeaveLedgerEntry, LedgerEntryType
 from app.repositories.base import BaseRepository
+from app.repositories.leave_ledger_totals import YearTotals, split_totals
 
-# Entries that make up a year's allocation (a correction re-states it).
-_ALLOCATED = (LedgerEntryType.ALLOCATION, LedgerEntryType.CORRECTION)
+# Each entry type's days summed apart by sign: added and taken-away days
+# count differently (see :class:`YearTotals`).
+_PLUS = func.sum(case((LeaveLedgerEntry.days > 0, LeaveLedgerEntry.days), else_=0))
+_MINUS = func.sum(case((LeaveLedgerEntry.days < 0, LeaveLedgerEntry.days), else_=0))
+_YearKey = tuple[uuid.UUID, uuid.UUID, int]
 
 
 class LeaveLedgerRepository(BaseRepository[LeaveLedgerEntry]):
@@ -37,33 +41,27 @@ class LeaveLedgerRepository(BaseRepository[LeaveLedgerEntry]):
         super().__init__(LeaveLedgerEntry, db, org_id=org_id)
         self._org = org_id
 
-    async def totals(
-        self, user_id: uuid.UUID, leave_year: int
-    ) -> dict[uuid.UUID, tuple[Decimal | None, Decimal]]:
-        """``{leave_type_id: (allocation or None, adjustments)}`` for one year.
+    async def totals(self, user_id: uuid.UUID, leave_year: int) -> dict[uuid.UUID, YearTotals]:
+        """``{leave_type_id: totals}`` for one year.
 
-        See :func:`_split` for how corrections count.
+        See :func:`split_totals` for how corrections count.
         """
         stmt = self._scoped(
-            select(
-                LeaveLedgerEntry.leave_type_id,
-                LeaveLedgerEntry.entry_type,
-                func.sum(LeaveLedgerEntry.days),
-            )
+            select(LeaveLedgerEntry.leave_type_id, LeaveLedgerEntry.entry_type, _PLUS, _MINUS)
             .where(LeaveLedgerEntry.user_id == user_id, LeaveLedgerEntry.leave_year == leave_year)
             .group_by(LeaveLedgerEntry.leave_type_id, LeaveLedgerEntry.entry_type)
         )
-        sums: dict[uuid.UUID, dict[LedgerEntryType, Decimal]] = {}
-        for type_id, entry_type, days in (await self._db.execute(stmt)).all():
-            sums.setdefault(type_id, {})[entry_type] = days
-        return {key: _split(by_type) for key, by_type in sums.items()}
+        sums: dict[uuid.UUID, dict[LedgerEntryType, tuple[Decimal, Decimal]]] = {}
+        for type_id, entry_type, plus, minus in (await self._db.execute(stmt)).all():
+            sums.setdefault(type_id, {})[entry_type] = (plus, minus)
+        return {key: split_totals(by_type) for key, by_type in sums.items()}
 
     async def type_totals(
         self, user_ids: Collection[uuid.UUID], type_ids: Collection[uuid.UUID]
-    ) -> dict[tuple[uuid.UUID, uuid.UUID, int], tuple[Decimal | None, Decimal]]:
-        """``{(user, type, leave_year): (allocation or None, adjustments)}``.
+    ) -> dict[_YearKey, YearTotals]:
+        """``{(user, type, leave_year): totals}``.
 
-        See :func:`_split` for how corrections count.
+        See :func:`split_totals` for how corrections count.
         """
         if not user_ids or not type_ids:
             return {}
@@ -73,7 +71,8 @@ class LeaveLedgerRepository(BaseRepository[LeaveLedgerEntry]):
                 LeaveLedgerEntry.leave_type_id,
                 LeaveLedgerEntry.leave_year,
                 LeaveLedgerEntry.entry_type,
-                func.sum(LeaveLedgerEntry.days),
+                _PLUS,
+                _MINUS,
             )
             .where(
                 LeaveLedgerEntry.user_id.in_(user_ids),
@@ -86,10 +85,10 @@ class LeaveLedgerRepository(BaseRepository[LeaveLedgerEntry]):
                 LeaveLedgerEntry.entry_type,
             )
         )
-        sums: dict[tuple[uuid.UUID, uuid.UUID, int], dict[LedgerEntryType, Decimal]] = {}
-        for user_id, type_id, year, entry_type, days in (await self._db.execute(stmt)).all():
-            sums.setdefault((user_id, type_id, year), {})[entry_type] = days
-        return {key: _split(by_type) for key, by_type in sums.items()}
+        sums: dict[_YearKey, dict[LedgerEntryType, tuple[Decimal, Decimal]]] = {}
+        for user_id, type_id, year, kind, plus, minus in (await self._db.execute(stmt)).all():
+            sums.setdefault((user_id, type_id, year), {})[kind] = (plus, minus)
+        return {key: split_totals(by_type) for key, by_type in sums.items()}
 
     async def allocated_since(self, leave_type_id: uuid.UUID, leave_year: int) -> bool:
         """True if anyone's allocation for ``leave_year`` or later is already booked."""
@@ -186,20 +185,3 @@ class LeaveLedgerRepository(BaseRepository[LeaveLedgerEntry]):
             .order_by(LeaveLedgerEntry.created_at)
         )
         return list((await self._db.execute(stmt)).scalars().all())
-
-
-def _split(sums: dict[LedgerEntryType, Decimal]) -> tuple[Decimal | None, Decimal]:
-    """``(allocation or None, adjustments)`` from one year's entry totals.
-
-    A correction (HR recalculating a frozen allocation) is part of the
-    allocation, so a monthly type releases it month by month like the rest;
-    a manual adjustment is available at once.
-    """
-    zero = Decimal("0")
-    allocation = sums.get(LedgerEntryType.ALLOCATION)
-    correction = sums.get(LedgerEntryType.CORRECTION, zero)
-    adjustments = sum((days for kind, days in sums.items() if kind not in _ALLOCATED), zero)
-    if allocation is None:
-        # No allocation to correct; keep the days rather than drop them.
-        return None, adjustments + correction
-    return allocation + correction, adjustments

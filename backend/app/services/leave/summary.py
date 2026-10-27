@@ -55,6 +55,7 @@ def balance_schema(line: BalanceLine) -> Balance:
         allocated=line.allocated,
         earned=line.earned,
         adjustments=line.adjustments,
+        added=line.added,
         used=line.used,
         pending=line.pending,
         available=line.available,

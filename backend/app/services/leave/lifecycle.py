@@ -43,7 +43,7 @@ from app.services.leave.errors import (
 )
 from app.services.leave.evaluation import evaluate
 from app.services.leave.evaluation_steps import Evaluation
-from app.services.leave.loss_of_pay import give_back, reprice
+from app.services.leave.loss_of_pay import rebalance, reprice
 from app.services.leave.messages import already_decided_message
 from app.services.leave.policies import policy_for_request, resolve_member_policy
 
@@ -157,7 +157,7 @@ async def decide(
     if not approve and request.leave_type_id is not None:
         # The rejected request's paid days are free again.
         member = await policy_for_request(db, org_id, request)
-        await give_back(db, member, request.user_id, request.leave_type_id, request.start_date)
+        await rebalance(db, member, request.user_id, request.leave_type_id, request.start_date)
     return request
 
 

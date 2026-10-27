@@ -106,7 +106,8 @@ import LeavePreviewPanel from '@/components/leave/LeavePreviewPanel.vue'
 import { useLeaveRequestForm } from '@/composables/useLeaveRequestForm'
 import { useLeaveStore } from '@/stores/leave'
 import type { HalfDay, LeaveKind } from '@/types/leave'
-import { formatDays, HALF_DAY_LABELS, KIND_LABELS, pillOptions, toNumber } from '@/utils/leave'
+import { HALF_DAY_LABELS, KIND_LABELS, pillOptions, pluralDays, toNumber } from '@/utils/leave'
+import { daysLeftForDraft } from '@/utils/leaveAccrual'
 import { formatDayRange } from '@/utils/leaveDates'
 
 const props = defineProps<{ modelValue: boolean; preset: LeaveKind }>()
@@ -130,12 +131,15 @@ const kindOptions = computed(() => {
 })
 
 const typeItems = computed(() =>
-  (summary.value?.balances ?? []).map(b => ({
-    title: b.available === null
-      ? `${b.leave_type.name} · No limit`
-      : `${b.leave_type.name} · ${formatDays(toNumber(b.available))} days left`,
-    value: b.leave_type.id,
-  })),
+  (summary.value?.balances ?? []).map(b => {
+    const left = daysLeftForDraft(b, form.preview.value)
+    return {
+      title: left === null
+        ? `${b.leave_type.name} · No limit`
+        : `${b.leave_type.name} · ${pluralDays(toNumber(left))} left`,
+      value: b.leave_type.id,
+    }
+  }),
 )
 
 const holidayItems = computed(() =>

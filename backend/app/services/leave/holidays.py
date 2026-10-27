@@ -38,7 +38,7 @@ from app.repositories.policy_holiday import PolicyHolidayRepository
 from app.schemas.leave_policy import HolidayCountry, Subdivision
 from app.services.leave.calendar_math import count_days, leave_year_bounds, leave_year_by_label
 from app.services.leave.errors import LeaveInvalidError
-from app.services.leave.loss_of_pay import give_back, reprice
+from app.services.leave.loss_of_pay import rebalance, reprice
 from app.services.leave.policies import mandatory_holidays, policy_for_request, today_for
 
 logger = structlog.get_logger(__name__)
@@ -176,7 +176,7 @@ async def recount_requests(db: AsyncSession, policy: LeavePolicy, start: date) -
         if key is None or key in seen:
             continue
         seen.add(key)
-        await give_back(db, member, request.user_id, key[1], request.start_date)
+        await rebalance(db, member, request.user_id, key[1], request.start_date)
     await db.flush()
     if changed:
         logger.info(

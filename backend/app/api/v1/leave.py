@@ -96,6 +96,7 @@ async def preview_request(
         excluded=[ExcludedDate(date=d, reason=r) for d, r in result.excluded],
         balance_before=result.balance_before,
         balance_after=result.balance_after,
+        balances_on_start=result.balances_on_start,
         auto_approved=result.auto_approved,
         approvers=[PersonRef(user_id=u, name=n) for u, n in result.approvers.managers],
         routes_to_hr=result.approvers.routes_to_hr,
