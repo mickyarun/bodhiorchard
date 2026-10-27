@@ -43,9 +43,16 @@ export function useFeatureList() {
   const activeRepos = computed(() => settingsStore.repos.filter(r => r.status !== 'removed'))
   const pageCount = computed(() => Math.max(1, Math.ceil(store.total / PAGE_SIZE)))
   const filtering = computed(() => !!repoId.value || !!debouncedQuery.value)
-  // Nothing mapped at all, as opposed to nothing matching the filters.
+  // Nothing mapped at all, as opposed to nothing matching the filters:
+  // an empty unfiltered list before any repository has been scanned.
   const nothingMapped = computed(
-    () => store.items.length === 0 && !filtering.value && !focusedId.value && (mode.value === 'active' || mode.value === 'all'),
+    () =>
+      store.items.length === 0 &&
+      !store.error &&
+      !filtering.value &&
+      !focusedId.value &&
+      (mode.value === 'active' || mode.value === 'all') &&
+      !activeRepos.value.some(r => r.lastScanned !== null),
   )
 
   const contributors = computed<RepoContributor[]>(() => store.contributorsByRepo[repoId.value] ?? [])

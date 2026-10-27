@@ -39,7 +39,7 @@
       <v-progress-circular indeterminate color="primary" aria-label="Loading bugs" />
     </div>
     <p v-else-if="!rows.length" class="bugs-page__empty">{{ emptyText }}</p>
-    <BugTable v-else :bugs="rows" :now="now" :label="budId ? `Bugs for ${budLabel}` : 'Bugs'" @open="openBug" />
+    <BugTable v-else :bugs="rows" :now="now" :show-type="scope === 'all'" :label="budId ? `Bugs for ${budLabel}` : 'Bugs'" @open="openBug" />
 
     <AppSideSheet v-model="showDetail" :title="detailTitle" :width="600">
       <BugDetailPanel />

@@ -80,7 +80,7 @@ describe('featureCard', () => {
 
   it('offers details only when there are some', () => {
     expect(featureHasDetail(feature())).toBe(false)
-    expect(featureHasDetail(feature({ description: 'x'.repeat(201) }))).toBe(true)
+    expect(featureHasDetail(feature({ description: 'x'.repeat(141) }))).toBe(true)
     expect(featureHasDetail(feature({ capabilities: { capabilities: ['Export'] } }))).toBe(true)
   })
 

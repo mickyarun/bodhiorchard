@@ -20,7 +20,6 @@
 <template>
   <AppPage title="Features" :subtitle="subtitle">
     <FeatureFilters
-      v-if="!(hasLoadedOnce && nothingMapped)"
       v-model:query="query"
       v-model:repo-id="repoId"
       v-model:mode="mode"

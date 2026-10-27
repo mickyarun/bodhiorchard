@@ -39,6 +39,8 @@ export const BUG_STATUS_GROUP_OPTIONS: FilterOption<BugStatusGroup>[] = [
   { value: 'closed', label: 'Closed' },
 ]
 
+export const BUG_TYPE_LABELS: Record<BugType, string> = { production: 'Production', testing: 'Testing' }
+
 const STILL_OPEN: ReadonlySet<string> = new Set<BugStatusValue>(['open', 'in-progress', 'blocked'])
 
 export function isScope(value: unknown): value is BugScope {

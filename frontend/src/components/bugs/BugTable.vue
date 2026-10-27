@@ -34,7 +34,7 @@
         <tr v-for="bug in bugs" :key="bug.id">
           <td class="bug-table__bug">
             <button type="button" class="bug-table__title" @click="emit('open', bug)">{{ bug.title }}</button>
-            <span class="bug-table__sub">{{ [bugRef(bug.bugNumber), bugWhere(bug)].filter(Boolean).join(' · ') }}</span>
+            <span class="bug-table__sub">{{ [bugRef(bug.bugNumber), showType && BUG_TYPE_LABELS[bug.bugType], bugWhere(bug)].filter(Boolean).join(' · ') }}</span>
           </td>
           <td>
             <AppTag :color="BUG_SEVERITY_COLORS[bug.severity]" sr-prefix="Severity:">{{ severityLabel(bug.severity) }}</AppTag>
@@ -63,10 +63,11 @@
 <script setup lang="ts">
 import AppTag from '@/components/common/AppTag.vue'
 import { BUG_SEVERITY_COLORS, BUG_STATUS_COLORS, BUG_STATUS_LABELS, budRef, type BugListItem } from '@/types'
-import { bugRef, bugWhere, severityLabel } from '@/utils/bugList'
+import { BUG_TYPE_LABELS, bugRef, bugWhere, severityLabel } from '@/utils/bugList'
 import { formatDateTime, relativeTime } from '@/utils/date'
 
-defineProps<{ bugs: BugListItem[]; label: string; now: Date }>()
+// ``showType`` names each bug's environment when both are listed.
+defineProps<{ bugs: BugListItem[]; label: string; now: Date; showType: boolean }>()
 const emit = defineEmits<{ open: [bug: BugListItem] }>()
 </script>
 

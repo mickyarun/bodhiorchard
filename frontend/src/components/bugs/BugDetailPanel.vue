@@ -22,7 +22,7 @@
   <div v-if="bug" class="bug-detail">
     <div class="bug-detail__tags">
       <AppTag :color="BUG_SEVERITY_COLORS[bug.severity]" sr-prefix="Severity:">{{ severityLabel(bug.severity) }}</AppTag>
-      <AppTag>{{ bug.bugType === 'production' ? 'Production' : 'Testing' }}</AppTag>
+      <AppTag>{{ BUG_TYPE_LABELS[bug.bugType] }}</AppTag>
     </div>
 
     <BugEditableText
@@ -64,8 +64,8 @@ import { computed } from 'vue'
 import AppTag from '@/components/common/AppTag.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useBugsStore } from '@/stores/bugs'
-import { BUG_SEVERITY_COLORS, budRef } from '@/types'
-import { severityLabel } from '@/utils/bugList'
+import { BUG_SEVERITY_COLORS, BUG_STATUS_LABELS, budRef } from '@/types'
+import { BUG_TYPE_LABELS, severityLabel } from '@/utils/bugList'
 import { formatDateTime } from '@/utils/date'
 import BugAttachments from './BugAttachments.vue'
 import BugComments from './BugComments.vue'
@@ -85,6 +85,7 @@ const facts = computed(() => {
   if (!b) return []
   const out: Array<{ label: string; value: string; to?: string }> = []
   // Shown as fields above for people who can change them.
+  if (!canEditBugs.value) out.push({ label: 'Status', value: BUG_STATUS_LABELS[b.status] ?? b.status })
   if (!canAssignBugs.value) out.push({ label: 'Owner', value: b.assigneeName || 'Unassigned' })
   if (!canEditBugs.value) out.push({ label: 'Feature', value: b.featureTitle || 'Not linked' })
   if (b.budId && b.budNumber) {

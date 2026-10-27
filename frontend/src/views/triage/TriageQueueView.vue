@@ -33,7 +33,7 @@
     </div>
 
     <div v-else-if="!shown.length" class="triage-page__empty">
-      <h2>{{ tab === 'waiting' ? 'Nothing waiting' : 'No decided requests yet' }}</h2>
+      <h2>{{ tab === 'waiting' ? 'Nothing waiting' : 'No earlier requests yet' }}</h2>
       <p>
         Feature requests raised in Slack show up here once the Triage agent has scoped them.
       </p>

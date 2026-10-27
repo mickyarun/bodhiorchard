@@ -134,7 +134,7 @@ export function codeLocationsText(locations: Map<string, string[]>): string {
 }
 
 /** Description length past which the card clamps it and offers to show the rest. */
-export const LONG_DESCRIPTION = 200
+export const LONG_DESCRIPTION = 140
 
 /** Whether "Show details" would reveal anything. */
 export function featureHasDetail(f: Feature): boolean {
