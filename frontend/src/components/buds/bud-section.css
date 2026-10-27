@@ -187,6 +187,16 @@
   margin: 0 auto; /* centers diagrams narrower than the panel */
 }
 
+/* A diagram Mermaid can't parse is shown as a plain code block (its
+ * source), with this one-line notice above it. */
+.rendered-markdown .mermaid-notice {
+  margin-bottom: 6px;
+  padding: 6px 12px;
+  border-left: 3px solid rgb(var(--v-theme-warning));
+  background: rgba(var(--v-theme-warning), 0.08);
+  font-size: 13px;
+}
+
 /* ── Empty state ───────────────────────────────── */
 .section-empty {
   display: flex;

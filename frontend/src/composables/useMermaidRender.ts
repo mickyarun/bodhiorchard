@@ -33,6 +33,12 @@
 import mermaid from 'mermaid'
 import { onMounted, onUpdated, type Ref } from 'vue'
 
+import { quoteMermaidLabels } from '@/utils/mermaidLabels'
+
+/** Shown above a diagram that still doesn't parse, in place of Mermaid's error graphic. */
+export const MERMAID_FALLBACK_NOTICE =
+  "This diagram has a syntax error, so it's shown as source."
+
 // Single global init — Mermaid keeps its config on a module-level
 // singleton; calling ``initialize`` twice prints a warning. The flag
 // guards against repeated calls when multiple composables mount.
@@ -60,12 +66,59 @@ function ensureInitialized(): void {
   _initialized = true
 }
 
+// Blocks a pass has started on.
+const claimed = new WeakSet<HTMLElement>()
+
+/**
+ * Turn a block that can't be drawn back into a plain code block holding
+ * its source, with a one-line notice above it. Dropping the ``mermaid``
+ * class keeps later passes from trying it again.
+ */
+function showSource(node: HTMLElement, source: string): void {
+  node.classList.remove('mermaid')
+  node.classList.add('mermaid-source')
+  node.textContent = source
+  const notice = document.createElement('p')
+  notice.className = 'mermaid-notice'
+  notice.textContent = MERMAID_FALLBACK_NOTICE
+  node.before(notice)
+}
+
+/** ``source`` if it parses, else its labels quoted if that parses, else null. */
+async function parseable(source: string): Promise<string | null> {
+  if (await mermaid.parse(source, { suppressErrors: true })) return source
+  // Stray quotes in labels are a common slip in generated specs.
+  const repaired = quoteMermaidLabels(source)
+  if (repaired === source) return null
+  return (await mermaid.parse(repaired, { suppressErrors: true })) ? repaired : null
+}
+
+/**
+ * Draw one block. A diagram that doesn't parse, even with its labels
+ * quoted, is shown as source rather than as Mermaid's error graphic.
+ */
+async function renderOne(node: HTMLElement): Promise<void> {
+  // A mount and an update can both reach a block while it is still being parsed.
+  if (claimed.has(node)) return
+  claimed.add(node)
+  const source = node.textContent ?? ''
+  const drawable = await parseable(source)
+  if (drawable === null) {
+    showSource(node, source)
+    return
+  }
+  node.textContent = drawable
+  try {
+    await mermaid.run({ nodes: [node] })
+  } catch {
+    showSource(node, source)
+  }
+}
+
 /**
  * Find every ``.mermaid`` block inside ``rootRef.value`` and replace
- * its textContent with the rendered SVG. Errors per-diagram are
- * caught so one bad block doesn't blank the whole spec — the failing
- * block stays as raw text (Mermaid's own error pane) and the rest
- * still renders.
+ * its textContent with the rendered SVG. Each block is drawn on its
+ * own, so one bad diagram doesn't blank the rest of the spec.
  */
 export function useMermaidRender(rootRef: Ref<HTMLElement | null>): void {
   const runOnce = async (): Promise<void> => {
@@ -81,15 +134,7 @@ export function useMermaidRender(rootRef: Ref<HTMLElement | null>): void {
     // a re-render of every diagram on every keystroke in a sibling
     // editor.
     const pending = nodes.filter((n) => n.dataset.processed !== 'true')
-    if (pending.length === 0) return
-    try {
-      await mermaid.run({ nodes: pending })
-    } catch {
-      // Mermaid's per-node failures are already rendered in the
-      // affected ``<pre>`` element as a visible error message; we
-      // swallow the aggregated promise rejection so a single bad
-      // diagram doesn't blank the rest of the rendered markdown.
-    }
+    for (const node of pending) await renderOne(node)
   }
 
   onMounted(runOnce)
