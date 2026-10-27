@@ -28,7 +28,12 @@
           <p class="settings-sub">Connect the tools your team already uses. Each one saves on its own.</p>
         </header>
 
-        <AppCallout v-if="settingsStore.error" variant="error">{{ settingsStore.error }}</AppCallout>
+        <AppCallout v-if="settingsStore.error" variant="error">
+          {{ settingsStore.error }}
+          <template #actions>
+            <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="settingsStore.error = null" />
+          </template>
+        </AppCallout>
         <AppCallout v-if="settingsStore.saveSuccess" variant="success">
           Settings saved.
           <template #actions>
@@ -36,8 +41,10 @@
           </template>
         </AppCallout>
 
-        <div v-if="settingsStore.loading && !settingsStore.connectionsLoaded" class="d-flex justify-center py-12">
-          <v-progress-circular indeterminate color="primary" aria-label="Loading settings" />
+        <!-- Cards mount once the connections have loaded; mounting them
+             earlier and again after the load fetched everything twice. -->
+        <div v-if="!settingsStore.connectionsLoaded" class="d-flex justify-center py-12">
+          <v-progress-circular v-if="settingsStore.loading" indeterminate color="primary" aria-label="Loading settings" />
         </div>
         <template v-else>
           <IntegrationCard
@@ -50,7 +57,7 @@
             connect-label="Set up"
             :primary="primary === 'ai'"
           >
-            <SettingsClaudeCode @test="t => (aiTest = t)" @summary="s => (aiSummary = s)" />
+            <SettingsClaudeCode v-model:dirty="dirty.ai" @test="t => (aiTest = t)" @summary="s => (aiSummary = s)" />
           </IntegrationCard>
           <IntegrationCard
             :open="openId === 'github'"
@@ -62,7 +69,7 @@
             connect-label="Connect GitHub"
             :primary="primary === 'github'"
           >
-            <GitHubAppPanel standalone />
+            <GitHubAppPanel v-model:dirty="dirty.github" standalone />
           </IntegrationCard>
           <IntegrationCard
             :open="openId === 'slack'"
@@ -74,7 +81,7 @@
             connect-label="Connect Slack"
             :primary="primary === 'slack'"
           >
-            <SettingsSlack />
+            <SettingsSlack v-model:dirty="dirty.slack" />
           </IntegrationCard>
           <IntegrationCard
             :open="openId === 'mcp'"
@@ -90,19 +97,31 @@
           </IntegrationCard>
           <p class="settings-sub">Bitbucket, GitLab and Telegram are coming later.</p>
         </template>
+        <ConfirmDialog
+          :model-value="guard.asking.value"
+          title="Discard unsaved changes?"
+          message="Some integration settings have not been saved."
+          confirm-label="Discard changes"
+          cancel-label="Keep editing"
+          tone="warning"
+          @confirm="guard.answer(true)"
+          @cancel="guard.answer(false)"
+        />
       </div>
     </div>
   </AppPage>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import AppPage from '@/components/common/AppPage.vue'
 import GitHubAppPanel from '@/components/settings/connections/GitHubAppPanel.vue'
 import IntegrationCard from '@/components/settings/connections/IntegrationCard.vue'
 import McpTokenPanel from '@/components/settings/connections/McpTokenPanel.vue'
 import SettingsSectionNav from '@/components/settings/SettingsSectionNav.vue'
+import ConfirmDialog from '@/components/settings/code/ConfirmDialog.vue'
+import { useUnsavedGuard } from '@/composables/useUnsavedGuard'
 import { useSettingsStore } from '@/stores/settings'
 import { providerSummary } from '@/utils/aiProviderOptions'
 import {
@@ -124,6 +143,10 @@ const settingsStore = useSettingsStore()
 const aiTest = ref<ProviderTest>('idle')
 const aiSummary = ref(providerSummary(undefined, undefined))
 const mcpTokenSet = ref(false)
+
+// Unsaved edits per card; leaving the page with any of them asks first.
+const dirty = reactive({ ai: false, github: false, slack: false })
+const guard = useUnsavedGuard(computed(() => dirty.ai || dirty.github || dirty.slack), [])
 
 // One card open at a time: opening one closes the rest.
 const openId = ref<IntegrationId | null>(null)

@@ -323,7 +323,7 @@ const isValid = computed(() =>
 
 async function save(): Promise<void> {
   if (!isValid.value) return
-  await settingsStore.saveConnections()
+  await settingsStore.saveConnections(['presence'])
 }
 
 onMounted(async () => {

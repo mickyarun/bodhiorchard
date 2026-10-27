@@ -140,9 +140,17 @@ const apiBase = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/api\/?$/, '
 const backendUrl = apiBase || window.location.origin
 const webhookUrl = `${backendUrl}${WEBHOOK_PATH}`
 
+/** Something typed that is not saved yet. */
+const dirty = computed(
+  () => (appId.value ?? null) !== (github.value.appId ?? null) || !!privateKey.value || !!webhookSecret.value,
+)
+
+// A newly saved App ID refreshes the field only while nothing is typed.
 watch(
   () => github.value.appId,
-  (next) => { appId.value = next },
+  (next) => {
+    if (!privateKey.value && !webhookSecret.value) appId.value = next
+  },
 )
 
 // Reset the inline error whenever the user edits any credential field
@@ -152,7 +160,7 @@ watch([appId, privateKey, webhookSecret], () => {
 })
 
 // Translate the settings store's last error into a typed alert when it
-// looks like a Phase J validation envelope. The store stores the
+// looks like the backend's credential-validation envelope. The store stores the
 // ``detail`` body verbatim, so we parse it conservatively — anything
 // that isn't a known envelope falls back to the raw string. Synchronous so
 // the parent's "is this our save" flag is still set when the error lands.
@@ -242,7 +250,7 @@ function clearSensitiveFields(): void {
   appId.value = github.value.appId
 }
 
-defineExpose({ flushCredentials, clearSensitiveFields })
+defineExpose({ flushCredentials, clearSensitiveFields, dirty })
 </script>
 
 <style scoped>

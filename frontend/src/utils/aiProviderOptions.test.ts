@@ -22,7 +22,9 @@ import {
   providerSummary,
   providerTiles,
   recommendedMode,
+  testOutcome,
   visibleModes,
+  withArticle,
 } from './aiProviderOptions'
 
 function caps(provider: string, cli: string | null, modes: [string, boolean][]): ProviderCaps {
@@ -70,7 +72,8 @@ describe('descriptions', () => {
   it('tells a host login from no credential', () => {
     expect(modeDescription(claude.auth_modes[0], claude)).toContain('login already on the host')
     expect(modeDescription(ollama.auth_modes[0], ollama)).toContain('Sends no credential')
-    expect(modeDescription(claude.auth_modes[2], claude)).toContain('claude setup-token')
+    expect(modeDescription(claude.auth_modes[2], claude)).toContain('claude setup-token command')
+    expect(modeDescription(claude.auth_modes[1], claude)).toContain('Paste an API key.')
   })
   it('names the CLI or the local server', () => {
     const [c, o] = providerTiles([claude, ollama])
@@ -101,5 +104,20 @@ describe('providerSummary', () => {
     expect(providerSummary(claude, claude.auth_modes[1])).toBe('Agents run through Claude, using a stored API key.')
     expect(providerSummary(ollama, ollama.auth_modes[0])).toBe('Agents run through Ollama, with no credential.')
     expect(providerSummary(undefined, undefined)).toContain('Choose which agent')
+  })
+})
+
+describe('withArticle', () => {
+  it('picks a or an', () => {
+    expect(withArticle('Anthropic API key')).toBe('an Anthropic API key')
+    expect(withArticle('GitHub token')).toBe('a GitHub token')
+  })
+})
+
+describe('testOutcome', () => {
+  it('reads a missing CLI, a pass and a failure', () => {
+    expect(testOutcome({ cli_available: false })).toMatchObject({ passed: false, showInstallHint: true })
+    expect(testOutcome({ cli_available: true, test_passed: true, cli_version: '2.1' })).toEqual({ passed: true, message: '2.1', showInstallHint: false })
+    expect(testOutcome({ cli_available: true, test_passed: false, error: 'nope' }).message).toBe('nope')
   })
 })

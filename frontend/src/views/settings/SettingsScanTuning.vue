@@ -75,10 +75,10 @@
         for each of those calls.
       </div>
       <v-btn
-        color="primary"
+        variant="outlined"
         prepend-icon="mdi-content-save-outline"
-        :loading="settingsStore.saving"
-        :disabled="!formValid"
+        :loading="saving"
+        :disabled="!formValid || !dirty"
         @click="onSave"
       >
         Save
@@ -97,8 +97,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
+import { differsFrom, snapshotSection } from '@/utils/connectionSections'
 
 const settingsStore = useSettingsStore()
 
@@ -146,9 +147,20 @@ const maxTurns = computed<number>({
 
 const formValid = ref(true)
 const savedSnackbar = ref(false)
+const saving = ref(false)
+
+// Last saved values: Save stays off until something changes, and a failed
+// save puts them back so nothing half-edited lingers in the store.
+const saved = ref(snapshotSection(settingsStore.connections, 'scan'))
+watch(() => settingsStore.connections, c => { saved.value = snapshotSection(c, 'scan') })
+const dirty = computed(() => differsFrom(settingsStore.connections.scan, saved.value))
 
 async function onSave(): Promise<void> {
-  const ok = await settingsStore.saveConnections()
+  saving.value = true
+  const before = saved.value
+  const ok = await settingsStore.saveConnections(['scan'])
+  saving.value = false
   if (ok) savedSnackbar.value = true
+  else settingsStore.connections.scan = { ...before }
 }
 </script>

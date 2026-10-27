@@ -16,7 +16,8 @@
 
 <!-- AI provider settings inside the Integrations card: which agent runs
      codebase-aware work, how it signs in, and a connection test. Saves on
-     its own and reports the test result and a one-line summary upward. -->
+     its own (only when something changed) and reports the test result, a
+     one-line summary of the saved choice and whether there are edits. -->
 <template>
   <div class="ai-panel">
     <p v-if="ai.deploymentMode.value" class="ai-panel__mode">
@@ -104,7 +105,12 @@ const ai = useAiProviderSettings()
 const limitations = computed(() => providerLimitations(ai.caps.value))
 
 watch(ai.test, t => emit('test', t), { immediate: true })
-watch([ai.caps, ai.mode], () => emit('summary', providerSummary(ai.caps.value, ai.mode.value)), { immediate: true })
+// The card describes what is saved, not the selection being edited.
+watch([ai.savedCaps, ai.savedMode], () => emit('summary', providerSummary(ai.savedCaps.value, ai.savedMode.value)), {
+  immediate: true,
+})
+const dirty = defineModel<boolean>('dirty', { default: false })
+watch(ai.dirty, d => { dirty.value = d }, { immediate: true })
 
 onMounted(() => {
   void ai.load()

@@ -350,7 +350,7 @@ const isValid = computed(() => {
 })
 
 async function save(): Promise<void> {
-  await settingsStore.saveConnections()
+  await settingsStore.saveConnections(['qaAutomation', 'budStages', 'bugAttachments'])
 }
 
 onMounted(async () => {

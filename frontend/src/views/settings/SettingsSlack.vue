@@ -20,7 +20,12 @@
      half-typed Slack secrets. -->
 <template>
   <div class="slack-panel">
-    <AppCallout v-if="error" variant="error">{{ error }}</AppCallout>
+    <AppCallout v-if="error" variant="error">
+      {{ error }}
+      <template #actions>
+        <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="error = ''" />
+      </template>
+    </AppCallout>
     <AppCallout v-if="slack.connected" variant="warning" eyebrow="Reinstall required" icon="mdi-refresh-alert">
       The bot now needs the <code>im:write</code> scope to send race invites and member sign-in details as
       direct messages. Reinstall the Slack app to grant it; invites keep arriving in the app meanwhile.
@@ -55,7 +60,7 @@
       />
     </div>
     <div class="slack-panel__save">
-      <v-btn color="primary" variant="flat" :loading="saving" @click="save">Save Slack settings</v-btn>
+      <v-btn color="primary" variant="flat" :loading="saving" :disabled="!dirty" @click="save">Save Slack settings</v-btn>
     </div>
 
     <SlackSetupGuide />
@@ -70,28 +75,47 @@ import PasswordField from '@/components/common/PasswordField.vue'
 import SlackMemberSync from '@/components/settings/slack/SlackMemberSync.vue'
 import SlackSetupGuide from '@/components/settings/slack/SlackSetupGuide.vue'
 import { useSettingsStore } from '@/stores/settings'
+import { differsFrom } from '@/utils/connectionSections'
+
+const dirty = defineModel<boolean>('dirty', { default: false })
 
 const settingsStore = useSettingsStore()
 const slack = computed(() => settingsStore.connections.slack)
 
-const draft = reactive({ botToken: '', signingSecret: '', teamId: '' })
+type SlackFields = { botToken: string; signingSecret: string; teamId: string }
+
+// The API sends null for an unset field; the inputs hold ''.
+function fieldsOf(s: SlackFields): SlackFields {
+  return { botToken: s.botToken ?? '', signingSecret: s.signingSecret ?? '', teamId: s.teamId ?? '' }
+}
+
+const saved = ref<SlackFields>(fieldsOf(slack.value))
+const draft = reactive<SlackFields>(fieldsOf(slack.value))
 const saving = ref(false)
 const error = ref('')
 
-// Reload the draft whenever the saved values change (load, any save).
-watch(
-  slack,
-  s => Object.assign(draft, { botToken: s.botToken, signingSecret: s.signingSecret, teamId: s.teamId }),
-  { immediate: true },
-)
+watch(draft, d => { dirty.value = differsFrom(d, saved.value) }, { deep: true, immediate: true })
+
+// New saved values (load, a save, the GitHub poll) refresh the draft only
+// while nothing is typed, so they never wipe an edit in progress.
+watch(slack, s => {
+  saved.value = fieldsOf(s)
+  if (!dirty.value) Object.assign(draft, saved.value)
+  else dirty.value = differsFrom(draft, saved.value)
+})
 
 async function save(): Promise<void> {
   saving.value = true
   error.value = ''
+  const before = fieldsOf(slack.value)
   Object.assign(settingsStore.connections.slack, draft)
-  const ok = await settingsStore.saveConnections()
-  // The store error is shown here, not by whichever card watches it.
-  if (!ok) {
+  const ok = await settingsStore.saveConnections(['slack'])
+  if (ok) {
+    Object.assign(draft, fieldsOf(slack.value))
+  } else {
+    // Put the saved values back so nothing half-typed lingers in the store,
+    // and show the error here once rather than on the page.
+    Object.assign(settingsStore.connections.slack, before)
     error.value = settingsStore.error ?? 'Could not save the Slack settings.'
     settingsStore.error = null
   }

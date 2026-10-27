@@ -64,7 +64,7 @@ function validationMessages(detail: unknown[]): string {
 
 /**
  * Coerce a FastAPI ``detail`` field to a string. Handles the legacy
- * shape (plain string) and the typed envelope used by Phase J's
+ * shape (plain string) and the typed envelope used by the GitHub
  * credential validation (``{ error: "...", message: "..." }``) so
  * callers can pattern-match on the JSON shape downstream without
  * losing the structured payload to ``[object Object]`` coercion.

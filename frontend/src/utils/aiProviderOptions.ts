@@ -43,6 +43,11 @@ export function providerTiles(providers: ProviderCaps[]): ChoiceTile[] {
   }))
 }
 
+/** "an Anthropic API key", "a GitHub token". */
+export function withArticle(noun: string): string {
+  return `${/^[aeiou]/i.test(noun) ? 'an' : 'a'} ${noun}`
+}
+
 export function modeDescription(mode: AuthModeSpec, caps: ProviderCaps): string {
   if (!mode.requires_secret) {
     // "No secret" means two things: a CLI provider inherits the host login,
@@ -52,9 +57,9 @@ export function modeDescription(mode: AuthModeSpec, caps: ProviderCaps): string 
       : 'Uses the login already on the host. Nothing is stored in the database.'
   }
   if (mode.value === 'subscription') {
-    return 'Paste an OAuth token from `claude setup-token`. Uses your Claude plan and is stored encrypted.'
+    return 'Paste the OAuth token that the claude setup-token command prints. Uses your Claude plan and is stored encrypted.'
   }
-  return `Paste a ${mode.label}. Stored encrypted and used for every agent run.`
+  return `Paste ${withArticle(mode.label)}. Stored encrypted and used for every agent run.`
 }
 
 /**
@@ -112,4 +117,27 @@ export function providerSummary(caps: ProviderCaps | undefined, mode: AuthModeSp
   if (mode?.requires_secret) how = `, using a stored ${mode.label}`
   else if (mode) how = caps.cli === null ? ', with no credential' : ', using the host login'
   return `Agents run through ${providerTitle(caps.provider)}${how}.`
+}
+
+export interface ProviderTestResult {
+  cli_available?: boolean
+  test_passed?: boolean
+  cli_version?: string | null
+  output?: string
+  error?: string | null
+}
+
+export interface ProviderTestOutcome {
+  passed: boolean
+  message: string
+  showInstallHint: boolean
+}
+
+/** What a connection test response means for the card. */
+export function testOutcome(data: ProviderTestResult): ProviderTestOutcome {
+  if (!data.cli_available) {
+    return { passed: false, message: data.error || 'The provider CLI is not installed on the backend.', showInstallHint: true }
+  }
+  if (data.test_passed) return { passed: true, message: data.cli_version || data.output || '', showInstallHint: false }
+  return { passed: false, message: data.error || 'The CLI is installed but the connection test failed.', showInstallHint: false }
 }

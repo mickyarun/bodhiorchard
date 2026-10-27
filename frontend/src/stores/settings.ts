@@ -16,6 +16,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import api from '@/services/api'
 import { extractApiError } from '@/utils/errors'
+import { pickSections } from '@/utils/connectionSections'
 import type { JobCreatedResponse, RepoBranchList, RepoInfo } from '@/types'
 import { GITHUB_APP_STATUS, isGitHubAppStatus, type GitHubAppStatus } from '@/types/connections'
 
@@ -89,6 +90,8 @@ export interface ConnectionsState {
   }
 }
 
+export type ConnectionsSection = keyof ConnectionsState
+
 function emptyState(): ConnectionsState {
   return {
     sourceCode: { localPath: '', type: 'single-repo' },
@@ -158,7 +161,7 @@ export const useSettingsStore = defineStore('settings', () => {
   function normaliseGithubStatus(github: ConnectionsState['github']): GitHubAppStatus {
     // Defensive: prefer the backend-supplied enum but fall back to deriving
     // from `connected` + `installationId` so the UI doesn't break against
-    // a backend that hasn't shipped Phase A yet.
+    // a backend that predates the status field.
     if (isGitHubAppStatus(github.status)) {
       return github.status
     }
@@ -175,7 +178,7 @@ export const useSettingsStore = defineStore('settings', () => {
     error.value = null
     try {
       const { data } = await api.get('/v1/settings/connections')
-      // Backfill the Phase F fields if a stale backend omits them, so the
+      // Backfill the install fields if a stale backend omits them, so the
       // store shape stays stable for consumers (the GitHub App card).
       const github = data.github ?? {}
       data.github = {
@@ -193,13 +196,20 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
-  async function saveConnections(): Promise<boolean> {
+  /**
+   * PATCH the connections. With ``sections`` only those sections are sent
+   * (the backend leaves the rest untouched) and only those are taken back
+   * from the response, so one card's save never carries another card's
+   * edits or overwrites them. Without it, everything is sent as before.
+   */
+  async function saveConnections(sections?: ConnectionsSection[]): Promise<boolean> {
     saving.value = true
     error.value = null
     saveSuccess.value = false
     try {
-      const { data } = await api.patch('/v1/settings/connections', connections.value)
-      connections.value = data
+      const payload = sections ? pickSections(connections.value, sections) : connections.value
+      const { data } = await api.patch('/v1/settings/connections', payload)
+      connections.value = sections ? { ...connections.value, ...pickSections(data, sections) } : data
       connectionsLoaded.value = true
       saveSuccess.value = true
       return true

@@ -51,7 +51,7 @@
       <div v-if="formVisible">
         <GitHubAppCredentialsForm ref="formRef" :listen-to-store-errors="!standalone || savingHere" />
         <div v-if="standalone" class="d-flex justify-end mt-2">
-          <v-btn color="primary" variant="flat" :loading="settingsStore.saving" :disabled="settingsStore.saving" @click="onStandaloneSave">
+          <v-btn color="primary" variant="flat" :loading="savingHere" :disabled="!dirty || savingHere" @click="onStandaloneSave">
             Save credentials
           </v-btn>
         </div>
@@ -132,22 +132,29 @@ function clearSensitiveFields(): void {
 // save's error and not one from another card's save.
 const savingHere = ref(false)
 
+// Unsaved credentials in the form; the Integrations page guards on it.
+const dirty = defineModel<boolean>('dirty', { default: false })
+watch(() => formRef.value?.dirty ?? false, d => { dirty.value = d }, { immediate: true })
+
 async function onStandaloneSave(): Promise<void> {
-  // Push the form into the store, then save through the same action so the
+  // Push the form into the store, then save only the GitHub section so the
   // form's typed error and success watchers fire as usual.
   savingHere.value = true
+  const github = settingsStore.connections.github as Record<string, unknown>
+  const savedAppId = github.appId
   flushCredentials()
-  const ok = await settingsStore.saveConnections()
+  const ok = await settingsStore.saveConnections(['github'])
   savingHere.value = false
   if (ok) {
     clearSensitiveFields()
     return
   }
-  // A failed save leaves the pasted secrets in the store; take them out so
-  // a later save from another card does not send them again.
-  const github = settingsStore.connections.github as Record<string, unknown>
+  // Take the typed values back out of the store (the form keeps them), and
+  // leave the error to the form so it shows once.
+  github.appId = savedAppId
   delete github.privateKey
   delete github.webhookSecret
+  settingsStore.error = null
 }
 
 defineExpose({ flushCredentials, clearSensitiveFields })

@@ -21,7 +21,13 @@
 import { computed, ref, watch } from 'vue'
 import type { ProviderCaps } from '@/constants/aiProviders'
 import api from '@/services/api'
-import { authTiles, canSaveProvider, recommendedMode } from '@/utils/aiProviderOptions'
+import {
+  authTiles,
+  canSaveProvider,
+  recommendedMode,
+  testOutcome,
+  type ProviderTestResult,
+} from '@/utils/aiProviderOptions'
 import type { ProviderTest } from '@/utils/integrations'
 
 /** Typing a server address probes it; wait for a pause first. */
@@ -35,14 +41,6 @@ interface SavedSettings {
   base_url: string | null
   model: string | null
   thinking: boolean
-}
-
-interface TestResult {
-  cli_available?: boolean
-  test_passed?: boolean
-  cli_version?: string | null
-  output?: string
-  error?: string | null
 }
 
 function quietUnlessAuth(label: string, err: unknown): void {
@@ -61,6 +59,8 @@ export function useAiProviderSettings() {
   const model = ref('')
   const thinkingChoice = ref<'on' | 'off'>('off')
   const saving = ref(false)
+  // The last saved choice, to tell edits apart and to describe the card.
+  const saved = ref<SavedSettings | null>(null)
   const test = ref<ProviderTest>('idle')
   const testError = ref('')
   const testVersion = ref('')
@@ -70,8 +70,22 @@ export function useAiProviderSettings() {
   const tiles = computed(() => authTiles(caps.value, deploymentMode.value))
   const mode = computed(() => caps.value?.auth_modes.find(m => m.value === authMode.value))
   const requiresSecret = computed(() => mode.value?.requires_secret ?? false)
+  const savedCaps = computed(() => providers.value.find(p => p.provider === savedProvider.value))
+  const savedMode = computed(() => savedCaps.value?.auth_modes.find(m => m.value === saved.value?.auth_mode))
+  const dirty = computed(() => {
+    const s = saved.value
+    if (!s) return false
+    return (
+      provider.value !== s.provider
+      || authMode.value !== s.auth_mode
+      || baseUrl.value.trim() !== (s.base_url ?? '')
+      || model.value !== (s.model ?? '')
+      || (thinkingChoice.value === 'on') !== s.thinking
+      || credential.value.trim().length > 0
+    )
+  })
   const canSave = computed(() =>
-    canSaveProvider({
+    dirty.value && canSaveProvider({
       requiresSecret: requiresSecret.value,
       hasStored: hasStoredCredential.value,
       providerChanged: provider.value !== savedProvider.value,
@@ -80,6 +94,7 @@ export function useAiProviderSettings() {
   )
 
   function applySaved(data: SavedSettings): void {
+    saved.value = data
     provider.value = data.provider ?? provider.value
     savedProvider.value = provider.value
     authMode.value = data.auth_mode
@@ -176,18 +191,12 @@ export function useAiProviderSettings() {
     }
   }
 
-  function applyTest(data: TestResult): void {
-    if (!data.cli_available) {
-      test.value = 'failed'
-      testError.value = data.error || 'The provider CLI is not installed on the backend.'
-      showInstallHint.value = true
-    } else if (data.test_passed) {
-      test.value = 'passed'
-      testVersion.value = data.cli_version || data.output || ''
-    } else {
-      test.value = 'failed'
-      testError.value = data.error || 'The CLI is installed but the connection test failed.'
-    }
+  function applyTest(data: ProviderTestResult): void {
+    const outcome = testOutcome(data)
+    test.value = outcome.passed ? 'passed' : 'failed'
+    testVersion.value = outcome.passed ? outcome.message : ''
+    testError.value = outcome.passed ? '' : outcome.message
+    showInstallHint.value = outcome.showInstallHint
   }
 
   async function runTest(): Promise<void> {
@@ -200,7 +209,7 @@ export function useAiProviderSettings() {
       const body = caps.value?.requires_base_url
         ? { base_url: baseUrl.value.trim() || undefined, model: model.value || undefined, thinking: thinkingChoice.value === 'on' }
         : null
-      const { data } = await api.post<TestResult>('/v1/settings/claude/test', body, { timeout: TEST_TIMEOUT_MS })
+      const { data } = await api.post<ProviderTestResult>('/v1/settings/claude/test', body, { timeout: TEST_TIMEOUT_MS })
       applyTest(data)
     } catch (err) {
       test.value = 'failed'
@@ -212,7 +221,7 @@ export function useAiProviderSettings() {
   return {
     providers, deploymentMode, provider, authMode, credential, hasStoredCredential, baseUrl, model, thinkingChoice,
     saving, test, testError, testVersion, showInstallHint,
-    caps, tiles, mode, requiresSecret, canSave,
+    caps, tiles, mode, requiresSecret, canSave, dirty, savedCaps, savedMode,
     selectProvider, load, save, runTest,
   }
 }

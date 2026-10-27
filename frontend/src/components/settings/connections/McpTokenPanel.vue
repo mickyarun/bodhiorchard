@@ -23,7 +23,12 @@
       <span class="mcp-panel__text">
         {{ hasToken ? 'A workspace token is set. Replacing it stops the old one working.' : 'No workspace token yet.' }}
       </span>
-      <v-btn :color="hasToken ? undefined : 'primary'" :variant="hasToken ? 'outlined' : 'flat'" :loading="generating" @click="generate">
+      <v-btn
+        :color="hasToken ? undefined : 'primary'"
+        :variant="hasToken ? 'outlined' : 'flat'"
+        :loading="generating"
+        @click="hasToken ? (confirmOpen = true) : generate()"
+      >
         {{ hasToken ? 'Replace token' : 'Generate token' }}
       </v-btn>
     </div>
@@ -32,7 +37,12 @@
     <AppCallout v-if="newToken" variant="warning" title="Copy the token now. It is not shown again.">
       <div class="mcp-panel__token">
         <PasswordField :model-value="newToken" label="Workspace MCP token" variant="outlined" density="compact" readonly hide-details />
-        <v-btn :icon="copied ? 'mdi-check' : 'mdi-content-copy'" :aria-label="copied ? 'Copied' : 'Copy token'" variant="text" @click="copy(newToken)" />
+        <v-btn
+          :icon="copied === 'token' ? 'mdi-check' : 'mdi-content-copy'"
+          :aria-label="copied === 'token' ? 'Copied' : 'Copy token'"
+          variant="text"
+          @click="copy(newToken, 'token')"
+        />
       </div>
     </AppCallout>
 
@@ -42,7 +52,13 @@
     </p>
     <div class="mcp-panel__snippet">
       <pre>{{ exportLine('') }}</pre>
-      <v-btn icon="mdi-content-copy" size="small" variant="text" aria-label="Copy the export line" @click="copy(exportLine(newToken))" />
+      <v-btn
+        :icon="copied === 'line' ? 'mdi-check' : 'mdi-content-copy'"
+        :aria-label="copied === 'line' ? 'Copied' : 'Copy the export line'"
+        size="small"
+        variant="text"
+        @click="copy(exportLine(newToken), 'line')"
+      />
     </div>
     <v-expansion-panels variant="accordion" flat class="mcp-panel__shells">
       <v-expansion-panel v-for="snippet in shellSnippets('')" :key="snippet.id">
@@ -52,6 +68,14 @@
         <v-expansion-panel-text><pre class="mcp-panel__code">{{ snippet.code }}</pre></v-expansion-panel-text>
       </v-expansion-panel>
     </v-expansion-panels>
+    <ConfirmDialog
+      v-model="confirmOpen"
+      title="Replace the workspace token?"
+      message="The current token stops working straight away. Anyone using it needs the new one."
+      confirm-label="Replace token"
+      tone="warning"
+      @confirm="generate"
+    />
     <p class="mcp-panel__text">
       Each person can also make their own token on <router-link to="/settings/mcp-connect">MCP connect</router-link>.
     </p>
@@ -62,6 +86,7 @@
 import { onMounted, ref } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import PasswordField from '@/components/common/PasswordField.vue'
+import ConfirmDialog from '@/components/settings/code/ConfirmDialog.vue'
 import api from '@/services/api'
 import { copyText } from '@/utils/clipboard'
 import { exportLine, shellSnippets } from '@/utils/mcpEnvSnippets'
@@ -73,7 +98,8 @@ const hasToken = defineModel<boolean>('hasToken', { required: true })
 const newToken = ref('')
 const generating = ref(false)
 const error = ref('')
-const copied = ref(false)
+const copied = ref<'token' | 'line' | null>(null)
+const confirmOpen = ref(false)
 
 onMounted(async () => {
   try {
@@ -98,10 +124,13 @@ async function generate(): Promise<void> {
   }
 }
 
-async function copy(text: string): Promise<void> {
-  if (!(await copyText(text))) return
-  copied.value = true
-  setTimeout(() => { copied.value = false }, COPIED_MS)
+async function copy(text: string, what: 'token' | 'line'): Promise<void> {
+  if (!(await copyText(text))) {
+    error.value = 'Could not copy. Copy it by hand instead.'
+    return
+  }
+  copied.value = what
+  setTimeout(() => { copied.value = null }, COPIED_MS)
 }
 </script>
 
