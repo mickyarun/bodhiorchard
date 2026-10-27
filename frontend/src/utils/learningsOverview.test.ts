@@ -50,7 +50,9 @@ const points = [
 describe('medianCycle and shippedTotal', () => {
   it('handles empty and even-length series', () => {
     expect(medianCycle([])).toBeNull()
-    expect(medianCycle(points)).toBe(16)
+    // 17 once, 15 twice: the busier week wins.
+    expect(medianCycle(points)).toBe(15)
+    expect(medianCycle([points[0], { week_start: '2026-10-12', avg_cycle_days: 15, n_buds: 1 }])).toBe(16)
     expect(shippedTotal(points)).toBe(3)
   })
 })
@@ -105,7 +107,7 @@ describe('weeklyShipped', () => {
 describe('learningsKpis', () => {
   it('reads the overview into four tiles', () => {
     const kpis = learningsKpis(points, [simple], [{ phase: 'testing', median_drift_pct: 40, buds_over_estimate: 2, buds_total: 3 }])
-    expect(kpis.map(k => k.value)).toEqual(['3', '16.0d', 'Development', '1'])
+    expect(kpis.map(k => k.value)).toEqual(['3', '15.0d', 'Development', '1'])
   })
   it('says when there is not enough data', () => {
     const kpis = learningsKpis([], [], [])

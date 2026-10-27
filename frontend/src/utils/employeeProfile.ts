@@ -20,6 +20,7 @@
 import type { EmployeeWork } from '@/types/employee'
 import type { Balance } from '@/types/leave'
 import { balanceTotal, formatDays, meterPercents, swatchColor, toNumber } from '@/utils/leave'
+import { plural } from '@/utils/format'
 import { earnedSoFar } from '@/utils/leaveAccrual'
 
 /** "2022-01-10" as a local date (no time-zone shift), or null. */
@@ -38,10 +39,6 @@ function startOfDay(date: Date): Date {
 function monthsBetween(from: Date, to: Date): number {
   const months = (to.getFullYear() - from.getFullYear()) * 12 + to.getMonth() - from.getMonth()
   return to.getDate() < from.getDate() ? months - 1 : months
-}
-
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`
 }
 
 /** "4 years 9 months", "3 months", "Less than a month"; null before they start. */

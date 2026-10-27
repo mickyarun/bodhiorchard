@@ -16,7 +16,7 @@
 
 <template>
   <AppPage title="Skills" subtitle="Who knows which part of the code, read from git history. Updated with each repository scan.">
-    <template #actions>
+    <div class="skills-tools">
       <v-text-field
         v-model="search"
         :label="viewMode === 'people' ? 'Find a person or area' : 'Find an area or person'"
@@ -29,9 +29,14 @@
         @click:clear="search = ''"
       />
       <AppPillToggle v-model="viewMode" :options="VIEW_OPTIONS" aria-label="Group by" />
-    </template>
+    </div>
 
-    <AppCallout v-if="store.error" variant="error">{{ store.error }}</AppCallout>
+    <AppCallout v-if="store.error" variant="error">
+      {{ store.error }}
+      <template #actions>
+        <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="store.error = null" />
+      </template>
+    </AppCallout>
 
     <div v-if="store.loading" class="skills-loading">
       <v-progress-circular indeterminate color="primary" aria-label="Loading skills" />
@@ -98,9 +103,14 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.skills-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
 .skills-search {
-  width: 260px;
-  flex: 0 1 260px;
+  flex: 0 1 300px;
 }
 .skills-loading {
   display: flex;
@@ -121,7 +131,6 @@ onMounted(() => {
 @media (max-width: 600px) {
   .skills-search {
     flex-basis: 100%;
-    width: 100%;
   }
 }
 </style>

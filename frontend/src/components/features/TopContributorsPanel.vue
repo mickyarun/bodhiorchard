@@ -38,12 +38,9 @@
 import AppMonogram from '@/components/common/AppMonogram.vue'
 import AppPanel from '@/components/common/AppPanel.vue'
 import type { RepoContributor } from '@/types'
+import { plural } from '@/utils/format'
 
 defineProps<{ contributors: RepoContributor[]; loading: boolean }>()
-
-function plural(n: number, noun: string): string {
-  return `${n} ${noun}${n === 1 ? '' : 's'}`
-}
 </script>
 
 <style scoped>

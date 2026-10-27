@@ -26,11 +26,10 @@
       </span>
     </header>
     <ul class="skill-card__list">
-      <li v-for="(mod, i) in shown" :key="mod.name">
+      <li v-for="mod in shown" :key="mod.name">
         <SkillMeter
           :name="mod.name"
           :score="mod.score"
-          :color="rankColour(i)"
           :detail="mod.languages.slice(0, 3).join(', ')"
         />
       </li>
@@ -56,7 +55,7 @@ import { computed, ref } from 'vue'
 import AppMonogram from '@/components/common/AppMonogram.vue'
 import SkillMeter from './SkillMeter.vue'
 import type { SkillProfile } from '@/types'
-import { profileSummary, rankColour, sortByScore } from '@/utils/skillProfiles'
+import { profileSummary, sortByScore } from '@/utils/skillProfiles'
 
 const PREVIEW_COUNT = 3
 

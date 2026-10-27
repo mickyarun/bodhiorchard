@@ -119,10 +119,3 @@ export function filterAreas(areas: SkillArea[], query: string): SkillArea[] {
   if (!q) return areas
   return areas.filter(a => matches(a.name, q) || a.people.some(p => matches(p.userName, q)))
 }
-
-/** Bar colour per rank inside a card: the strongest skill takes the action blue. */
-const RANK_COLOURS = ['primary', 'brand', 'on-surface-variant'] as const
-
-export function rankColour(index: number): string {
-  return RANK_COLOURS[Math.min(index, RANK_COLOURS.length - 1)]
-}

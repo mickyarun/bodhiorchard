@@ -15,7 +15,8 @@
  -->
 
 <!-- One labelled skill bar: the name on the left, the level word on the
-     right and a thin meter underneath. ``color`` is a theme colour name. -->
+     right and a thin neutral meter underneath. The level reads as text;
+     the bar is not coloured, since colour is kept for status. -->
 <template>
   <div class="skill-meter">
     <div class="skill-meter__row">
@@ -31,7 +32,7 @@
       :aria-valuenow="percent"
       :aria-valuetext="`${skillLevel(score)}, ${percent}%`"
     >
-      <span class="skill-meter__fill" :style="{ width: `${percent}%`, '--fill': `var(--v-theme-${color})` }" />
+      <span class="skill-meter__fill" :style="{ width: `${percent}%` }" />
     </div>
     <span v-if="detail" class="skill-meter__detail">{{ detail }}</span>
   </div>
@@ -41,7 +42,7 @@
 import { computed } from 'vue'
 import { scorePercent, skillLevel } from '@/utils/skillProfiles'
 
-const props = defineProps<{ name: string; score: number; color: string; detail?: string }>()
+const props = defineProps<{ name: string; score: number; detail?: string }>()
 
 const percent = computed(() => scorePercent(props.score))
 </script>
@@ -78,7 +79,7 @@ const percent = computed(() => scorePercent(props.score))
   display: block;
   height: 100%;
   border-radius: 999px;
-  background: rgb(var(--fill));
+  background: rgb(var(--v-theme-on-surface-variant));
 }
 .skill-meter__detail {
   font-size: 12px;

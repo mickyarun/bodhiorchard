@@ -85,10 +85,14 @@ export function formatDays(days: number | null): string {
   return days == null ? '–' : `${days.toFixed(1)}d`
 }
 
-/** Median of the weekly average cycle times, or null with no closures. */
+/**
+ * Median cycle time with each week's average counted once per BUD closed
+ * that week, so a busy week weighs more than a quiet one. Null with no
+ * closures. (The API gives weekly averages, not each BUD's own time.)
+ */
 export function medianCycle(points: VelocityTrendPoint[]): number | null {
-  if (points.length === 0) return null
-  const sorted = points.map(p => p.avg_cycle_days).sort((a, b) => a - b)
+  const sorted = points.flatMap(p => Array<number>(Math.max(0, p.n_buds)).fill(p.avg_cycle_days)).sort((a, b) => a - b)
+  if (sorted.length === 0) return null
   const mid = Math.floor(sorted.length / 2)
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
 }
@@ -177,7 +181,7 @@ export function learningsKpis(
   const slowest = slowestStage(buckets)
   return [
     { label: 'Shipped', value: String(shippedTotal(points)), sub: `BUDs closed in the last ${TREND_WEEKS} weeks` },
-    { label: 'Median cycle time', value: formatDays(median), sub: 'Per BUD, from the weekly averages' },
+    { label: 'Median cycle time', value: formatDays(median), sub: 'Weekly averages, weighted by BUDs closed' },
     {
       label: 'Slowest stage',
       value: slowest?.label ?? '–',
@@ -186,7 +190,7 @@ export function learningsKpis(
     {
       label: 'Stages over estimate',
       value: String(offenders.length),
-      sub: 'Over by 30% or more on two or more BUDs',
+      sub: 'More than 30% over on two or more BUDs',
     },
   ]
 }

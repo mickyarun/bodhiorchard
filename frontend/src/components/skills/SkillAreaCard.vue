@@ -28,11 +28,10 @@
       <AppTag v-if="area.people.length === 1" color="warning" sr-prefix="Risk:">One person</AppTag>
     </header>
     <ul class="skill-card__list">
-      <li v-for="(person, i) in shown" :key="person.email">
+      <li v-for="person in shown" :key="person.email">
         <SkillMeter
           :name="person.userName"
           :score="person.score"
-          :color="rankColour(i)"
           :detail="plural(person.touchCount, 'commit')"
         />
       </li>
@@ -58,7 +57,7 @@ import { computed, ref } from 'vue'
 import AppTag from '@/components/common/AppTag.vue'
 import SkillMeter from './SkillMeter.vue'
 import { plural } from '@/utils/format'
-import { rankColour, type SkillArea } from '@/utils/skillProfiles'
+import type { SkillArea } from '@/utils/skillProfiles'
 
 const PREVIEW_COUNT = 3
 

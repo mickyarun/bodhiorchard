@@ -19,7 +19,6 @@ import {
   filterProfiles,
   groupByArea,
   profileSummary,
-  rankColour,
   scorePercent,
   skillLevel,
   sortByScore,
@@ -107,13 +106,5 @@ describe('filters', () => {
     const areas = groupByArea([meera, ravi])
     expect(filterAreas(areas, 'ravi').map(a => a.name)).toEqual(['auth/two_factor', 'web/portal'])
     expect(filterAreas(areas, 'ledger').map(a => a.name)).toEqual(['payments/ledger'])
-  })
-})
-
-describe('rankColour', () => {
-  it('uses the action blue for the top skill and settles on muted', () => {
-    expect(rankColour(0)).toBe('primary')
-    expect(rankColour(1)).toBe('brand')
-    expect(rankColour(5)).toBe('on-surface-variant')
   })
 })
