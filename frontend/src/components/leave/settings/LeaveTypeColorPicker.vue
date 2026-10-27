@@ -32,7 +32,8 @@
         :title="option.name"
         @click="color = option.key"
       >
-        <v-icon v-if="color === option.key" icon="mdi-check" size="16" color="white" />
+        <!-- Vuetify derives an on-<colour> with contrast for every theme colour. -->
+        <v-icon v-if="color === option.key" icon="mdi-check" size="16" :color="`on-${swatchColor(option.key)}`" />
       </button>
     </div>
     <v-chip :color="swatchColor(color)" variant="tonal" label aria-label="Preview">

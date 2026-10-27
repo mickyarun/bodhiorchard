@@ -47,7 +47,23 @@ const props = defineProps<{
   highlightTypeId?: string | null
 }>()
 
-function leaveCard(balance: Balance) {
+/** One tile: BalanceCard's props, keyed for the list. */
+interface Card {
+  key: string
+  props: {
+    title: string
+    color: string
+    value: string
+    unit: string
+    meter: { used: number; pending: number } | null
+    caption: string
+    note: string
+    tag: string
+    highlight: boolean
+  }
+}
+
+function leaveCard(balance: Balance): Card {
   const meter = meterPercents(balance)
   const available = toNumber(balance.available)
   const highlight = balance.leave_type.id === props.highlightTypeId
@@ -69,7 +85,7 @@ function leaveCard(balance: Balance) {
   }
 }
 
-function optionalCard(optional: OptionalHolidayBalance) {
+function optionalCard(optional: OptionalHolidayBalance): Card {
   const percent = (n: number) => (optional.quota ? Math.min(100, (n / optional.quota) * 100) : 0)
   const used = percent(optional.used)
   return {
@@ -91,7 +107,7 @@ function optionalCard(optional: OptionalHolidayBalance) {
   }
 }
 
-function lopCard(days: number) {
+function lopCard(days: number): Card {
   return {
     key: 'loss-of-pay',
     props: {

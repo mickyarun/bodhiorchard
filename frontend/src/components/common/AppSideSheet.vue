@@ -24,7 +24,8 @@
        </AppSideSheet>
 
      It's a dialog, so it sits in the overlay layer: nothing is rendered
-     beside the page while it's closed, and focus stays inside while open. -->
+     beside the page while it's closed, and focus stays inside while open
+     and returns to whatever opened it on close. -->
 <template>
   <v-dialog
     :model-value="modelValue"
@@ -35,6 +36,7 @@
     scrollable
     :aria-labelledby="headingId"
     @update:model-value="emit('update:modelValue', $event)"
+    @after-leave="restoreFocus"
   >
     <section class="app-side-sheet__panel">
       <header class="app-side-sheet__head">
@@ -48,14 +50,30 @@
 </template>
 
 <script setup lang="ts">
-import { useId } from 'vue'
+import { useId, watch } from 'vue'
 import { useDisplay } from 'vuetify'
 
-withDefaults(defineProps<{ modelValue: boolean; title: string; width?: number }>(), { width: 460 })
+const props = withDefaults(defineProps<{ modelValue: boolean; title: string; width?: number }>(), { width: 460 })
 const emit = defineEmits<(e: 'update:modelValue', value: boolean) => void>()
 
 const { xs } = useDisplay()
 const headingId = useId()
+
+// Whatever opened the sheet gets focus back once it has slid away, so
+// keyboard users don't land on <body>.
+let opener: HTMLElement | null = null
+watch(
+  () => props.modelValue,
+  open => {
+    if (open && document.activeElement instanceof HTMLElement) opener = document.activeElement
+  },
+  { immediate: true },
+)
+
+function restoreFocus(): void {
+  if (opener?.isConnected) opener.focus()
+  opener = null
+}
 </script>
 
 <!-- Not scoped: the dialog content is teleported to the overlay container. -->

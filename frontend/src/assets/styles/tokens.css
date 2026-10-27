@@ -76,14 +76,15 @@
   --color-priority-p3:  #CBD5E1;
 
   /* Leave-type swatches — a categorical palette HR picks from per type.
-     Dots and meters only; never a status signal. */
-  --color-swatch-1:     #60A5FA;                /* blue                    */
-  --color-swatch-2:     #818CF8;                /* indigo                  */
-  --color-swatch-3:     #FBBF24;                /* amber                   */
-  --color-swatch-4:     #F87171;                /* red                     */
-  --color-swatch-5:     #A78BFA;                /* violet                  */
-  --color-swatch-6:     #2DD4BF;                /* teal                    */
-  --color-swatch-7:     #94A3B8;                /* grey                    */
+     Dots and meters only; never a status signal, so no hue here repeats
+     the action, status, brand or gold colours. */
+  --color-swatch-1:     #2DD4BF;                /* teal                    */
+  --color-swatch-2:     #B197FC;                /* violet                  */
+  --color-swatch-3:     #F6955A;                /* orange                  */
+  --color-swatch-4:     #F472B6;                /* pink                    */
+  --color-swatch-5:     #E879F9;                /* fuchsia                 */
+  --color-swatch-6:     #C4A484;                /* brown                   */
+  --color-swatch-7:     #D1D5DB;                /* grey                    */
 
   /* ── Type ─────────────────────────────────────────────────────────── */
   --font-display: "Geist", ui-sans-serif, system-ui, sans-serif;
@@ -165,13 +166,13 @@
   --color-priority-p2:  #4338CA;
   --color-priority-p3:  #475569;
 
-  --color-swatch-1:     #2563EB;
-  --color-swatch-2:     #4F46E5;
-  --color-swatch-3:     #B45309;
-  --color-swatch-4:     #DC2626;
-  --color-swatch-5:     #7C3AED;
-  --color-swatch-6:     #0F766E;
-  --color-swatch-7:     #64748B;
+  --color-swatch-1:     #0F766E;
+  --color-swatch-2:     #6D28D9;
+  --color-swatch-3:     #C05621;
+  --color-swatch-4:     #BE185D;
+  --color-swatch-5:     #A21CAF;
+  --color-swatch-6:     #7C5A43;
+  --color-swatch-7:     #4B5563;
 }
 
 /* ── Brand panel ───────────────────────────────────────────────────────

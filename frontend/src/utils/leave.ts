@@ -24,6 +24,7 @@ import type {
   LeaveStatus,
   LeaveTypeBrief,
   PersonRef,
+  SwatchKey,
   WfhApproval,
 } from '@/types/leave'
 import { WEEKDAY_SHORT, weekdayIndex } from '@/utils/leaveDates'
@@ -31,6 +32,13 @@ import { WEEKDAY_SHORT, weekdayIndex } from '@/utils/leaveDates'
 export const KIND_LABELS: Record<LeaveKind, string> = {
   leave: 'Leave',
   wfh: 'Work from home',
+  optional_holiday: 'Optional holiday',
+}
+
+/** Shorter kind labels for tight spaces, e.g. the request type toggle on a phone. */
+export const KIND_SHORT_LABELS: Record<LeaveKind, string> = {
+  leave: 'Leave',
+  wfh: 'WFH',
   optional_holiday: 'Optional holiday',
 }
 
@@ -66,11 +74,23 @@ export function pillOptions<T extends string>(labels: Record<T, string>): { labe
 
 /** Leave-type colour keys are theme colours of the same name (tokens.css
  *  --color-swatch-*), a categorical palette kept apart from status colours. */
-export const SWATCH_KEYS = ['swatch-1', 'swatch-2', 'swatch-3', 'swatch-4', 'swatch-5', 'swatch-6', 'swatch-7']
+export const SWATCH_KEYS = [
+  'swatch-1',
+  'swatch-2',
+  'swatch-3',
+  'swatch-4',
+  'swatch-5',
+  'swatch-6',
+  'swatch-7',
+] as const satisfies readonly SwatchKey[]
+
+function isSwatchKey(key: string): key is SwatchKey {
+  return (SWATCH_KEYS as readonly string[]).includes(key)
+}
 
 /** Theme colour name for a leave type's colour key; unknown keys get the first swatch. */
-export function swatchColor(key: string | null | undefined): string {
-  return key && SWATCH_KEYS.includes(key) ? key : SWATCH_KEYS[0]
+export function swatchColor(key: string | null | undefined): SwatchKey {
+  return key && isSwatchKey(key) ? key : SWATCH_KEYS[0]
 }
 
 /** Decimal from the API (string or number) as a number; blanks are 0. */
@@ -93,6 +113,12 @@ export function formatDays(value: number): string {
 /** "1 day", "2.5 days". */
 export function pluralDays(value: number): string {
   return `${formatDays(value)} ${value === 1 ? 'day' : 'days'}`
+}
+
+/** How long a request is: "3 days", or "Half day, morning". */
+export function requestLength(request: { days: Decimalish; half_day: HalfDay }): string {
+  if (request.half_day === 'none') return pluralDays(toNumber(request.days))
+  return `Half day, ${HALF_DAY_LABELS[request.half_day].toLowerCase()}`
 }
 
 /** "2 days loss of pay", or '' when there are none. */
