@@ -14,137 +14,110 @@
  * limitations under the License.
  -->
 
-<!-- Shared top-3 podium for the XP and Race leaderboards. Owns the staggered
-     slot layout (2nd left, 1st centre + harvest-gold glow, 3rd right) and the
-     card styling so the two tabs cannot drift apart. Callers map their rows to
-     `PodiumEntry[]` (rank order: index 0 is first place). -->
+<!-- The top three as cards in rank order. First place carries the gold
+     reward colour on its rank and border. -->
 <template>
-  <div class="podium">
-    <div
-      v-for="slot in slots"
-      :key="slot.rank"
-      class="podium__slot"
-      :class="`podium__slot--${slot.tier}`"
-    >
-      <div class="podium-card" :class="{ 'podium-card--me': slot.entry.isMe }">
-        <div class="podium-card__medal">{{ MEDALS[slot.rank - 1] }}</div>
-        <div class="podium-card__name text-body-2 font-weight-bold">{{ slot.entry.name }}</div>
-        <div
-          class="podium-card__figure bo-display text-h6 font-weight-bold"
-          :class="`podium-card__figure--${slot.entry.figureKind}`"
-        >
-          {{ slot.entry.figure }}
-        </div>
-        <div v-if="slot.entry.meta" class="podium-card__meta text-caption text-medium-emphasis">
-          {{ slot.entry.meta }}
-        </div>
-      </div>
-    </div>
-  </div>
+  <ol class="podium" aria-label="Top three">
+    <li v-for="e in entries" :key="e.key" class="podium__card" :class="{ 'podium__card--first': e.rank === 1, 'podium__card--me': e.isMe }">
+      <span class="podium__rank">{{ ordinal(e.rank) }}</span>
+      <AppMonogram :name="e.name" :size="xs ? 40 : 56" />
+      <span class="podium__name">{{ e.name }}<span v-if="e.isMe" class="podium__you"> (you)</span></span>
+      <span class="podium__figure">{{ e.figure }} <span v-if="e.unit" class="podium__unit">{{ e.unit }}</span></span>
+      <span v-if="e.note" class="podium__note">{{ e.note }}</span>
+    </li>
+  </ol>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { useDisplay } from 'vuetify'
+import AppMonogram from '@/components/common/AppMonogram.vue'
+import { ordinal, type RankedEntry } from '@/utils/leaderboard'
 
-export interface PodiumEntry {
-  name: string
-  // The headline number for this board — XP total or finish time.
-  figure: string
-  // 'gold' tints the figure with the reward signal (XP); 'ink' keeps it a
-  // neutral metric (a finish time isn't a reward).
-  figureKind: 'gold' | 'ink'
-  // Optional small line under the figure (level, distance, …).
-  meta?: string
-  isMe?: boolean
-}
+defineProps<{ entries: RankedEntry[] }>()
 
-const props = defineProps<{
-  // Top three in rank order — index 0 is first place.
-  entries: PodiumEntry[]
-}>()
-
-const MEDALS = ['🥇', '🥈', '🥉']
-
-// Visual order: silver (2nd) left, gold (1st) centre, bronze (3rd) right.
-const slots = computed(() =>
-  [
-    { rank: 2, tier: 'silver', entry: props.entries[1] },
-    { rank: 1, tier: 'gold', entry: props.entries[0] },
-    { rank: 3, tier: 'bronze', entry: props.entries[2] },
-  ].filter((s) => s.entry),
-)
+// Phones stack the cards into rows with a smaller monogram.
+const { xs } = useDisplay()
 </script>
 
 <style scoped>
 .podium {
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
 }
-
-.podium__slot {
-  display: flex;
-  justify-content: center;
-}
-.podium__slot--gold {
-  align-self: flex-start;
-}
-.podium__slot--silver {
-  align-self: center;
-}
-.podium__slot--bronze {
-  align-self: flex-end;
-}
-
-.podium-card {
+.podium__card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 20px 28px;
-  border-radius: 16px;
-  background: rgb(var(--v-theme-surface-bright));
+  gap: 10px;
+  min-width: 0;
+  padding: 22px;
+  text-align: center;
+  background: rgb(var(--v-theme-surface));
   border: 1px solid rgb(var(--v-theme-rule));
-  min-width: 160px;
-  gap: 6px;
+  border-radius: 12px;
 }
-
-.podium-card--me {
-  box-shadow: 0 0 0 2px rgba(var(--v-theme-primary), 0.4);
+.podium__card--first {
+  border-color: rgba(var(--v-theme-gold), 0.6);
 }
-
-/* 1st place is the harvest moment — the reserved gold signal + soft glow.
-   Silver / bronze keep their universally-read medal tints. */
-.podium__slot--gold .podium-card {
-  border-color: rgba(var(--v-theme-gold), 0.5);
-  background: rgba(var(--v-theme-gold), 0.08);
-  box-shadow: 0 0 24px rgba(var(--v-theme-gold), 0.18);
-  padding: 24px 32px;
-  min-width: 180px;
+.podium__card--me {
+  background: rgba(var(--v-theme-primary), 0.05);
 }
-.podium__slot--silver .podium-card {
-  border-color: rgba(192, 192, 192, 0.3);
-  background: rgba(192, 192, 192, 0.05);
+.podium__rank {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgb(var(--v-theme-on-surface-variant));
 }
-.podium__slot--bronze .podium-card {
-  border-color: rgba(205, 127, 50, 0.3);
-  background: rgba(205, 127, 50, 0.05);
-}
-
-.podium-card__medal {
-  font-size: 36px;
-  line-height: 1;
-}
-.podium-card__figure {
-  font-variant-numeric: tabular-nums;
-}
-.podium-card__figure--gold {
+.podium__card--first .podium__rank {
   color: rgb(var(--v-theme-gold));
 }
-.podium-card__figure--ink {
-  color: rgb(var(--v-theme-on-surface));
+.podium__name {
+  max-width: 100%;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
-.podium-card__meta {
+.podium__you,
+.podium__unit,
+.podium__note {
+  font-size: 13px;
+  font-weight: 500;
   color: rgb(var(--v-theme-on-surface-variant));
+}
+.podium__figure {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: var(--tracking-display);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 599.98px) {
+  .podium {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .podium__card {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    padding: 14px 16px;
+    text-align: left;
+  }
+  .podium__rank {
+    width: 28px;
+  }
+  .podium__name {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .podium__figure {
+    font-size: 20px;
+  }
+  .podium__note {
+    flex-basis: 100%;
+    padding-left: 80px;
+  }
 }
 </style>
