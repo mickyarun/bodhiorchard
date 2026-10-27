@@ -892,11 +892,12 @@ export const BUG_STATUS_LABELS: Record<BugStatusValue, string> = {
   closed: 'Closed',
 }
 
+// Severity shares the priority scale (theme colours ``priority-p0``…``p3``).
 export const BUG_SEVERITY_COLORS: Record<BugSeverity, string> = {
-  low: 'grey',
-  medium: 'warning',
-  high: 'orange',
-  critical: 'error',
+  low: 'priority-p3',
+  medium: 'priority-p2',
+  high: 'priority-p1',
+  critical: 'priority-p0',
 }
 
 export const BUG_STATUS_COLORS: Record<BugStatusValue, string> = {

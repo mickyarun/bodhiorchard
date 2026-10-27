@@ -37,6 +37,22 @@ function emptyBoard(): Record<BugStatusValue, BugListItem[]> {
   )
 }
 
+interface BugListFilters {
+  status?: string
+  severity?: string
+  budId?: string
+  featureId?: string
+  page?: number
+  pageSize?: number
+}
+
+interface BugBoardFilters {
+  bugType?: 'testing' | 'production' | 'all'
+  severity?: string
+  featureId?: string
+  assigneeId?: string
+}
+
 export const useBugsStore = defineStore('bugs', () => {
   const bugs = ref<BugListItem[]>([])
   const total = ref(0)
@@ -53,14 +69,14 @@ export const useBugsStore = defineStore('bugs', () => {
 
   const boardColumns = computed(() => BUG_BOARD_COLUMNS)
 
-  async function fetchBugs(filters?: {
-    status?: string
-    severity?: string
-    budId?: string
-    featureId?: string
-    page?: number
-    pageSize?: number
-  }): Promise<void> {
+  // The filters each list was last loaded with, so a refresh after an
+  // edit (updateBug, createBug) reloads the same view instead of the
+  // unfiltered default.
+  let lastBugFilters: BugListFilters | undefined
+  let lastBoardFilters: BugBoardFilters | undefined
+
+  async function fetchBugs(filters: BugListFilters | undefined = lastBugFilters): Promise<void> {
+    lastBugFilters = filters
     loading.value = true
     error.value = null
     try {
@@ -84,12 +100,8 @@ export const useBugsStore = defineStore('bugs', () => {
     }
   }
 
-  async function fetchBoard(filters?: {
-    bugType?: 'testing' | 'production' | 'all'
-    severity?: string
-    featureId?: string
-    assigneeId?: string
-  }): Promise<void> {
+  async function fetchBoard(filters: BugBoardFilters | undefined = lastBoardFilters): Promise<void> {
+    lastBoardFilters = filters
     boardLoading.value = true
     error.value = null
     try {

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { describe, expect, it } from 'vitest'
-import { formatShortDate } from './date'
+import { formatShortDate, relativeTime } from './date'
 
 describe('formatShortDate', () => {
   it('gives month and day', () => expect(formatShortDate('2026-10-27T12:00:00')).toBe('Oct 27'))
@@ -21,4 +21,24 @@ describe('formatShortDate', () => {
     expect(formatShortDate(null)).toBe('')
     expect(formatShortDate('soon')).toBe('soon')
   })
+})
+
+describe('relativeTime', () => {
+  const now = new Date(2026, 9, 28, 15, 0)
+  const at = (d: number, h: number, m = 0): string => new Date(2026, 9, d, h, m).toISOString()
+
+  it('counts minutes and hours within today', () => {
+    expect(relativeTime(at(28, 14, 59), now)).toBe('1 minute ago')
+    expect(relativeTime(at(28, 14, 30), now)).toBe('30 minutes ago')
+    expect(relativeTime(at(28, 13, 0), now)).toBe('2 hours ago')
+    expect(relativeTime(at(28, 15, 0), now)).toBe('just now')
+  })
+  it('counts calendar days before today', () => {
+    expect(relativeTime(at(27, 23, 0), now)).toBe('yesterday')
+    expect(relativeTime(at(25, 9, 0), now)).toBe('3 days ago')
+  })
+  it('falls back to the date after a week', () => {
+    expect(relativeTime(at(10, 9, 0), now)).toBe('Oct 10')
+  })
+  it('is empty for no date', () => expect(relativeTime(null, now)).toBe(''))
 })

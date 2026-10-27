@@ -59,3 +59,33 @@ export function formatShortDate(iso: string | null | undefined): string {
   if (Number.isNaN(d.getTime())) return iso
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
+
+const MINUTE_MS = 60_000
+const HOUR_MS = 60 * MINUTE_MS
+
+/**
+ * How long ago a timestamp was, for list rows: "just now", "5 minutes ago",
+ * "2 hours ago", "yesterday", "3 days ago", then the month and day.
+ * Days count calendar days in local time. Empty string for null.
+ */
+export function relativeTime(iso: string | null | undefined, now: Date): string {
+  if (!iso) return ''
+  const then = new Date(iso)
+  if (Number.isNaN(then.getTime())) return iso
+  const diff = now.getTime() - then.getTime()
+  if (diff < MINUTE_MS) return 'just now'
+  if (diff < HOUR_MS) {
+    const mins = Math.floor(diff / MINUTE_MS)
+    return mins === 1 ? '1 minute ago' : `${mins} minutes ago`
+  }
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  if (then >= startOfToday) {
+    const hours = Math.floor(diff / HOUR_MS)
+    return hours === 1 ? '1 hour ago' : `${hours} hours ago`
+  }
+  const startOfThen = new Date(then.getFullYear(), then.getMonth(), then.getDate())
+  const days = Math.round((startOfToday.getTime() - startOfThen.getTime()) / (24 * HOUR_MS))
+  if (days === 1) return 'yesterday'
+  if (days < 7) return `${days} days ago`
+  return formatShortDate(iso)
+}

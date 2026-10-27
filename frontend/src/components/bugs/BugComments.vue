@@ -56,6 +56,7 @@
               size="x-small"
               variant="text"
               density="compact"
+              aria-label="Edit comment"
               @click="startEdit(comment)"
             />
             <v-btn
@@ -64,6 +65,7 @@
               variant="text"
               density="compact"
               color="error"
+              aria-label="Delete comment"
               @click="onDelete(comment.id)"
             />
           </template>
@@ -84,8 +86,7 @@
           <div class="d-flex ga-2 justify-end">
             <v-btn variant="text" size="small" @click="cancelEdit">Cancel</v-btn>
             <v-btn
-              color="primary"
-              variant="flat"
+              variant="outlined"
               size="small"
               :disabled="!editDraft.trim() || editDraft === comment.body"
               @click="saveEdit(comment.id)"

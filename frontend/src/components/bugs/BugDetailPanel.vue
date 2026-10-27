@@ -14,322 +14,122 @@
  * limitations under the License.
  -->
 
+<!-- The open bug (``bugsStore.currentBug``), shown in the Bugs side sheet:
+     severity and environment, the title and description (editable in place
+     for editors), status / owner / feature, the facts, attachments and the
+     comment thread. -->
 <template>
-  <v-card v-if="bugsStore.currentBug" color="surface" class="pa-6" flat>
-    <div class="d-flex align-center ga-2 mb-3">
-      <span class="text-caption text-medium-emphasis font-weight-medium">
-        BUG-{{ String(bugsStore.currentBug.bugNumber).padStart(3, '0') }}
-      </span>
-      <v-chip
-        :color="BUG_SEVERITY_COLORS[bugsStore.currentBug.severity]"
-        size="small"
-        variant="tonal"
-      >
-        {{ bugsStore.currentBug.severity }}
-      </v-chip>
-      <v-chip
-        :color="bugsStore.currentBug.bugType === 'production' ? 'error' : 'info'"
-        size="small"
-        variant="tonal"
-      >
-        {{ bugsStore.currentBug.bugType }}
-      </v-chip>
-      <v-spacer />
-      <v-btn icon="mdi-close" variant="text" size="small" @click="$emit('close')" />
+  <div v-if="bug" class="bug-detail">
+    <div class="bug-detail__tags">
+      <AppTag :color="BUG_SEVERITY_COLORS[bug.severity]" sr-prefix="Severity:">{{ severityLabel(bug.severity) }}</AppTag>
+      <AppTag>{{ bug.bugType === 'production' ? 'Production' : 'Testing' }}</AppTag>
     </div>
 
-    <!-- Title (inline-edit) -->
-    <div v-if="editingTitle" class="mb-2 d-flex ga-2">
-      <v-text-field
-        v-model="titleDraft"
-        variant="outlined"
-        density="compact"
-        hide-details
-        autofocus
-      />
-      <v-btn icon="mdi-check" size="small" color="primary" @click="saveTitle" />
-      <v-btn icon="mdi-close" size="small" variant="text" @click="cancelTitle" />
-    </div>
-    <div
-      v-else
-      class="text-h6 font-weight-bold mb-2"
-      :class="{ 'cursor-pointer': canEditBugs }"
-      @click="canEditBugs && startEditTitle()"
-    >
-      {{ bugsStore.currentBug.title }}
-    </div>
-
-    <!-- Description -->
-    <div v-if="editingDescription" class="mb-3 d-flex flex-column ga-2">
-      <v-textarea
-        v-model="descriptionDraft"
-        variant="outlined"
-        density="compact"
-        rows="4"
-        hide-details
-        autofocus
-      />
-      <div class="d-flex ga-2 justify-end">
-        <v-btn variant="text" size="small" @click="cancelDescription">Cancel</v-btn>
-        <v-btn color="primary" variant="flat" size="small" @click="saveDescription">Save</v-btn>
-      </div>
-    </div>
-    <div
-      v-else
-      class="text-body-2 mb-4"
-      :class="{ 'cursor-pointer text-medium-emphasis': !bugsStore.currentBug.description }"
-      style="white-space: pre-wrap;"
-      @click="canEditBugs && startEditDescription()"
-    >
-      {{ bugsStore.currentBug.description || (canEditBugs ? 'Add a description…' : 'No description') }}
-    </div>
-
-    <!-- Status -->
-    <div class="mb-4">
-      <div class="text-caption text-medium-emphasis mb-1">Status</div>
-      <v-select
-        :model-value="bugsStore.currentBug.status"
-        :items="statusOptions"
-        :disabled="!canEditBugs"
-        variant="outlined"
-        density="compact"
-        hide-details
-        @update:model-value="onChangeStatus"
-      />
-    </div>
-
-    <!-- Meta block -->
-    <div class="d-flex flex-column ga-2 mb-4">
-      <div v-if="bugsStore.currentBug.module" class="text-caption text-medium-emphasis">
-        <strong>Module:</strong> {{ bugsStore.currentBug.module }}
-      </div>
-
-      <!-- Feature link -->
-      <div class="text-caption text-medium-emphasis">
-        <strong>Feature:</strong>
-        <template v-if="bugsStore.currentBug.featureTitle">
-          <v-chip
-            size="small"
-            variant="tonal"
-            color="primary"
-            class="ml-2"
-            :closable="canEditBugs"
-            @click:close="unlinkFeature"
-          >
-            {{ bugsStore.currentBug.featureTitle }}
-          </v-chip>
-        </template>
-        <span v-else-if="!canEditBugs" class="ml-2">Unlinked</span>
-        <v-autocomplete
-          v-else
-          v-model="linkedFeatureId"
-          :items="featureOptions"
-          :loading="featureSearchLoading"
-          item-title="label"
-          item-value="value"
-          variant="outlined"
-          density="compact"
-          placeholder="Search features…"
-          hide-details
-          clearable
-          class="ml-2 mt-1"
-          style="max-width: 320px"
-          @update:search="onFeatureSearch"
-          @update:model-value="onLinkFeature"
-        />
-      </div>
-
-      <!-- BUD link (read-only chip if present) -->
-      <div v-if="bugsStore.currentBug.budNumber" class="text-caption text-medium-emphasis">
-        <strong>BUD:</strong>
-        <v-chip size="small" variant="tonal" color="primary" class="ml-2">
-          {{ budRef(bugsStore.currentBug.budNumber) }}
-        </v-chip>
-      </div>
-
-      <!-- Assignee -->
-      <div class="text-caption text-medium-emphasis">
-        <strong>Assignee:</strong>
-        <span v-if="!canAssignBugs" class="ml-2">
-          {{ bugsStore.currentBug.assigneeName || 'Unassigned' }}
-        </span>
-        <v-autocomplete
-          v-else
-          v-model="assigneeId"
-          :items="assigneeOptions"
-          item-title="label"
-          item-value="value"
-          variant="outlined"
-          density="compact"
-          placeholder="Unassigned"
-          hide-details
-          clearable
-          class="ml-2 mt-1"
-          style="max-width: 320px"
-          @update:model-value="onChangeAssignee"
-        />
-      </div>
-
-      <div class="text-caption text-medium-emphasis">
-        <strong>Reporter:</strong> {{ bugsStore.currentBug.reporterName || 'Unknown' }}
-      </div>
-      <div class="text-caption text-medium-emphasis">
-        <strong>Reported:</strong> {{ formatDateTime(bugsStore.currentBug.createdAt) }}
-      </div>
-      <div v-if="bugsStore.currentBug.resolvedAt" class="text-caption text-medium-emphasis">
-        <strong>Resolved:</strong> {{ formatDateTime(bugsStore.currentBug.resolvedAt) }}
-      </div>
-    </div>
-
-    <v-divider class="mb-4" />
-
-    <BugAttachments
-      :bug-id="bugsStore.currentBug.id"
-      :readonly="!canAttachToBugs"
-      class="mb-4"
+    <BugEditableText
+      :value="bug.title"
+      label="Title"
+      :editable="canEditBugs"
+      required
+      class="bug-detail__title"
+      @save="bugsStore.updateBug(bug.id, { title: $event })"
+    />
+    <BugEditableText
+      :value="bug.description ?? ''"
+      label="Description"
+      :editable="canEditBugs"
+      multiline
+      :empty-text="canEditBugs ? 'Add a description' : 'No description'"
+      @save="bugsStore.updateBug(bug.id, { description: $event })"
     />
 
-    <v-divider class="mb-4" />
+    <BugDetailFields v-if="canEditBugs || canAssignBugs" :bug="bug" />
 
-    <BugComments :bug-id="bugsStore.currentBug.id" />
-  </v-card>
+    <dl class="bug-detail__facts">
+      <template v-for="fact in facts" :key="fact.label">
+        <dt>{{ fact.label }}</dt>
+        <dd>
+          <router-link v-if="fact.to" :to="fact.to">{{ fact.value }}</router-link>
+          <template v-else>{{ fact.value }}</template>
+        </dd>
+      </template>
+    </dl>
+
+    <BugAttachments :bug-id="bug.id" :readonly="!canAttachToBugs" />
+    <BugComments :bug-id="bug.id" />
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { useBugsStore } from '@/stores/bugs'
-import { useFeaturesStore } from '@/stores/features'
-import { useMembersStore } from '@/stores/members'
+import { computed } from 'vue'
+import AppTag from '@/components/common/AppTag.vue'
 import { usePermissions } from '@/composables/usePermissions'
-import { BUG_SEVERITY_COLORS, budRef, type BugStatusValue } from '@/types'
+import { useBugsStore } from '@/stores/bugs'
+import { BUG_SEVERITY_COLORS, budRef } from '@/types'
+import { severityLabel } from '@/utils/bugList'
 import { formatDateTime } from '@/utils/date'
 import BugAttachments from './BugAttachments.vue'
 import BugComments from './BugComments.vue'
-
-defineEmits<{ (e: 'close'): void }>()
+import BugDetailFields from './BugDetailFields.vue'
+import BugEditableText from './BugEditableText.vue'
 
 const bugsStore = useBugsStore()
-const featuresStore = useFeaturesStore()
-const membersStore = useMembersStore()
 const { canEditBugs, canAssignBugs, canReportBugs } = usePermissions()
+const bug = computed(() => bugsStore.currentBug)
 
-// Reporters attach evidence too, not just editors — the backend gates
-// the upload route on the same trio.
+// Reporters attach evidence too, not just editors; the backend gates the
+// upload route the same way.
 const canAttachToBugs = computed(() => canReportBugs.value || canEditBugs.value)
 
-const statusOptions: { title: string; value: BugStatusValue }[] = [
-  { title: 'Open', value: 'open' },
-  { title: 'In Progress', value: 'in-progress' },
-  { title: 'Blocked', value: 'blocked' },
-  { title: 'Resolved', value: 'resolved' },
-  { title: 'Closed', value: 'closed' },
-]
-
-const editingTitle = ref(false)
-const titleDraft = ref('')
-const editingDescription = ref(false)
-const descriptionDraft = ref('')
-const linkedFeatureId = ref<string | null>(null)
-const assigneeId = ref<string | null>(null)
-const featureSearchQuery = ref('')
-const featureSearchLoading = ref(false)
-let featureSearchTimer: ReturnType<typeof setTimeout> | null = null
-
-const featureOptions = computed(() =>
-  featuresStore.items.map((f) => ({
-    label: f.featureTitle,
-    value: f.id,
-  })),
-)
-
-const assigneeOptions = computed(() =>
-  membersStore.members.map((m) => ({
-    label: m.name || m.email,
-    value: m.id,
-  })),
-)
-
-watch(
-  () => bugsStore.currentBug?.id,
-  async (id) => {
-    if (!id) return
-    linkedFeatureId.value = bugsStore.currentBug?.featureId ?? null
-    assigneeId.value = bugsStore.currentBug?.assigneeId ?? null
-    if (canAssignBugs.value && membersStore.members.length === 0) {
-      await membersStore.fetchMembers()
-    }
-  },
-  { immediate: true },
-)
-
-function startEditTitle(): void {
-  if (!bugsStore.currentBug) return
-  titleDraft.value = bugsStore.currentBug.title
-  editingTitle.value = true
-}
-
-function cancelTitle(): void {
-  editingTitle.value = false
-}
-
-async function saveTitle(): Promise<void> {
-  if (!bugsStore.currentBug || !titleDraft.value.trim()) return
-  await bugsStore.updateBug(bugsStore.currentBug.id, { title: titleDraft.value.trim() })
-  editingTitle.value = false
-}
-
-function startEditDescription(): void {
-  if (!bugsStore.currentBug) return
-  descriptionDraft.value = bugsStore.currentBug.description ?? ''
-  editingDescription.value = true
-}
-
-function cancelDescription(): void {
-  editingDescription.value = false
-}
-
-async function saveDescription(): Promise<void> {
-  if (!bugsStore.currentBug) return
-  await bugsStore.updateBug(bugsStore.currentBug.id, {
-    description: descriptionDraft.value,
-  })
-  editingDescription.value = false
-}
-
-async function onChangeStatus(newStatus: BugStatusValue): Promise<void> {
-  if (!bugsStore.currentBug) return
-  await bugsStore.updateBug(bugsStore.currentBug.id, { status: newStatus })
-}
-
-async function onChangeAssignee(id: string | null): Promise<void> {
-  if (!bugsStore.currentBug) return
-  await bugsStore.updateBug(bugsStore.currentBug.id, { assigneeId: id })
-}
-
-async function onLinkFeature(id: string | null): Promise<void> {
-  if (!bugsStore.currentBug || !id) return
-  await bugsStore.updateBug(bugsStore.currentBug.id, { featureId: id })
-}
-
-async function unlinkFeature(): Promise<void> {
-  if (!bugsStore.currentBug) return
-  linkedFeatureId.value = null
-  await bugsStore.updateBug(bugsStore.currentBug.id, { featureId: null })
-}
-
-function onFeatureSearch(query: string): void {
-  featureSearchQuery.value = query
-  if (featureSearchTimer) clearTimeout(featureSearchTimer)
-  featureSearchTimer = setTimeout(async () => {
-    featureSearchLoading.value = true
-    await featuresStore.fetchPage({ q: query || undefined, mode: 'active' })
-    featureSearchLoading.value = false
-  }, 250)
-}
+const facts = computed(() => {
+  const b = bug.value
+  if (!b) return []
+  const out: Array<{ label: string; value: string; to?: string }> = []
+  // Shown as fields above for people who can change them.
+  if (!canAssignBugs.value) out.push({ label: 'Owner', value: b.assigneeName || 'Unassigned' })
+  if (!canEditBugs.value) out.push({ label: 'Feature', value: b.featureTitle || 'Not linked' })
+  if (b.budId && b.budNumber) {
+    out.push({ label: 'BUD', value: [budRef(b.budNumber), b.budTitle].filter(Boolean).join(' · '), to: `/buds/${b.budId}` })
+  }
+  if (b.module) out.push({ label: 'Module', value: b.module })
+  out.push({ label: 'Reporter', value: b.reporterName || 'Unknown' })
+  out.push({ label: 'Reported', value: formatDateTime(b.createdAt) })
+  if (b.resolvedAt) out.push({ label: 'Resolved', value: formatDateTime(b.resolvedAt) })
+  return out
+})
 </script>
 
 <style scoped>
-.cursor-pointer {
-  cursor: pointer;
+.bug-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.bug-detail__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.bug-detail__title :deep(.bug-text__value) {
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+}
+.bug-detail__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+.bug-detail__facts dt {
+  color: rgb(var(--v-theme-on-surface-variant));
+}
+.bug-detail__facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.bug-detail__facts a {
+  color: var(--color-accent-text);
+  text-decoration: none;
 }
 </style>

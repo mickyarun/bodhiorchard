@@ -26,7 +26,7 @@
     @update:model-value="onDialogToggle"
   >
     <v-card color="surface" class="pa-6">
-      <div class="text-h6 font-weight-bold bo-display mb-4">Report a Bug</div>
+      <h2 class="bug-create__title">Report a bug</h2>
 
       <!-- Reached only when the bug was filed but an attachment upload
         failed. The bug exists, so the primary action switches from
@@ -59,7 +59,7 @@
         placeholder="Steps to reproduce, expected vs actual behavior..."
       />
 
-      <div class="d-flex ga-3 mb-3">
+      <div class="d-flex flex-wrap ga-3 mb-3">
         <v-select
           v-model="severity"
           :disabled="!!createdBug"
@@ -67,7 +67,7 @@
           label="Severity"
           variant="outlined"
           density="compact"
-          style="flex: 1"
+          style="flex: 1 1 180px"
         />
         <v-text-field
           v-model="module"
@@ -75,7 +75,7 @@
           label="Module / Area"
           variant="outlined"
           density="compact"
-          style="flex: 1"
+          style="flex: 1 1 180px"
           placeholder="e.g. payments, auth"
         />
       </div>
@@ -96,11 +96,11 @@
           :loading="featureLoading"
           item-title="label"
           item-value="value"
-          label="Link to Feature (optional)"
+          label="Feature (optional)"
           variant="outlined"
           density="compact"
           placeholder="Search features…"
-          hint="AI auto-detects the closest Feature when left empty."
+          hint="Left empty, Glideship links the closest feature itself."
           persistent-hint
           clearable
           class="mb-3"
@@ -119,13 +119,13 @@
         <v-spacer />
         <v-btn variant="text" @click="dismiss">{{ createdBug ? 'Close' : 'Cancel' }}</v-btn>
         <v-btn
-          color="error"
+          color="primary"
           variant="flat"
           :disabled="!title?.trim()"
           :loading="saving"
           @click="submit"
         >
-          {{ createdBug ? 'Retry upload' : 'Report Bug' }}
+          {{ createdBug ? 'Retry upload' : 'Report bug' }}
         </v-btn>
       </v-card-actions>
     </v-card>
@@ -283,3 +283,11 @@ function finish(bug: BugRead): void {
   emit('created', bug)
 }
 </script>
+
+<style scoped>
+.bug-create__title {
+  margin: 0 0 16px;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+</style>
