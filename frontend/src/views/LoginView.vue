@@ -14,78 +14,79 @@
  * limitations under the License.
  -->
 
+<!-- Sign-in: the form on the left, the navy brand panel on the right.
+     Below 960px the panel is dropped and the form takes the full width. -->
 <template>
-  <div class="setup-gradient d-flex flex-column" style="min-height: 100vh;">
-    <v-container class="d-flex flex-column align-center justify-center flex-grow-1 py-8">
-      <div class="mb-8">
-        <BrandLogo />
-      </div>
+  <div class="login-shell">
+    <main class="login-shell__main">
+      <div class="login-shell__inner">
+        <BrandLogo :size="34" />
 
-      <v-card color="surface" class="pa-8 w-100" max-width="420">
-        <div class="text-h5 font-weight-bold bo-display mb-1 text-center">Welcome back</div>
-        <div class="text-body-2 text-medium-emphasis text-center mb-6">
-          Sign in to your Glideship account
-        </div>
+        <header class="login-shell__head">
+          <h1 class="login-shell__title bo-display">Sign in</h1>
+          <p class="login-shell__lede">Welcome back to your workspace.</p>
+        </header>
 
-        <v-alert
-          v-if="authStore.loginError"
-          type="error"
-          variant="tonal"
-          density="compact"
-          class="mb-4"
-          closable
-          @click:close="authStore.loginError = null"
-        >
-          {{ authStore.loginError }}
-        </v-alert>
+        <AppCallout v-if="errorMessage" variant="error" role="alert">
+          {{ errorMessage }}
+          <template #actions>
+            <v-btn
+              icon="mdi-close"
+              aria-label="Dismiss"
+              variant="text"
+              size="x-small"
+              @click="dismissError"
+            />
+          </template>
+        </AppCallout>
 
-        <v-form @submit.prevent="handleLogin">
+        <v-form class="login-shell__form" @submit.prevent="handleLogin">
           <v-text-field
             v-model="email"
-            label="Email"
+            label="Work email"
             type="email"
-            prepend-inner-icon="mdi-email-outline"
-            density="compact"
-            variant="outlined"
-            class="mb-3"
+            autocomplete="email"
             autofocus
             :rules="[rules.required, rules.email]"
           />
-
           <PasswordField
             v-model="password"
             label="Password"
-            prepend-inner-icon="mdi-lock-outline"
             autocomplete="current-password"
-            density="compact"
-            variant="outlined"
-            class="mb-4"
             :rules="[rules.required]"
           />
-
           <v-btn
             type="submit"
             color="primary"
+            variant="flat"
             block
             size="large"
             :loading="loading"
             :disabled="!email.trim() || !password"
           >
-            Sign In
+            Sign in
           </v-btn>
         </v-form>
-      </v-card>
-    </v-container>
+
+        <p class="login-shell__note">
+          New here? Ask your workspace admin for an invite. Self-hosted: your data stays on your
+          own servers.
+        </p>
+      </div>
+    </main>
+    <LoginBrandPanel class="login-shell__panel" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/services/api'
+import AppCallout from '@/components/common/AppCallout.vue'
 import BrandLogo from '@/components/common/BrandLogo.vue'
 import PasswordField from '@/components/common/PasswordField.vue'
+import LoginBrandPanel from '@/components/auth/LoginBrandPanel.vue'
 import { afterSignIn } from '@/utils/afterSignIn'
 
 const router = useRouter()
@@ -95,6 +96,15 @@ const email = ref('')
 const password = ref('')
 const loading = ref(false)
 const orgSlug = ref('')
+// Set when the workspace couldn't be looked up, so a submit says why
+// nothing happened instead of doing nothing.
+const unreachable = ref(false)
+
+const UNREACHABLE_MESSAGE = "Can't reach Glideship right now. Check your connection and reload."
+
+const errorMessage = computed(
+  () => authStore.loginError ?? (unreachable.value ? UNREACHABLE_MESSAGE : null),
+)
 
 const rules = {
   required: (v: string) => !!v?.trim() || 'Required',
@@ -112,12 +122,22 @@ onMounted(async () => {
       orgSlug.value = data.org_slug
     }
   } catch {
-    // Backend unreachable
+    // Backend unreachable: say so if they try to sign in.
   }
 })
 
+function dismissError(): void {
+  authStore.loginError = null
+  unreachable.value = false
+}
+
 async function handleLogin(): Promise<void> {
-  if (!email.value.trim() || !password.value || !orgSlug.value) return
+  if (!email.value.trim() || !password.value) return
+  if (!orgSlug.value) {
+    unreachable.value = true
+    return
+  }
+  unreachable.value = false
   loading.value = true
   const success = await authStore.login(email.value.trim(), password.value, orgSlug.value)
   loading.value = false
@@ -126,3 +146,80 @@ async function handleLogin(): Promise<void> {
   }
 }
 </script>
+
+<style scoped>
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  background: rgb(var(--v-theme-background));
+  color: rgb(var(--v-theme-on-background));
+}
+
+.login-shell__main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl, 3rem) var(--space-md, 1.5rem);
+}
+
+.login-shell__inner {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.login-shell__head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.login-shell__title {
+  margin: 0;
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 600;
+}
+
+.login-shell__lede {
+  margin: 0;
+  font-size: 15px;
+  color: rgb(var(--v-theme-muted));
+}
+
+.login-shell__form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.login-shell__note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 19px;
+  color: rgb(var(--v-theme-muted));
+}
+
+@media (max-width: 959px) {
+  .login-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .login-shell__panel {
+    display: none;
+  }
+
+  .login-shell__main {
+    align-items: flex-start;
+    padding: var(--space-xl, 3rem) var(--space-sm, 1rem);
+  }
+
+  .login-shell__inner {
+    max-width: 420px;
+  }
+}
+</style>

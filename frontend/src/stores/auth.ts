@@ -16,6 +16,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { User } from '@/types'
 import api from '@/services/api'
+import { extractApiError } from '@/utils/errors'
 import { forgetReturnTo } from '@/utils/returnTo'
 
 export const useAuthStore = defineStore('auth', () => {
@@ -61,16 +62,12 @@ export const useAuthStore = defineStore('auth', () => {
       }
       return true
     } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { status?: number; data?: { detail?: string } } }
-        if (axiosErr.response?.status === 401) {
-          loginError.value = 'Invalid email or password.'
-        } else {
-          loginError.value = axiosErr.response?.data?.detail || 'Login failed. Please try again.'
-        }
-      } else {
-        loginError.value = 'Network error. Please check your connection.'
-      }
+      const status = (err as { response?: { status?: number } } | null)?.response?.status
+      // A 422 carries FastAPI's validation list; extractApiError turns it
+      // into sentences rather than showing the raw JSON.
+      loginError.value = status === 401
+        ? 'Invalid email or password.'
+        : extractApiError(err, 'Login failed. Please try again.')
       return false
     }
   }
