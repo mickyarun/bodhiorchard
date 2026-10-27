@@ -97,6 +97,9 @@ describe('weeklyShipped', () => {
     expect(weeks[0]).toMatchObject({ label: 'Oct 5', avgCycleDays: 17 })
     expect(weeks[3].avgCycleDays).toBeNull()
   })
+  it('covers the whole backend window by default', () => {
+    expect(weeklyShipped([], new Date('2026-10-28T12:00:00Z'))).toHaveLength(13)
+  })
 })
 
 describe('learningsKpis', () => {

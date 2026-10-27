@@ -17,7 +17,7 @@
 <!-- BUDs closed each week across the trend window, the current week
      drawn in the full action blue. -->
 <template>
-  <AppPanel title="Shipped per week" :note="`BUDs closed in the last ${weeks.length} weeks`">
+  <AppPanel title="Shipped per week" note="BUDs closed each week">
     <div class="weeks" role="img" :aria-label="chartLabel">
       <span v-for="(week, i) in weeks" :key="week.weekStart" class="week" :title="weekTitle(week)">
         <span class="week__n">{{ week.shipped }}</span>

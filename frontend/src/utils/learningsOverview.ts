@@ -27,6 +27,13 @@ import { BUD_STATUS_COLORS, BUD_STATUS_LABELS, BUD_STATUS_ORDER, type BUDStatus 
 /** The backend's velocity window (``VELOCITY_TREND_WEEKS``). */
 export const TREND_WEEKS = 12
 
+/**
+ * Bars in the weekly chart. The backend window is "now minus 12 weeks",
+ * which reaches into a 13th Monday-week, so the chart shows 13 bars and
+ * every closure the headline numbers count has a bar.
+ */
+export const CHART_WEEKS = TREND_WEEKS + 1
+
 const DAY_MS = 86_400_000
 
 export interface StagePart {
@@ -146,7 +153,7 @@ function weekLabel(weekStart: string): string {
  * One bar per week for the trend window, oldest first, including the
  * weeks nothing shipped (the API only returns weeks with closures).
  */
-export function weeklyShipped(points: VelocityTrendPoint[], today: Date, weeks = TREND_WEEKS): WeekBar[] {
+export function weeklyShipped(points: VelocityTrendPoint[], today: Date, weeks = CHART_WEEKS): WeekBar[] {
   const byWeek = new Map(points.map(p => [p.week_start, p]))
   const lastMonday = Date.parse(`${mondayOf(today)}T00:00:00Z`)
   return Array.from({ length: weeks }, (_, i) => {
@@ -179,7 +186,7 @@ export function learningsKpis(
     {
       label: 'Stages over estimate',
       value: String(offenders.length),
-      sub: 'Median overrun above 30%',
+      sub: 'Over by 30% or more on two or more BUDs',
     },
   ]
 }

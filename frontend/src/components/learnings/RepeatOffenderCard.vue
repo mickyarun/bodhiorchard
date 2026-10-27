@@ -14,15 +14,16 @@
  * limitations under the License.
  -->
 
-<!-- Stages whose median overrun across recent closes is above the +30%
-     line the recap also uses. The parent hides the panel when none are. -->
+<!-- Stages that ran more than 30% over estimate on two or more of the
+     last 50 closed BUDs, worst median overrun first. The parent hides the
+     panel when there are none. -->
 <template>
-  <AppPanel title="Stages that run over" note="Median overrun against the estimate, last 50 closed BUDs" flush>
+  <AppPanel title="Stages that run over" note="Over estimate by 30% or more on two or more of the last 50 closed BUDs" flush>
     <ul class="offenders">
       <li v-for="row in offenders" :key="row.phase" class="offender">
         <span class="offender__stage">{{ stageLabel(row.phase) }}</span>
         <span class="offender__ratio">{{ row.buds_over_estimate }} of {{ row.buds_total }} BUDs over estimate</span>
-        <AppTag color="warning">+{{ row.median_drift_pct.toFixed(0) }}%</AppTag>
+        <AppTag color="warning" sr-prefix="Median overrun">+{{ row.median_drift_pct.toFixed(0) }}%</AppTag>
       </li>
     </ul>
   </AppPanel>
