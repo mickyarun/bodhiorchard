@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""SQLAlchemy ORM models for Bodhiorchard.
+"""SQLAlchemy ORM models for Glideship.
 
 All models are imported here so that Alembic can discover them for
 auto-generation of migration scripts.

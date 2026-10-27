@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Structured JSON logging configuration for Bodhiorchard.
+"""Structured JSON logging configuration for Glideship.
 
 Configures structlog to output JSON-formatted logs with timestamps,
 log level, logger name, and request correlation context. When

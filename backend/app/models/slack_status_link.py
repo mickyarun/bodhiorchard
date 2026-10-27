@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""A member's permission for Bodhiorchard to set their Slack status.
+"""A member's permission for Glideship to set their Slack status.
 
 Slack only lets a bot set its own status, so each person approves once
 and we keep their user token (encrypted) to show "Working from home" or

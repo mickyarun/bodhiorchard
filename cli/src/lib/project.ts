@@ -19,7 +19,7 @@ const HR_KEYRING_ISSUED_FILE = "hr-keyring-issued";
 
 // The .env holds the at-rest encryption key and JWT secret. If the install dir
 // is (or becomes) a git repo, this keeps those out of version control.
-const GITIGNORE_CONTENTS = "# Bodhiorchard install — never commit local secrets.\n.env\n";
+const GITIGNORE_CONTENTS = "# Glideship install — never commit local secrets.\n.env\n";
 
 export function composeFilePath(projectDir: string): string {
   return path.join(projectDir, COMPOSE_FILE);

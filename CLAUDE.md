@@ -79,7 +79,7 @@ All development is orchestrated from the repo root via npm workspaces. Backend P
 
 ## Architecture Overview
 
-Bodhiorchard is a **local-first, multi-tenant AI dev-ops platform** with three cooperating processes plus managed infra. Keep these boundaries in mind — they determine where new code belongs.
+Glideship is a **local-first, multi-tenant AI dev-ops platform** with three cooperating processes plus managed infra. Keep these boundaries in mind — they determine where new code belongs.
 
 ### Three-process topology
 

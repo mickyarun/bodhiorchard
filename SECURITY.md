@@ -1,6 +1,6 @@
 # Security Policy
 
-Thank you for helping keep Bodhiorchard and its users safe.
+Thank you for helping keep Glideship and its users safe.
 
 ## Supported Versions
 
@@ -9,7 +9,7 @@ Thank you for helping keep Bodhiorchard and its users safe.
 | 0.1.x   | ✅        |
 | < 0.1   | ❌        |
 
-Bodhiorchard is in early public release. Only the latest `0.1.x` line receives security fixes.
+Glideship is in early public release. Only the latest `0.1.x` line receives security fixes.
 
 ## Reporting a Vulnerability
 

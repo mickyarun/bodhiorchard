@@ -15,49 +15,53 @@
  */
 
 /*
- * Hallmark · design system tokens — Bodhiorchard
+ * Design system tokens — Glideship
  * The single source of truth for colour, type, space, motion, and radius.
- * Source of record is design.md at the repo root. Dark is the default theme
- * (:root); the light variant overrides under Vuetify's theme class so the
- * custom properties track whichever theme Vuetify has activated.
+ * Source of record is design.md at the repo root; the hex values here are
+ * mirrored in plugins/vuetify-theme.ts — keep the two in sync. Dark is the
+ * default theme (:root); the light variant overrides under Vuetify's theme
+ * class so the custom properties track whichever theme Vuetify has activated.
  *
- * Anchor hue 150° (forest green). Vibe: cultivated dev-ops, forest-deep,
- * harvest-gold. Display Bricolage Grotesque · body Geist · mono JetBrains Mono.
+ * Slate neutrals, one blue for action, indigo as brand accent, gold reserved
+ * for XP. Display + body Geist · wordmark Plus Jakarta Sans · mono JetBrains Mono.
  */
 
 /* Dark applies to :root (default) AND the explicit dark theme class, so a
-   nested <v-theme-provider theme="bodhiorchardDark"> inside a light app
+   nested <v-theme-provider theme="glideshipDark"> inside a light app
    (e.g. the character creator) still resolves these tokens to dark. */
 :root,
-.v-theme--bodhiorchardDark {
-  /* ── Colour · dark (primary identity) ─────────────────────────────── */
-  --color-paper:        oklch(17% 0.025 152);   /* deep forest canvas      */
-  --color-paper-2:      oklch(21% 0.026 152);   /* card surface  (+1)      */
-  --color-paper-3:      oklch(25% 0.026 152);   /* elevated / hover (+2)   */
-  --color-ink:          oklch(94% 0.012 150);   /* primary text (sage)     */
-  --color-ink-2:        oklch(78% 0.014 150);   /* secondary text          */
-  --color-muted:        oklch(62% 0.014 150);   /* metadata / hints        */
-  --color-rule:         oklch(31% 0.018 150);   /* dividers                */
-  --color-rule-2:       oklch(27% 0.016 150);   /* faint dividers          */
+.v-theme--glideshipDark {
+  /* ── Colour · dark ────────────────────────────────────────────────── */
+  --color-paper:        #0B1120;                /* app canvas              */
+  --color-paper-2:      #111827;                /* card surface  (+1)      */
+  --color-paper-3:      #1A2233;                /* elevated / hover (+2)   */
+  --color-ink:          #E5E9F0;                /* primary text            */
+  --color-ink-2:        #CBD2DC;                /* secondary text          */
+  --color-muted:        #94A3B8;                /* metadata · 6.9:1 on card */
+  --color-rule:         #222C3D;                /* dividers, card edges    */
+  --color-rule-2:       #1E2738;                /* faint dividers          */
 
-  --color-accent:       oklch(66% 0.15 150);    /* leaf-green — primary    */
-  --color-accent-ink:   oklch(16% 0.02 150);    /* text on accent fill     */
-  --color-accent-soft:  oklch(66% 0.15 150 / 0.14); /* tonal accent wash   */
-  --color-focus:        oklch(72% 0.19 150);    /* focus ring (instant)    */
+  --color-accent:       #60A5FA;                /* action blue (dark tone) */
+  --color-accent-ink:   #0B1120;                /* text on accent fill     */
+  --color-accent-soft:  rgb(96 165 250 / 0.14); /* tonal accent wash       */
+  --color-accent-text:  #60A5FA;                /* blue text on the wash   */
+  --color-focus:        #93C5FD;                /* focus ring              */
+  --color-brand:        #818CF8;                /* indigo — brand accent   */
 
-  --color-gold:         oklch(80% 0.13 85);     /* harvest signal — reward */
+  --color-gold:         oklch(80% 0.13 85);     /* XP / reward signal only */
   --color-gold-ink:     oklch(22% 0.03 85);     /* text on gold fill       */
   --color-gold-soft:    oklch(80% 0.13 85 / 0.16);
 
-  /* Status — distinct from the two brand accents */
-  --color-success:      oklch(74% 0.16 145);
-  --color-error:        oklch(65% 0.17 27);
-  --color-warning:      oklch(79% 0.13 68);
-  --color-info:         oklch(70% 0.12 235);
+  /* Status — distinct from the action accent */
+  --color-success:      #4ADE80;
+  --color-error:        #F87171;
+  --color-warning:      #FBBF24;
+  --color-info:         #38BDF8;
 
   /* ── Type ─────────────────────────────────────────────────────────── */
-  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Geist", ui-sans-serif, system-ui, sans-serif;
   --font-body:    "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-brand:   "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono:    "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
 
   --text-xs:      0.8rem;     /* 12.8px */
@@ -93,28 +97,46 @@
   --radius-pill:  999px;
 }
 
-/* ── Colour · light (derived — hue 150° held, lightness/chroma flipped) ─ */
-.v-theme--bodhiorchardLight {
-  --color-paper:        oklch(94.5% 0.020 150);
-  --color-paper-2:      oklch(99.3% 0.004 150);
-  --color-paper-3:      oklch(91.5% 0.020 150);
-  --color-ink:          oklch(22% 0.02 150);
-  --color-ink-2:        oklch(40% 0.018 150);
-  --color-muted:        oklch(54% 0.014 150);
-  --color-rule:         oklch(80% 0.022 150);
-  --color-rule-2:       oklch(87% 0.018 150);
+/* ── Colour · light ─────────────────────────────────────────────────── */
+.v-theme--glideshipLight {
+  --color-paper:        #F7F8FA;
+  --color-paper-2:      #FFFFFF;
+  --color-paper-3:      #F1F3F6;
+  --color-ink:          #0F172A;
+  --color-ink-2:        #334155;
+  --color-muted:        #5B6474;                /* 6.0:1 on white          */
+  --color-rule:         #E3E6EB;
+  --color-rule-2:       #EEF1F5;
 
-  --color-accent:       oklch(50% 0.14 150);
-  --color-accent-ink:   oklch(98% 0.01 150);
-  --color-accent-soft:  oklch(50% 0.14 150 / 0.12);
-  --color-focus:        oklch(52% 0.17 150);
+  --color-accent:       #2563EB;                /* action blue · 5.2:1     */
+  --color-accent-ink:   #FFFFFF;
+  --color-accent-soft:  rgb(37 99 235 / 0.10);
+  --color-accent-text:  #1D4ED8;                /* 6.0:1 on the wash       */
+  --color-focus:        #2563EB;
+  --color-brand:        #3730A3;
 
   --color-gold:         oklch(68% 0.13 80);
   --color-gold-ink:     oklch(22% 0.03 85);
   --color-gold-soft:    oklch(68% 0.13 80 / 0.16);
 
-  --color-success:      oklch(52% 0.15 145);
-  --color-error:        oklch(55% 0.18 27);
-  --color-warning:      oklch(70% 0.14 68);
-  --color-info:         oklch(55% 0.13 235);
+  --color-success:      #15803D;
+  --color-error:        #DC2626;
+  --color-warning:      #B45309;
+  --color-info:         #0369A1;
+}
+
+/* ── Brand panel ───────────────────────────────────────────────────────
+   The navy side panel on sign-in and setup. It stays dark in both themes,
+   so these sit outside the theme classes. Muted text is 6.6:1 on panel. */
+:root {
+  --color-panel:            #0F1B3D;
+  --color-panel-ink:        #F8FAFC;
+  --color-panel-ink-2:      #CBD5E1;
+  --color-panel-muted:      #94A3B8;
+  --color-panel-rule:       rgb(255 255 255 / 0.28);
+  --color-panel-hover:      rgb(255 255 255 / 0.06);
+  --color-panel-active:     rgb(255 255 255 / 0.08);
+  --color-panel-accent:     #60A5FA;
+  --color-panel-accent-2:   #93C5FD;
+  --color-panel-accent-ink: #0B1120;
 }

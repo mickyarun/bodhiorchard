@@ -14,7 +14,7 @@
 
 """Claude Code auth-mode → process-environment bridge.
 
-Bodhiorchard has eleven call sites that spawn ``claude`` as a subprocess via
+Glideship has eleven call sites that spawn ``claude`` as a subprocess via
 ``claude_runner.run_claude_code``. Each inherits ``os.environ``, so injecting
 ``ANTHROPIC_API_KEY`` into the parent process is the least-invasive way to
 wire up per-org API keys without touching every call site.
@@ -141,7 +141,7 @@ async def load_claude_env_at_startup(session: AsyncSession) -> None:
     """At boot, read the first org with a stored Claude credential and apply it.
 
     Covers both ``api_key`` (API key) and ``subscription`` (OAuth token) modes.
-    Bodhiorchard's documented deployment model is single-tenant per machine,
+    Glideship's documented deployment model is single-tenant per machine,
     so the first configured org wins. If no org has a credential stored, the
     process env is left alone — Hybrid mode deployments rely on the host's
     existing login and don't need any DB-sourced override.

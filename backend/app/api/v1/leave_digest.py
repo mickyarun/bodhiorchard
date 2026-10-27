@@ -34,7 +34,7 @@ from app.services.slack_interactive import post_message
 
 router = APIRouter(tags=["leave-admin"])
 
-SAMPLE = "Test from Bodhiorchard: the daily who's-out post will appear in this channel."
+SAMPLE = "Test from Glideship: the daily who's-out post will appear in this channel."
 
 
 @router.get("/digest-settings", response_model=LeaveDigestSettings)

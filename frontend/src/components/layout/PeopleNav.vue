@@ -18,12 +18,9 @@
      records), open to every member. The "People" heading only shows when
      the engineering links sit above it; on its own the group needs none. -->
 <template>
-  <v-list-subheader v-if="showHeading && !rail" class="people-nav__heading">
-    People
-  </v-list-subheader>
-  <v-divider v-else-if="showHeading" class="my-2" />
+  <NavHeading v-if="showHeading" label="People" :rail="rail" />
   <v-list-item
-    prepend-icon="mdi-beach"
+    prepend-icon="mdi-calendar-blank-outline"
     title="Leave"
     to="/leave"
     exact
@@ -37,8 +34,8 @@
   />
   <v-list-item
     v-if="leaveStore.approvalCount.is_approver"
-    prepend-icon="mdi-check-decagram-outline"
-    title="Leave approvals"
+    prepend-icon="mdi-check-circle-outline"
+    title="Approvals"
     to="/leave/approvals"
     rounded="lg"
   >
@@ -57,7 +54,7 @@
   />
   <v-list-item
     v-if="canViewEmployees"
-    prepend-icon="mdi-card-account-details-outline"
+    prepend-icon="mdi-account-multiple-outline"
     title="Employees"
     to="/people"
     rounded="lg"
@@ -79,6 +76,7 @@
 
 <script setup lang="ts">
 import { onMounted } from 'vue'
+import NavHeading from '@/components/layout/NavHeading.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useLeaveStore } from '@/stores/leave'
 
@@ -93,14 +91,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.people-nav__heading {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: var(--tracking-label, 0.08em);
-  text-transform: uppercase;
-  color: rgb(var(--v-theme-muted));
-  margin-top: 16px;
-}
 .people-nav__pill {
   min-width: 20px;
   height: 20px;

@@ -48,7 +48,7 @@ async def list_github_org_members(
 
     Returns dicts with ``login``, ``name``, ``avatar_url``, ``email``,
     and ``already_added`` (true when the GitHub login matches an existing
-    Bodhiorchard user). The "already added" flag is what powers the
+    Glideship user). The "already added" flag is what powers the
     invite-flow's "skip these accounts" filter.
     """
     org_repo = OrganizationRepository(db)

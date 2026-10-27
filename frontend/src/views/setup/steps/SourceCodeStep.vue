@@ -15,16 +15,14 @@
  -->
 
 <template>
-  <div class="d-flex flex-column align-center">
-    <v-icon icon="mdi-source-repository" size="48" color="primary" class="mb-4" />
-    <h2 class="text-h5 font-weight-bold bo-display mb-2">Repositories</h2>
-    <p class="text-body-2 text-medium-emphasis mb-6 text-center" style="max-width: 560px;">
-      Point to the repos you want to work with. Bodhiorchard uses Claude Code to
-      auto-detect developer skills, extract existing features, and build full
-      context so AI agents can help manage your workflow.
-    </p>
+  <div>
+    <SetupStepHeader
+      :step="4"
+      title="Add your repositories"
+      description="Point Glideship at the code you work on. Agents read it to map features, learn who knows what, and give every BUD full context."
+    />
 
-    <v-card class="pa-5 card-border-dark w-100" color="surface" style="max-width: 640px;">
+    <v-card class="pa-5 card-border-dark w-100" color="surface">
       <!-- Step 1: Source picker (tabs) -->
       <div class="d-flex align-center ga-2 mb-3">
         <v-avatar size="24" color="primary" class="text-caption font-weight-bold">1</v-avatar>
@@ -66,8 +64,8 @@
       </v-tabs>
 
       <!--
-        Bulk Import is shown in both setup and settings mode (Phase J
-        restored). The wizard pre-creates the org after the AI Engine
+        Bulk Import is shown in both setup and settings mode.
+        The wizard pre-creates the org after the AI Engine
         step so the picker has a backend to talk to.
       -->
       <div v-if="activeTab === TAB_BULK">
@@ -592,6 +590,7 @@
 // TODO(post-bulk-import): split this 800+ line file into per-tab subcomponents.
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useSetupStore } from '@/stores/setup'
+import SetupStepHeader from '@/components/setup/SetupStepHeader.vue'
 import type { SetupRepoConfig } from '@/types/setup'
 import type { BulkOnboardJobTerminalResult } from '@/types/repoOnboard'
 import api from '@/services/api'
@@ -602,7 +601,7 @@ const TAB_LOCAL = 'local'
 const TAB_BULK = 'bulk'
 type SourceTab = typeof TAB_GITHUB | typeof TAB_LOCAL | typeof TAB_BULK
 
-// Phase J: Bulk Import is now visible in both modes — the wizard
+// Bulk Import is visible in both modes — the wizard
 // pre-creates the org after the AI Engine step so a live JWT exists by
 // the time the user reaches Source Code. The ``mode`` prop stays so
 // callers can opt into per-surface tweaks in the future without another
@@ -616,7 +615,7 @@ const props = withDefaults(defineProps<{
 const setupStore = useSetupStore()
 const repos = computed(() => setupStore.state.sourceCode.repos)
 const hasReposConfigured = computed(() => setupStore.state.sourceCode.repos.length > 0)
-// Phase P — section 2 ("Map branches") only renders local-path entries.
+// Section 2 ("Map branches") only renders local-path entries.
 // Bulk and github-clone flows auto-detect main/develop on add, so showing
 // them again duplicates UI the user already touched.
 const localPathRepos = computed(() =>

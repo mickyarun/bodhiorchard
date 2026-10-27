@@ -14,7 +14,7 @@
 
 """Repository setup: MCP init, hooks, gitignore, package.json, commit/push, PR creation.
 
-Handles all the file-level setup that Bodhiorchard performs on a tracked
+Handles all the file-level setup that Glideship performs on a tracked
 repository: writing ``.claude/settings.json``, installing git hooks,
 updating ``.gitignore``, adding a ``prepare`` script to ``package.json``,
 and committing + pushing the result as a PR-ready branch.
@@ -72,16 +72,16 @@ _BODHIORCHARD_CLAUDE_SECTION = """\
 <!-- bodhiorchard:start -->
 ---
 
-## Bodhiorchard — Development Workflow
+## Glideship — Development Workflow
 
-This repo is tracked by Bodhiorchard. MCP tools are configured in `.mcp.json`.
+This repo is tracked by Glideship. MCP tools are configured in `.mcp.json`.
 
 ### MCP Setup
 
-Before starting any BUD work, verify Bodhiorchard MCP is connected:
+Before starting any BUD work, verify Glideship MCP is connected:
 1. Check that `get_bud_context` tool is available
 2. If NOT available, set up your token:
-   - Go to Bodhiorchard Settings → Integrations → MCP Token
+   - Go to Glideship Settings → Integrations → MCP Token
    - Copy your token
    - Run: `export BODHIORCHARD_MCP_TOKEN="your-token"` in your shell profile
    - Restart Claude Code
@@ -140,7 +140,7 @@ stay consistent with their work.
 
 ### Commit Tracking
 
-- Commits on `bud-NNN/` branches are automatically tracked by Bodhiorchard
+- Commits on `bud-NNN/` branches are automatically tracked by Glideship
 - Post-commit hooks report author, files, and message to the team dashboard
 
 ### Claude Code Hooks (Automatic)
@@ -222,7 +222,7 @@ def _stage_file_args(filepath: str) -> list[str]:
 
 
 def append_bodhiorchard_claude_instructions(repo_path: str) -> bool:
-    """Append Bodhiorchard workflow instructions to CLAUDE.md.
+    """Append Glideship workflow instructions to CLAUDE.md.
 
     Idempotent updates via ``<!-- bodhiorchard:start/end -->`` markers:
     on first run we append the section to the end of the file (or
@@ -237,13 +237,13 @@ def append_bodhiorchard_claude_instructions(repo_path: str) -> bool:
     """
     claude_md = Path(repo_path) / "CLAUDE.md"
     if not claude_md.exists():
-        # Create CLAUDE.md with just the Bodhiorchard section
+        # Create CLAUDE.md with just the Glideship section
         claude_md.write_text(_BODHIORCHARD_CLAUDE_SECTION.strip() + "\n", encoding="utf-8")
         return True
 
     content = claude_md.read_text(encoding="utf-8", errors="replace")
 
-    # Already has Bodhiorchard section — check if content changed
+    # Already has Glideship section — check if content changed
     if _BG_START in content:
         start = content.index(_BG_START)
         if _BG_END not in content:
@@ -383,8 +383,8 @@ async def commit_and_push_setup_worktree(work_path: str) -> str | None:
             "commit",
             "-m",
             "chore(bodhiorchard): add MCP tools, git hooks, and config\n\n"
-            "Auto-committed by Bodhiorchard scan pipeline.\n"
-            "- .claude/settings.json: Bodhiorchard MCP server config\n"
+            "Auto-committed by Glideship scan pipeline.\n"
+            "- .claude/settings.json: Glideship MCP server config\n"
             "- .githooks/: pre-commit (BUD validation) + post-commit (tracking)\n"
             "- package.json: prepare script sets core.hooksPath on npm install\n"
             "- .gitignore: exclude .bodhiorchard/ worktrees\n"
@@ -407,7 +407,7 @@ async def commit_and_push_setup_worktree(work_path: str) -> str | None:
         )
         return _SETUP_BRANCH
 
-    # The setup branch is server-managed: only Bodhiorchard scans write to
+    # The setup branch is server-managed: only Glideship scans write to
     # it. Plain ``--force`` is intentional — a redeployment that recomputes
     # ``public_url`` (e.g. localhost → prod) must be able to claim the
     # branch even when the prior environment force-pushed commits the new
@@ -612,11 +612,11 @@ def _same_path(a: Path, b: Path) -> bool:
         return str(a) == str(b)
 
 
-# ── Bodhiorchard MCP server init ─────────────────────────────────────
+# ── Glideship MCP server init ─────────────────────────────────────
 
 
 async def init_bodhiorchard_mcp_in_repo(repo_path: str, backend_url: str) -> bool:
-    """Write .mcp.json and .claude/settings.json with Bodhiorchard MCP config.
+    """Write .mcp.json and .claude/settings.json with Glideship MCP config.
 
     Copies the MCP bridge script into the repo at .bodhiorchard/mcp_bridge.py
     and writes config with a relative path. Token is NOT included — developers
@@ -624,7 +624,7 @@ async def init_bodhiorchard_mcp_in_repo(repo_path: str, backend_url: str) -> boo
 
     Args:
         repo_path: Absolute path to the git repository.
-        backend_url: URL of the Bodhiorchard backend.
+        backend_url: URL of the Glideship backend.
 
     Returns:
         True if the file was written (changed), False if already up to date.
@@ -691,10 +691,10 @@ def _build_pre_commit_hook(backend_url: str, org_id: str) -> str:
     """Build the pre-commit hook script content.
 
     The hook validates that BUD branches (bud-NNN/...) reference a BUD
-    that exists in Bodhiorchard. Non-BUD branches are allowed through.
+    that exists in Glideship. Non-BUD branches are allowed through.
 
     Args:
-        backend_url: Public URL of the Bodhiorchard backend.
+        backend_url: Public URL of the Glideship backend.
         org_id: Organization UUID string (baked into hook for org scoping).
 
     Returns:
@@ -709,7 +709,7 @@ def _build_pre_commit_hook(backend_url: str, org_id: str) -> str:
         'STATUS=$(curl -s -o /dev/null -w "%{http_code}" \\\n'
         f'  "{backend_url}/api/v1/public/{org_id}/bud-check/$BUD_NUM" 2>/dev/null)\n'
         'if [ "$STATUS" = "404" ]; then\n'
-        '  echo "BUD-$BUD_NUM not found in Bodhiorchard. Commit blocked."\n'
+        '  echo "BUD-$BUD_NUM not found in Glideship. Commit blocked."\n'
         "  exit 1\n"
         "fi\n"
     )
@@ -718,12 +718,12 @@ def _build_pre_commit_hook(backend_url: str, org_id: str) -> str:
 def _build_post_commit_hook(backend_url: str, org_id: str) -> str:
     """Build the post-commit hook script content.
 
-    Reports each commit to Bodhiorchard via /mcp/dev-activity (authenticated).
+    Reports each commit to Glideship via /mcp/dev-activity (authenticated).
     Sources _common.sh from .claude/hooks/ for shared utilities.
     Fire-and-forget (backgrounded, never blocks the commit).
 
     Args:
-        backend_url: Public URL of the Bodhiorchard backend.
+        backend_url: Public URL of the Glideship backend.
         org_id: Organization UUID string (unused, kept for API compat).
 
     Returns:
@@ -777,13 +777,13 @@ async def install_hooks(repo_path: str, backend_url: str, org_id: str) -> bool:
     ``.git/hooks/`` (local-only). Then sets ``core.hooksPath`` so git
     uses the committed directory. This way all devs pulling the repo
     get the hook scripts; they just need ``core.hooksPath`` configured
-    once (done automatically by the Bodhiorchard MCP server on init).
+    once (done automatically by the Glideship MCP server on init).
 
     Idempotent: checks for the marker string before writing.
 
     Args:
         repo_path: Absolute path to the git repository.
-        backend_url: Public URL of the Bodhiorchard backend.
+        backend_url: Public URL of the Glideship backend.
         org_id: Organization UUID string (baked into hook URLs for scoping).
 
     Returns:
@@ -810,7 +810,7 @@ async def install_hooks(repo_path: str, backend_url: str, org_id: str) -> bool:
                 # Overwrite with updated hook content
                 hook_path.write_text(full_content, encoding="utf-8")
             else:
-                # Append to existing non-Bodhiorchard hook
+                # Append to existing non-Glideship hook
                 with hook_path.open("a") as f:
                     f.write(f"\n{hook_content}")
         else:
@@ -837,7 +837,7 @@ def _build_common_sh(backend_url: str) -> str:
     """Build the shared utility script sourced by all hooks."""
     return textwrap.dedent("""\
         {marker}
-        # Shared utilities for Bodhiorchard hooks.
+        # Shared utilities for Glideship hooks.
         # Sourced by individual hook scripts — not executed directly.
 
         BACKEND_URL="{url}"
@@ -1321,7 +1321,7 @@ async def install_claude_hooks(repo_path: str, backend_url: str) -> bool:
 
     Args:
         repo_path: Absolute path to the git repository.
-        backend_url: Public URL of the Bodhiorchard backend.
+        backend_url: Public URL of the Glideship backend.
 
     Returns:
         True if hook files were written (changed), False if already up to date.
@@ -1533,7 +1533,7 @@ def add_prepare_script(repo_path: str) -> bool:
     """Add a ``prepare`` script to package.json that sets core.hooksPath.
 
     This runs automatically on every ``npm install`` / ``yarn install``,
-    ensuring all developers get Bodhiorchard's git hooks without manual
+    ensuring all developers get Glideship's git hooks without manual
     setup — the same pattern used by Husky.
 
     If the repo has no package.json, creates a minimal one.
@@ -1578,14 +1578,14 @@ def add_prepare_script(repo_path: str) -> bool:
     return True
 
 
-# ── Commit Bodhiorchard setup files ─────────────────────────────────
+# ── Commit Glideship setup files ─────────────────────────────────
 
 
 async def commit_and_push_bodhiorchard_setup(repo_path: str, base_branch: str) -> str | None:
-    """Create a branch, commit Bodhiorchard setup files, and push to origin.
+    """Create a branch, commit Glideship setup files, and push to origin.
 
     Creates ``bodhiorchard/init-setup`` from the base branch, stages only
-    the files Bodhiorchard modifies, commits, and pushes. The team can
+    the files Glideship modifies, commits, and pushes. The team can
     then review via PR in their hosting platform.
 
     Idempotent: if the branch already exists on the remote, skips.
@@ -1605,7 +1605,7 @@ async def commit_and_push_bodhiorchard_setup(repo_path: str, base_branch: str) -
     orig_branch, _, _ = await run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_path)
     orig_branch = orig_branch.strip()
 
-    # Earlier scan phases write Bodhiorchard's own files (MCP config, git
+    # Earlier scan phases write Glideship's own files (MCP config, git
     # hooks, a ``prepare`` script in package.json) directly into the
     # working tree. Those uncommitted changes will collide with the
     # upcoming branch switch — git refuses to checkout when it would
@@ -1706,8 +1706,8 @@ async def commit_and_push_bodhiorchard_setup(repo_path: str, base_branch: str) -
                 "commit",
                 "-m",
                 "chore(bodhiorchard): add MCP tools, git hooks, and config\n\n"
-                "Auto-committed by Bodhiorchard scan pipeline.\n"
-                "- .claude/settings.json: Bodhiorchard MCP server config\n"
+                "Auto-committed by Glideship scan pipeline.\n"
+                "- .claude/settings.json: Glideship MCP server config\n"
                 "- .githooks/: pre-commit (BUD validation) + post-commit (tracking)\n"
                 "- package.json: prepare script sets core.hooksPath on npm install\n"
                 "- .gitignore: exclude .bodhiorchard/ worktrees\n"
@@ -1772,11 +1772,11 @@ async def commit_and_push_bodhiorchard_setup(repo_path: str, base_branch: str) -
         await run_git(["checkout", base_branch], cwd=repo_path)
 
 
-_SETUP_PR_TITLE = "chore: add Bodhiorchard MCP tools, git hooks, and config"
+_SETUP_PR_TITLE = "chore: add Glideship MCP tools, git hooks, and config"
 _SETUP_PR_BODY = (
     "## Summary\n\n"
-    "Auto-generated by Bodhiorchard scan pipeline.\n\n"
-    "- `.claude/settings.json` — Bodhiorchard MCP server config\n"
+    "Auto-generated by Glideship scan pipeline.\n\n"
+    "- `.claude/settings.json` — Glideship MCP server config\n"
     "- `.githooks/` — pre-commit (BUD validation) + post-commit (tracking)\n"
     "- `package.json` — prepare script sets `core.hooksPath`\n"
     "- `.gitignore` — exclude `.bodhiorchard/` worktrees\n"
@@ -1855,7 +1855,7 @@ async def create_setup_pr(
     tracked_repo: TrackedRepository,
     base_branch: str,
 ) -> SetupPrOutcome:
-    """Open (or adopt) the Bodhiorchard MCP setup PR via the GitHub App.
+    """Open (or adopt) the Glideship MCP setup PR via the GitHub App.
 
     Decision tree, after ``commit_and_push_bodhiorchard_setup`` succeeds:
 

@@ -23,7 +23,7 @@
  * spawning its own timer or watching the socket lifecycle manually.
  *
  * Implementation: event-driven, NOT polled. `socket.ts` dispatches a
- * ``bodhiorchard:socket-reconnected`` event on every successful WS
+ * ``glideship:socket-reconnected`` event on every successful WS
  * ``onopen`` after the first one. We listen on the window and fan out
  * to every registered callback. This catches sub-second restart
  * windows that a 5 s polling timer would miss — common when the
@@ -46,7 +46,7 @@
 type ReconnectCallback = () => void | Promise<void>
 
 const callbacks: Set<ReconnectCallback> = new Set()
-const RECONNECT_EVENT = 'bodhiorchard:socket-reconnected'
+const RECONNECT_EVENT = 'glideship:socket-reconnected'
 
 function fireAll(): void {
   // Snapshot so a callback that unregisters itself during the fire

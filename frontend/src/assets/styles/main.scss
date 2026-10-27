@@ -19,7 +19,7 @@
 
 body {
   font-family: var(--font-body, 'Geist', sans-serif);
-  // Geist on the dark forest canvas reads optically heavy at 400; drop to 350
+  // Geist on the dark canvas reads optically heavy at 400; drop to 350
   // (Hallmark dark-mode recipe). Light theme restores 400 below.
   font-weight: 350;
   -webkit-font-smoothing: antialiased;
@@ -36,15 +36,22 @@ html .v-application {
   font-family: var(--font-body, 'Geist', sans-serif);
 }
 
-.v-theme--bodhiorchardLight body,
-.v-theme--bodhiorchardLight {
+.v-theme--glideshipLight body,
+.v-theme--glideshipLight {
   font-weight: 400;
 }
 
-// Display / wordmark register — Bricolage Grotesque, roman, tight tracking.
-.bo-display,
+// Display register — Geist, roman, tight tracking.
+.bo-display {
+  font-family: var(--font-display, 'Geist', sans-serif);
+  font-style: normal;
+  letter-spacing: var(--tracking-display, -0.02em);
+}
+
+// Wordmark register — Plus Jakarta Sans 700, used only for the product name.
 .bo-wordmark {
-  font-family: var(--font-display, 'Bricolage Grotesque', sans-serif);
+  font-family: var(--font-brand, 'Plus Jakarta Sans', sans-serif);
+  font-weight: 700;
   font-style: normal;
   letter-spacing: var(--tracking-display, -0.02em);
 }

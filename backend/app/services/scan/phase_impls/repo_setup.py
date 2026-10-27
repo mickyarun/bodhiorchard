@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Phase B1 — bootstrap a tracked repo's Bodhiorchard configuration.
+"""Phase B1 — bootstrap a tracked repo's Glideship configuration.
 
 Per-repo setup that runs once on the first scan (and is idempotent on
 subsequent scans):
@@ -23,7 +23,7 @@ subsequent scans):
    without explicit values (legacy ``Add Repo`` UX).
 3. MCP server config so the org's agent CLI (Claude → ``.mcp.json``;
    Codex → ``.codex/config.toml``; Copilot → ``.github/copilot/``)
-   launched inside the repo can talk back to Bodhiorchard.
+   launched inside the repo can talk back to Glideship.
 4. Git hooks (``.githooks/`` + ``core.hooksPath``) and the org's
    agent-CLI hooks (Claude → ``.claude/``; Codex → ``.codex/hooks.json``;
    Copilot → ``.github/hooks/``), all wired to the shared dev-activity
@@ -32,7 +32,7 @@ subsequent scans):
    prep, and the workflow paragraph appended to ``CLAUDE.md``.
 6. If any file actually changed, branch + commit + push + PR.
 
-Failures are caught and logged but never propagated — Bodhiorchard
+Failures are caught and logged but never propagated — Glideship
 must keep scanning even when one repo's worktree push hits a stale
 remote token. Returns a UI-facing string when a setup branch was
 pushed but no PR could be opened.
@@ -175,7 +175,7 @@ async def phase_b1_repo_setup(
         # generic and written for every provider.
         provider = org.ai_provider if org is not None else AIProvider.claude
 
-        # Init Bodhiorchard MCP in repo (skips if already configured)
+        # Init Glideship MCP in repo (skips if already configured)
         await update_scan_progress(
             scan_id,
             status="setting_up_mcp",

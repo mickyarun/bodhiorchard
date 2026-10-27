@@ -16,92 +16,49 @@
 
 <template>
   <div>
-    <StepIndicator
-      :current-step="setupStore.currentStep"
-      @go-to-step="setupStore.goToStep"
-    />
-
-    <v-window
-      v-model="setupStore.currentStep"
-      :touch="false"
-      class="mb-6"
-    >
-      <v-window-item :value="STEP_WELCOME">
-        <WelcomeStep @get-started="setupStore.nextStep()" />
-      </v-window-item>
-
-      <v-window-item :value="STEP_ORG">
-        <OrganizationStep />
-      </v-window-item>
-
-      <v-window-item :value="STEP_ADMIN">
-        <AdminAccountStep />
-      </v-window-item>
-
-      <v-window-item :value="STEP_AI">
-        <AIConfigStep />
-      </v-window-item>
-
-      <v-window-item :value="STEP_SOURCE_CODE">
-        <SourceCodeStep mode="setup" />
-      </v-window-item>
-
-      <v-window-item :value="STEP_REVIEW">
-        <ReviewStep @launch="handleLaunch" />
+    <!-- Fade between steps: a horizontal slide clips the outgoing card. -->
+    <v-window v-model="setupStore.currentStep" :touch="false" class="setup-wizard__window">
+      <v-window-item
+        v-for="item in stepItems"
+        :key="item.value"
+        :value="item.value"
+        transition="fade-transition"
+        reverse-transition="fade-transition"
+      >
+        <WelcomeStep v-if="item.value === STEP_WELCOME" @get-started="setupStore.nextStep()" />
+        <OrganizationStep v-else-if="item.value === STEP_ORG" />
+        <AdminAccountStep v-else-if="item.value === STEP_ADMIN" />
+        <AIConfigStep v-else-if="item.value === STEP_AI" />
+        <SourceCodeStep v-else-if="item.value === STEP_SOURCE_CODE" mode="setup" />
+        <ReviewStep v-else @launch="handleLaunch" />
       </v-window-item>
     </v-window>
 
-    <v-alert
-      v-if="validationError"
-      type="warning"
-      variant="tonal"
-      class="mb-4"
-      closable
-      @click:close="validationError = ''"
-    >
+    <AppCallout v-if="validationError" variant="warning" class="mb-4">
       {{ validationError }}
-    </v-alert>
-
-    <v-alert
-      v-if="setupStore.submitError"
-      type="error"
-      variant="tonal"
-      class="mb-4"
-      closable
-    >
+    </AppCallout>
+    <AppCallout v-if="setupStore.submitError" variant="error" class="mb-4">
       {{ setupStore.submitError }}
-    </v-alert>
+    </AppCallout>
 
-    <div
+    <SetupFooter
       v-if="setupStore.currentStep > 0"
-      class="d-flex justify-space-between align-center"
-    >
-      <v-btn
-        variant="text"
-        prepend-icon="mdi-arrow-left"
-        :disabled="setupStore.isFirstStep"
-        @click="setupStore.prevStep()"
-      >
-        Back
-      </v-btn>
-
-      <v-btn
-        v-if="!setupStore.isLastStep"
-        color="primary"
-        append-icon="mdi-arrow-right"
-        @click="handleNext"
-      >
-        Continue
-      </v-btn>
-    </div>
+      :step="setupStore.currentStep"
+      :busy="advancing"
+      :back-locked="setupStore.finalizeDone"
+      @back="setupStore.prevStep()"
+      @next="handleNext"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSetupStore } from '@/stores/setup'
-import StepIndicator from '@/components/setup/StepIndicator.vue'
+import AppCallout from '@/components/common/AppCallout.vue'
+import SetupFooter from '@/components/setup/SetupFooter.vue'
+import { SETUP_STEPS } from '@/components/setup/setupSteps'
 import WelcomeStep from './steps/WelcomeStep.vue'
 import OrganizationStep from './steps/OrganizationStep.vue'
 import AdminAccountStep from './steps/AdminAccountStep.vue'
@@ -109,8 +66,8 @@ import AIConfigStep from './steps/AIConfigStep.vue'
 import SourceCodeStep from './steps/SourceCodeStep.vue'
 import ReviewStep from './steps/ReviewStep.vue'
 
-// Step layout (Phase K — dedicated Connect-GitHub step retired; the
-// bulk-import tab inside SourceCodeStep now owns the credential entry):
+// Step layout (GitHub credentials are entered in the Source Code step's
+// bulk-import tab; there is no separate GitHub step):
 //   0 Welcome | 1 Org | 2 Admin | 3 AI | 4 Source code | 5 Review
 const STEP_WELCOME = 0
 const STEP_ORG = 1
@@ -118,10 +75,20 @@ const STEP_ADMIN = 2
 const STEP_AI = 3
 const STEP_SOURCE_CODE = 4
 const STEP_REVIEW = 5
+const stepItems = SETUP_STEPS.map((_, value) => ({ value }))
 
 const setupStore = useSetupStore()
 const router = useRouter()
 const validationError = ref('')
+
+// A validation message belongs to the step that raised it; drop it as soon
+// as the user moves to another step (Back, Continue, or the step list).
+watch(
+  () => setupStore.currentStep,
+  () => {
+    validationError.value = ''
+  },
+)
 
 const validationMessages: Record<number, string> = {
   [STEP_ORG]: 'Please fill in the organization name and slug.',
@@ -129,9 +96,24 @@ const validationMessages: Record<number, string> = {
   [STEP_SOURCE_CODE]: 'Add at least one repository and map both main and develop branches.',
 }
 
+// True while Continue is waiting on the backend (creating the org, starting
+// onboarding). Drives the button spinner and drops repeat clicks, so a
+// double click can't send two create requests before the first returns.
+const advancing = ref(false)
+
 async function handleNext(): Promise<void> {
-  // Phase J — leaving the AI Engine step is the canonical "create the
-  // org" trigger. Once submitOrgInit succeeds the JWT is set into axios,
+  if (advancing.value) return
+  advancing.value = true
+  try {
+    await advance()
+  } finally {
+    advancing.value = false
+  }
+}
+
+async function advance(): Promise<void> {
+  // Leaving the AI Engine step is the canonical "create the org"
+  // trigger. Once submitOrgInit succeeds the JWT is set into axios,
   // so every later step (Source Code → Bulk Import) works against a
   // real backend. submitOrgInit is idempotent on Back/Forward
   // navigation; subsequent calls no-op.
@@ -153,8 +135,8 @@ async function handleNext(): Promise<void> {
     return
   }
 
-  // Phase O — leaving the Source Code step fires finalize so the
-  // wizard's Continue button drives the bulk-onboard job. ReviewStep
+  // Leaving the Source Code step fires finalize so the wizard's
+  // Continue button drives the bulk-onboard job. ReviewStep
   // becomes a launch confirmation screen that already has jobId/scanId
   // in flight by the time it renders.
   if (setupStore.currentStep === STEP_SOURCE_CODE) {
@@ -189,3 +171,9 @@ async function handleLaunch(): Promise<void> {
   }
 }
 </script>
+
+<style scoped>
+.setup-wizard__window {
+  margin-bottom: var(--space-md, 1.5rem);
+}
+</style>

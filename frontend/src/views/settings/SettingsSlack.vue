@@ -255,7 +255,7 @@
           </div>
 
           <div class="text-caption text-medium-emphasis mb-3">
-            Link Slack workspace users to Bodhiorchard members, or import them as new members.
+            Link Slack workspace users to Glideship members, or import them as new members.
             <br />
             <strong>Required scopes:</strong>
             <v-chip size="x-small" variant="tonal" color="primary" class="ml-1">users:read</v-chip>
@@ -439,12 +439,12 @@ const slackEventsOpen = ref(false)
 // Slack manifest for quick app creation
 const slackManifest = JSON.stringify({
   display_information: {
-    name: 'Bodhiorchard',
-    description: 'Bodhiorchard code intelligence notifications and agent triggers',
+    name: 'Glideship',
+    description: 'Glideship code intelligence notifications and agent triggers',
   },
   features: {
     bot_user: {
-      display_name: 'Bodhiorchard',
+      display_name: 'Glideship',
       always_online: true,
     },
   },

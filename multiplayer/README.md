@@ -1,6 +1,6 @@
-# Bodhiorchard Multiplayer Server
+# Glideship Multiplayer Server
 
-Real-time multiplayer server using [Colyseus](https://colyseus.io/) for the Bodhiorchard 3D garden.
+Real-time multiplayer server using [Colyseus](https://colyseus.io/) for the Glideship 3D garden.
 
 ## Quick Start
 

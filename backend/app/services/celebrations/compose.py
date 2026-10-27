@@ -54,7 +54,7 @@ _ANNIVERSARY_HEADLINES = (
 _MIXED_HEADLINE = "Double the reason to celebrate today! :tada:"
 _SIGN_OFF = "_Let's break out the balloons, cake, and confetti!_"
 _SAMPLE_NOTICE = (
-    ":test_tube: *This is a test post* from Bodhiorchard's celebration settings — "
+    ":test_tube: *This is a test post* from Glideship's celebration settings — "
     "nobody's real birthday or anniversary is being announced."
 )
 # Giphy's API terms require visible attribution next to their content.

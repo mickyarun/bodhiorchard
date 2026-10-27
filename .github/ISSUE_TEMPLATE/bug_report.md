@@ -28,5 +28,5 @@ What actually happened. Include error messages, stack traces, or screenshots if 
 
 - Deployment mode: <!-- Full Docker / Hybrid -->
 - OS:
-- Bodhiorchard version / commit:
+- Glideship version / commit:
 - Browser (if frontend issue):

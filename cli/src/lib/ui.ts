@@ -15,7 +15,7 @@ export const log = {
 
 export function banner(): void {
   console.log();
-  console.log(chalk.bold.green("  Bodhiorchard"));
+  console.log(chalk.bold.green("  Glideship"));
   console.log(chalk.dim("  AI-native software development operations, running locally."));
   console.log();
 }

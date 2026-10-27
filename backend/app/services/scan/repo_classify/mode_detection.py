@@ -278,7 +278,7 @@ def _detect_db_python(manifest_text: str, path: Path) -> str | None:
 
     The manifest text is already ``.lower()``-ed by the caller. Alembic
     presence is treated as a postgres signal because that's how every
-    real Bodhiorchard backend is laid out — extend the table here if a
+    real Glideship backend is laid out — extend the table here if a
     repo legitimately uses alembic on a non-postgres dialect.
     """
     for hint, flavor in _DB_DRIVER_HINTS_PY:

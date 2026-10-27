@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Members who let Bodhiorchard set their Slack status."""
+"""Members who let Glideship set their Slack status."""
 
 import uuid
 from datetime import datetime

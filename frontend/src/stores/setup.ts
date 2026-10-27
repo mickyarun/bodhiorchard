@@ -28,13 +28,13 @@ export const useSetupStore = defineStore('setup', () => {
   const submitError = ref<string | null>(null)
   const scanId = ref<string | null>(null)
   const jobId = ref<string | null>(null)
-  // Phase J — once submitOrgInit succeeds, the org+JWT are live and the
+  // Once submitOrgInit succeeds, the org+JWT are live and the
   // wizard's earlier-step values become read-only. Used by the wizard to
   // gate "Continue" on the AI Engine step (idempotent guard for
   // Back/Forward navigation) and by Org/Admin/AI steps to grey out their
   // fields once the org has been created.
   const orgInitDone = ref(false)
-  // Phase O — true once submitFinalize succeeds. The wizard now fires
+  // True once submitFinalize succeeds. The wizard now fires
   // finalize on Continue out of the Source Code step, so the Review
   // step's Launch button must not re-POST. submitSetup short-circuits
   // when this is already true.
@@ -72,7 +72,7 @@ export const useSetupStore = defineStore('setup', () => {
     },
   })
 
-  // Step layout (Phase K — dedicated Connect-GitHub step retired; see
+  // Step layout (no separate GitHub step; see
   // SetupWizard.vue for matching constants):
   //   0 Welcome | 1 Org | 2 Admin | 3 AI | 4 Source code | 5 Review
   const totalSteps = 6
@@ -110,7 +110,7 @@ export const useSetupStore = defineStore('setup', () => {
     const repos = state.value.sourceCode.repos
     if (repos.length === 0) return false
     // Local-path entries are the only ones that surface a manual branch
-    // picker (Phase P), so they're the only ones we strictly require both
+    // picker, so they're the only ones we strictly require both
     // branches on. Bulk + github-clone auto-detect at add-time and the
     // wizard doesn't render UI for the user to fix develop separately.
     return repos.every((r) => {
@@ -190,7 +190,7 @@ export const useSetupStore = defineStore('setup', () => {
    * DEPRECATED — kept for back-compat with single-shot wizards.
    * New flow: submitOrgInit() then submitFinalize().
    *
-   * Phase J: ``submitOrgInit`` is now idempotent (returns ``null`` once
+   * ``submitOrgInit`` is idempotent (returns ``null`` once
    * the org already exists this session). The shim treats that as a
    * success and proceeds to finalize, so callers that have already
    * invoked ``submitOrgInit`` separately keep working.

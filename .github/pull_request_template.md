@@ -1,5 +1,5 @@
 <!--
-Thanks for contributing to Bodhiorchard! Fill in the sections below.
+Thanks for contributing to Glideship! Fill in the sections below.
 Delete any section that genuinely doesn't apply (with a note explaining why).
 -->
 

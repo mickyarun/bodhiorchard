@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Resolve a git/GitHub identity to a single canonical Bodhiorchard user.
+"""Resolve a git/GitHub identity to a single canonical Glideship user.
 
 Code-review and commit attribution arrive as a GitHub login and/or a
 commit email. Either can fail to resolve on its own — a contributor whose

@@ -1,6 +1,6 @@
 # bodhiorchard
 
-One command to run the [Bodhiorchard](https://github.com/) stack locally. Pulls
+One command to run the [Glideship](https://github.com/) stack locally. Pulls
 prebuilt Docker images and starts everything — Postgres (pgvector), Redis, the
 API, the realtime server, and the web UI — then opens the setup wizard.
 
@@ -30,7 +30,7 @@ port (8000 / 3000 / 2567), `init` detects it and asks whether to:
 
 Redis reuse is offered freely. Postgres reuse is opt-in via
 `--allow-postgres-reuse` and is verified to have the `pgvector` extension before
-it's accepted (Bodhiorchard requires it).
+it's accepted (Glideship requires it).
 
 Run fully non-interactively with `--yes` (auto-remaps any conflict).
 

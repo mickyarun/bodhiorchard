@@ -19,7 +19,7 @@
        Force the dark theme regardless of the app's light/dark setting so its
        hard-coded dark panels and the Vuetify emphasis text stay consistent
        (in light mode the medium-emphasis labels were dark-on-dark = invisible). -->
-  <v-theme-provider theme="bodhiorchardDark" with-background class="char-select">
+  <v-theme-provider theme="glideshipDark" with-background class="char-select">
     <!-- Ambient gradient backdrop -->
     <div class="char-select__backdrop" />
 
@@ -89,7 +89,7 @@
         <header class="char-select__panel-head">
           <div class="char-select__eyebrow">Character Setup</div>
           <h1 class="char-select__title">Customize Your Hero</h1>
-          <p class="char-select__sub">Pick your avatar, colors, and loadout for the Bodhiorchard garden.</p>
+          <p class="char-select__sub">Pick your avatar, colors, and loadout for the Glideship garden.</p>
         </header>
 
         <v-tabs

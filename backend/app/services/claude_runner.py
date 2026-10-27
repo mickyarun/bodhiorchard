@@ -15,7 +15,7 @@
 """Claude Code CLI runner for executing AI tasks locally.
 
 This module provides the interface for triggering Claude Code from the
-Bodhiorchard backend via local subprocess execution.
+Glideship backend via local subprocess execution.
 """
 
 import asyncio
@@ -53,7 +53,7 @@ ProgressCallback = Callable[[str, dict[str, Any]], None]  # (tool_name, tool_inp
 # to a managed, empty scratch dir inside the platform tmp tree (which is
 # on the cwd allowlist). Using a sentinel rather than ``None`` makes the
 # intent explicit at every call site and removes the silent fallback to
-# the FastAPI worker's cwd — in Hybrid mode that cwd is the Bodhiorchard
+# the FastAPI worker's cwd — in Hybrid mode that cwd is the Glideship
 # repo root, which is a confused-deputy waiting to happen if a future
 # git/gh-using caller ever forgets to pass ``working_dir``.
 NO_REPO_CONTEXT: str = "<no-repo-context>"
@@ -95,9 +95,9 @@ class ClaudeRunResult:
 class MCPServerConfig:
     """Configuration for an MCP server to expose to the Claude CLI.
 
-    Generates a stdio-based MCP config that spawns the Bodhiorchard bridge script,
+    Generates a stdio-based MCP config that spawns the Glideship bridge script,
     which translates MCP JSON-RPC calls into REST API calls back to the
-    running Bodhiorchard backend.
+    running Glideship backend.
     """
 
     backend_url: str

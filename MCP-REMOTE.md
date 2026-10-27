@@ -1,6 +1,6 @@
-# Connect your local AI to Bodhiorchard via MCP
+# Connect your local AI to Glideship via MCP
 
-Bodhiorchard exposes a **read-only** Model Context Protocol (MCP) endpoint so
+Glideship exposes a **read-only** Model Context Protocol (MCP) endpoint so
 your local AI assistant (Claude Desktop, Cursor, Continue, etc.) can use the
 same org context our internal agents see — recent BUDs, the active-features
 knowledge base, and your design systems — while you draft a PRD, design or
@@ -45,7 +45,7 @@ new tool to the internal handler registry never widens this surface.
 
 ## Manage your tokens
 
-Visit **Settings → MCP Connect** in the Bodhiorchard UI:
+Visit **Settings → MCP Connect** in the Glideship UI:
 
 1. Click **New token**, give it a descriptive name
    (`claude-desktop-laptop`), set a TTL (default 90 days, max 365).

@@ -42,7 +42,7 @@ won't work):
 git clone https://github.com/mickyarun/taskflow-java-bodhiorchard-demo.git
 ```
 
-Then add the cloned folder's absolute path in Bodhiorchard **Settings →
+Then add the cloned folder's absolute path in Glideship **Settings →
 Repositories** (or the setup wizard's **Local path** tab), branch `main`, and
 run a scan. Expect ~4 features (Authentication, Task Management, Notifications,
 Billing), `NotificationService` as a cross-feature hub, and 4 skill profiles.
@@ -84,7 +84,7 @@ java -jar target/taskflow-spring-1.0.0.jar   # → http://localhost:9003
 
 ## Testing the Scan Pipeline
 
-1. Start Bodhiorchard (`uvicorn` on default port 8000)
+1. Start Glideship (`uvicorn` on default port 8000)
 2. In Settings > Repositories, add the 3 source repos (the QA suite isn't a scan target):
    - `/path/to/examples/taskflow-api`
    - `/path/to/examples/taskflow-worker`

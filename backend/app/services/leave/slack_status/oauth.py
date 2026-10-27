@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""The one-click "let Bodhiorchard set my Slack status" approval.
+"""The one-click "let Glideship set my Slack status" approval.
 
 The member starts it logged in; Slack sends their browser back to a
 callback that has no login, so who it's for travels in a short-lived

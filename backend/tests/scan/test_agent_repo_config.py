@@ -96,7 +96,7 @@ def test_agents_md_is_provider_neutral_and_idempotent(tmp_path: Path) -> None:
     assert changed is True
 
     md = (tmp_path / "AGENTS.md").read_text()
-    assert "Bodhiorchard" in md
+    assert "Glideship" in md
     assert ".bodhiorchard/hooks/" in md  # rewritten from .claude/hooks/
     assert "<!-- bodhiorchard:start -->" in md
     assert "<!-- bodhiorchard:end -->" in md

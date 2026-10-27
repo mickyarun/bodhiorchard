@@ -47,7 +47,7 @@ const LOCAL_CODE_CONTEXT_BLOCK = `Local code context (recommended):
   'code_locations' — a per-repo map of layer → file paths
   (frontend / backend / processor / etc.). Use YOUR OWN
   filesystem tool to read those files under my checkout; don't
-  try to fetch them via the Bodhiorchard MCP (it only exposes
+  try to fetch them via the Glideship MCP (it only exposes
   metadata, not source).
 * Ground the spec / design in what those files actually do:
   reuse existing components, name real functions, reference real

@@ -28,31 +28,27 @@
         </v-alert>
 
         <v-form @submit.prevent="handleSubmit">
-          <v-text-field
+          <PasswordField
             v-model="newPassword"
-            label="New Password"
-            :type="showNew ? 'text' : 'password'"
+            label="New password"
             prepend-inner-icon="mdi-lock-outline"
-            :append-inner-icon="showNew ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+            autocomplete="new-password"
             density="compact"
             variant="outlined"
             class="mb-3"
             autofocus
-            :rules="[v => v.length >= 8 || 'Min 8 characters']"
-            @click:append-inner="showNew = !showNew"
+            :rules="[(v: string) => v.length >= 8 || 'Min 8 characters']"
           />
 
-          <v-text-field
+          <PasswordField
             v-model="confirmPassword"
-            label="Confirm Password"
-            :type="showConfirm ? 'text' : 'password'"
+            label="Confirm password"
             prepend-inner-icon="mdi-lock-check-outline"
-            :append-inner-icon="showConfirm ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+            autocomplete="new-password"
             density="compact"
             variant="outlined"
             class="mb-4"
-            :rules="[v => v === newPassword || 'Passwords do not match']"
-            @click:append-inner="showConfirm = !showConfirm"
+            :rules="[(v: string) => v === newPassword || 'Passwords do not match']"
           />
 
           <v-btn
@@ -76,14 +72,13 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { afterSignIn } from '@/utils/afterSignIn'
+import PasswordField from '@/components/common/PasswordField.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
 const newPassword = ref('')
 const confirmPassword = ref('')
-const showNew = ref(false)
-const showConfirm = ref(false)
 const loading = ref(false)
 const errorMsg = ref('')
 

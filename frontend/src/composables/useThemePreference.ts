@@ -22,8 +22,8 @@
 import { computed, onScopeDispose, ref } from 'vue'
 import { useTheme } from 'vuetify'
 
-export const THEME_DARK = 'bodhiorchardDark'
-export const THEME_LIGHT = 'bodhiorchardLight'
+export const THEME_DARK = 'glideshipDark'
+export const THEME_LIGHT = 'glideshipLight'
 
 export type ThemePreference = 'system' | 'light' | 'dark'
 

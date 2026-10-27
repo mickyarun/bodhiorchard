@@ -272,7 +272,7 @@ class TestValidateWorkingDir:
         from app.services.claude_runner import _validate_working_dir
 
         # Silent fallback to the FastAPI worker cwd is gone — that path
-        # could land the agent inside the Bodhiorchard repo itself.
+        # could land the agent inside the Glideship repo itself.
         with pytest.raises(ValueError, match="working_dir is required"):
             _validate_working_dir(None)
 

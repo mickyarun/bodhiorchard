@@ -1,4 +1,4 @@
-# Bodhiorchard Frontend
+# Glideship Frontend
 
 Vue 3 + Vuetify 3 + Pinia SPA. Hosts the in-app UI and the public landing site (same source, two builds).
 

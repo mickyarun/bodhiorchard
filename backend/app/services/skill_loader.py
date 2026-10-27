@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Skill loader for Bodhiorchard agent skills.
+"""Skill loader for Glideship agent skills.
 
 Reads skill definition markdown files from backend/app/agents/skills/,
 parses YAML frontmatter, and returns structured Skill objects.

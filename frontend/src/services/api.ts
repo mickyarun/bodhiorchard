@@ -174,7 +174,7 @@ api.interceptors.response.use(
       // Consumers like PlayCanvasCanvas read localStorage directly for the
       // hot path, so this event is belt-and-suspenders for anyone caching
       // the token in a reactive ref.
-      window.dispatchEvent(new CustomEvent('bodhiorchard:token-refreshed', {
+      window.dispatchEvent(new CustomEvent('glideship:token-refreshed', {
         detail: { accessToken: data.access_token },
       }))
 

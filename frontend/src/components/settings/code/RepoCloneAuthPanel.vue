@@ -65,7 +65,7 @@
               class="text-primary"
             >GitHub → fine-grained tokens</a> and click <em>Generate new token</em>.
           </li>
-          <li>Limit access to the repos you want Bodhiorchard to clone.</li>
+          <li>Limit access to the repos you want Glideship to clone.</li>
           <li>Under <em>Repository permissions</em>, set <strong>Contents: Read and Write</strong>.</li>
           <li>Generate, copy the token (starts with <code>github_pat_…</code>) and paste it above.</li>
         </ol>

@@ -37,7 +37,7 @@ async function run(action: () => Promise<void>): Promise<void> {
 const program = new Command();
 program
   .name("bodhiorchard")
-  .description("Pull and run the Bodhiorchard stack locally with one command.")
+  .description("Pull and run the Glideship stack locally with one command.")
   .version(version)
   .option("--project-dir <path>", "directory holding the install (defaults to ./bodhiorchard)");
 

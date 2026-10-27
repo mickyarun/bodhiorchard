@@ -1,4 +1,4 @@
-# CLAUDE.md - Bodhiorchard Backend Development Guidelines
+# CLAUDE.md - Glideship Backend Development Guidelines
 
 ## Tech Stack
 - **Python 3.12+** with strict type hints

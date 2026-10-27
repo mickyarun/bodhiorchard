@@ -158,7 +158,7 @@ const runByRepo = computed<Record<string, RepoRunRow>>(() => {
 
 const confirmMessage = computed(() =>
   pendingRemove.value
-    ? `Remove ${pendingRemove.value.name}? Bodhiorchard will stop scanning it; existing features stay.`
+    ? `Remove ${pendingRemove.value.name}? Glideship will stop scanning it; existing features stay.`
     : '',
 )
 

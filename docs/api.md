@@ -1,6 +1,6 @@
 # API Reference
 
-Bodhiorchard exposes three programmable surfaces. All three run on the same host as the backend.
+Glideship exposes three programmable surfaces. All three run on the same host as the backend.
 
 | Surface | Port | What it's for |
 |---|---|---|

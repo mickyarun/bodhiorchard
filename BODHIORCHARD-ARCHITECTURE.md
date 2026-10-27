@@ -1,4 +1,4 @@
-# Bodhiorchard Technical Architecture Document
+# Glideship Technical Architecture Document
 
 **Version**: 2.1
 **Last Updated**: 2026-03-17
@@ -36,7 +36,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        Bodhiorchard Platform                             │
+│                        Glideship Platform                             │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
 │  ┌──────────────────────┐  ┌──────────────────────┐                │
@@ -385,14 +385,14 @@ LIMIT 5;
 ### 2.5 GitHub Apps for Integration
 
 **Installation Flow:**
-1. Org admin visits Bodhiorchard dashboard
+1. Org admin visits Glideship dashboard
 2. Clicks "Connect GitHub Organization"
 3. Redirected to GitHub OAuth approval
-4. User grants Bodhiorchard app access to:
+4. User grants Glideship app access to:
    - Code repos (read access)
    - PR/merge events (webhooks)
    - Workflow runs (check status)
-5. Bodhiorchard stores GitHub App installation token in `organizations.github_app_token`
+5. Glideship stores GitHub App installation token in `organizations.github_app_token`
 
 **Webhook Events:**
 ```python
@@ -3785,7 +3785,7 @@ PRD Repo:
 ```yaml
 # .github/workflows/status-update.yml
 
-name: Bodhiorchard Status Update
+name: Glideship Status Update
 on:
   pull_request:
     types: [closed]
@@ -3805,7 +3805,7 @@ jobs:
           fi
           echo "prd_ref=$PRD" >> $GITHUB_OUTPUT
 
-      - name: Call Bodhiorchard API
+      - name: Call Glideship API
         if: steps.extract_prd.outputs.prd_ref != ''
         run: |
           curl -X POST https://bodhiorchard.your-domain.com/api/webhooks/github \
@@ -3846,7 +3846,7 @@ jobs:
           AFFECTED=$(git diff origin/main --name-only | grep -E '^src/(billing|payment)' || echo "")
           [ ! -z "$AFFECTED" ] && echo "needs_rule_update=true" >> $GITHUB_OUTPUT
 
-      - name: Trigger Bodhiorchard Rule Update
+      - name: Trigger Glideship Rule Update
         if: steps.check_rules.outputs.needs_rule_update == 'true'
         run: |
           curl -X POST https://bodhiorchard.your-domain.com/api/agents/status/trigger \
@@ -3873,7 +3873,7 @@ jobs:
 ### 10.1 Event Subscriptions & Commands
 
 ```yaml
-app_display_name: Bodhiorchard
+app_display_name: Glideship
 
 scopes:
   - chat:write
@@ -4242,7 +4242,7 @@ def verify_slack_signature(signature: str, timestamp: str, body: str, secret: st
 
 ### 12.3 Role-Based Access Control (9 Roles, 9 Permission Categories)
 
-Bodhiorchard uses a **granular RBAC model** with 9 system roles, 9 permission categories, and support for custom org-level roles.
+Glideship uses a **granular RBAC model** with 9 system roles, 9 permission categories, and support for custom org-level roles.
 
 **Role Hierarchy:**
 
@@ -4519,7 +4519,7 @@ No dashboards full of noise — just what matters to you, right now.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Bodhiorchard                                    Arun • Acme • ⚙    │
+│  Glideship                                    Arun • Acme • ⚙    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  Good morning, Arun                          Thu, Mar 5 2026    │
@@ -4569,7 +4569,7 @@ No dashboards full of noise — just what matters to you, right now.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Bodhiorchard                                   Sarah • Acme • ⚙    │
+│  Glideship                                   Sarah • Acme • ⚙    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  Good morning, Sarah                         Thu, Mar 5 2026    │
@@ -4626,7 +4626,7 @@ No dashboards full of noise — just what matters to you, right now.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Bodhiorchard                                   James • Acme • ⚙    │
+│  Glideship                                   James • Acme • ⚙    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  Good morning, James                         Thu, Mar 5 2026    │
@@ -4678,7 +4678,7 @@ No dashboards full of noise — just what matters to you, right now.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Bodhiorchard                                    Alex • Acme • ⚙    │
+│  Glideship                                    Alex • Acme • ⚙    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ┌─── OPEN TICKETS ──────────────────────────────────────┐     │
@@ -5446,22 +5446,22 @@ async def get_org_context(
 
 ```python
 # Domain exceptions
-class BodhiorchardError(Exception):
-    """Base exception for all Bodhiorchard errors."""
+class GlideshipError(Exception):
+    """Base exception for all Glideship errors."""
     def __init__(self, message: str, code: str, status_code: int = 400):
         self.message = message
         self.code = code
         self.status_code = status_code
 
-class PRDNotFoundError(BodhiorchardError):
+class PRDNotFoundError(GlideshipError):
     def __init__(self, prd_id: str):
         super().__init__(f"PRD {prd_id} not found", "PRD_NOT_FOUND", 404)
 
-class PermissionDeniedError(BodhiorchardError):
+class PermissionDeniedError(GlideshipError):
     def __init__(self, permission: str):
         super().__init__(f"Permission denied: {permission}", "PERMISSION_DENIED", 403)
 
-class PRDTransitionError(BodhiorchardError):
+class PRDTransitionError(GlideshipError):
     def __init__(self, current: str, target: str):
         super().__init__(
             f"Cannot transition from '{current}' to '{target}'",
@@ -5469,8 +5469,8 @@ class PRDTransitionError(BodhiorchardError):
         )
 
 # Global exception handler
-@app.exception_handler(BodhiorchardError)
-async def bodhiorchard_error_handler(request: Request, exc: BodhiorchardError):
+@app.exception_handler(GlideshipError)
+async def glideship_error_handler(request: Request, exc: GlideshipError):
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -5549,14 +5549,14 @@ event_bus.subscribe(Events.BUG_THRESHOLD_EXCEEDED, on_bug_threshold)
 
 ## 15. Support Integration
 
-This addendum covers features F13–F15 which extend the core Bodhiorchard platform with customer-facing support ticket integration, customer revenue-based profiling, and a PRD reopening lifecycle.
+This addendum covers features F13–F15 which extend the core Glideship platform with customer-facing support ticket integration, customer revenue-based profiling, and a PRD reopening lifecycle.
 
 ---
 
 ### 15.1 New Features (F13-F15)
 
 ### F13. Support Ticket Integration (Customer Bugs → Dev Lifecycle)
-- Support tickets (from Freshdesk, Zendesk, Intercom, or Slack) feed into the Bodhiorchard lifecycle as **customer bugs**
+- Support tickets (from Freshdesk, Zendesk, Intercom, or Slack) feed into the Glideship lifecycle as **customer bugs**
 - **Support Agent** (new Agent #9) triages incoming tickets:
   - Semantic search: is this a known bug? Is there already a PRD for this feature?
   - If known bug → link ticket to existing bug → notify customer with status/ETA
@@ -6407,20 +6407,20 @@ async function updateStatusBar() {
 ### 16.5 Command Palette Commands
 
 ```
-Bodhiorchard: Show My PRDs
-Bodhiorchard: Show My Bugs
-Bodhiorchard: File a Bug (opens quick input)
-Bodhiorchard: Trigger Triage Agent
-Bodhiorchard: View Today's Standup
-Bodhiorchard: Open PRD Board (opens web app)
-Bodhiorchard: Search PRDs (semantic search)
-Bodhiorchard: View Capacity
+Glideship: Show My PRDs
+Glideship: Show My Bugs
+Glideship: File a Bug (opens quick input)
+Glideship: Trigger Triage Agent
+Glideship: View Today's Standup
+Glideship: Open PRD Board (opens web app)
+Glideship: Search PRDs (semantic search)
+Glideship: View Capacity
 ```
 
 ### 16.6 Authentication
 
 The extension uses the same JWT tokens as the web app. On first launch:
-1. User clicks "Sign in to Bodhiorchard"
+1. User clicks "Sign in to Glideship"
 2. Extension opens browser to `https://app.bodhiorchard.io/vscode-auth`
 3. User logs in, app generates a device token
 4. Token is passed back to VSCode via URI handler (`vscode://bodhiorchard/auth?token=...`)
@@ -6439,7 +6439,7 @@ The extension uses the same JWT tokens as the web app. On first launch:
 
 ### 17.1 LLM Provider Abstraction
 
-Bodhiorchard uses **LiteLLM** as the LLM abstraction layer, enabling seamless switching between local and cloud providers.
+Glideship uses **LiteLLM** as the LLM abstraction layer, enabling seamless switching between local and cloud providers.
 
 ```python
 # backend/app/services/llm_service.py
@@ -6524,16 +6524,16 @@ Each agent is assigned a model tier based on task complexity:
 
 ### 17.4 Codebase-Aware Agent Execution (Local Claude Code / API)
 
-Agents that generate PRDs, technical plans, and retrospectives need deep codebase awareness — they must read source files, grep patterns, understand git history, and apply org-level design guidelines. Direct API calls lack this context. Claude Code CLI running on the same machine as Bodhiorchard with the source code accessible locally solves this.
+Agents that generate PRDs, technical plans, and retrospectives need deep codebase awareness — they must read source files, grep patterns, understand git history, and apply org-level design guidelines. Direct API calls lack this context. Claude Code CLI running on the same machine as Glideship with the source code accessible locally solves this.
 
-> **Note**: Bodhiorchard runs directly on the machine where the source code lives. There is no separate Mac Mini, remote node, or network discovery — agents execute locally via Claude Code CLI or cloud API calls.
+> **Note**: Glideship runs directly on the machine where the source code lives. There is no separate Mac Mini, remote node, or network discovery — agents execute locally via Claude Code CLI or cloud API calls.
 
 #### 17.4.1 Two Execution Modes (Configurable at Setup)
 
 | Mode | Execution | Codebase Access | Quality | Cost | Complexity |
 |------|-----------|----------------|---------|------|------------|
-| **A: Local Claude Code** | `claude -p "..."` via subprocess on the Bodhiorchard host | Full filesystem (Read/Glob/Grep/Bash) + Skills + CLAUDE.md | Highest | API key billing | Low |
-| **B: Direct API** | `litellm` from Bodhiorchard backend | Limited (prompt-only, no filesystem) | Good | API key billing | Lowest |
+| **A: Local Claude Code** | `claude -p "..."` via subprocess on the Glideship host | Full filesystem (Read/Glob/Grep/Bash) + Skills + CLAUDE.md | Highest | API key billing | Low |
+| **B: Direct API** | `litellm` from Glideship backend | Limited (prompt-only, no filesystem) | Good | API key billing | Lowest |
 
 Mode A is recommended. Mode B is the fallback when Claude Code is not installed.
 
@@ -6545,7 +6545,7 @@ SLACK / GITHUB
   /bodhiorchard-triage "thread URL"
                | webhook (via Cloudflare Tunnel or localhost)
                v
-  Bodhiorchard Host Machine (Backend + Agents + Source Code)
+  Glideship Host Machine (Backend + Agents + Source Code)
 
   ┌─────────────────────────────────────────┐
   │  FastAPI Backend                         │
@@ -6571,7 +6571,7 @@ SLACK / GITHUB
   │    service-payments/                     │
   │    frontend-app/                         │
   │                                          │
-  │  MCP Writeback --> Bodhiorchard API (localhost)│
+  │  MCP Writeback --> Glideship API (localhost)│
   │    - write_prd(title, content, metadata) │
   │    - update_task_status(task_id, status)  │
   │    - post_slack_message(channel, text)    │
@@ -6592,17 +6592,17 @@ SLACK / GITHUB
       CLAUDE.md
     frontend-app/
       CLAUDE.md
-    bodhiorchard/                      # Bodhiorchard itself
+    bodhiorchard/                      # Glideship itself
       CLAUDE.md
   .claude/
     CLAUDE.md                     # Org-level context (loaded in ALL sessions)
     settings.json                 # Claude Code settings
-    .mcp.json                     # MCP server config (Bodhiorchard writeback)
+    .mcp.json                     # MCP server config (Glideship writeback)
 ```
 
 **Networking: Cloudflare Tunnel (optional)**
 
-Public access is provided via Cloudflare Tunnel (see Section 17.5). For local-only deployments, no networking setup is needed — Bodhiorchard runs on `localhost:8000` (API) and `localhost:3000` (UI).
+Public access is provided via Cloudflare Tunnel (see Section 17.5). For local-only deployments, no networking setup is needed — Glideship runs on `localhost:8000` (API) and `localhost:3000` (UI).
 
 **Process management (launchd on macOS):**
 
@@ -6639,7 +6639,7 @@ Public access is provided via Cloudflare Tunnel (see Section 17.5). For local-on
 
 #### 17.4.4 Task Runner Daemon
 
-The daemon runs on the Mac Mini, polls a Redis queue for tasks, and runs the configured CLI tool. On startup, it **self-registers** with the Bodhiorchard backend and waits for admin approval before accepting tasks. It also sends **heartbeats** every 30 seconds.
+The daemon runs on the Mac Mini, polls a Redis queue for tasks, and runs the configured CLI tool. On startup, it **self-registers** with the Glideship backend and waits for admin approval before accepting tasks. It also sends **heartbeats** every 30 seconds.
 
 ```python
 # bodhiorchard-runner/runner.py
@@ -6688,7 +6688,7 @@ class TaskRunner:
                 asyncio.create_task(self._execute_with_semaphore(task))
 
     async def _register_with_backend(self):
-        """Self-register with the Bodhiorchard backend. See 17.4.10."""
+        """Self-register with the Glideship backend. See 17.4.10."""
         if self.node_id and self.node_token:
             # Already registered (re-registration with existing creds)
             async with httpx.AsyncClient() as client:
@@ -6811,7 +6811,7 @@ class TaskRunner:
 
 #### 17.4.5 MCP Server for Claude Code Writeback
 
-Claude Code on the Mac Mini connects to a Bodhiorchard MCP server to write PRDs, update statuses, and post to Slack while generating content.
+Claude Code on the Mac Mini connects to a Glideship MCP server to write PRDs, update statuses, and post to Slack while generating content.
 
 **MCP config on Mac Mini (`~/.claude/.mcp.json`):**
 
@@ -6960,14 +6960,14 @@ user-invocable: false
 <!-- ~/.claude/skills/prd-template/SKILL.md -->
 ---
 name: prd-template
-description: Standard PRD template for Bodhiorchard feature requests
+description: Standard PRD template for Glideship feature requests
 user-invocable: true
 argument-hint: "[feature description]"
 allowed-tools: Read, Glob, Grep, Bash
 ---
 
 Generate a PRD using this template. Read relevant repos for technical context.
-Use the Bodhiorchard MCP tools to save the PRD when complete.
+Use the Glideship MCP tools to save the PRD when complete.
 
 # PRD: [Feature Title]
 ## 1. Overview
@@ -7041,12 +7041,12 @@ The setup flow configures the execution mode, registers repos, installs skills, 
 
 ```python
 # bodhiorchard-runner/setup.py
-"""Bodhiorchard AI Execution Node Setup Wizard"""
+"""Glideship AI Execution Node Setup Wizard"""
 import questionary, yaml
 from pathlib import Path
 
 def run_setup():
-    print("Bodhiorchard AI Execution Node Setup")
+    print("Glideship AI Execution Node Setup")
     print("=" * 40)
 
     # Step 1: Choose execution mode
@@ -7063,10 +7063,10 @@ def run_setup():
 
     if mode in ("claude_code", "codex"):
         # Step 2: Org registration token (see 17.4.10)
-        # Admin generates this in Bodhiorchard UI → Settings → Execution Nodes → "Generate Token"
+        # Admin generates this in Glideship UI → Settings → Execution Nodes → "Generate Token"
         print("\nStep 2: Organization Registration")
         org_token = questionary.password(
-            "Enter your org registration token (from Bodhiorchard admin panel):"
+            "Enter your org registration token (from Glideship admin panel):"
         ).ask()
         config["org_token"] = org_token
 
@@ -7074,7 +7074,7 @@ def run_setup():
         backend_url = _discover_backend(org_token)
         if not backend_url:
             backend_url = questionary.text(
-                "Bodhiorchard backend URL:", default="http://bodhiorchard-backend.tailnet:8000"
+                "Glideship backend URL:", default="http://bodhiorchard-backend.tailnet:8000"
             ).ask()
         config["bodhiorchard_api_url"] = backend_url
         print(f"  ✓ Backend: {backend_url}")
@@ -7093,7 +7093,7 @@ def run_setup():
 
         if reg_result["status"] == "pending":
             print("  ⏳ Waiting for admin approval...")
-            print("  (Ask your admin to approve in Bodhiorchard → Settings → Execution Nodes)")
+            print("  (Ask your admin to approve in Glideship → Settings → Execution Nodes)")
             _wait_for_approval(config)
             print("  ✓ Approved! Node is now active.")
 
@@ -7192,7 +7192,7 @@ done
 
 #### 17.4.10 Node Discovery & Registration Protocol
 
-The architecture assumes the Bodhiorchard backend and Mac Mini(s) need to find each other, authenticate, and maintain a persistent connection. This section defines how that works across three discovery layers.
+The architecture assumes the Glideship backend and Mac Mini(s) need to find each other, authenticate, and maintain a persistent connection. This section defines how that works across three discovery layers.
 
 **Problem**: The backend needs to know which execution nodes exist, whether they're healthy, and how to route tasks to them — without requiring manual IP entry.
 
@@ -7260,7 +7260,7 @@ class ExecutionNode(Base):
 This is the **always-on** discovery method. The runner daemon registers itself with the backend on every startup.
 
 ```
-Mac Mini (runner daemon startup)              Bodhiorchard Backend
+Mac Mini (runner daemon startup)              Glideship Backend
         |                                            |
   1.    |--- POST /api/nodes/register -------------->|
         |    {                                       |
@@ -7467,7 +7467,7 @@ async def pause_node(node_id: UUID, user=Depends(require_role("admin", "org_owne
 
 ##### L2: mDNS/Bonjour Auto-Discovery (Same LAN)
 
-For teams where the Bodhiorchard backend and Mac Mini are on the same local network, zero-config discovery via Bonjour eliminates all manual setup.
+For teams where the Glideship backend and Mac Mini are on the same local network, zero-config discovery via Bonjour eliminates all manual setup.
 
 **On the Mac Mini** (runner daemon advertises itself):
 
@@ -7516,14 +7516,14 @@ class BonjourAdvertiser:
             s.close()
 ```
 
-**On the Bodhiorchard backend** (discovers Mac Minis on the LAN):
+**On the Glideship backend** (discovers Mac Minis on the LAN):
 
 ```python
 # backend/app/services/node_discovery.py
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
 
 class LanNodeDiscovery(ServiceListener):
-    """Listens for Bodhiorchard runner nodes on the local network via mDNS."""
+    """Listens for Glideship runner nodes on the local network via mDNS."""
 
     SERVICE_TYPE = "_bodhiorchard-runner._tcp.local."
 
@@ -7621,7 +7621,7 @@ sudo tailscale up --ssh --advertise-tags=tag:bodhiorchard-runner
 import httpx
 
 class TailscaleNodeDiscovery:
-    """Discovers Bodhiorchard runner nodes via Tailscale device API."""
+    """Discovers Glideship runner nodes via Tailscale device API."""
 
     def __init__(self, api_key: str, tailnet: str, db_session_factory):
         self.api_key = api_key          # Tailscale API key
@@ -7877,7 +7877,7 @@ Discovery: mDNS active ● | Tailscale polling: every 5m ●
 
 ##### Org Registration Token
 
-To prevent unauthorized nodes from registering, the admin generates a one-time (or reusable) **org registration token** in the Bodhiorchard UI. This token is entered during the Mac Mini setup wizard.
+To prevent unauthorized nodes from registering, the admin generates a one-time (or reusable) **org registration token** in the Glideship UI. This token is entered during the Mac Mini setup wizard.
 
 ```python
 # backend/app/api/org_tokens.py
@@ -7904,10 +7904,10 @@ async def create_registration_token(
 **Setup wizard uses this token:**
 
 ```
-Bodhiorchard AI Execution Node Setup
+Glideship AI Execution Node Setup
 ========================================
 Step 1: Organization Registration
-  Enter your org registration token (from Bodhiorchard admin panel):
+  Enter your org registration token (from Glideship admin panel):
   > ot_a1b2c3d4e5f6...
 
   ✓ Token valid. Organization: "Acme Corp"
@@ -7920,7 +7920,7 @@ Step 2: Registering this machine...
 
   ✓ Registered! Status: PENDING
   ⏳ Waiting for admin approval...
-  (Ask your admin to approve this node in Bodhiorchard → Settings → Execution Nodes)
+  (Ask your admin to approve this node in Glideship → Settings → Execution Nodes)
 
   ✓ Approved! Node is now active.
 
@@ -7995,7 +7995,7 @@ async def handle_slash_command(request: Request, bg: BackgroundTasks):
 | API key on Mac Mini | Stored in macOS Keychain, injected via launchd env vars. Never in config files. |
 | Tailscale network | Private mesh, not exposed to internet. ACLs restrict node access. |
 | MCP token | Short-lived, scoped to internal API. Rotated via setup wizard. |
-| Repo access | Read-only clones. Writes go through MCP to Bodhiorchard API only. |
+| Repo access | Read-only clones. Writes go through MCP to Glideship API only. |
 | Budget control | `--max-budget-usd` prevents runaway API costs per task. |
 
 ### 17.6 Deployment Modes Matrix
@@ -8025,7 +8025,7 @@ async def handle_slash_command(request: Request, bg: BackgroundTasks):
 
 ### 17.5 Public Access via Cloudflare Tunnel (Optional)
 
-Bodhiorchard works fully on localhost. For orgs needing Slack webhooks (require public HTTPS) or remote access, **Cloudflare Tunnel** provides a free, zero-VPS solution.
+Glideship works fully on localhost. For orgs needing Slack webhooks (require public HTTPS) or remote access, **Cloudflare Tunnel** provides a free, zero-VPS solution.
 
 | Requirement | Cloudflare Tunnel |
 |---|---|
@@ -8061,7 +8061,7 @@ cloudflared:
 
 ### Why this matters
 
-AI agents hallucinate when they lack context. Bodhiorchard solves this with a
+AI agents hallucinate when they lack context. Glideship solves this with a
 four-layer knowledge architecture that keeps all organizational knowledge
 current, structured, and accessible to every agent.
 
@@ -8140,7 +8140,7 @@ content: |
   - Async everywhere (no sync DB calls)
 
   ## Error Handling
-  - Custom exception hierarchy: BodhiorchardError > DomainError > ...
+  - Custom exception hierarchy: GlideshipError > DomainError > ...
   - Never catch bare Exception
   - Always log with structlog
 
@@ -8587,4 +8587,4 @@ Default tuning queries:
 
 ---
 
-**This document is implementation-ready and provides all technical details needed for a senior engineer to build Bodhiorchard from scratch.**
+**This document is implementation-ready and provides all technical details needed for a senior engineer to build Glideship from scratch.**

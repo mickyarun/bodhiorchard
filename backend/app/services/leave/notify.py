@@ -149,7 +149,7 @@ def stage_new_request(
         slack_text=message
         if not auto_approved
         # Escaped: a name like "<https://evil|Open>" must not become a link.
-        else f"{escape(message)} <{settings.frontend_url}{link}|Open in Bodhiorchard>",
+        else f"{escape(message)} <{settings.frontend_url}{link}|Open in Glideship>",
         prompt_request_id=None if auto_approved else request.id,
         # A pending request has nothing on the calendar yet.
         sync_request_id=request.id if auto_approved else None,

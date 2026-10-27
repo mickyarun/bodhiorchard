@@ -31,7 +31,7 @@ export const useAuthStore = defineStore('auth', () => {
   // `token.value` would stay stale after an automatic refresh (any consumer
   // reading `authStore.token` would send the old expired JWT to services like
   // the Colyseus OrgRoom, which rejects it via onAuth).
-  window.addEventListener('bodhiorchard:token-refreshed', ((event: Event) => {
+  window.addEventListener('glideship:token-refreshed', ((event: Event) => {
     const detail = (event as CustomEvent<{ accessToken: string }>).detail
     if (detail?.accessToken) {
       token.value = detail.accessToken

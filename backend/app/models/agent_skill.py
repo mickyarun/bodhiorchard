@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 
 class AgentType(StrEnum):
-    """Bodhiorchard agent types that own (or will own) a Claude-driven skill.
+    """Glideship agent types that own (or will own) a Claude-driven skill.
 
     Values must mirror the keys of ``app.agents.skill_mapping.AGENT_SKILL_MAP``;
     the seed flow uses that map to assign agent_type to each seeded row.

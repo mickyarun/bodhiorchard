@@ -16,7 +16,7 @@
 
 Mirrors the in-process loop pattern used by ``presence_cache.refresh_all_presence``:
 a single asyncio task spawned at app startup runs the sweep once a day.
-Single-instance assumption — if Bodhiorchard grows multi-instance we'll
+Single-instance assumption — if Glideship grows multi-instance we'll
 add a Redis lock to avoid duplicate deletes from each pod.
 """
 

@@ -192,7 +192,7 @@ def _codex_config_toml(backend_url: str) -> str:
     the backend adapter passes), so BUD-todo claims don't stall.
     """
     return (
-        "# Added by Bodhiorchard — MCP server for BUD tooling + code intelligence.\n"
+        "# Added by Glideship — MCP server for BUD tooling + code intelligence.\n"
         "[mcp_servers.bodhiorchard]\n"
         'command = "python3"\n'
         'args = [".bodhiorchard/mcp_bridge.py"]\n'

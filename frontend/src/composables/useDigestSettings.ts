@@ -33,7 +33,7 @@ export interface DigestTestResult {
 
 /** Plain words for Slack's error codes on a test post. */
 const SLACK_ERRORS: Record<string, string> = {
-  not_in_channel: 'The Bodhiorchard bot isn\'t in that channel. In Slack, type /invite @Bodhiorchard there.',
+  not_in_channel: 'The bot isn\'t in that channel yet. Open the channel in Slack and invite the app\'s bot with /invite.',
   channel_not_found: 'Slack can\'t find that channel. Check the channel ID (it starts with C or G).',
   slack_not_connected: 'Slack isn\'t connected yet. Connect it in Settings → Integrations.',
   slack_token_unreadable:

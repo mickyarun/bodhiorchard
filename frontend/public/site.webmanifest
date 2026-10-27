@@ -1,6 +1,6 @@
 {
-  "name": "Bodhiorchard",
-  "short_name": "Bodhiorchard",
+  "name": "Glideship",
+  "short_name": "Glideship",
   "icons": [
     {
       "src": "/web-app-manifest-192x192.png",
@@ -15,7 +15,7 @@
       "purpose": "maskable"
     }
   ],
-  "theme_color": "#0D1B0F",
-  "background_color": "#0D1B0F",
+  "theme_color": "#0B1120",
+  "background_color": "#0B1120",
   "display": "standalone"
 }

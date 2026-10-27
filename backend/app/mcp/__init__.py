@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Model Context Protocol (MCP) server integration for Bodhiorchard.
+"""Model Context Protocol (MCP) server integration for Glideship.
 
 Provides tools that Claude Code on execution nodes can call to interact
-with Bodhiorchard data: BUDs, knowledge base, bugs, task status, and Slack.
+with Glideship data: BUDs, knowledge base, bugs, task status, and Slack.
 """

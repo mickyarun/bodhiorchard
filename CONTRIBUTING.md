@@ -1,4 +1,4 @@
-# Contributing to Bodhiorchard
+# Contributing to Glideship
 
 By contributing to this project, you agree to license your contribution under
 the Apache License, Version 2.0, and you certify that you have the right to do

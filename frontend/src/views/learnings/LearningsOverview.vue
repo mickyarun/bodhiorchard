@@ -141,7 +141,7 @@ const medianCycle = computed<number | null>(() => {
 .overview-title {
   font-size: 24px;
   font-weight: 600;
-  font-family: var(--font-display, 'Bricolage Grotesque', sans-serif);
+  font-family: var(--font-display, 'Geist', sans-serif);
   letter-spacing: var(--tracking-display, -0.02em);
   line-height: 1.1;
   margin: 2px 0 4px;

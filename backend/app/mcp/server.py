@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""MCP (Model Context Protocol) server for Bodhiorchard.
+"""MCP (Model Context Protocol) server for Glideship.
 
-Exposes tools that Claude Code can call to read/write Bodhiorchard data:
+Exposes tools that Claude Code can call to read/write Glideship data:
 BUDs, features, bugs, task status, team context.
 
 Mounted at /mcp/ on the main FastAPI app.

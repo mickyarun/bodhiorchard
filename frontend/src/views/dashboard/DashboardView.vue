@@ -167,7 +167,7 @@
 
       <div v-if="!displayData" class="d-flex align-center justify-center fill-height">
         <div class="text-center text-medium-emphasis">
-          <img src="/assets/bodhiorchard-logo.png" width="64" height="64" alt="" class="mb-3" style="border-radius: 50%; opacity: 0.6;" />
+          <BrandLogo :size="56" :show-text="false" class="justify-center mb-3 dashboard-empty__mark" />
           <div class="text-body-1">No tree data yet</div>
           <div class="text-body-2">Add repositories in Settings to see your garden</div>
         </div>
@@ -219,6 +219,7 @@ import QuizHub from '@/components/quiz/QuizHub.vue'
 import { useQuizStore } from '@/stores/quiz'
 import { useQuizSocket } from '@/composables/useQuizSocket'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
+import BrandLogo from '@/components/common/BrandLogo.vue'
 import LiveMatchesPanel from '@/components/minigames/LiveMatchesPanel.vue'
 
 const route = useRoute()
@@ -484,5 +485,10 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.1);
   font-family: inherit;
   font-weight: 600;
+}
+
+/* Muted brand mark on the "no data yet" state. */
+.dashboard-empty__mark {
+  opacity: 0.6;
 }
 </style>

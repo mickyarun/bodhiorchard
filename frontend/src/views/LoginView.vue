@@ -18,13 +18,13 @@
   <div class="setup-gradient d-flex flex-column" style="min-height: 100vh;">
     <v-container class="d-flex flex-column align-center justify-center flex-grow-1 py-8">
       <div class="mb-8">
-        <BodhiorchardLogo />
+        <BrandLogo />
       </div>
 
       <v-card color="surface" class="pa-8 w-100" max-width="420">
         <div class="text-h5 font-weight-bold bo-display mb-1 text-center">Welcome back</div>
         <div class="text-body-2 text-medium-emphasis text-center mb-6">
-          Sign in to your Bodhiorchard account
+          Sign in to your Glideship account
         </div>
 
         <v-alert
@@ -52,17 +52,15 @@
             :rules="[rules.required, rules.email]"
           />
 
-          <v-text-field
+          <PasswordField
             v-model="password"
             label="Password"
-            :type="showPassword ? 'text' : 'password'"
             prepend-inner-icon="mdi-lock-outline"
-            :append-inner-icon="showPassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+            autocomplete="current-password"
             density="compact"
             variant="outlined"
             class="mb-4"
             :rules="[rules.required]"
-            @click:append-inner="showPassword = !showPassword"
           />
 
           <v-btn
@@ -86,7 +84,8 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/services/api'
-import BodhiorchardLogo from '@/components/common/BodhiorchardLogo.vue'
+import BrandLogo from '@/components/common/BrandLogo.vue'
+import PasswordField from '@/components/common/PasswordField.vue'
 import { afterSignIn } from '@/utils/afterSignIn'
 
 const router = useRouter()
@@ -94,7 +93,6 @@ const authStore = useAuthStore()
 
 const email = ref('')
 const password = ref('')
-const showPassword = ref(false)
 const loading = ref(false)
 const orgSlug = ref('')
 

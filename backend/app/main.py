@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Bodhiorchard API application entry point."""
+"""Glideship API application entry point."""
 # (reload trigger — FT-5 fix verification)
 
 import asyncio
@@ -259,7 +259,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     embedding_warmup_task = asyncio.create_task(_warm_embedding_model())
 
     # 8a. Daily retention sweep for the MCP audit log. Single-instance:
-    # if Bodhiorchard grows multi-pod we'll move this behind a Redis lock
+    # if Glideship grows multi-pod we'll move this behind a Redis lock
     # so duplicate deletes don't race across pods.
     mcp_audit_cleanup_task = asyncio.create_task(run_audit_cleanup())
 
@@ -354,7 +354,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(
-    title="Bodhiorchard API",
+    title="Glideship API",
     version="0.1.0",
     description="AI-powered software development platform",
     lifespan=lifespan,
@@ -421,4 +421,4 @@ register_hr_errors(app)
 @app.get("/")
 async def root() -> dict[str, Any]:
     """Root endpoint returning API identity and version."""
-    return {"name": "Bodhiorchard", "version": "0.1.0"}
+    return {"name": "Glideship", "version": "0.1.0"}

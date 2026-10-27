@@ -73,7 +73,7 @@
           <div>
             <div class="text-body-2 font-weight-medium">Claude Code MCP</div>
             <div class="text-caption text-medium-emphasis">
-              Connect Claude Code to Bodhiorchard for BUDs, knowledge, and team context
+              Connect Claude Code to Glideship for BUDs, knowledge, and team context
             </div>
           </div>
         </div>

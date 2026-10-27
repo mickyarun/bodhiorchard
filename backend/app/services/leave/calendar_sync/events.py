@@ -36,7 +36,7 @@ from app.services.leave.calendar_math import iter_dates
 
 OOO_TITLE = "Out of office"
 HOME_TITLE = "Home"
-DESCRIPTION = "Added by Bodhiorchard from an approved request."
+DESCRIPTION = "Added by Glideship from an approved request."
 
 
 @dataclass(frozen=True)

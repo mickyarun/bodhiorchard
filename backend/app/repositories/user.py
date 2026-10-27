@@ -720,7 +720,7 @@ class UserRepository(BaseRepository[User]):
         return result.scalar_one_or_none()
 
     async def get_slack_id_to_name(self, org_id: uuid.UUID, slack_ids: set[str]) -> dict[str, str]:
-        """Map Slack user IDs to Bodhiorchard user display names within an org.
+        """Map Slack user IDs to Glideship user display names within an org.
 
         Args:
             org_id: Organization UUID for membership scoping.

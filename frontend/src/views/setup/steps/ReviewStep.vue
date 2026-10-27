@@ -16,116 +16,46 @@
 
 <template>
   <div>
-    <div class="text-center mb-6">
-      <v-icon icon="mdi-rocket-launch-outline" size="48" color="primary" class="mb-3" />
-      <div class="text-h5 font-weight-bold bo-display mb-1">Review & Launch</div>
-      <div class="text-body-2 text-medium-emphasis">
-        Confirm your configuration and launch Bodhiorchard
-      </div>
-    </div>
+    <SetupStepHeader
+      :step="5"
+      title="Ready to launch"
+      description="Your workspace is set up and the first scan has started. You can change any of this later in Settings."
+    />
 
-    <!-- Organization -->
-    <v-card class="pa-5 card-border-dark mb-4" color="surface">
-      <div class="d-flex align-center ga-3 mb-3">
-        <v-icon icon="mdi-domain" color="primary" size="20" />
-        <div class="text-body-1 font-weight-medium">Organization</div>
-      </div>
-      <v-table density="compact" class="bg-transparent">
-        <tbody>
-          <tr>
-            <td class="text-medium-emphasis" style="width: 140px;">Name</td>
-            <td>{{ setupStore.state.organization.name }}</td>
-          </tr>
-          <tr>
-            <td class="text-medium-emphasis">Slug</td>
-            <td>
-              <code class="text-primary">{{ setupStore.state.organization.slug }}</code>
-            </td>
-          </tr>
-        </tbody>
-      </v-table>
-    </v-card>
-
-    <!-- Admin -->
-    <v-card class="pa-5 card-border-dark mb-4" color="surface">
-      <div class="d-flex align-center ga-3 mb-3">
-        <v-icon icon="mdi-account-key-outline" color="primary" size="20" />
-        <div class="text-body-1 font-weight-medium">Admin Account</div>
-      </div>
-      <v-table density="compact" class="bg-transparent">
-        <tbody>
-          <tr>
-            <td class="text-medium-emphasis" style="width: 140px;">Name</td>
-            <td>{{ setupStore.state.admin.name }}</td>
-          </tr>
-          <tr>
-            <td class="text-medium-emphasis">Email</td>
-            <td>{{ setupStore.state.admin.email }}</td>
-          </tr>
-        </tbody>
-      </v-table>
-    </v-card>
-
-    <!-- Repositories -->
-    <v-card class="pa-5 card-border-dark mb-4" color="surface">
-      <div class="d-flex align-center ga-3 mb-3">
-        <v-icon icon="mdi-source-repository" color="primary" size="20" />
-        <div class="text-body-1 font-weight-medium">
-          Repositories ({{ setupStore.state.sourceCode.repos.length }})
+    <section class="review-step__card" aria-label="Setup summary">
+      <div v-for="row in summary" :key="row.label" class="review-step__row">
+        <div class="review-step__label">{{ row.label }}</div>
+        <div class="review-step__value">
+          <template v-if="row.lines.length">
+            <span v-for="(line, i) in row.lines" :key="i" class="review-step__line">{{ line }}</span>
+          </template>
+          <span v-else class="review-step__empty">Not set</span>
         </div>
       </div>
-      <v-table density="compact" class="bg-transparent mb-3">
-        <tbody>
-          <tr v-for="r in setupStore.state.sourceCode.repos" :key="r.path">
-            <td class="text-medium-emphasis" style="width: 180px;">
-              <v-icon icon="mdi-source-repository" size="14" class="mr-1" />
-              {{ r.path.split('/').pop() }}
-            </td>
-            <td>
-              <v-chip size="x-small" variant="tonal" class="mr-1">{{ r.mainBranch || '?' }}</v-chip>
-              <v-chip size="x-small" variant="tonal">{{ r.developBranch || '?' }}</v-chip>
-            </td>
-          </tr>
-          <tr>
-            <td class="text-medium-emphasis">AI Engine</td>
-            <td>Claude Code</td>
-          </tr>
-        </tbody>
-      </v-table>
-    </v-card>
+    </section>
 
-    <!--
-      Cloning + scan run as background jobs after Continue. Progress is
-      surfaced by the dashboard's setup popup once the user lands there,
-      so the wizard doesn't render its own drawer.
-    -->
-    <v-alert
-      type="info"
-      variant="tonal"
-      density="compact"
-      icon="mdi-information-outline"
-      class="mb-6"
+    <AppCallout variant="info" class="mb-6">
+      Cloning and the first scan run in the background, with live progress on the dashboard.
+      You can connect GitHub, Slack and other tools from Settings while it runs.
+    </AppCallout>
+
+    <v-btn
+      color="primary"
+      size="large"
+      prepend-icon="mdi-rocket-launch-outline"
+      :loading="setupStore.isSubmitting"
+      @click="emit('launch')"
     >
-      Cloning and the initial scan run in the background. You'll see live
-      progress on the dashboard. You can configure GitHub, Slack, and
-      other integrations from Settings while it runs.
-    </v-alert>
-
-    <div class="d-flex justify-center">
-      <v-btn
-        color="primary"
-        size="large"
-        prepend-icon="mdi-rocket-launch-outline"
-        :loading="setupStore.isSubmitting"
-        @click="emit('launch')"
-      >
-        Launch Bodhiorchard
-      </v-btn>
-    </div>
+      Launch Glideship
+    </v-btn>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import AppCallout from '@/components/common/AppCallout.vue'
+import SetupStepHeader from '@/components/setup/SetupStepHeader.vue'
+import { providerTitle } from '@/constants/aiProviders'
 import { useSetupStore } from '@/stores/setup'
 
 const setupStore = useSetupStore()
@@ -133,4 +63,79 @@ const setupStore = useSetupStore()
 const emit = defineEmits<{
   launch: []
 }>()
+
+interface SummaryRow {
+  label: string
+  lines: string[]
+}
+
+const summary = computed<SummaryRow[]>(() => {
+  const { organization, admin, claude, sourceCode } = setupStore.state
+  const repoLines = sourceCode.repos.map(
+    (r) => `${r.path.split('/').pop()} · ${r.mainBranch || '?'} / ${r.developBranch || '?'}`,
+  )
+  return [
+    { label: 'Organization', lines: [organization.name, organization.slug].filter(Boolean) },
+    { label: 'Admin', lines: [admin.name, admin.email].filter(Boolean) },
+    { label: 'AI engine', lines: [providerTitle(claude.provider)] },
+    { label: 'Repositories', lines: repoLines },
+  ]
+})
 </script>
+
+<style scoped>
+.review-step__card {
+  margin-bottom: var(--space-md, 1.5rem);
+  border: 1px solid rgb(var(--v-theme-rule));
+  border-radius: var(--radius-card, 10px);
+  background: rgb(var(--v-theme-surface));
+}
+
+.review-step__row {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: var(--space-sm, 1rem);
+  align-items: start;
+  padding: 16px 20px;
+}
+
+.review-step__row + .review-step__row {
+  border-top: 1px solid rgb(var(--v-theme-rule));
+}
+
+.review-step__label {
+  padding-top: 6px;
+  font-size: 14px;
+  color: rgb(var(--v-theme-muted));
+}
+
+.review-step__value {
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 14px;
+  color: rgb(var(--v-theme-on-surface));
+}
+
+.review-step__line {
+  overflow-wrap: anywhere;
+}
+
+.review-step__empty {
+  color: rgb(var(--v-theme-muted));
+}
+
+/* Phones: label above value. */
+@media (max-width: 599px) {
+  .review-step__row {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 2px;
+  }
+
+  .review-step__value {
+    padding-top: 0;
+  }
+}
+</style>

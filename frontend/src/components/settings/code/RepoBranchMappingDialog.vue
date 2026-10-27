@@ -38,7 +38,7 @@
 
       <div class="pa-5">
         <div class="text-caption text-medium-emphasis mb-4">
-          Bodhiorchard ties BUDs to branches: features merge from develop,
+          Glideship ties BUDs to branches: features merge from develop,
           stage-progress reads main, and (optionally) UAT promotion follows
           a third branch or pattern.
         </div>

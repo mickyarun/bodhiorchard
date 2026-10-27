@@ -48,7 +48,7 @@ let watchdogTimer: ReturnType<typeof setInterval> | null = null
 let retryCount = 0
 let _dead = false // true after all retries exhausted (until watchdog/visibility resets it)
 /** True once the WS has opened successfully at least once. Drives the
- *  ``bodhiorchard:socket-reconnected`` event below — the very first
+ *  ``glideship:socket-reconnected`` event below — the very first
  *  ``onopen`` is the initial connect, not a reconnect, so consumers that
  *  re-seed REST state shouldn't fire on it. */
 let _hasEverOpened = false
@@ -158,7 +158,7 @@ export function connect(): void {
     // the very first open keeps the contract "reconnect" not "initial
     // connect" so refetch callbacks don't double-fire on page load.
     if (_hasEverOpened) {
-      window.dispatchEvent(new CustomEvent('bodhiorchard:socket-reconnected'))
+      window.dispatchEvent(new CustomEvent('glideship:socket-reconnected'))
     }
     _hasEverOpened = true
   }
@@ -181,7 +181,7 @@ export function connect(): void {
     // 4001 = auth failure (expired / invalid JWT). Retrying with the
     // same token is pointless; kick the axios refresh interceptor by
     // pinging an authenticated endpoint. On success, axios dispatches
-    // `bodhiorchard:token-refreshed` and the window listener below
+    // `glideship:token-refreshed` and the window listener below
     // reconnects us with the fresh token.
     if (ev.code === 4001) {
       _dead = true
@@ -269,7 +269,7 @@ function attemptReconnect(): void {
 /**
  * Fire a single authenticated REST call to let the axios refresh
  * interceptor observe 401 and rotate the JWT. The subsequent
- * `bodhiorchard:token-refreshed` event (dispatched by api.ts) drives
+ * `glideship:token-refreshed` event (dispatched by api.ts) drives
  * the window listener below to reconnect. Safe to call even when the
  * token is still valid — the response is ignored.
  */
@@ -289,7 +289,7 @@ if (typeof window !== 'undefined') {
   })
   // When the axios interceptor rotates the JWT, drop the stale socket
   // and reconnect using the fresh token on the next connect().
-  window.addEventListener('bodhiorchard:token-refreshed', () => {
+  window.addEventListener('glideship:token-refreshed', () => {
     if (ws) {
       ws.onclose = null // prevent the pending-close from looping us
       ws.close()

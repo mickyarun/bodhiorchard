@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Data access repositories for Bodhiorchard."""
+"""Data access repositories for Glideship."""
 
 from app.repositories.agent_skill import AgentSkillRepository
 from app.repositories.agent_skill_bud_stage import AgentSkillBudStageRepository

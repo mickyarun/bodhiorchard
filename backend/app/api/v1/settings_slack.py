@@ -49,7 +49,7 @@ router = APIRouter(
 
 
 class SlackMemberPreview(BaseModel):
-    """A Slack workspace member with optional auto-matched Bodhiorchard user."""
+    """A Slack workspace member with optional auto-matched Glideship user."""
 
     slack_id: str
     slack_name: str
@@ -61,7 +61,7 @@ class SlackMemberPreview(BaseModel):
 
 
 class SlackLinkRequest(BaseModel):
-    """Mapping of Slack ID → Bodhiorchard user ID for bulk linking.
+    """Mapping of Slack ID → Glideship user ID for bulk linking.
 
     Each entry carries ``slack_id`` and ``user_id``. Newly linked members
     without a photo get their Slack one, looked up server-side.
@@ -71,7 +71,7 @@ class SlackLinkRequest(BaseModel):
 
 
 class SlackImportItem(BaseModel):
-    """A Slack member to import as a new Bodhiorchard user.
+    """A Slack member to import as a new Glideship user.
 
     Carries no photo URL on purpose: the photo is fetched from Slack's own
     API after the import (``sync_slack_photos``), so a client cannot plant an
@@ -86,7 +86,7 @@ class SlackImportItem(BaseModel):
 
 
 class SlackImportRequest(BaseModel):
-    """Batch import of Slack members as new Bodhiorchard users."""
+    """Batch import of Slack members as new Glideship users."""
 
     imports: list[SlackImportItem]
 
@@ -103,10 +103,10 @@ async def sync_slack_members(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[SlackMemberPreview]:
-    """Fetch all Slack workspace members and match against Bodhiorchard users.
+    """Fetch all Slack workspace members and match against Glideship users.
 
     Returns a preview list showing each Slack user with their best-guess
-    Bodhiorchard match (by email or existing slack_id link). The admin then
+    Glideship match (by email or existing slack_id link). The admin then
     confirms/adjusts the mappings before calling link-members.
 
     Args:
@@ -114,7 +114,7 @@ async def sync_slack_members(
         db: The async database session.
 
     Returns:
-        List of Slack members with suggested Bodhiorchard user matches.
+        List of Slack members with suggested Glideship user matches.
     """
     from app.services import slack_client
 
@@ -130,7 +130,7 @@ async def sync_slack_members(
     bot_token = decrypt_secret(org.slack_bot_token)
     slack_members = await slack_client.users_list(bot_token)
 
-    # Load all Bodhiorchard users for this org
+    # Load all Glideship users for this org
     user_repo = UserRepository(db, org_id=org.id)
     users = await user_repo.list_by_org(org.id)
 
@@ -173,7 +173,7 @@ async def sync_slack_members(
 
         if not matched_user and display_name:
             # Match by name tokens (case-insensitive):
-            # any Slack name token matching any Bodhiorchard user name token
+            # any Slack name token matching any Glideship user name token
             slack_tokens = {t.lower() for t in display_name.split() if len(t) >= 3}
             for user in users:
                 if not user.name:
@@ -208,7 +208,7 @@ async def link_slack_members(
     perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, int]:
-    """Bulk-link Slack IDs to Bodhiorchard users.
+    """Bulk-link Slack IDs to Glideship users.
 
     Args:
         body: List of {slack_id, user_id} mappings.
@@ -287,7 +287,7 @@ async def unlink_slack_member(
     perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, bool]:
-    """Remove the Slack link from a Bodhiorchard user.
+    """Remove the Slack link from a Glideship user.
 
     Args:
         body: Dict with ``slack_id`` to unlink.
@@ -341,7 +341,7 @@ async def import_slack_members(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SlackImportResponse:
-    """Import Slack workspace members as new Bodhiorchard users.
+    """Import Slack workspace members as new Glideship users.
 
     Creates a User + OrgToUser membership for each Slack member that does
     not already exist (by email). Automatically links the Slack ID.

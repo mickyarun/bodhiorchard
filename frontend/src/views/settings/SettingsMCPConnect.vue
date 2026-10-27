@@ -35,7 +35,7 @@
       </div>
       <p class="text-body-2 text-medium-emphasis mcp-hero__lede mt-3">
         Your local AI assistant — Claude Desktop, Cursor, Continue — connects to
-        Bodhiorchard via MCP. It can read org context, draft BUDs in chat, and
+        Glideship via MCP. It can read org context, draft BUDs in chat, and
         save them back through the BYO-AI write surface. Writes are scoped to
         BUDs you are the assignee of, only the field the current phase owns is
         editable, and every change is captured in the History tab for one-click
@@ -459,7 +459,7 @@ const REVIEW_GATE = `Important — review-then-commit:
 // ground its output in real source code rather than guessing,
 // using the ``code_locations`` paths get_features returns plus the
 // user's local checkout (read via the LLM's filesystem tool — NOT
-// via Bodhiorchard MCP, which doesn't expose source files).
+// via Glideship MCP, which doesn't expose source files).
 const LOCAL_CODE_CONTEXT_BLOCK = `Local code context (recommended):
 * Ask me which local directory holds my checkout, and confirm it's
   on the latest main (e.g. "git pull origin main first"). If I
@@ -468,7 +468,7 @@ const LOCAL_CODE_CONTEXT_BLOCK = `Local code context (recommended):
   'code_locations' — a per-repo map of layer → file paths
   (frontend / backend / processor / etc.). Use YOUR OWN
   filesystem tool to read those files under my checkout; don't
-  try to fetch them via the Bodhiorchard MCP (it only exposes
+  try to fetch them via the Glideship MCP (it only exposes
   metadata, not source).
 * Ground the spec / design in what those files actually do:
   reuse existing components, name real functions, reference real

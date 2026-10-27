@@ -74,7 +74,7 @@
         >
           <ol class="jira-steps">
             <li>Open <code>id.atlassian.com/manage-profile/security/api-tokens</code></li>
-            <li>Click <strong>Create API token</strong> and label it (e.g. "Bodhiorchard")</li>
+            <li>Click <strong>Create API token</strong> and label it (e.g. "Glideship")</li>
             <li>Copy the generated token and paste it below</li>
           </ol>
         </AppCallout>

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 /**
- * Bodhiorchard Multiplayer Server — Colyseus WebSocket server.
+ * Glideship Multiplayer Server — Colyseus WebSocket server.
  *
  * Rooms:
  *   "org"       — One per org, holds authoritative state for all members + agents.
@@ -81,4 +81,4 @@ const server = defineServer({
 })
 
 server.listen(port)
-console.log(`[Bodhiorchard Multiplayer] Listening on ws://localhost:${port}`)
+console.log(`[Glideship Multiplayer] Listening on ws://localhost:${port}`)

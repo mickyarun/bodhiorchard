@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared pytest fixtures for the Bodhiorchard test suite.
+"""Shared pytest fixtures for the Glideship test suite.
 
 **No DB scaffolding lives here.** The previous autouse session-scope
 ``setup_database`` fixture called ``Base.metadata.drop_all()`` on

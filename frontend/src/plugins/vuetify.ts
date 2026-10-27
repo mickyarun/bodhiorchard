@@ -21,7 +21,7 @@ import 'vuetify/styles'
 import { createVuetify } from 'vuetify'
 import { aliases, mdi } from 'vuetify/iconsets/mdi'
 import { resolveInitialThemeName } from '@/composables/useThemePreference'
-import { bodhiorchardThemes, vuetifyDefaults } from '@/plugins/vuetify-theme'
+import { glideshipThemes, vuetifyDefaults } from '@/plugins/vuetify-theme'
 
 export default createVuetify({
   icons: {
@@ -31,7 +31,7 @@ export default createVuetify({
   },
   theme: {
     defaultTheme: resolveInitialThemeName(),
-    themes: bodhiorchardThemes,
+    themes: glideshipThemes,
   },
   defaults: vuetifyDefaults,
 })

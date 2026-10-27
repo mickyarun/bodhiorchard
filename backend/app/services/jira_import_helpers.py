@@ -143,7 +143,7 @@ async def resolve_users(
     org_id: uuid.UUID,
     emails: set[str],
 ) -> dict[str, str]:
-    """Bulk-resolve Jira emails to Bodhiorchard user UUIDs.
+    """Bulk-resolve Jira emails to Glideship user UUIDs.
 
     Returns dict of lowercase email → UUID string.
     """

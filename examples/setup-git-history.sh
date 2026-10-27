@@ -130,4 +130,4 @@ fi
 echo "  Done ($(git -C taskflow-spring rev-list --count HEAD) commits)"
 
 echo ""
-echo "All repos ready. Add them as tracked repositories in Bodhiorchard settings."
+echo "All repos ready. Add them as tracked repositories in Glideship settings."

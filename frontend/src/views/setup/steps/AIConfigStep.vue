@@ -15,19 +15,14 @@
  -->
 
 <template>
-  <div class="d-flex flex-column align-center">
-    <v-icon icon="mdi-robot-outline" size="48" color="primary" class="mb-4" />
-    <h2 class="text-h5 font-weight-bold bo-display mb-2">AI Engine</h2>
-    <p class="text-body-2 text-medium-emphasis mb-6 text-center" style="max-width: 520px;">
-      Bodhiorchard uses an AI coding agent to analyze your codebase.
-      Pick a provider — we detected how the backend is running and prefilled the right auth option.
-    </p>
+  <div>
+    <SetupStepHeader
+      :step="3"
+      title="Connect the AI engine"
+      description="Agents use a coding CLI to read your code. Pick a provider — we detected how the backend runs and chose the matching sign-in option."
+    />
 
-    <v-card
-      class="pa-6 card-border-dark mb-4 w-100"
-      color="surface"
-      style="max-width: 560px;"
-    >
+    <v-card class="pa-6 card-border-dark mb-4 w-100" color="surface">
       <!-- Header: icon + title + detected-mode badge -->
       <div class="d-flex align-center ga-3 mb-5">
         <v-avatar size="40" color="primary" rounded="lg">
@@ -346,20 +341,6 @@
       </v-expand-transition>
     </v-card>
 
-    <!-- Coming-soon engines — kept compact at the bottom -->
-    <div class="w-100" style="max-width: 560px;">
-      <div class="text-caption mb-2 ml-1" style="opacity: 0.75;">
-        More AI engines coming soon
-      </div>
-      <div class="d-flex flex-wrap ga-2 coming-soon-row">
-        <v-chip variant="outlined" size="small" prepend-icon="mdi-server-outline">
-          Ollama
-          <template #append>
-            <v-chip size="x-small" variant="tonal" color="primary" class="ml-2">Soon</v-chip>
-          </template>
-        </v-chip>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -367,6 +348,7 @@
 import { computed, onMounted, watch, ref } from 'vue'
 import api from '@/services/api'
 import { useSetupStore } from '@/stores/setup'
+import SetupStepHeader from '@/components/setup/SetupStepHeader.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import type { ClaudeAuthMode } from '@/types/setup'
 import {
@@ -565,7 +547,7 @@ function modeDescription(mode: AuthModeSpec, caps: ProviderCaps): string {
   if (mode.value === 'subscription') {
     return 'Paste an OAuth token from `claude setup-token`. Uses your Claude plan.'
   }
-  return `Paste a ${mode.label}. Stored encrypted and applied to every agent run.`
+  return `Paste your ${mode.label}. Stored encrypted and applied to every agent run.`
 }
 
 const authOptions = computed<ReadonlyArray<AuthOption>>(() => {
@@ -720,10 +702,6 @@ async function testConnection(): Promise<void> {
 </script>
 
 <style scoped>
-.coming-soon-row :deep(.v-chip) {
-  pointer-events: none;
-  cursor: default;
-}
 
 .section-label {
   display: flex;

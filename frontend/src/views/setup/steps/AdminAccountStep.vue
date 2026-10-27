@@ -15,94 +15,71 @@
  -->
 
 <template>
-  <v-card class="pa-8 card-border-dark" color="surface">
-    <div class="d-flex align-center ga-3 mb-6">
-      <v-avatar color="primary" size="44">
-        <v-icon icon="mdi-account-key-outline" size="24" />
-      </v-avatar>
-      <div>
-        <div class="text-h5 font-weight-bold bo-display">Admin Account</div>
-        <div class="text-body-2 text-medium-emphasis">Create the first admin user</div>
-      </div>
-    </div>
+  <SetupStepHeader
+    :step="2"
+    title="Create the admin account"
+    description="You'll sign in with this account. Invite the rest of your team once setup is done."
+  />
+  <v-card class="pa-6 card-border-dark" color="surface">
+    <AppCallout v-if="setupStore.orgInitDone" variant="info" icon="mdi-lock-outline" class="mb-4">
+      Locked after Continue — the admin account has already been created.
+    </AppCallout>
 
     <v-text-field
       v-model="setupStore.state.admin.name"
-      label="Full Name"
+      label="Full name"
       placeholder="Jane Doe"
-      prepend-inner-icon="mdi-account-outline"
-      class="mb-4"
+      autocomplete="name"
+      class="mb-2"
       :rules="[rules.required]"
       :readonly="setupStore.orgInitDone"
     />
 
     <v-text-field
       v-model="setupStore.state.admin.email"
-      label="Email"
+      label="Work email"
       placeholder="jane@acme.com"
-      prepend-inner-icon="mdi-email-outline"
       type="email"
-      class="mb-4"
+      autocomplete="email"
+      class="mb-2"
       :rules="[rules.required, rules.email]"
       :readonly="setupStore.orgInitDone"
     />
 
-    <v-alert
-      v-if="setupStore.orgInitDone"
-      type="info"
-      variant="tonal"
-      density="compact"
-      icon="mdi-lock-outline"
-      class="mb-4"
-    >
-      Locked after Continue — the admin account has already been created.
-    </v-alert>
-
-    <v-text-field
+    <PasswordField
       v-model="setupStore.state.admin.password"
       label="Password"
-      placeholder="Minimum 8 characters"
-      prepend-inner-icon="mdi-lock-outline"
-      :type="showPassword ? 'text' : 'password'"
-      :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
-      class="mb-1"
+      hint="At least 8 characters"
+      persistent-hint
+      autocomplete="new-password"
       :rules="[rules.required, rules.minLength]"
       :readonly="setupStore.orgInitDone"
-      @click:append-inner="showPassword = !showPassword"
     />
 
-    <v-progress-linear
-      :model-value="passwordStrength"
-      :color="passwordStrengthColor"
-      class="mb-1"
-      height="4"
-      rounded
-    />
-    <div class="text-caption text-medium-emphasis mb-4">
-      Password strength: {{ passwordStrengthLabel }}
+    <div v-if="setupStore.state.admin.password" class="admin-step__strength" aria-live="polite">
+      <v-progress-linear :model-value="passwordStrength" :color="passwordStrengthColor" height="4" rounded />
+      <span>Strength: {{ passwordStrengthLabel }}</span>
     </div>
 
-    <v-text-field
+    <PasswordField
       v-model="confirmPassword"
-      label="Confirm Password"
-      placeholder="Re-enter your password"
-      prepend-inner-icon="mdi-lock-check-outline"
-      :type="showConfirmPassword ? 'text' : 'password'"
-      :append-inner-icon="showConfirmPassword ? 'mdi-eye-off' : 'mdi-eye'"
+      label="Confirm password"
+      class="mt-4"
+      autocomplete="new-password"
       :rules="[rules.required, rules.passwordMatch]"
       :readonly="setupStore.orgInitDone"
-      @click:append-inner="showConfirmPassword = !showConfirmPassword"
     />
   </v-card>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import AppCallout from '@/components/common/AppCallout.vue'
+import PasswordField from '@/components/common/PasswordField.vue'
+import SetupStepHeader from '@/components/setup/SetupStepHeader.vue'
 import { useSetupStore } from '@/stores/setup'
 
 const setupStore = useSetupStore()
-const showPassword = ref(false)
-const showConfirmPassword = ref(false)
 const confirmPassword = ref('')
 
 const passwordStrength = computed(() => {
@@ -139,3 +116,14 @@ const rules = {
     v === setupStore.state.admin.password || 'Passwords do not match',
 }
 </script>
+
+<style scoped>
+.admin-step__strength {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--space-2xs, 0.5rem);
+  font-size: 12px;
+  color: rgb(var(--v-theme-muted));
+}
+</style>

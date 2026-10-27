@@ -85,7 +85,7 @@
           </g>
         </svg>
 
-        <h1 class="engine-loader__brand">Bodhiorchard</h1>
+        <h1 class="engine-loader__brand">Glideship</h1>
         <p class="engine-loader__phase">{{ currentPhaseLabel }}</p>
 
         <!-- Progress bar. Fills smoothly as phase advances. -->

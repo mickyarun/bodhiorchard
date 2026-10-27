@@ -22,7 +22,7 @@ day: any bucket whose snapshot is older than ``SNAPSHOT_AGE_HOURS``
 into the 30d_ago slot.
 
 Single-instance assumption mirrors ``mcp_audit_cleanup`` — when
-Bodhiorchard grows multi-instance we'll add a Redis lock so two pods
+Glideship grows multi-instance we'll add a Redis lock so two pods
 don't double-roll.
 """
 

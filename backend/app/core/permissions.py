@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Permission definitions — the source of truth for Bodhiorchard RBAC.
+"""Permission definitions — the source of truth for Glideship RBAC.
 
 This module defines every permission category and permission. The default
 system-role-to-permission mapping lives in :mod:`app.core.role_defs`. The

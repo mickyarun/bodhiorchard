@@ -43,7 +43,7 @@ function ensureInitialized(): void {
   mermaid.initialize({
     startOnLoad: false, // we run it manually per-mount
     securityLevel: 'strict', // disallow embedded HTML / click handlers
-    // The app's Vuetify default theme is ``bodhiorchardDark``
+    // The app's Vuetify default theme is ``glideshipDark``
     // (see src/plugins/vuetify.ts). Mermaid's ``default`` theme uses
     // dark edge colours that disappear against our dark surface;
     // ``dark`` switches the entire palette (light edges, lighter

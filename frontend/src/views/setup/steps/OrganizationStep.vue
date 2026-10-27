@@ -15,20 +15,15 @@
  -->
 
 <template>
-  <v-card class="pa-8 card-border-dark" color="surface">
-    <div class="d-flex align-center ga-3 mb-6">
-      <v-avatar color="primary" size="44">
-        <v-icon icon="mdi-domain" size="24" />
-      </v-avatar>
-      <div>
-        <div class="text-h5 font-weight-bold bo-display">Organization</div>
-        <div class="text-body-2 text-medium-emphasis">Set up your workspace</div>
-      </div>
-    </div>
-
+  <SetupStepHeader
+    :step="1"
+    title="Name your workspace"
+    description="This is the organization your team signs in to. You can rename it later in Settings."
+  />
+  <v-card class="pa-6 card-border-dark" color="surface">
     <v-text-field
       v-model="setupStore.state.organization.name"
-      label="Organization Name"
+      label="Organization name"
       placeholder="Acme Inc."
       prepend-inner-icon="mdi-office-building-outline"
       class="mb-4"
@@ -41,7 +36,7 @@
 
     <v-text-field
       v-model="setupStore.state.organization.slug"
-      label="Slug"
+      label="URL slug"
       placeholder="acme-inc"
       prepend-inner-icon="mdi-link-variant"
       :hint="setupStore.orgInitDone ? lockedHint : 'Used in URLs. Lowercase letters, numbers, and hyphens only.'"
@@ -51,23 +46,20 @@
       :readonly="setupStore.orgInitDone"
     />
 
-    <v-alert
-      type="info"
-      variant="tonal"
-      density="compact"
-      icon="mdi-information-outline"
-    >
-      Bodhiorchard supports multi-org setups. You can add more organizations later.
-    </v-alert>
+    <AppCallout variant="info">
+      You can add more organizations later.
+    </AppCallout>
   </v-card>
 </template>
 
 <script setup lang="ts">
+import AppCallout from '@/components/common/AppCallout.vue'
+import SetupStepHeader from '@/components/setup/SetupStepHeader.vue'
 import { useSetupStore } from '@/stores/setup'
 
 const setupStore = useSetupStore()
 
-// Phase J — once submitOrgInit succeeds, the org row exists in the
+// Once submitOrgInit succeeds, the org row exists in the
 // backend and these fields can no longer be changed (the wizard's
 // "create org" trigger has already fired). Reads cleanly as read-only
 // instead of throwing on the next attempt.

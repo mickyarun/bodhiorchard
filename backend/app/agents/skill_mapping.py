@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Mapping from Bodhiorchard agent names to skill definition files.
+"""Mapping from Glideship agent names to skill definition files.
 
-Each Bodhiorchard agent (triage, bud, status, etc.) maps to a skill markdown
+Each Glideship agent (triage, bud, status, etc.) maps to a skill markdown
 file in backend/app/agents/skills/ that defines its persona, tools, and workflow.
 
 The map is also used to seed ``agent_skills`` rows (one per

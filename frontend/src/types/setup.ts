@@ -82,7 +82,8 @@ export interface SetupState {
 
 export interface StepDefinition {
   title: string
-  icon: string
+  // One line shown under the title in the wizard's step list.
+  description: string
   key: string
 }
 

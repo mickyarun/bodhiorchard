@@ -67,7 +67,7 @@ interface ChipState {
   href: string | null
 }
 
-const TOOLTIP_PR_OPEN = 'Bodhiorchard MCP setup PR is open. Merge it to enable activity tracking.'
+const TOOLTIP_PR_OPEN = 'Glideship MCP setup PR is open. Merge it to enable activity tracking.'
 const TOOLTIP_PR_CLOSED
   = 'The previous setup PR was closed without merging. Re-scan this repo to push a fresh branch.'
 const TOOLTIP_MANUAL = (

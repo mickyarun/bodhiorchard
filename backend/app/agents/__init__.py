@@ -12,4 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""AI agent orchestration layer for Bodhiorchard."""
+"""AI agent orchestration layer for Glideship."""

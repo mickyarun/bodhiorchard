@@ -43,7 +43,7 @@ class RepoStatus(StrEnum):
 
 
 class SetupPrState(StrEnum):
-    """Lifecycle state of the Bodhiorchard MCP setup PR for a repo.
+    """Lifecycle state of the Glideship MCP setup PR for a repo.
 
     ``OPEN`` is written when the PR is created (or adopted from a
     pre-existing branch). The webhook flips it to ``MERGED`` or

@@ -1,6 +1,6 @@
 # Deployment Guide
 
-Bodhiorchard splits cleanly into two planes so you can pick how much of it lives on your hardware.
+Glideship splits cleanly into two planes so you can pick how much of it lives on your hardware.
 
 ## The data plane is always local
 
@@ -10,7 +10,7 @@ Postgres + pgvector, every BUD, the embeddings index, the scanned repos, the age
 
 Three first-class modes, three reasons to pick each:
 
-- **Local Claude Code** — point Bodhiorchard at a host `claude login` session. Pro / Max flat-rate, no per-token bills, codebase-aware.
+- **Local Claude Code** — point Glideship at a host `claude login` session. Pro / Max flat-rate, no per-token bills, codebase-aware.
 - **Cloud Claude via API key** — paste an `sk-ant-…` into **Settings → AI Configuration → Claude Code**. Pay-per-token, recommended for evaluators and CI.
 - **Anthropic direct API** — for the lightweight non-codebase agents (Triage, Bug-Linker, Standup). Lower latency and lower per-call cost than going through Claude Code.
 
@@ -18,7 +18,7 @@ See [AI Engines & MCP Server](ai-engines.md) for the engine-by-engine breakdown.
 
 ## One-machine self-host
 
-A single laptop or Mac Mini runs the whole platform — frontend, backend, multiplayer, Postgres, Redis. A **Cloudflare Tunnel** optionally exposes just the Slack / GitHub webhook endpoints without putting the rest of the stack online. This makes Bodhiorchard a credible **self-hosted Jira alternative** for teams that don't want to live on per-seat SaaS.
+A single laptop or Mac Mini runs the whole platform — frontend, backend, multiplayer, Postgres, Redis. A **Cloudflare Tunnel** optionally exposes just the Slack / GitHub webhook endpoints without putting the rest of the stack online. This makes Glideship a credible **self-hosted Jira alternative** for teams that don't want to live on per-seat SaaS.
 
 What you get:
 
@@ -57,7 +57,7 @@ What you get:
 
 ## Choosing a deployment mode
 
-Bodhiorchard ships in **two deployment modes**. The product is identical, only the process boundary between your host and the containers changes.
+Glideship ships in **two deployment modes**. The product is identical, only the process boundary between your host and the containers changes.
 
 | Mode | What runs in Docker | What runs on your host | Claude auth |
 |---|---|---|---|
@@ -68,7 +68,7 @@ Bodhiorchard ships in **two deployment modes**. The product is identical, only t
 
 ### Fastest: one command with `npx` (no clone, no build)
 
-The quickest way to try Bodhiorchard. The [`bodhiorchard`](https://www.npmjs.com/package/bodhiorchard) npm package pulls prebuilt images from Docker Hub and runs the full Full-Docker stack — you don't clone the repo or build anything.
+The quickest way to try Glideship. The [`bodhiorchard`](https://www.npmjs.com/package/bodhiorchard) npm package pulls prebuilt images from Docker Hub and runs the full Full-Docker stack — you don't clone the repo or build anything.
 
 ```bash
 npx bodhiorchard init     # detect ports, generate secrets, pull images
@@ -168,7 +168,7 @@ The other way round, give Full Docker both keys, the one from `backend/.env` fir
 
 ## Try the included examples
 
-Bodhiorchard pairs with **TaskFlow** — four deliberately wired-together sample repos that exercise cross-repo feature detection, skill profiling, BUD generation, and PR-merge feature reconciliation without you needing to wire up your own codebase:
+Glideship pairs with **TaskFlow** — four deliberately wired-together sample repos that exercise cross-repo feature detection, skill profiling, BUD generation, and PR-merge feature reconciliation without you needing to wire up your own codebase:
 
 - `taskflow-api` — FastAPI backend (auth, tasks, notifications, billing)
 - `taskflow-web` — Vue + Vuetify frontend that calls into the API
@@ -188,7 +188,7 @@ bash setup-git-history.sh
 
 The script uses `gh repo clone` when available, falling back to `git clone` over SSH. To clone from a fork instead, export `BODHIORCHARD_EXAMPLES_OWNER=<your-username>` before running.
 
-**2. In the Bodhiorchard UI, add the four repos under Settings → Repositories:**
+**2. In the Glideship UI, add the four repos under Settings → Repositories:**
 
 ```
 /absolute/path/to/examples/taskflow-api

@@ -1,4 +1,4 @@
-# Bodhiorchard Backend
+# Glideship Backend
 
 FastAPI + SQLAlchemy 2.0 + PostgreSQL + pgvector. Multi-tenant agent-driven dev platform.
 
@@ -11,7 +11,7 @@ FastAPI + SQLAlchemy 2.0 + PostgreSQL + pgvector. Multi-tenant agent-driven dev 
 - **AI engines**: Claude Code CLI (codebase-aware), Anthropic direct API (lightweight). Ollama / OpenAI / OpenAI Codex on the roadmap. See [AI Engines & MCP Server](../docs/ai-engines.md).
 - **Embeddings**: [fastembed](https://github.com/qdrant/fastembed) (ONNX, local) — `BAAI/bge-small-en-v1.5`, 384-d
 - **Code intelligence**: [graphify](https://github.com/safishamsi/graphify) + NetworkX (Leiden communities) — note the pip distribution is `graphifyy` (two y's); the Python module imports as `graphify`
-- **MCP**: in-tree server at `:8001`, handlers under `app/mcp/handlers_*.py`. See [AI Engines & MCP Server — MCP tools](../docs/ai-engines.md#mcp-server--the-tools-bodhiorchard-exposes-to-claude-code).
+- **MCP**: in-tree server at `:8001`, handlers under `app/mcp/handlers_*.py`. See [AI Engines & MCP Server — MCP tools](../docs/ai-engines.md#mcp-server--the-tools-glideship-exposes-to-claude-code).
 - **Cache / queue**: Redis
 - **Migrations**: Alembic (async)
 - **Logging**: structlog

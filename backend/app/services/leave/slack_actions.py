@@ -56,7 +56,7 @@ logger = structlog.get_logger(__name__)
 
 OPEN_FAILED = "Slack didn't open the rejection form in time. Click Reject again."
 NOT_LINKED = (
-    "Your Slack account isn't linked to an active Bodhiorchard member in this workspace, "
+    "Your Slack account isn't linked to an active Glideship member in this workspace, "
     "so you can't decide leave from here."
 )
 

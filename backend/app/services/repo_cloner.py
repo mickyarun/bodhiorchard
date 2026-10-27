@@ -167,7 +167,7 @@ async def clone_or_update(
 
     Args:
         url: GitHub HTTPS or SSH URL.
-        org_slug: Bodhiorchard org slug — used as the first path segment so
+        org_slug: Glideship org slug — used as the first path segment so
             clones from different orgs never collide.
         pat: Optional GitHub personal-access token for HTTPS private repos.
         branch: Branch the wizard onboarded the repo on. When set, ``git

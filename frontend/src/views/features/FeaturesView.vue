@@ -359,7 +359,7 @@ onMounted(async () => {
   margin: 0;
   font-size: 1.625rem;
   font-weight: 700;
-  font-family: var(--font-display, 'Bricolage Grotesque', sans-serif);
+  font-family: var(--font-display, 'Geist', sans-serif);
   color: rgb(var(--v-theme-on-surface));
   letter-spacing: var(--tracking-display, -0.02em);
 }

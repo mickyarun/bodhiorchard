@@ -1,18 +1,18 @@
 <div align="center">
 
-# Bodhiorchard&trade;
+# Glideship
 
 ### Ship software, not Scrum ceremonies.
 
 **The open-source, self-hosted alternative to Jira & Scrum — AI agents run the process end-to-end, developers earn XP for what actually ships, and your data never leaves your machine.**
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Website](https://img.shields.io/badge/website-bodhiorchard.ai-2E7D32.svg)](https://bodhiorchard.ai/)
+[![Website](https://img.shields.io/badge/website-bodhiorchard.ai-2563EB.svg)](https://bodhiorchard.ai/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Vue 3](https://img.shields.io/badge/Vue.js-3-4FC08D.svg)](https://vuejs.org)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED.svg)](https://www.docker.com)
 
-[Website](https://bodhiorchard.ai/) · [Quick Start](#quick-start) · [Why Bodhiorchard](#why-bodhiorchard) · [People](#people-leave-wfh-and-employee-records) · [The Twelve Agents](#the-twelve-agents) · [Docs](#documentation) · [FAQ](#faq)
+[Website](https://bodhiorchard.ai/) · [Quick Start](#quick-start) · [Why Glideship](#why-glideship) · [People](#people-leave-wfh-and-employee-records) · [The Twelve Agents](#the-twelve-agents) · [Docs](#documentation) · [FAQ](#faq)
 
 <a href="https://bodhiorchard.ai/"><img src="docs/images/board-ui.webp" width="85%" alt="The BUD board — every feature tracked from backlog to production in one view"></a>
 
@@ -22,7 +22,7 @@
 
 ---
 
-**Bodhiorchard** replaces sprint, scrum, and Jira ceremony with **Agent-Driven Development (ADD)** — twelve specialised AI agents handle the busywork (triage, specs, estimates, test plans, retrospectives) while humans keep the decisions that matter, and developers earn XP for the work that actually reaches production. It's a **self-hosted Jira alternative** for the full lifecycle: intake → spec → design → development → testing → deploy → retrospective. The data plane stays on your hardware; inference runs through your choice of agent — [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [GitHub Copilot](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli), [OpenAI Codex](https://developers.openai.com/codex/cli), or [Ollama](https://ollama.com) for fully-local inference — picked per organization in setup.
+**Glideship** replaces sprint, scrum, and Jira ceremony with **Agent-Driven Development (ADD)** — twelve specialised AI agents handle the busywork (triage, specs, estimates, test plans, retrospectives) while humans keep the decisions that matter, and developers earn XP for the work that actually reaches production. It's a **self-hosted Jira alternative** for the full lifecycle: intake → spec → design → development → testing → deploy → retrospective. The data plane stays on your hardware; inference runs through your choice of agent — [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [GitHub Copilot](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli), [OpenAI Codex](https://developers.openai.com/codex/cli), or [Ollama](https://ollama.com) for fully-local inference — picked per organization in setup.
 
 > **Less process. More shipped.** The full methodology lives at [bodhiorchard.ai](https://bodhiorchard.ai/).
 
@@ -54,7 +54,7 @@ npm install && npm run setup && npm run dev
 
 → All three paths, the full `bodhiorchard` CLI command list, prerequisites, mode-switching, and a ready-made demo dataset: **[Deployment Guide](docs/deployment.md)**
 
-## Why Bodhiorchard
+## Why Glideship
 
 | | |
 |---|---|
@@ -67,7 +67,7 @@ npm install && npm run setup && npm run dev
 
 ### Old way vs Agent-Driven Development
 
-| Phase | Scrum / Agile | Bodhiorchard |
+| Phase | Scrum / Agile | Glideship |
 |---|---|---|
 | **Intake** | Jira ticket, manual triage, sprint planning | Slack message → Triage Agent interviews, dedupes, estimates |
 | **Estimation** | Story points, planning poker | Probabilistic per-phase dates with confidence intervals |
@@ -101,7 +101,7 @@ The gamification layer rebuilds developer skill profiles nightly — skills comp
 
 | | | | |
 |---|---|---|---|
-| ![Developer skill profile — rebuilt nightly](docs/images/skills-ui.webp) | ![Ship quality, earn XP, grow your tree](docs/images/gamification-ui.webp) | ![Leaderboard ranked by shipped value](docs/images/LeaderBoard-ui.webp) | ![Unlocks — do the work, unlock the world](docs/images/unlocks-ui.webp) |
+| ![Developer skill profile — rebuilt nightly](docs/images/skills-ui.webp) | ![Ship quality, earn XP, level up](docs/images/gamification-ui.webp) | ![Leaderboard ranked by shipped value](docs/images/LeaderBoard-ui.webp) | ![Unlocks — do the work, unlock the world](docs/images/unlocks-ui.webp) |
 
 And yes — your codebase is a living orchard. Repos as trees, features as fruit, your team walking the garden:
 
@@ -115,7 +115,7 @@ And yes — your codebase is a living orchard. Repos as trees, features as fruit
 
 ## People: leave, WFH and employee records
 
-The rest of the company can use Bodhiorchard too. HR and Sales staff get a People workspace with leave, the team calendar and their own details. Everything engineering is hidden from them in the UI and refused at the API, MCP, WebSocket and multiplayer layers.
+The rest of the company can use Glideship too. HR and Sales staff get a People workspace with leave, the team calendar and their own details. Everything engineering is hidden from them in the UI and refused at the API, MCP, WebSocket and multiplayer layers.
 
 - **Leave and work from home.** Balances per leave type, half days, optional holidays with a yearly quota, and backdating up to a limit HR sets. The request dialog counts working days, skipping weekends and holidays, before anything is sent.
 - **Loss of pay.** Leave past someone's balance is not refused. The extra days are marked unpaid, shown to the employee before they send the request and to the approver before they decide, and handed back if the request is cancelled or a holiday is added later.
@@ -205,7 +205,7 @@ shared/      World layout consumed by frontend + multiplayer
 examples/    TaskFlow demo repos (cross-repo feature detection)
 ```
 
-The agent layer is engine-independent: a per-org provider selector runs the agents through **Claude Code, GitHub Copilot, OpenAI Codex, or Ollama** — each org picks one in setup. The three CLIs reach the same tools via one STDIO MCP bridge; Ollama has no CLI, so it speaks HTTP and runs those same tools in-process. Adding an engine is a thin adapter, not a rewrite. A provider's limits are declared, not discovered: Ollama has no file access, so the features needing it are refused outright rather than answered from guesswork. Bodhiorchard also runs its own **MCP server** so any of those CLIs (or any MCP client) can drive the BUD lifecycle, query the code graph, and read team context.
+The agent layer is engine-independent: a per-org provider selector runs the agents through **Claude Code, GitHub Copilot, OpenAI Codex, or Ollama** — each org picks one in setup. The three CLIs reach the same tools via one STDIO MCP bridge; Ollama has no CLI, so it speaks HTTP and runs those same tools in-process. Adding an engine is a thin adapter, not a rewrite. A provider's limits are declared, not discovered: Ollama has no file access, so the features needing it are refused outright rather than answered from guesswork. Glideship also runs its own **MCP server** so any of those CLIs (or any MCP client) can drive the BUD lifecycle, query the code graph, and read team context.
 
 ## Documentation
 
@@ -222,9 +222,9 @@ The agent layer is engine-independent: a per-org provider selector runs the agen
 
 ### What is Agent-Driven Development?
 
-A methodology where specialised AI agents — not humans running status meetings — drive every phase of the software lifecycle, while humans review, decide, and steer. It sits in the slot Agile occupied in 2001: a reorganisation of work around new capabilities. The methodology is free to adopt with or without Bodhiorchard — see [bodhiorchard.ai](https://bodhiorchard.ai/).
+A methodology where specialised AI agents — not humans running status meetings — drive every phase of the software lifecycle, while humans review, decide, and steer. It sits in the slot Agile occupied in 2001: a reorganisation of work around new capabilities. The methodology is free to adopt with or without Glideship — see [bodhiorchard.ai](https://bodhiorchard.ai/).
 
-### Is Bodhiorchard a self-hosted Jira alternative?
+### Is Glideship a self-hosted Jira alternative?
 
 Yes — for the full workflow layer (intake through retrospective). It's especially relevant for teams affected by Atlassian sunsetting self-hosted Jira licences (new licences end March 2026, full shutdown 2029).
 
@@ -238,11 +238,11 @@ No — and you're not tied to Claude at all. Pick your agent CLI per organizatio
 
 ### How is this different from Cursor, Tabby, or Continue?
 
-Those are IDE-side coding assistants for an individual developer. Bodhiorchard is the orchestration and project-management layer above them — intake, specs, estimation, assignment, test plans, bug linking, retrospectives. Pair them freely.
+Those are IDE-side coding assistants for an individual developer. Glideship is the orchestration and project-management layer above them — intake, specs, estimation, assignment, test plans, bug linking, retrospectives. Pair them freely.
 
 ### How does it compare to GitHub Copilot Workspace?
 
-Copilot Workspace is cloud-only and GitHub-bound. Bodhiorchard is self-hosted, repo-agnostic (GitHub, GitLab, self-hosted Git), and AI-engine-agnostic.
+Copilot Workspace is cloud-only and GitHub-bound. Glideship is self-hosted, repo-agnostic (GitHub, GitLab, self-hosted Git), and AI-engine-agnostic.
 
 ### What does "BUD" mean?
 
@@ -276,11 +276,11 @@ if it isn't running, re-scans fall back to a direct scan.
 
 Contributions welcome — fork, branch, lint (`ruff` / `vue-tsc`), and open a PR. All commits need DCO sign-off (`git commit -s`); see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Why "Bodhiorchard"?
+## Why "Glideship"?
 
-**Bodhi** (Sanskrit: "awakening") is what the Buddha attained under the Bodhi tree. An **orchard** is a grove tended with intention so it can bear fruit. The software industry builds tools to make life better, yet the process of building them consumes our lives — ceremonies, status updates, and busywork that were meant to help but became the work itself.
+To **glide** is to move without effort; to **ship** is to put finished work in front of the people who need it. The software industry builds tools to make life better, yet the process of building them consumes our lives — ceremonies, status updates, and busywork that were meant to help but became the work itself.
 
-Bodhiorchard exists because **AI should give humans their time back**. The agents are the orchardists: they water, prune, and tend the soil so the trees can grow and the humans who planted them can step back and enjoy the harvest.
+Glideship exists because **AI should give humans their time back**. The agents carry the routine steps — specs, estimates, reviews, test plans — so work glides from idea to shipped, and the people who started it can spend their time on the decisions that matter.
 
 *Build well. Then go outside.*
 
@@ -294,8 +294,8 @@ Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 **Built by [Arun Rajkumar](https://github.com/mickyarun)**
 
-If Bodhiorchard helps your team, give it a ⭐ and spread the word.
+If Glideship helps your team, give it a ⭐ and spread the word.
 
-<sub>&copy; 2025-2026 Arun Rajkumar. Bodhiorchard&trade; is a trademark of Arun Rajkumar.<br>Independent open-source project — not affiliated with any employer or client.</sub>
+<sub>&copy; 2025-2026 Arun Rajkumar. Glideship is a trademark of Arun Rajkumar.<br>Independent open-source project — not affiliated with any employer or client.</sub>
 
 </div>

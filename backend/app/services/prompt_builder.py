@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Prompt builder for Bodhiorchard agent execution.
+"""Prompt builder for Glideship agent execution.
 
 Combines a skill definition, backlog item context, org knowledge, and repo
 information into a complete prompt for Claude Code CLI execution.
@@ -122,7 +122,7 @@ async def build_agent_prompt(
     sections.append("\n---\n\n## Instructions\n")
     sections.append(
         "Complete the task described above. Use the available MCP tools to read context "
-        "and write results back to Bodhiorchard. Update your task status when done."
+        "and write results back to Glideship. Update your task status when done."
     )
 
     prompt = "\n".join(sections)

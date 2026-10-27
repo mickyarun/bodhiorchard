@@ -102,7 +102,7 @@ defineProps<{
 }
 
 .kpi-value {
-  font-family: var(--font-display, 'Bricolage Grotesque', sans-serif);
+  font-family: var(--font-display, 'Geist', sans-serif);
   font-size: 2rem;
   font-weight: 600;
   line-height: 1.1;

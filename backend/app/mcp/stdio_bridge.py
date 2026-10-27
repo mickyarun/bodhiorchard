@@ -13,10 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""MCP stdio bridge — translates MCP JSON-RPC (stdio) to Bodhiorchard REST API calls.
+"""MCP stdio bridge — translates MCP JSON-RPC (stdio) to Glideship REST API calls.
 
 Claude Code spawns this script as a subprocess. It reads JSON-RPC requests
-from stdin, forwards tool calls to the Bodhiorchard backend via HTTP, and writes
+from stdin, forwards tool calls to the Glideship backend via HTTP, and writes
 JSON-RPC responses to stdout.
 
 Register with Claude Code CLI:
@@ -77,7 +77,7 @@ def _get_token() -> str:
 def _api_request(
     method: str, path: str, body: dict[str, Any] | None = None
 ) -> dict[str, Any] | list[dict[str, Any]]:
-    """Make an HTTP request to the Bodhiorchard backend.
+    """Make an HTTP request to the Glideship backend.
 
     Returns a structured error dict on HTTP failures (e.g. 401) so that
     Claude sees a clean MCP error instead of a raw exception traceback.
@@ -106,7 +106,7 @@ def _api_request(
 
 
 def _get_tools() -> list[dict[str, Any]]:
-    """Fetch tool definitions from the Bodhiorchard backend."""
+    """Fetch tool definitions from the Glideship backend."""
     _log("tools/list requested")
     tools = _api_request("GET", "/mcp/tools")
     if not isinstance(tools, list):
@@ -129,7 +129,7 @@ def _get_tools() -> list[dict[str, Any]]:
 
 
 def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Execute a tool call via the Bodhiorchard backend."""
+    """Execute a tool call via the Glideship backend."""
     _log(f"tools/call name={name}")
     result = _api_request("POST", f"/mcp/tools/{name}", {"params": arguments})
     if isinstance(result, list):
