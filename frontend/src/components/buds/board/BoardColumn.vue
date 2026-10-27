@@ -17,7 +17,7 @@
 <!-- One lifecycle stage on the board: a stage-coloured dot, the name and
      count, then its cards. -->
 <template>
-  <section class="board-column" :aria-label="`${label}, ${buds.length} BUDs`">
+  <section class="board-column" :aria-label="`${label}, ${buds.length === 1 ? '1 BUD' : `${buds.length} BUDs`}`">
     <header class="board-column__head">
       <span class="board-column__dot" :style="{ background: `rgb(var(--v-theme-${BUD_STATUS_COLORS[status]}))` }" />
       <h2 class="board-column__name">{{ label }}</h2>

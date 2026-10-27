@@ -33,6 +33,7 @@
       :team-options="teamOptions"
       :can-create="canCreateBuds"
       :can-configure="canViewQAAutomation"
+      :can-manage-teams="canManageMembers"
       @new-bud="showCreateDialog = true"
     />
 
@@ -86,18 +87,19 @@ import YieldOfferNotice from '@/components/buds/YieldOfferNotice.vue'
 import BoardColumn from '@/components/buds/board/BoardColumn.vue'
 import BoardHeader from '@/components/buds/board/BoardHeader.vue'
 import { useBudBoard } from '@/composables/useBudBoard'
+import { useNow } from '@/composables/useNow'
 import { usePermissions } from '@/composables/usePermissions'
 
 const {
   budStore, query, assignee, priority, team, sortByPriority, showDiscarded,
   priorityOptions, assignees, teamOptions, columns, budsByColumn, shownCount, filtering,
 } = useBudBoard()
-const { canViewQAAutomation, canCreateBuds, canEditBuds } = usePermissions()
+const { canViewQAAutomation, canCreateBuds, canEditBuds, canManageMembers } = usePermissions()
 
 const showCreateDialog = ref(false)
 const restoreDialog = ref<InstanceType<typeof BUDRestoreDialog> | null>(null)
-// Card ages and deadline colours are relative to when the board opened.
-const now = new Date()
+// Card ages and deadline colours; ticks each minute so they don't go stale.
+const now = useNow()
 </script>
 
 <style scoped>

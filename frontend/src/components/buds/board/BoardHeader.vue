@@ -35,14 +35,12 @@
     <div class="board-header__filters">
       <BoardFilterMenu v-model="assignee" label="Assignee" all-label="All assignees" :options="assigneeOptions" />
       <BoardFilterMenu v-model="priority" label="Priority" all-label="All priorities" :options="priorityOptions" />
-      <BoardFilterMenu
-        v-model="team"
-        label="Team"
-        all-label="All teams"
-        :options="teamOptions"
-        :disabled="teamOptions.length === 0"
-        disabled-hint="No teams yet. Add them in Settings, Teams."
-      />
+      <BoardFilterMenu v-if="teamOptions.length" v-model="team" label="Team" all-label="All teams" :options="teamOptions" />
+      <!-- No teams to filter by yet: say so, and point admins at where they're made. -->
+      <span v-else class="board-header__hint">
+        No teams yet<template v-if="canManageTeams">.
+          <router-link :to="{ name: 'members', query: { tab: 'teams' } }">Set up teams</router-link></template>
+      </span>
     </div>
     <div class="board-header__tools">
       <v-btn
@@ -94,6 +92,7 @@ const props = defineProps<{
   teamOptions: FilterOption[]
   canCreate: boolean
   canConfigure: boolean
+  canManageTeams: boolean
 }>()
 
 const emit = defineEmits<{ 'new-bud': [] }>()
@@ -139,6 +138,17 @@ const countLabel = computed(() => {
 .board-header__search {
   flex: 0 1 260px;
   min-width: 200px;
+}
+.board-header__hint {
+  font-size: 13px;
+  color: rgb(var(--v-theme-on-surface-variant));
+}
+.board-header__hint a {
+  color: var(--color-accent-text);
+  text-decoration: none;
+}
+.board-header__hint a:hover {
+  text-decoration: underline;
 }
 .board-header__filters,
 .board-header__tools {

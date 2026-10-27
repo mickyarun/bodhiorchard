@@ -16,6 +16,7 @@
 // assignee dropdown, and the per-card status lines.
 
 import { BUD_PRIORITY_WEIGHTS, type BUDListItem, type BUDPriority } from '@/types'
+import { formatShortDate } from '@/utils/date'
 
 const DAY_MS = 86_400_000
 
@@ -111,10 +112,6 @@ export function deadlineTone(deadline: string, now: Date): StatusTone {
   return 'muted'
 }
 
-function shortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
 /**
  * The status lines a board card shows, from the data the list endpoint
  * carries: the current stage's deadline, then when it closed, was
@@ -124,16 +121,16 @@ export function cardStatusLines(bud: BUDListItem, now: Date): CardStatusLine[] {
   const lines: CardStatusLine[] = []
   if (bud.current_phase_deadline) {
     lines.push({
-      text: `Stage due ${shortDate(bud.current_phase_deadline)}`,
+      text: `Stage due ${formatShortDate(bud.current_phase_deadline)}`,
       tone: deadlineTone(bud.current_phase_deadline, now),
     })
   }
   if (bud.status === 'closed') {
-    lines.push({ text: `Released ${shortDate(bud.updated_at)}`, tone: 'success' })
+    lines.push({ text: `Released ${formatShortDate(bud.updated_at)}`, tone: 'success' })
   } else if (bud.status === 'discarded') {
-    lines.push({ text: `Discarded ${shortDate(bud.updated_at)}`, tone: 'error' })
+    lines.push({ text: `Discarded ${formatShortDate(bud.updated_at)}`, tone: 'error' })
   } else if (bud.prod_p70_date) {
-    lines.push({ text: `Live by ${shortDate(bud.prod_p70_date)} · 70% likely`, tone: 'muted' })
+    lines.push({ text: `Live by ${formatShortDate(bud.prod_p70_date)} · 70% likely`, tone: 'muted' })
   }
   return lines
 }

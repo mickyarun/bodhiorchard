@@ -51,3 +51,11 @@ export function formatDate(iso: string | null | undefined): string {
     year: 'numeric',
   })
 }
+
+/** Month and day only, e.g. "Oct 27". Empty string for null; the raw string if unparseable. */
+export function formatShortDate(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}

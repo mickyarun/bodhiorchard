@@ -48,7 +48,7 @@
         v-if="bud.open_bug_count > 0"
         :to="`/bugs?budId=${bud.id}`"
         class="board-card__bugs"
-        :aria-label="`${bud.open_bug_count} open bugs`"
+        :aria-label="bud.open_bug_count === 1 ? '1 open bug' : `${bud.open_bug_count} open bugs`"
       >
         <v-icon icon="mdi-bug-outline" size="14" />{{ bud.open_bug_count }}
       </router-link>
