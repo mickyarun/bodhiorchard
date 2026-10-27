@@ -14,57 +14,46 @@
  * limitations under the License.
  -->
 
+<!-- Forced password change after signing in with a temporary password,
+     in the shared signed-out frame (AuthShell). -->
 <template>
-  <div class="setup-gradient d-flex flex-column" style="min-height: 100vh;">
-    <v-container class="d-flex flex-column align-center justify-center flex-grow-1 py-8">
-      <v-card color="surface" class="pa-8 w-100" max-width="420">
-        <div class="text-h5 font-weight-bold bo-display mb-1 text-center">Change Password</div>
-        <div class="text-body-2 text-medium-emphasis text-center mb-6">
-          Your password must be changed before you can continue.
-        </div>
+  <AuthShell
+    title="Change your password"
+    lede="Your password must be changed before you can continue."
+  >
+    <AppCallout v-if="errorMsg" variant="error" role="alert">
+      {{ errorMsg }}
+    </AppCallout>
 
-        <v-alert v-if="errorMsg" type="error" variant="tonal" density="compact" class="mb-4">
-          {{ errorMsg }}
-        </v-alert>
-
-        <v-form @submit.prevent="handleSubmit">
-          <PasswordField
-            v-model="newPassword"
-            label="New password"
-            prepend-inner-icon="mdi-lock-outline"
-            autocomplete="new-password"
-            density="compact"
-            variant="outlined"
-            class="mb-3"
-            autofocus
-            :rules="[(v: string) => v.length >= 8 || 'Min 8 characters']"
-          />
-
-          <PasswordField
-            v-model="confirmPassword"
-            label="Confirm password"
-            prepend-inner-icon="mdi-lock-check-outline"
-            autocomplete="new-password"
-            density="compact"
-            variant="outlined"
-            class="mb-4"
-            :rules="[(v: string) => v === newPassword || 'Passwords do not match']"
-          />
-
-          <v-btn
-            type="submit"
-            color="primary"
-            block
-            size="large"
-            :loading="loading"
-            :disabled="!canSubmit"
-          >
-            Set New Password
-          </v-btn>
-        </v-form>
-      </v-card>
-    </v-container>
-  </div>
+    <v-form class="change-password-form" @submit.prevent="handleSubmit">
+      <PasswordField
+        v-model="newPassword"
+        label="New password"
+        hint="At least 8 characters"
+        persistent-hint
+        autocomplete="new-password"
+        autofocus
+        :rules="[(v: string) => v.length >= 8 || 'Min 8 characters']"
+      />
+      <PasswordField
+        v-model="confirmPassword"
+        label="Confirm password"
+        autocomplete="new-password"
+        :rules="[(v: string) => v === newPassword || 'Passwords do not match']"
+      />
+      <v-btn
+        type="submit"
+        color="primary"
+        variant="flat"
+        block
+        size="large"
+        :loading="loading"
+        :disabled="!canSubmit"
+      >
+        Set new password
+      </v-btn>
+    </v-form>
+  </AuthShell>
 </template>
 
 <script setup lang="ts">
@@ -72,7 +61,9 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { afterSignIn } from '@/utils/afterSignIn'
+import AppCallout from '@/components/common/AppCallout.vue'
 import PasswordField from '@/components/common/PasswordField.vue'
+import AuthShell from '@/components/auth/AuthShell.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -106,3 +97,11 @@ async function handleSubmit() {
   }
 }
 </script>
+
+<style scoped>
+.change-password-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+</style>
