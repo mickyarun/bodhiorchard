@@ -16,7 +16,7 @@
  *  after approval when the request falls in another leave year. */
 import type { ApprovalItem, LastLeave } from '@/types/leave'
 import { pluralDays, toNumber, toNumberOrNull } from '@/utils/leave'
-import { formatDayRange, parseIsoDate } from '@/utils/leaveDates'
+import { formatDayRange, parseIsoDate, toIsoDate } from '@/utils/leaveDates'
 
 const DAY_MS = 86_400_000
 
@@ -54,4 +54,18 @@ export function inBalanceYear(item: ApprovalItem): boolean {
  */
 export function otherYearBalanceAfter(item: ApprovalItem): number | null {
   return inBalanceYear(item) ? null : toNumberOrNull(item.balance_after)
+}
+
+/** When a request was sent, from its `created_at` timestamp, counted in
+ *  local days: "2 days ago". */
+export function sentAgo(createdAt: string, today: Date): string {
+  return timeAgo(toIsoDate(new Date(createdAt)), today)
+}
+
+/** "6 requests waiting on you · oldest sent 2 days ago", or '' when none. */
+export function queueSummary(items: ApprovalItem[], today: Date): string {
+  if (!items.length) return ''
+  const count = `${items.length} ${items.length === 1 ? 'request' : 'requests'} waiting on you`
+  const oldest = items.reduce((min, i) => (i.request.created_at < min ? i.request.created_at : min), items[0].request.created_at)
+  return `${count} · oldest sent ${sentAgo(oldest, today)}`
 }

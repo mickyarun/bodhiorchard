@@ -19,7 +19,7 @@
      already under way keeps its start: only the end moves, or the rest is
      withdrawn. The requester is told either way. -->
 <template>
-  <div class="mt-4">
+  <div>
     <template v-if="mode === 'move'">
       <div class="date-grid">
         <v-text-field v-model="start" label="From" type="date" :disabled="started" v-bind="field" />
@@ -50,16 +50,16 @@
       v-bind="field"
     />
     <AppCallout v-if="error" variant="error" class="mt-3">{{ error }}</AppCallout>
-    <div class="d-flex justify-end flex-wrap ga-2 mt-3">
+    <div class="d-flex justify-end flex-wrap ga-2" :class="{ 'mt-3': mode }">
       <template v-if="mode">
         <v-btn variant="text" @click="close">Back</v-btn>
-        <v-btn v-if="mode === 'move'" color="primary" variant="tonal" :loading="busy" @click="submitMove">
+        <v-btn v-if="mode === 'move'" color="primary" variant="flat" :loading="busy" @click="submitMove">
           Save new dates
         </v-btn>
         <v-btn
           v-else
           color="error"
-          variant="tonal"
+          variant="outlined"
           :loading="busy"
           :disabled="!note.trim()"
           @click="submitWithdraw"

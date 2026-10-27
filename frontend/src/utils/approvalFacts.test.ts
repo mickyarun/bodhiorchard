@@ -15,7 +15,14 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ApprovalItem, Balance } from '@/types/leave'
-import { inBalanceYear, lastLeaveLine, otherYearBalanceAfter, timeAgo } from '@/utils/approvalFacts'
+import {
+  inBalanceYear,
+  lastLeaveLine,
+  otherYearBalanceAfter,
+  queueSummary,
+  sentAgo,
+  timeAgo,
+} from '@/utils/approvalFacts'
 
 // Wednesday 21 October 2026, mid-morning local time.
 const TODAY = new Date(2026, 9, 21, 10, 30)
@@ -73,5 +80,28 @@ describe('otherYearBalanceAfter', () => {
   it('has nothing to say for unlimited types or requests without a figure', () => {
     expect(otherYearBalanceAfter(item(null, 2027))).toBeNull()
     expect(inBalanceYear(item(null, null))).toBe(true)
+  })
+})
+
+describe('sentAgo', () => {
+  it('counts local days from a timestamp', () => {
+    expect(sentAgo(new Date(2026, 9, 19, 23, 50).toISOString(), TODAY)).toBe('2 days ago')
+    expect(sentAgo(new Date(2026, 9, 21, 8, 0).toISOString(), TODAY)).toBe('today')
+  })
+})
+
+describe('queueSummary', () => {
+  function sent(at: Date): ApprovalItem {
+    return { request: { created_at: at.toISOString() } } as ApprovalItem
+  }
+
+  it('counts the queue and says how old the oldest request is', () => {
+    const items = [sent(new Date(2026, 9, 20, 9)), sent(new Date(2026, 9, 16, 9)), sent(new Date(2026, 9, 21, 9))]
+    expect(queueSummary(items, TODAY)).toBe('3 requests waiting on you · oldest sent 5 days ago')
+  })
+
+  it('uses the singular, and is empty for an empty queue', () => {
+    expect(queueSummary([sent(new Date(2026, 9, 21, 9))], TODAY)).toBe('1 request waiting on you · oldest sent today')
+    expect(queueSummary([], TODAY)).toBe('')
   })
 })

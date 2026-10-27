@@ -15,52 +15,62 @@
  -->
 
 <!-- Leave approvals: requests from the caller's reports, plus the HR
-     queue for holders of leave:approve. -->
+     queue for holders of leave:approve. A list beside the selected request
+     on wide screens; on narrow ones the request opens under its row. -->
 <template>
-  <div class="pa-6 approvals">
-    <div class="d-flex align-start justify-space-between flex-wrap ga-3 mb-6">
-      <div>
-        <h1 class="text-h5 font-weight-bold bo-display">Leave approvals</h1>
-        <p class="text-body-2 text-medium-emphasis">
-          Approve or reject leave and work-from-home requests.
-        </p>
-      </div>
-      <AppPillToggle :model-value="store.status" :options="TABS" @update:model-value="store.fetch" />
-    </div>
+  <LeavePage title="Approvals" :subtitle="subtitle">
+    <template #actions>
+      <AppPillToggle :model-value="store.status" :options="TABS" aria-label="Show" @update:model-value="store.fetch" />
+    </template>
 
-    <ApprovalFilters class="mb-4" />
-    <v-progress-linear v-if="store.loading" indeterminate color="primary" class="mb-4" />
-    <AppCallout v-if="store.error" variant="error" class="mb-4">{{ store.error }}</AppCallout>
-    <AppCallout v-if="store.notice" variant="info" class="mb-4">{{ store.notice }}</AppCallout>
+    <ApprovalFilters />
+    <v-progress-linear v-if="store.loading" indeterminate color="primary" />
+    <AppCallout v-if="store.error" variant="error">{{ store.error }}</AppCallout>
+    <AppCallout v-if="store.notice" variant="info">{{ store.notice }}</AppCallout>
+    <AppCallout v-if="showLimitHint" variant="info">
+      Showing the latest {{ store.items.length }} decisions.
+      {{ dated ? 'Narrow the dates or filters to see the rest.' : 'Pick dates to find older ones.' }}
+    </AppCallout>
 
     <div v-if="!store.loading && !store.error && !store.items.length" class="empty">
-      <v-icon icon="mdi-check-all" size="32" color="success" />
-      <div class="text-body-1 font-weight-medium mt-2">
-        {{ emptyTitle }}
-      </div>
-      <div class="text-body-2 text-medium-emphasis">
+      <div class="empty__title">{{ emptyTitle }}</div>
+      <div class="empty__text">
         {{ store.status === 'pending' ? 'New requests show here.' : 'Requests approved or rejected recently show here.' }}
       </div>
     </div>
 
-    <AppCallout v-if="showLimitHint" variant="info" class="mb-4">
-      Showing the latest {{ store.items.length }} decisions.
-      {{ dated ? 'Narrow the dates or filters to see the rest.' : 'Pick dates to find older ones.' }}
-    </AppCallout>
-    <div class="d-flex flex-column ga-3">
-      <ApprovalCard v-for="item in store.items" :key="item.request.id" :item="item" />
+    <div v-if="store.items.length" class="queue">
+      <section class="queue__list" aria-label="Requests">
+        <ul>
+          <li v-for="item in store.items" :key="item.request.id">
+            <ApprovalQueueItem
+              :item="item"
+              :selected="isOpen(item)"
+              :controls="narrow ? `approval-${item.request.id}` : null"
+              @select="select(item)"
+            />
+            <ApprovalCard v-if="narrow && isOpen(item)" :id="`approval-${item.request.id}`" :item="item" class="queue__inline" />
+          </li>
+        </ul>
+      </section>
+      <ApprovalCard v-if="!narrow && current" :key="current.request.id" :item="current" />
     </div>
-  </div>
+  </LeavePage>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useDisplay } from 'vuetify'
 import AppCallout from '@/components/common/AppCallout.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import ApprovalCard from '@/components/leave/ApprovalCard.vue'
 import ApprovalFilters from '@/components/leave/ApprovalFilters.vue'
+import ApprovalQueueItem from '@/components/leave/ApprovalQueueItem.vue'
+import LeavePage from '@/components/leave/LeavePage.vue'
 import { useDebounced } from '@/composables/useDebounced'
 import { type ApprovalTab, useLeaveApprovalsStore } from '@/stores/leaveApprovals'
+import type { ApprovalItem } from '@/types/leave'
+import { queueSummary } from '@/utils/approvalFacts'
 
 const store = useLeaveApprovalsStore()
 // Before the filter bar sets up, so it never shows another viewer's picks.
@@ -69,6 +79,31 @@ const TABS: { label: string; value: ApprovalTab }[] = [
   { label: 'Pending', value: 'pending' },
   { label: 'Decided', value: 'decided' },
 ]
+
+// Below this the sidebar leaves too little room for the list beside a request.
+const NARROW_BELOW_PX = 1180
+const { width } = useDisplay()
+const narrow = computed(() => width.value < NARROW_BELOW_PX)
+
+// Wide screens always show one request, the first by default; narrow ones
+// open a request only when its row is tapped, and tapping again closes it.
+const selectedId = ref<string | null>(null)
+const current = computed(
+  () => store.items.find(i => i.request.id === selectedId.value) ?? store.items[0] ?? null,
+)
+function isOpen(item: ApprovalItem): boolean {
+  return narrow.value ? item.request.id === selectedId.value : item === current.value
+}
+function select(item: ApprovalItem): void {
+  const id = item.request.id
+  selectedId.value = narrow.value && selectedId.value === id ? null : id
+}
+
+const subtitle = computed(() => {
+  if (store.status === 'decided') return 'Requests decided recently, newest first.'
+  if (store.error || (store.loading && !store.items.length)) return ''
+  return queueSummary(store.items, new Date()) || 'Nothing is waiting on you.'
+})
 
 const filtered = computed(() => Object.values(store.filters).some(Boolean))
 const emptyTitle = computed(() => {
@@ -98,11 +133,46 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.approvals {
-  max-width: 1120px;
+.queue {
+  display: grid;
+  grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.queue__list {
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid rgb(var(--v-theme-rule));
+  border-radius: 12px;
+  overflow: hidden;
+  min-width: 0;
+}
+.queue__list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.queue__list li + li {
+  border-top: 1px solid var(--color-rule-2);
+}
+.queue__inline {
+  border-width: 1px 0 0;
+  border-radius: 0;
 }
 .empty {
   text-align: center;
   padding: 48px 16px;
+}
+.empty__title {
+  font-size: var(--text-base);
+  font-weight: 500;
+}
+.empty__text {
+  font-size: var(--text-sm);
+  color: rgb(var(--v-theme-on-surface-variant));
+}
+@media (max-width: 1179px) {
+  .queue {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>
