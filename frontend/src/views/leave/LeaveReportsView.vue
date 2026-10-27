@@ -18,58 +18,49 @@
      filters and CSV export. HR and the owner see everyone; managers see
      their direct reports. Reasons never appear here. -->
 <template>
-  <div class="pa-6 reports">
-    <div class="d-flex align-start justify-space-between flex-wrap ga-3 mb-4">
-      <div>
-        <h1 class="text-h5 font-weight-bold bo-display">Leave reports</h1>
-        <p v-if="store.scope" class="text-body-2 text-medium-emphasis">
-          {{ store.scope.all ? 'Everyone in the organisation.' : 'Your direct reports.' }}
-        </p>
-      </div>
-      <div class="d-flex align-center ga-3">
-        <AppPillToggle v-model="store.report" :options="REPORTS" />
-        <v-btn
-          color="primary"
-          variant="tonal"
-          prepend-icon="mdi-download"
-          :loading="store.exporting"
-          :disabled="store.noAccess"
-          @click="exportCsv"
-        >
-          Export CSV
-        </v-btn>
-      </div>
-    </div>
+  <LeavePage title="Leave reports" :subtitle="subtitle">
+    <template #actions>
+      <AppPillToggle v-model="store.report" :options="REPORTS" aria-label="Report" />
+      <v-btn
+        variant="outlined"
+        prepend-icon="mdi-download"
+        :loading="store.exporting"
+        :disabled="store.noAccess"
+        @click="exportCsv"
+      >
+        Export CSV
+      </v-btn>
+    </template>
 
     <div v-if="store.noAccess" class="empty">
-      <v-icon icon="mdi-file-chart-outline" size="32" color="primary" />
-      <div class="text-body-1 font-weight-medium mt-2">No reports for you yet</div>
-      <div class="text-body-2 text-medium-emphasis">
+      <div class="empty__title">No reports for you yet</div>
+      <div class="empty__text">
         Leave reports show the leave of the people who report to you, or everyone's for HR.
       </div>
     </div>
     <template v-else>
-      <ReportFilterBar class="mb-4" />
-      <AppCallout v-if="store.scopeError" variant="error" class="mb-4">
+      <ReportFilterBar />
+      <AppCallout v-if="store.scopeError" variant="error">
         {{ store.scopeError }} Reload the page to pick people, offices or policies.
       </AppCallout>
-      <AppCallout v-if="store.error || exportError" variant="error" class="mb-4">
+      <AppCallout v-if="store.error || exportError" variant="error">
         {{ exportError || store.error }}
       </AppCallout>
-      <v-card color="surface" rounded="lg">
+      <section class="report" :aria-label="REPORT_LABELS[store.report]">
         <v-progress-linear v-if="store.loading" indeterminate color="primary" />
         <ReportSummaryTable v-if="store.report === 'summary'" :report="store.summary" />
         <ReportRegisterTable v-else-if="store.report === 'register'" :report="store.register" />
         <ReportBalancesTable v-else :report="store.balances" />
-      </v-card>
+      </section>
     </template>
-  </div>
+  </LeavePage>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
+import LeavePage from '@/components/leave/LeavePage.vue'
 import ReportBalancesTable from '@/components/leave/reports/ReportBalancesTable.vue'
 import ReportFilterBar from '@/components/leave/reports/ReportFilterBar.vue'
 import ReportRegisterTable from '@/components/leave/reports/ReportRegisterTable.vue'
@@ -84,7 +75,17 @@ const REPORTS: { label: string; value: ReportName }[] = [
   { label: 'Balances', value: 'balances' },
 ]
 
+const REPORT_LABELS: Record<ReportName, string> = {
+  summary: 'Leave taken by person',
+  register: 'Every request',
+  balances: 'Balances by person and type',
+}
+
 const store = useLeaveReportsStore()
+const subtitle = computed(() => {
+  if (!store.scope) return ''
+  return store.scope.all ? 'Everyone in the organisation.' : 'Your direct reports.'
+})
 const exportError = ref('')
 
 // Typing a custom date or picking several filters sends one request, not many.
@@ -112,11 +113,36 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.reports {
-  max-width: 1400px;
+.report {
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid rgb(var(--v-theme-rule));
+  border-radius: 12px;
+  overflow: hidden;
+  min-width: 0;
+}
+.report :deep(.v-table) {
+  background: transparent;
+}
+.report :deep(.v-table__wrapper > table > thead > tr > th) {
+  background: rgb(var(--v-theme-background));
+  font-size: 12px;
+  font-weight: 600;
+  color: rgb(var(--v-theme-on-surface-variant));
+  white-space: nowrap;
+}
+.report :deep(.v-table__wrapper > table > tbody) {
+  font-variant-numeric: tabular-nums;
 }
 .empty {
   text-align: center;
   padding: 48px 16px;
+}
+.empty__title {
+  font-size: var(--text-base);
+  font-weight: 500;
+}
+.empty__text {
+  font-size: var(--text-sm);
+  color: rgb(var(--v-theme-on-surface-variant));
 }
 </style>

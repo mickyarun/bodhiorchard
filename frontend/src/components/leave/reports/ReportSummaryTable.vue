@@ -28,15 +28,15 @@
     <template #[`item.name`]="{ item }"><ReportPersonCell :row="item" /></template>
     <template v-for="(t, i) in report?.leave_types ?? []" :key="t.key" #[`item.type_${i}`]="{ item }">
       <template v-if="t.key in item.left_by_type">
-        <div class="taken">{{ formatDays(toNumber(item.leave_by_type[t.key])) }}</div>
+        <div class="taken" :class="tone(item.leave_by_type[t.key])">{{ formatDays(toNumber(item.leave_by_type[t.key])) }}</div>
         <div class="left text-caption" :class="leftTone(item.left_by_type[t.key])">
           {{ leftLabel(item.left_by_type[t.key]) }}
         </div>
       </template>
-      <template v-else>{{ days(item.leave_by_type[t.key]) }}</template>
+      <span v-else :class="tone(item.leave_by_type[t.key])">{{ days(item.leave_by_type[t.key]) }}</span>
     </template>
     <template #[`item.leave_days`]="{ item }">
-      <div class="taken">{{ days(item.leave_days) }}</div>
+      <div class="taken" :class="tone(item.leave_days)">{{ days(item.leave_days) }}</div>
       <div
         v-if="item.high_leave"
         class="left text-caption"
@@ -47,11 +47,19 @@
       </div>
     </template>
     <template #[`item.lop_days`]="{ item }">
-      <span :class="{ 'text-warning': toNumber(item.lop_days) > 0 }">{{ days(item.lop_days) }}</span>
+      <span :class="toNumber(item.lop_days) > 0 ? 'text-warning' : 'zero'">{{ days(item.lop_days) }}</span>
     </template>
-    <template #[`item.wfh_days`]="{ item }">{{ days(item.wfh_days) }}</template>
-    <template #[`item.optional_holidays`]="{ item }">{{ days(item.optional_holidays) }}</template>
-    <template #[`item.pending_days`]="{ item }">{{ days(item.pending_days) }}</template>
+    <template #[`item.wfh_days`]="{ item }"><span :class="tone(item.wfh_days)">{{ days(item.wfh_days) }}</span></template>
+    <template #[`item.optional_holidays`]="{ item }">
+      <span :class="tone(item.optional_holidays)">{{ days(item.optional_holidays) }}</span>
+    </template>
+    <template #[`item.pending_days`]="{ item }"><span :class="tone(item.pending_days)">{{ days(item.pending_days) }}</span></template>
+    <template #[`body.append`]>
+      <tr v-if="report?.rows.length" class="totals">
+        <th scope="row">Total</th>
+        <td v-for="h in headers.slice(1)" :key="h.key" class="text-end">{{ days(totals[h.key]) }}</td>
+      </tr>
+    </template>
     <template #no-data><div class="pa-4 text-medium-emphasis">Nobody to show for these filters.</div></template>
   </v-data-table>
 </template>
@@ -63,6 +71,7 @@ import type { Decimalish } from '@/types/leave'
 import type { SummaryReport } from '@/types/leaveReports'
 import { highLeaveForOthers, highLeaveShort } from '@/utils/highLeave'
 import { formatDays, toNumber } from '@/utils/leave'
+import { summaryTotals } from '@/utils/leaveReportTotals'
 
 const props = defineProps<{ report: SummaryReport | null }>()
 
@@ -91,6 +100,13 @@ function leftTone(value: Decimalish | null | undefined): string {
   return toNumber(value) <= 0 ? 'text-warning' : 'text-medium-emphasis'
 }
 
+const totals = computed(() => summaryTotals(props.report))
+
+/** Zero days are a quiet dash. */
+function tone(value: Decimalish | undefined): string {
+  return toNumber(value) ? '' : 'zero'
+}
+
 function days(value: Decimalish | undefined): string {
   const n = toNumber(value)
   return n ? formatDays(n) : '–'
@@ -108,6 +124,20 @@ function days(value: Decimalish | undefined): string {
 }
 .taken {
   font-weight: 600;
+}
+.zero {
+  color: rgb(var(--v-theme-on-surface-variant));
+  font-weight: 400;
+}
+.totals th,
+.totals td {
+  font-weight: 600;
+  border-top: 2px solid rgb(var(--v-theme-rule));
+  background: rgb(var(--v-theme-background));
+}
+.totals th {
+  text-align: left;
+  padding: 0 16px;
 }
 .left {
   white-space: nowrap;
