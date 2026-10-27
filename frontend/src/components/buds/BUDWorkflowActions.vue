@@ -71,7 +71,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useBUDStore } from '@/stores/bud'
 import { useJobSocket } from '@/composables/useJobSocket'
 import { subscribe, unsubscribe } from '@/services/socket'
@@ -420,6 +420,10 @@ function stopAgentActivity(): void {
   currentActivityBudId = null
   clearWatchdog()
 }
+
+// Leaving the page, or the BUD this instance was mounted for, must drop
+// the agent_activity subscription; the parent's ref is gone by unmount.
+onBeforeUnmount(stopAgentActivity)
 
 defineExpose({
   agentGenerating,

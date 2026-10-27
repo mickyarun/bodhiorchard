@@ -306,6 +306,7 @@
 </template>
 
 <script setup lang="ts">
+import { copyText } from '@/utils/clipboard'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useBudActivity } from '@/composables/useBudActivity'
 import { useSettingsStore } from '@/stores/settings'
@@ -395,8 +396,7 @@ async function executeAddRepo(): Promise<void> {
 }
 
 async function copyBranchName(): Promise<void> {
-  const name = `bud-${String(props.budNumber || 0).padStart(3, '0')}/`
-  await navigator.clipboard.writeText(name)
+  if (!(await copyText(branchPrefix(props.budNumber)))) return
   branchCopied.value = true
   setTimeout(() => {
     branchCopied.value = false

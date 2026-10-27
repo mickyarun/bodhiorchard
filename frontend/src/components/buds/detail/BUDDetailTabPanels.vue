@@ -23,12 +23,12 @@
       <v-tabs-window-item value="requirements">
         <BUDRequirementsTab
           :bud="bud"
-          :editing="editingRequirements"
+          :editing="requirementsEditing"
           :edit-value="requirementsDraft"
           :agent-locked="agentLocked"
           @update:edit-value="requirementsDraft = $event"
-          @save="emit('save-requirements')"
-          @start-edit="emit('edit-requirements')"
+          @save="requirements.save"
+          @start-edit="requirements.toggle"
           @enrich="emit('enrich')"
           @features-changed="emit('timeline-changed')"
         />
@@ -51,11 +51,11 @@
       <v-tabs-window-item value="tech-spec">
         <BUDTechSpecTab
           :bud="bud"
-          :editing="editingTechSpec"
+          :editing="techSpecEditing"
           :edit-value="techSpecDraft"
           @update:edit-value="techSpecDraft = $event"
-          @save="emit('save-tech-spec')"
-          @start-edit="emit('edit-tech-spec')"
+          @save="techSpec.save"
+          @start-edit="techSpec.toggle"
           @generate="emit('open-tech-spec-chat')"
           @refresh-bud="refreshBud"
         />
@@ -137,13 +137,17 @@ import BUDTodoBoard from '@/components/buds/BUDTodoBoard.vue'
 import LearningsPanel from '@/components/buds/LearningsPanel.vue'
 import BUDCodeReviewTab from './BUDCodeReviewTab.vue'
 import { useBudReleaseBranches } from '@/composables/useBudReleaseBranches'
+import type { useMarkdownSection } from '@/composables/useMarkdownSection'
 import { useBUDStore } from '@/stores/bud'
 import type { BUDDocument, TimelineEvent } from '@/types'
 
+type MarkdownEditor = ReturnType<typeof useMarkdownSection>
+
 const props = defineProps<{
   bud: BUDDocument
-  editingRequirements: boolean
-  editingTechSpec: boolean
+  /** The page's Requirements and Tech spec editors (one instance each for the page's life). */
+  requirements: MarkdownEditor
+  techSpec: MarkdownEditor
   agentLocked: boolean
   uatEnabled: boolean
   isClosed: boolean
@@ -154,11 +158,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'save-requirements': []
-  'edit-requirements': []
   enrich: []
-  'save-tech-spec': []
-  'edit-tech-spec': []
   'open-tech-spec-chat': []
   'chat-message': [message: { role: 'ai'; text: string }]
   'design-tab-change': []
@@ -169,8 +169,9 @@ const emit = defineEmits<{
 }>()
 
 const tab = defineModel<string>('tab', { required: true })
-const requirementsDraft = defineModel<string>('requirementsDraft', { required: true })
-const techSpecDraft = defineModel<string>('techSpecDraft', { required: true })
+// Stable refs from the page's editors, so destructuring keeps reactivity.
+const { editing: requirementsEditing, editValue: requirementsDraft } = props.requirements
+const { editing: techSpecEditing, editValue: techSpecDraft } = props.techSpec
 
 const budStore = useBUDStore()
 const designPanel = ref<InstanceType<typeof BUDDesignPanel> | null>(null)

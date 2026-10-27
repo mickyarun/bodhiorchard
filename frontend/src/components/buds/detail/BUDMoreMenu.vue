@@ -40,7 +40,7 @@
           :key="s.value"
           :title="s.title"
           :active="status === s.value"
-          :disabled="agentLocked"
+          :disabled="agentLocked || changingStatus || !canMoveTo(s.value)"
           @click="emit('update-status', s.value)"
         />
       </template>
@@ -48,10 +48,12 @@
       <v-list-item prepend-icon="mdi-tune-variant" :disabled="isClosed" @click="emit('open-skill-settings')">
         <v-list-item-title>AI skills</v-list-item-title>
       </v-list-item>
-      <v-divider class="my-1" />
-      <v-list-item base-color="error" prepend-icon="mdi-delete-outline" :disabled="agentLocked" @click="emit('delete')">
-        <v-list-item-title>Delete BUD</v-list-item-title>
-      </v-list-item>
+      <template v-if="canDelete">
+        <v-divider class="my-1" />
+        <v-list-item base-color="error" prepend-icon="mdi-delete-outline" :disabled="agentLocked" @click="emit('delete')">
+          <v-list-item-title>Delete BUD</v-list-item-title>
+        </v-list-item>
+      </template>
     </v-list>
   </v-menu>
 </template>
@@ -64,7 +66,10 @@ defineProps<{
   statusItems: ReadonlyArray<{ title: string; value: BUDStatus }>
   isClosed: boolean
   agentLocked: boolean
+  changingStatus: boolean
   canEditBuds: boolean
+  canMoveTo: (status: BUDStatus) => boolean
+  canDelete: boolean
 }>()
 
 const emit = defineEmits<{

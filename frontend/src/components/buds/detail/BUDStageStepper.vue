@@ -134,9 +134,24 @@ const steps = computed(() => stageSteps(props.phaseOrder, props.status))
     min-width: 6px;
   }
 }
+/* Phone width: smaller marks and hairline gaps so eight stages still fit. */
 @container bud-page (max-width: 560px) {
   .stage-stepper {
     padding: 12px 14px;
+  }
+  .stage-stepper__step {
+    gap: 6px;
+  }
+  .stage-stepper__mark {
+    width: 18px;
+    height: 18px;
+  }
+  .stage-stepper__step--current .stage-stepper__mark {
+    border-width: 5px;
+  }
+  .stage-stepper__line {
+    margin: 0 2px;
+    min-width: 0;
   }
 }
 </style>

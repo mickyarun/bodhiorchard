@@ -80,7 +80,7 @@ const DESIGN_VERSION_DETAIL = {
 // drawer body is reachable, leaf components stay inert.
 const PASSTHROUGH = { template: '<div><slot /></div>' }
 const VUETIFY_STUBS = {
-  'v-navigation-drawer': PASSTHROUGH,
+  AppSideSheet: PASSTHROUGH,
   'v-dialog': PASSTHROUGH,
   'v-card': PASSTHROUGH,
   'v-card-actions': PASSTHROUGH,

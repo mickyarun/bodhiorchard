@@ -46,10 +46,11 @@
         icon="mdi-plus"
         size="x-small"
         variant="text"
-        title="New Session"
+        title="New session"
+        aria-label="Start a new chat session"
         @click="emit('new-session')"
       />
-      <v-btn icon="mdi-close" size="x-small" variant="text" @click="emit('close')" />
+      <v-btn icon="mdi-close" size="x-small" variant="text" aria-label="Close AI chat" @click="emit('close')" />
     </div>
 
     <div ref="chatContainer" class="chat-messages">
@@ -183,12 +184,17 @@
             variant="flat"
             color="error"
             class="remove-btn"
+            :aria-label="`Remove pasted image ${idx + 1}`"
             @click="removeImage(idx)"
           />
         </div>
       </div>
+      <label v-if="!needsDesignGeneration" for="bud-chat-input" class="d-sr-only">
+        Message to the AI about {{ sectionLabel }}
+      </label>
       <v-textarea
         v-if="!needsDesignGeneration"
+        id="bud-chat-input"
         v-model="input"
         variant="outlined"
         density="compact"
@@ -207,6 +213,7 @@
             size="small"
             variant="text"
             color="primary"
+            aria-label="Send message"
             :loading="loading"
             :disabled="!input.trim() && !pastedImages.length || !!stageGateMessage"
             @click="sendChat"

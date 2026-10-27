@@ -14,27 +14,12 @@
      produces a new ``source='revert'`` row — history is append-only,
      so the restore is itself reversible. -->
 <template>
-  <v-navigation-drawer
-    v-model="open"
-    location="right"
-    temporary
-    width="900"
-    class="diff-drawer"
-  >
-    <div class="diff-drawer__header">
-      <div class="d-flex align-center ga-2">
-        <v-icon icon="mdi-text-box-search-outline" size="20" />
-        <div>
-          <div class="text-subtitle-1 font-weight-bold">{{ sectionLabel }} history</div>
-          <div class="text-caption text-medium-emphasis">
-            Showing edits to <strong>{{ sectionLabel }}</strong> only ·
-            {{ phase }} phase
-          </div>
-        </div>
-        <v-spacer />
-        <v-btn icon="mdi-close" variant="text" size="small" @click="open = false" />
-      </div>
-    </div>
+  <!-- A side sheet (a dialog), so nothing sits off-screen beside the page
+       while it's closed; full screen on phones, Escape closes it. -->
+  <AppSideSheet v-model="open" :title="`${sectionLabel} history`" :width="900">
+    <p class="diff-drawer__scope">
+      Showing edits to <strong>{{ sectionLabel }}</strong> only · {{ phase }} phase
+    </p>
 
     <div class="diff-drawer__body">
       <!-- Left rail — version list scoped to this phase. -->
@@ -87,7 +72,7 @@
               → <strong>current</strong>
             </template>
             <template v-else>
-              Select a version on the left to see what changed.
+              Select a version to see what changed.
             </template>
           </div>
           <div v-if="diffStats" class="diff-stats">
@@ -120,7 +105,7 @@
         <div v-else-if="!selectedVersion" class="diff-pane__placeholder">
           <v-icon icon="mdi-arrow-left-circle-outline" size="32" class="text-medium-emphasis" />
           <div class="text-body-2 text-medium-emphasis mt-2">
-            Pick a version on the left to view the diff.
+            Pick a version to view the diff.
           </div>
         </div>
         <div v-else-if="diffLines.length === 0" class="diff-pane__placeholder">
@@ -171,13 +156,14 @@
     >
       {{ snackbar.text }}
     </v-snackbar>
-  </v-navigation-drawer>
+  </AppSideSheet>
 </template>
 
 <script setup lang="ts">
 import { diffLines as diffLinesFn } from 'diff'
 import { computed, ref, watch } from 'vue'
 import api from '@/services/api'
+import AppSideSheet from '@/components/common/AppSideSheet.vue'
 import type { BUDDesign } from '@/types'
 
 interface BUDVersionSummary {
@@ -216,7 +202,7 @@ const emit = defineEmits<{
   reverted: []
 }>()
 
-// Two-way bind via the v-navigation-drawer's v-model.
+// Two-way bind via the side sheet's v-model.
 const open = computed({
   get: () => props.modelValue,
   set: (v) => emit('update:modelValue', v),
@@ -473,23 +459,32 @@ watch(
 </script>
 
 <style scoped>
-.diff-drawer {
-  display: flex;
-  flex-direction: column;
-}
-.diff-drawer__header {
-  padding: 14px 16px;
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  background: rgb(var(--v-theme-surface));
+.diff-drawer__scope {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: rgb(var(--v-theme-on-surface-variant));
 }
 .diff-drawer__body {
   display: grid;
-  grid-template-columns: 240px 1fr;
-  height: calc(100vh - 64px);
-  min-height: 0;
+  grid-template-columns: 240px minmax(0, 1fr);
+  min-height: calc(100vh - 140px);
+  border: 1px solid rgb(var(--v-theme-rule));
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+@media (max-width: 760px) {
+  .diff-drawer__body {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+  .diff-rail {
+    max-height: 220px;
+    border-right: 0;
+    border-bottom: 1px solid rgb(var(--v-theme-rule));
+  }
 }
 .diff-rail {
-  border-right: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  border-right: 1px solid rgb(var(--v-theme-rule));
   overflow-y: auto;
   padding: 8px;
   background: rgba(var(--v-theme-on-surface), 0.02);

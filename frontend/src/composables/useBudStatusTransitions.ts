@@ -60,6 +60,23 @@ export function useBudStatusTransitions(hooks: BudStatusHooks) {
   const showPendingCasesDialog = ref(false)
   const pendingCasesTarget = ref('')
   const pendingCasesList = ref<{ id: string; title: string }[]>([])
+  // Closing runs the close-out (XP, SP, learning recap) and can't be
+  // undone, so every path to ``closed`` asks first.
+  const showCloseConfirmDialog = ref(false)
+
+  // A stage change is in flight. Further requests are ignored until it
+  // settles, so a double click can't fire two PATCHes or two guards.
+  const changingStatus = ref(false)
+
+  async function inFlight(run: () => Promise<void>): Promise<void> {
+    if (changingStatus.value) return
+    changingStatus.value = true
+    try {
+      await run()
+    } finally {
+      changingStatus.value = false
+    }
+  }
 
   // Backend rejection surface
   const statusErrorSnackbar = ref(false)
@@ -115,9 +132,18 @@ export function useBudStatusTransitions(hooks: BudStatusHooks) {
     }
   }
 
-  async function updateStatus(newStatus: string): Promise<void> {
+  function updateStatus(newStatus: string): Promise<void> {
+    return inFlight(() => runStatusGuards(newStatus))
+  }
+
+  async function runStatusGuards(newStatus: string): Promise<void> {
     const bud = hooks.getBud()
     if (!bud) return
+
+    if (newStatus === 'closed') {
+      showCloseConfirmDialog.value = true
+      return
+    }
 
     // Intercept code_review transition: warn if no PRs are open.
     if (newStatus === 'code_review') {
@@ -186,14 +212,19 @@ export function useBudStatusTransitions(hooks: BudStatusHooks) {
 
   async function confirmNoPRWarning(): Promise<void> {
     showNoPRWarningDialog.value = false
-    await executeStatusChange('code_review')
+    await inFlight(() => executeStatusChange('code_review'))
   }
 
   async function confirmOverrideStatus(): Promise<void> {
     const reason = overrideReasonText.value.trim()
     if (!reason) return
     overrideReasonDialog.value = false
-    await executeStatusChange(pendingOverrideStatus.value, reason)
+    await inFlight(() => executeStatusChange(pendingOverrideStatus.value, reason))
+  }
+
+  async function confirmClose(): Promise<void> {
+    showCloseConfirmDialog.value = false
+    await inFlight(() => executeStatusChange('closed'))
   }
 
   async function executeStatusChange(newStatus: string, reason?: string): Promise<void> {
@@ -229,6 +260,8 @@ export function useBudStatusTransitions(hooks: BudStatusHooks) {
   return {
     cancellingAgent,
     cancellingDesignId,
+    changingStatus,
+    showCloseConfirmDialog,
     // guard-dialog state
     showNoPRWarningDialog,
     overrideReasonDialog,
@@ -248,5 +281,6 @@ export function useBudStatusTransitions(hooks: BudStatusHooks) {
     openQATab,
     confirmNoPRWarning,
     confirmOverrideStatus,
+    confirmClose,
   }
 }

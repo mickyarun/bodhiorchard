@@ -195,6 +195,8 @@
 </template>
 
 <script setup lang="ts">
+import { copyText } from '@/utils/clipboard'
+import { branchPrefix } from '@/utils/budDetail'
 import AppCallout from '@/components/common/AppCallout.vue'
 import { ref, computed, onMounted } from 'vue'
 import { marked } from 'marked'
@@ -316,9 +318,8 @@ function downloadTestPlan(): void {
   URL.revokeObjectURL(a.href)
 }
 
-function copyBranchName(): void {
-  const name = `bud-${String(props.budNumber ?? 0).padStart(3, '0')}/`
-  navigator.clipboard.writeText(name)
+async function copyBranchName(): Promise<void> {
+  if (!(await copyText(branchPrefix(props.budNumber)))) return
   branchCopied.value = true
   setTimeout(() => { branchCopied.value = false }, 2000)
 }

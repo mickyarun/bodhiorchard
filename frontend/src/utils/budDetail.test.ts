@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { BUD_STATUS_ORDER, VALID_BUD_TABS } from '@/types'
-import { STATUS_TAB_MAP, branchPrefix, detailTabs, nextStage, stageSteps } from './budDetail'
+import { STATUS_TAB_MAP, branchPrefix, canMoveBud, detailTabs, nextStage, stageSteps } from './budDetail'
 
 const NO_UAT = BUD_STATUS_ORDER.filter(s => s !== 'uat')
 
@@ -54,14 +54,27 @@ describe('stageSteps', () => {
   })
 })
 
+describe('a BUD left in UAT after the org turned UAT off', () => {
+  it('keeps its UAT step, with earlier stages done', () => {
+    const steps = stageSteps(NO_UAT, 'uat')
+    expect(steps.map(s => s.status)).toEqual(
+      ['bud', 'design', 'tech_arch', 'development', 'code_review', 'testing', 'uat', 'prod'])
+    expect(steps.find(s => s.status === 'uat')?.state).toBe('current')
+    expect(steps.filter(s => s.state === 'done')).toHaveLength(6)
+  })
+  it('moves on to prod', () => {
+    expect(nextStage(NO_UAT, 'uat')).toBe('prod')
+  })
+})
+
 describe('nextStage', () => {
   it('steps through the org phase order', () => {
     expect(nextStage(BUD_STATUS_ORDER, 'development')).toBe('code_review')
     expect(nextStage(BUD_STATUS_ORDER, 'testing')).toBe('uat')
     expect(nextStage(NO_UAT, 'testing')).toBe('prod')
   })
-  it('moves prod to closed and stops once ended', () => {
-    expect(nextStage(BUD_STATUS_ORDER, 'prod')).toBe('closed')
+  it('never offers closing in one click, and stops once ended', () => {
+    expect(nextStage(BUD_STATUS_ORDER, 'prod')).toBeNull()
     expect(nextStage(BUD_STATUS_ORDER, 'closed')).toBeNull()
     expect(nextStage(BUD_STATUS_ORDER, 'discarded')).toBeNull()
   })
@@ -71,5 +84,21 @@ describe('branchPrefix', () => {
   it('pads the BUD number to three digits', () => {
     expect(branchPrefix(8)).toBe('bud-008/')
     expect(branchPrefix(1234)).toBe('bud-1234/')
+  })
+})
+
+describe('canMoveBud', () => {
+  const holds = (...perms: string[]) => (p: string) => perms.includes(p)
+  it('lets buds:edit move any stage', () => {
+    expect(canMoveBud(holds('buds:edit'), 'bud', 'design')).toBe(true)
+  })
+  it('lets QA move a BUD out of testing only', () => {
+    expect(canMoveBud(holds('buds:test'), 'testing', 'uat')).toBe(true)
+    expect(canMoveBud(holds('buds:test'), 'testing', 'prod')).toBe(true)
+    expect(canMoveBud(holds('buds:test'), 'uat', 'prod')).toBe(false)
+    expect(canMoveBud(holds('buds:test'), 'testing', 'development')).toBe(false)
+  })
+  it('refuses everyone else', () => {
+    expect(canMoveBud(holds('buds:view'), 'testing', 'uat')).toBe(false)
   })
 })

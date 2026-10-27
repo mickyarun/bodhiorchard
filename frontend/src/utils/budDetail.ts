@@ -15,7 +15,7 @@
 // Pure helpers behind the BUD detail page: the tab list, which tab each
 // status opens on, and the stage stepper.
 
-import { BUD_STATUS_LABELS, type BUDStatus } from '@/types'
+import { BUD_STATUS_LABELS, BUD_STATUS_ORDER, type BUDStatus } from '@/types'
 
 /** The tab a BUD opens on for each status; also followed on every status change. */
 export const STATUS_TAB_MAP: Record<BUDStatus, string> = {
@@ -82,12 +82,20 @@ export interface StageStep {
 const ENDED: ReadonlySet<BUDStatus> = new Set(['closed', 'discarded'])
 
 /**
- * The stepper's stages (the org's phase order up to prod) and where the
- * BUD sits on them. A closed BUD has finished every stage; a discarded
- * one has no position.
+ * The live stages for a BUD: the org's phase order up to prod, plus the
+ * BUD's own stage if the org has since switched it off (a BUD can sit in
+ * UAT after UAT is turned off), in canonical lifecycle order.
+ */
+function liveStages(phaseOrder: readonly BUDStatus[], status: BUDStatus): BUDStatus[] {
+  return BUD_STATUS_ORDER.filter(s => !ENDED.has(s) && (phaseOrder.includes(s) || s === status))
+}
+
+/**
+ * The stepper's stages and where the BUD sits on them. A closed BUD has
+ * finished every stage; a discarded one has no position.
  */
 export function stageSteps(phaseOrder: readonly BUDStatus[], status: BUDStatus): StageStep[] {
-  const stages = phaseOrder.filter(s => !ENDED.has(s))
+  const stages = liveStages(phaseOrder, status)
   const at = status === 'closed' ? stages.length : stages.indexOf(status)
   return stages.map((s, i) => ({
     status: s,
@@ -96,15 +104,32 @@ export function stageSteps(phaseOrder: readonly BUDStatus[], status: BUDStatus):
   }))
 }
 
-/** The stage after ``status`` in the org's phase order (prod moves to closed); null once ended. */
+/**
+ * The live stage after ``status``, for the one-click "Move to" action.
+ * Null at prod: closing can't be undone, so it is only offered from the
+ * stage menu, behind a confirmation. Null once ended too.
+ */
 export function nextStage(phaseOrder: readonly BUDStatus[], status: BUDStatus): BUDStatus | null {
   if (ENDED.has(status)) return null
-  const order: BUDStatus[] = phaseOrder.filter(s => s !== 'discarded')
-  const i = order.indexOf(status)
-  return i >= 0 && i < order.length - 1 ? order[i + 1] : null
+  const stages = liveStages(phaseOrder, status)
+  const i = stages.indexOf(status)
+  return i >= 0 && i < stages.length - 1 ? stages[i + 1] : null
 }
 
 /** The branch prefix commits for a BUD go on, e.g. 8 → "bud-008/". Git hooks match on it. */
 export function branchPrefix(budNumber: number | undefined): string {
   return `bud-${String(budNumber || 0).padStart(3, '0')}/`
+}
+
+/**
+ * Stage moves a buds:test holder (QA) may make without buds:edit. Mirrors
+ * _QA_OWNED_TRANSITIONS in backend/app/api/v1/bud.py: QA is the gate out
+ * of testing, to UAT, or to prod when the org has UAT off.
+ */
+const QA_OWNED_TRANSITIONS: ReadonlySet<string> = new Set(['testing>uat', 'testing>prod'])
+
+/** Whether someone with these permissions may move a BUD from one stage to another. */
+export function canMoveBud(hasPermission: (p: string) => boolean, from: BUDStatus, to: BUDStatus): boolean {
+  if (hasPermission('buds:edit')) return true
+  return hasPermission('buds:test') && QA_OWNED_TRANSITIONS.has(`${from}>${to}`)
 }

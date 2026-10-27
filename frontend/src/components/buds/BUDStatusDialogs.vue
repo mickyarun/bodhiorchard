@@ -16,6 +16,7 @@
 
 <script setup lang="ts">
 import type { useBudStatusTransitions } from '@/composables/useBudStatusTransitions'
+import BUDCloseConfirmDialog from './detail/BUDCloseConfirmDialog.vue'
 
 type StatusController = ReturnType<typeof useBudStatusTransitions>
 
@@ -42,6 +43,7 @@ const {
   statusErrorSnackbar, statusErrorMessage,
   statusInfoSnackbar, statusInfoMessage,
   confirmNoPRWarning, confirmOverrideStatus, openQATab,
+  showCloseConfirmDialog, confirmClose,
 } = props.controller
 </script>
 
@@ -52,6 +54,8 @@ const {
          {role}…" banner emitted by BUDWorkflowActions on `skill_invoked`.
          Both fired for the same ~10s window and showed identical copy.
          Keeping only the richer, agent-named WS banner. -->
+
+    <BUDCloseConfirmDialog v-model="showCloseConfirmDialog" @confirm="confirmClose" />
 
     <!-- Status Override Reason Dialog (code_review → testing with unmerged PRs) -->
     <v-dialog v-model="overrideReasonDialog" max-width="420">

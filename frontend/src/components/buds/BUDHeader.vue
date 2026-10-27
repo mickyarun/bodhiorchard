@@ -36,14 +36,17 @@
           </span>
         </div>
 
-        <h1
-          v-if="!editingTitle"
-          class="bud-header__title"
-          :class="{ 'bud-header__title--locked': agentLocked }"
-          :title="agentLocked ? undefined : 'Click to rename'"
-          @click="startEditTitle"
-        >
-          {{ bud.title }}
+        <h1 v-if="!editingTitle" class="bud-header__title">
+          <button
+            type="button"
+            class="bud-header__title-btn"
+            :disabled="agentLocked"
+            :title="agentLocked ? undefined : 'Rename'"
+            @click="startEditTitle"
+          >
+            {{ bud.title }}<span class="d-sr-only">, rename</span>
+            <v-icon v-if="!agentLocked" icon="mdi-pencil-outline" size="18" class="bud-header__title-icon" />
+          </button>
         </h1>
         <v-text-field
           v-else
@@ -92,10 +95,11 @@
           Ask AI
         </v-btn>
         <v-btn
-          v-if="nextStatus && canEditBuds"
+          v-if="nextStatus && canMoveTo(nextStatus)"
           color="primary"
           variant="flat"
-          :disabled="agentLocked"
+          :loading="changingStatus"
+          :disabled="agentLocked || changingStatus"
           @click="emit('update-status', nextStatus)"
         >
           Move to {{ BUD_STATUS_LABELS[nextStatus] }}
@@ -105,7 +109,10 @@
           :status-items="statusItems"
           :is-closed="isClosed"
           :agent-locked="agentLocked"
+          :changing-status="changingStatus"
           :can-edit-buds="canEditBuds"
+          :can-move-to="canMoveTo"
+          :can-delete="canDelete"
           @update-status="emit('update-status', $event)"
           @restore="emit('restore')"
           @open-skill-settings="emit('open-skill-settings')"
@@ -131,13 +138,19 @@ const props = defineProps<{
   statusItems: ReadonlyArray<{ title: string; value: BUDStatus }>
   /** The stage the primary button moves to; null hides it. */
   nextStatus: BUDStatus | null
+  /** Whether the viewer may move the BUD to this stage (buds:edit, or QA out of testing). */
+  canMoveTo: (status: BUDStatus) => boolean
+  /** A stage change is in flight. */
+  changingStatus: boolean
+  /** backlog:delete — gates Delete BUD. */
+  canDelete: boolean
   isClosed: boolean
   agentLocked: boolean
   chatOpen: boolean
   /** False when the open section can't be chatted about at this stage (the backend would 409). */
   chatable: boolean
   canEditPriority: boolean
-  /** buds:edit — gates moving stages from the header and restoring a discarded BUD. */
+  /** buds:edit — gates restoring a discarded BUD. */
   canEditBuds: boolean
 }>()
 

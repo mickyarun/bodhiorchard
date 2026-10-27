@@ -82,6 +82,7 @@
 </template>
 
 <script setup lang="ts">
+import { copyText } from '@/utils/clipboard'
 import { computed } from 'vue'
 import type { AutomationTestCase } from '@/types'
 
@@ -114,6 +115,6 @@ const groupedCases = computed(() => {
 })
 
 function copyToClipboard(text: string): void {
-  navigator.clipboard.writeText(text)
+  void copyText(text)
 }
 </script>

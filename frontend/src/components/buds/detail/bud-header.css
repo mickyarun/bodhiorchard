@@ -82,11 +82,36 @@
   font-weight: 600;
   letter-spacing: var(--tracking-display);
   overflow-wrap: anywhere;
+}
+.bud-header__title-btn {
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  color: inherit;
   cursor: text;
 }
-.bud-header__title--locked {
+.bud-header__title-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.bud-header__title-btn:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+.bud-header__title-icon {
+  margin-left: 6px;
+  vertical-align: middle;
+  opacity: 0;
+  color: rgb(var(--v-theme-on-surface-variant));
+  transition: opacity var(--dur-short) var(--ease-out);
+}
+.bud-header__title-btn:hover .bud-header__title-icon,
+.bud-header__title-btn:focus-visible .bud-header__title-icon {
+  opacity: 1;
 }
 .bud-header__title-field {
   max-width: 560px;

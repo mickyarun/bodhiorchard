@@ -16,14 +16,19 @@
 // component (BUDWorkflowActions), and derives whether the BUD is locked
 // while they run.
 
-import { computed, onUnmounted, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, watch, type ComputedRef, type Ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import type BUDWorkflowActions from '@/components/buds/BUDWorkflowActions.vue'
 import type { BUDDocument } from '@/types'
 
 type Workflow = InstanceType<typeof BUDWorkflowActions>
 
-export function useBudAgentTracking(bud: ComputedRef<BUDDocument | null>, workflowRef: Ref<Workflow | null>) {
+export function useBudAgentTracking(
+  bud: ComputedRef<BUDDocument | null>,
+  workflowRef: Ref<Workflow | null>,
+  /** Runs each time the BUD unlocks after an agent run. */
+  onAgentFinished: () => void,
+) {
   const authStore = useAuthStore()
 
   // Watch the job id, not the task object: every refetch builds a new
@@ -48,7 +53,8 @@ export function useBudAgentTracking(bud: ComputedRef<BUDDocument | null>, workfl
 
   // The org-wide agent_activity stream covers phase workers that have no
   // task row (assignment, todo generation, estimation), so the banner and
-  // the lock stay accurate end to end. The workflow dedupes per BUD.
+  // the lock stay accurate end to end. The workflow dedupes per BUD and
+  // unsubscribes itself before it unmounts.
   watch(
     [() => bud.value?.id, () => authStore.user?.org_id, workflowRef],
     ([budId, orgId, wf]) => {
@@ -56,7 +62,6 @@ export function useBudAgentTracking(bud: ComputedRef<BUDDocument | null>, workfl
     },
     { immediate: true },
   )
-  onUnmounted(() => workflowRef.value?.stopAgentActivity())
 
   // Locked while an agent task is pending or running, or any phase worker
   // is in flight: the stage menu and every gated control disable.
@@ -64,6 +69,9 @@ export function useBudAgentTracking(bud: ComputedRef<BUDDocument | null>, workfl
     const t = bud.value?.active_agent_task
     const taskActive = !!t && (t.status === 'pending' || t.status === 'running')
     return taskActive || !!workflowRef.value?.phaseInFlight
+  })
+  watch(agentLocked, (locked, wasLocked) => {
+    if (!locked && wasLocked) onAgentFinished()
   })
 
   // The shared agent banner: any agent outside the design stage (where the

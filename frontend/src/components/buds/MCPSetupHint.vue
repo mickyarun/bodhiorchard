@@ -40,7 +40,7 @@
       <v-btn
         size="x-small"
         :color="iconColor"
-        variant="flat"
+        variant="tonal"
         :prepend-icon="generating ? undefined : 'mdi-key-plus'"
         :loading="generating"
         class="text-none generate-btn"

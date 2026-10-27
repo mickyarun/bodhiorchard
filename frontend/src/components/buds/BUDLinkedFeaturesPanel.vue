@@ -15,7 +15,7 @@
  -->
 
 <template>
-  <v-card variant="outlined" class="linked-features-panel">
+  <v-card variant="flat" class="linked-features-panel">
     <div class="d-flex align-center px-4 py-2">
       <div class="d-flex align-center text-subtitle-2">
         <span>Linked features</span>
@@ -238,6 +238,8 @@ watch(
 <style scoped>
 .linked-features-panel {
   background: rgb(var(--v-theme-surface));
+  border: 1px solid rgb(var(--v-theme-rule));
+  border-radius: var(--radius-card);
 }
 .linked-feature-row :deep(.v-list-item__append) {
   align-self: center;

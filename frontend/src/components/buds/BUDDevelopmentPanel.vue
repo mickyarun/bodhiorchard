@@ -297,6 +297,7 @@ import BUDImpactedReposDialog from '@/components/buds/BUDImpactedReposDialog.vue
 import { useBudActivity } from '@/composables/useBudActivity'
 import { useSettingsStore } from '@/stores/settings'
 import { branchPrefix } from '@/utils/budDetail'
+import { copyText } from '@/utils/clipboard'
 import { fileColor, fileIcon, parseFiles, timeAgo } from '@/utils/dev-activity-helpers'
 import type { DevActivity } from '@/types'
 import MCPSetupHint from './MCPSetupHint.vue'
@@ -382,7 +383,7 @@ function eventColor(a: DevActivity): string {
 }
 
 async function copyBranchName(): Promise<void> {
-  await navigator.clipboard.writeText(branchPrefix(props.budNumber))
+  if (!(await copyText(branchPrefix(props.budNumber)))) return
   branchCopied.value = true
   setTimeout(() => { branchCopied.value = false }, 2000)
 }

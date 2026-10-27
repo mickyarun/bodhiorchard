@@ -67,6 +67,7 @@ import BudPriorityChip from '@/components/buds/BudPriorityChip.vue'
 import BUDAssigneeMenu from './BUDAssigneeMenu.vue'
 import type { BUDDocument } from '@/types'
 import { branchPrefix } from '@/utils/budDetail'
+import { copyText } from '@/utils/clipboard'
 import { formatDate } from '@/utils/date'
 
 const props = defineProps<{ bud: BUDDocument }>()
@@ -76,7 +77,7 @@ const copied = ref(false)
 let resetTimer: ReturnType<typeof setTimeout> | undefined
 
 async function copyBranch(): Promise<void> {
-  await navigator.clipboard.writeText(branchPrefix(props.bud.bud_number))
+  if (!(await copyText(branchPrefix(props.bud.bud_number)))) return
   copied.value = true
   clearTimeout(resetTimer)
   resetTimer = setTimeout(() => { copied.value = false }, 2000)

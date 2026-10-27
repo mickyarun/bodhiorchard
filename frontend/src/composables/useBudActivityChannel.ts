@@ -30,15 +30,19 @@ export interface BudActivityHandlers {
 
 export function useBudActivityChannel(handlers: BudActivityHandlers) {
   let cleanup: (() => void) | null = null
+  // Set on unmount: a load that finishes after the page has gone must not
+  // subscribe again, or the subscription would never be dropped.
+  let disposed = false
 
   function disconnect(): void {
     cleanup?.()
     cleanup = null
   }
 
-  /** Follow one BUD, dropping whichever BUD was followed before. */
+  /** Follow one BUD, dropping whichever BUD was followed before. No-op once unmounted. */
   function connect(budId: string): void {
     disconnect()
+    if (disposed) return
     const topic = `bud:${budId}:activity`
     const refresh = () => handlers.refresh(budId)
     const onEvent = (data: unknown) => {
@@ -55,7 +59,10 @@ export function useBudActivityChannel(handlers: BudActivityHandlers) {
     }
   }
 
-  onUnmounted(disconnect)
+  onUnmounted(() => {
+    disposed = true
+    disconnect()
+  })
 
   return { connect, disconnect }
 }
