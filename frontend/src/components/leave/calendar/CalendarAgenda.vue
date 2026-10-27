@@ -17,24 +17,23 @@
 <!-- Narrow-screen team calendar: only the days of the month when
      someone is out or there's a holiday. -->
 <template>
-  <div v-if="!days.length" class="pa-6 text-body-2 text-medium-emphasis">
-    Nobody is out this month.
-  </div>
-  <v-list v-else bg-color="transparent" density="compact" class="py-0">
-    <v-list-item
-      v-for="day in days"
-      :key="day.iso"
-      class="py-2"
-      :class="{ 'agenda--today': day.iso === today }"
-      @click="emit('select', day.iso)"
-    >
-      <div class="text-body-2 font-weight-medium">{{ formatDayRange(day.iso, day.iso) }}</div>
-      <div v-if="day.holiday" class="text-caption agenda__holiday">{{ day.holiday }}</div>
-      <div class="d-flex flex-wrap ga-1 mt-1">
-        <CalendarEntryChip v-for="entry in day.entries" :key="entry.request_id" :entry="entry" />
-      </div>
-    </v-list-item>
-  </v-list>
+  <p v-if="!days.length" class="agenda__empty">Nobody is out this month.</p>
+  <ul v-else class="agenda">
+    <li v-for="day in days" :key="day.iso">
+      <button
+        type="button"
+        class="agenda__day"
+        :class="{ 'agenda__day--today': day.iso === today }"
+        @click="emit('select', day.iso)"
+      >
+        <span class="agenda__date">{{ formatDayRange(day.iso, day.iso) }}</span>
+        <span v-if="day.holiday" class="agenda__holiday">{{ day.holiday }}</span>
+        <span class="agenda__entries">
+          <CalendarEntryChip v-for="entry in day.entries" :key="entry.request_id" :entry="entry" />
+        </span>
+      </button>
+    </li>
+  </ul>
 </template>
 
 <script setup lang="ts">
@@ -64,10 +63,57 @@ const days = computed(() =>
 </script>
 
 <style scoped>
-.agenda__holiday {
-  color: rgb(var(--v-theme-secondary));
+.agenda {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
-.agenda--today {
-  border-left: 3px solid rgb(var(--v-theme-primary));
+.agenda li + li {
+  border-top: 1px solid var(--color-rule-2);
+}
+.agenda__day {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+.agenda__day:hover {
+  background: rgb(var(--v-theme-surface-variant));
+}
+.agenda__day:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+.agenda__day--today {
+  box-shadow: inset 3px 0 0 rgb(var(--v-theme-primary));
+}
+.agenda__date {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.agenda__holiday {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgb(var(--v-theme-info));
+}
+.agenda__entries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+.agenda__empty {
+  margin: 0;
+  padding: 20px 16px;
+  font-size: var(--text-sm);
+  color: rgb(var(--v-theme-on-surface-variant));
 }
 </style>

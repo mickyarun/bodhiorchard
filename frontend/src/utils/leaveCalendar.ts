@@ -14,7 +14,7 @@
 
 /** Who's out on a given day, for the team calendar. */
 import type { CalendarEntry, HolidayRead } from '@/types/leave'
-import { isWithin, weekdayIndex } from '@/utils/leaveDates'
+import { isWithin, MONTH_NAMES, monthDays, type MonthRef, weekdayIndex } from '@/utils/leaveDates'
 
 export interface DayContext {
   /** The caller's policy holidays, shown as day labels. */
@@ -37,4 +37,23 @@ export function entriesOnDay(entries: CalendarEntry[], iso: string): CalendarEnt
       const kindOrder = Number(a.kind === 'wfh') - Number(b.kind === 'wfh')
       return kindOrder || a.user.name.localeCompare(b.user.name)
     })
+}
+
+/** "6 people out in November · 2 working from home": distinct people with
+ *  leave, and with WFH, overlapping the month. Empty when nobody is. */
+export function monthSummary(entries: CalendarEntry[], month: MonthRef): string {
+  const days = monthDays(month)
+  const first = days[0]
+  const last = days[days.length - 1]
+  const out = new Set<string>()
+  const home = new Set<string>()
+  for (const e of entries) {
+    if (e.end_date < first || e.start_date > last) continue
+    if (e.status !== 'approved' && e.status !== 'pending') continue
+    ;(e.kind === 'wfh' ? home : out).add(e.user.user_id)
+  }
+  const parts: string[] = []
+  if (out.size) parts.push(`${out.size} ${out.size === 1 ? 'person' : 'people'} out in ${MONTH_NAMES[month.month - 1]}`)
+  if (home.size) parts.push(`${home.size} working from home`)
+  return parts.join(' · ')
 }

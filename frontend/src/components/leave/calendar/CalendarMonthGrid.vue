@@ -83,78 +83,88 @@ function cellLabel(iso: string): string {
 .grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  border-left: 1px solid rgba(var(--v-theme-on-surface), 0.08);
 }
 .grid__head {
-  padding: 8px;
-  font-size: 11px;
+  padding: 10px 12px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: var(--tracking-label, 0.08em);
-  color: rgb(var(--v-theme-muted));
-  border-right: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  letter-spacing: 0.04em;
+  color: rgb(var(--v-theme-on-surface-variant));
+  border-bottom: 1px solid rgb(var(--v-theme-rule));
 }
 .grid__cell {
   appearance: none;
-  background: transparent;
+  background: rgb(var(--v-theme-surface));
   color: inherit;
   font: inherit;
   text-align: left;
-  min-height: 104px;
-  padding: 6px;
+  min-height: 124px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 4px;
   cursor: pointer;
   border: none;
-  border-right: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  border-right: 1px solid var(--color-rule-2);
+  border-bottom: 1px solid var(--color-rule-2);
+  min-width: 0;
+}
+.grid__cell:nth-child(7n) {
+  border-right: none;
 }
 .grid__cell:hover {
-  background: rgba(var(--v-theme-on-surface), 0.04);
+  background: rgb(var(--v-theme-surface-variant));
 }
 .grid__cell:focus-visible {
-  outline: 2px solid rgb(var(--v-theme-primary));
+  outline: 2px solid var(--color-focus);
   outline-offset: -2px;
 }
 .grid__cell--outside {
-  opacity: 0.45;
+  background: rgb(var(--v-theme-background));
+}
+.grid__cell--outside .grid__day {
+  color: rgb(var(--v-theme-on-surface-variant));
 }
 .grid__cell--holiday {
-  background: rgba(var(--v-theme-secondary), 0.08);
+  background: rgba(var(--v-theme-info), 0.08);
+}
+.grid__day {
+  align-self: flex-start;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 4px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 500;
 }
 .grid__cell--today .grid__day {
   background: rgb(var(--v-theme-primary));
   color: rgb(var(--v-theme-on-primary));
-}
-.grid__day {
-  font-size: 12px;
   font-weight: 600;
-  width: 22px;
-  height: 22px;
-  line-height: 22px;
-  text-align: center;
-  border-radius: 50%;
 }
 .grid__holiday {
-  font-size: 11px;
-  color: rgb(var(--v-theme-secondary));
+  font-size: 12px;
+  font-weight: 500;
+  color: rgb(var(--v-theme-info));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  width: 100%;
 }
 .grid__entries {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  align-items: stretch;
+  gap: 4px;
   min-width: 0;
   width: 100%;
 }
 .grid__more {
-  font-size: 11px;
-  color: rgb(var(--v-theme-muted));
+  font-size: 12px;
+  color: rgb(var(--v-theme-on-surface-variant));
 }
 </style>

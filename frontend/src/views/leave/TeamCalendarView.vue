@@ -17,23 +17,20 @@
 <!-- Team calendar: who's on leave or working from home this month.
      A month grid on wide screens, an agenda list under 720px. -->
 <template>
-  <div class="pa-6 team-calendar">
-    <div class="d-flex align-start justify-space-between flex-wrap ga-3 mb-6">
-      <div>
-        <h1 class="text-h5 font-weight-bold bo-display">Team calendar</h1>
-        <p class="text-body-2 text-medium-emphasis">Who's on leave or working from home.</p>
+  <LeavePage title="Team calendar" :subtitle="subtitle">
+    <template #actions>
+      <div class="month-nav">
+        <v-btn icon="mdi-chevron-left" variant="outlined" size="small" aria-label="Previous month" @click="calendar.step(-1)" />
+        <span class="month-nav__title" aria-live="polite">{{ monthTitle(calendar.month.value) }}</span>
+        <v-btn icon="mdi-chevron-right" variant="outlined" size="small" aria-label="Next month" @click="calendar.step(1)" />
       </div>
-      <div class="d-flex align-center ga-1">
-        <v-btn icon="mdi-chevron-left" variant="text" size="small" aria-label="Previous month" @click="calendar.step(-1)" />
-        <span class="text-subtitle-1 font-weight-bold month-title">{{ monthTitle(calendar.month.value) }}</span>
-        <v-btn icon="mdi-chevron-right" variant="text" size="small" aria-label="Next month" @click="calendar.step(1)" />
-        <v-btn variant="tonal" size="small" class="ml-2" @click="calendar.today()">Today</v-btn>
-      </div>
-    </div>
+      <v-btn variant="outlined" @click="calendar.today()">Today</v-btn>
+    </template>
 
-    <AppCallout v-if="calendar.error.value" variant="error" class="mb-4">{{ calendar.error.value }}</AppCallout>
+    <CalendarLegend />
+    <AppCallout v-if="calendar.error.value" variant="error">{{ calendar.error.value }}</AppCallout>
 
-    <v-card color="surface" rounded="lg">
+    <section class="calendar" :aria-label="monthTitle(calendar.month.value)">
       <v-progress-linear v-if="calendar.loading.value" indeterminate color="primary" />
       <CalendarAgenda
         v-if="narrow"
@@ -51,13 +48,7 @@
         :today="today"
         @select="selected = $event"
       />
-    </v-card>
-
-    <div class="d-flex flex-wrap ga-4 mt-3 text-caption text-medium-emphasis">
-      <span>Dashed outline: work from home</span>
-      <span>◐ Half day</span>
-      <span>Faded: waiting for approval</span>
-    </div>
+    </section>
 
     <CalendarDayDrawer
       :day="selected"
@@ -65,7 +56,7 @@
       :context="calendar.context.value"
       @close="selected = null"
     />
-  </div>
+  </LeavePage>
 </template>
 
 <script setup lang="ts">
@@ -74,8 +65,11 @@ import { useDisplay } from 'vuetify'
 import AppCallout from '@/components/common/AppCallout.vue'
 import CalendarAgenda from '@/components/leave/calendar/CalendarAgenda.vue'
 import CalendarDayDrawer from '@/components/leave/calendar/CalendarDayDrawer.vue'
+import CalendarLegend from '@/components/leave/calendar/CalendarLegend.vue'
 import CalendarMonthGrid from '@/components/leave/calendar/CalendarMonthGrid.vue'
+import LeavePage from '@/components/leave/LeavePage.vue'
 import { useTeamCalendar } from '@/composables/useTeamCalendar'
+import { monthSummary } from '@/utils/leaveCalendar'
 import { monthTitle, toIsoDate } from '@/utils/leaveDates'
 
 const NARROW_BELOW_PX = 720
@@ -85,14 +79,32 @@ const { width } = useDisplay()
 const narrow = computed(() => width.value < NARROW_BELOW_PX)
 const today = toIsoDate(new Date())
 const selected = ref<string | null>(null)
+const subtitle = computed(() => {
+  if (calendar.loading.value || calendar.error.value) return ''
+  return (
+    monthSummary(calendar.data.value.entries, calendar.month.value) ||
+    'Nobody is on leave or working from home this month.'
+  )
+})
 </script>
 
 <style scoped>
-.team-calendar {
-  max-width: 1120px;
+.month-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
-.month-title {
-  min-width: 140px;
+.month-nav__title {
+  min-width: 132px;
   text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+}
+.calendar {
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid rgb(var(--v-theme-rule));
+  border-radius: 12px;
+  overflow: hidden;
+  min-width: 0;
 }
 </style>

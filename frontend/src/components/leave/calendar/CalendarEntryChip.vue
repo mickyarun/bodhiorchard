@@ -14,9 +14,10 @@
  * limitations under the License.
  -->
 
-<!-- Someone out on the team calendar. Leave is a tinted chip, WFH a
-     dashed outline; pending requests are faded with a dashed border.
-     The type colour only shows when the API sent the type. -->
+<!-- Someone out on the team calendar. Leave is a tinted chip, WFH an
+     outline with a house; a request still waiting for approval has a dashed
+     warning border. Colour is status only: the leave type never shows here
+     (the API withholds it from coworkers anyway). -->
 <template>
   <span
     class="entry"
@@ -24,33 +25,28 @@
       'entry--wfh': entry.kind === 'wfh',
       'entry--pending': entry.status === 'pending',
     }"
-    :style="{ '--entry-tone': tone }"
     :title="title"
   >
-    <v-icon v-if="entry.kind === 'wfh'" icon="mdi-home-outline" size="12" />
-    <span class="entry__name">{{ firstName(entry.user.name) }}</span>
-    <span v-if="entry.half_day !== 'none'" aria-hidden="true">◐</span>
+    <v-icon v-if="entry.kind === 'wfh'" icon="mdi-home-outline" size="12" aria-hidden="true" />
+    <span class="entry__name">{{ entry.user.name }}</span>
+    <span v-if="entry.half_day !== 'none'" class="entry__half">· ½</span>
   </span>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { CalendarEntry } from '@/types/leave'
-import { firstName, HALF_DAY_LABELS, KIND_LABELS, requestTypeLabel, swatchColor } from '@/utils/leave'
+import { HALF_DAY_LABELS, KIND_LABELS, requestTypeLabel } from '@/utils/leave'
 
 const props = defineProps<{ entry: CalendarEntry }>()
 
-const tone = computed(() => {
-  if (props.entry.kind === 'wfh') return 'var(--v-theme-primary)'
-  if (props.entry.leave_type) return `var(--v-theme-${swatchColor(props.entry.leave_type.color_key)})`
-  return 'var(--v-theme-info)'
-})
-
+// The type is in the hover text only when the API sent it (HR, the
+// requester and their managers).
 const title = computed(() => {
   const parts = [props.entry.user.name]
   parts.push(props.entry.leave_type ? requestTypeLabel(props.entry) : KIND_LABELS[props.entry.kind])
   if (props.entry.half_day !== 'none') parts.push(HALF_DAY_LABELS[props.entry.half_day])
-  if (props.entry.status === 'pending') parts.push('Pending')
+  if (props.entry.status === 'pending') parts.push('Waiting for approval')
   return parts.join(' · ')
 })
 </script>
@@ -59,14 +55,16 @@ const title = computed(() => {
 .entry {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   max-width: 100%;
-  padding: 1px 6px;
+  min-height: 22px;
+  padding: 0 7px;
   border-radius: 6px;
-  font-size: 11px;
-  line-height: 16px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
   border: 1px solid transparent;
-  background: rgba(var(--entry-tone), 0.16);
+  background: rgba(var(--v-theme-primary), 0.16);
   color: rgb(var(--v-theme-on-surface));
 }
 .entry__name {
@@ -74,13 +72,15 @@ const title = computed(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.entry__half {
+  flex-shrink: 0;
+}
 .entry--wfh {
   background: transparent;
-  border: 1px dashed rgb(var(--entry-tone));
+  border: 1.5px solid rgb(var(--v-theme-primary));
 }
 .entry--pending {
-  opacity: 0.5;
-  border-style: dashed;
-  border-color: rgb(var(--entry-tone));
+  background: rgba(var(--v-theme-warning), 0.1);
+  border: 1.5px dashed rgb(var(--v-theme-warning));
 }
 </style>
