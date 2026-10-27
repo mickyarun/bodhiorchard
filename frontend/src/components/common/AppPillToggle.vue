@@ -100,14 +100,14 @@ function select(value: T): void {
 }
 .app-pill-toggle__option {
   /* Reset the user-agent <button> styles, then drive everything from
-     here. Without ``color: #fff`` Chrome/Safari fall back to the
-     button's default colour (~ButtonText, often near-black) which
-     reads as invisible on the primary-green track. */
+     here. Labels use the theme's on-primary ink (white on the light
+     theme's blue, near-black on the dark theme's lighter blue) so both
+     clear 4.5:1 on the track. */
   appearance: none;
   -webkit-appearance: none;
   border: none;
   background: transparent;
-  color: #fff;
+  color: rgb(var(--v-theme-on-primary));
   font-family: inherit;
   font-weight: 600;
   letter-spacing: 0;
@@ -115,23 +115,24 @@ function select(value: T): void {
   border-radius: 999px;
   cursor: pointer;
   transition:
-    background-color 0.15s ease,
-    color 0.15s ease;
+    background-color var(--dur-short, 150ms) ease,
+    color var(--dur-short, 150ms) ease;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 .app-pill-toggle__option:hover:not(.app-pill-toggle__option--active) {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(var(--v-theme-on-primary), 0.14);
 }
+/* The active pill is a surface-coloured cut-out showing the primary ink:
+   5.2:1 on the light theme, 7.0:1 on the dark theme. */
 .app-pill-toggle__option--active {
-  background: #fff;
+  background: rgb(var(--v-theme-surface));
   color: rgb(var(--v-theme-primary));
   cursor: default;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 .app-pill-toggle__option:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline: 2px solid rgb(var(--v-theme-on-primary));
   outline-offset: 2px;
 }
 </style>

@@ -95,3 +95,12 @@ def test_empty_priority_does_not_log(monkeypatch: pytest.MonkeyPatch) -> None:
     normalize_triage_priority(None)
     normalize_triage_priority("")
     fake_logger.warning.assert_not_called()
+
+
+def test_unknown_priority_silent_when_logging_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read paths opt out of the warning but still get the P2 default."""
+    fake_logger = MagicMock()
+    monkeypatch.setattr(triage_priority, "logger", fake_logger)
+
+    assert normalize_triage_priority("super-urgent", log_unknown=False) == BUDPriority.P2
+    fake_logger.warning.assert_not_called()

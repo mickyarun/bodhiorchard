@@ -292,9 +292,9 @@ function formatDuration(ms: number | null): string {
   max-width: 360px;
   padding: 12px 14px;
   background: rgb(var(--v-theme-surface));
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.1);
+  /* Hairline edge, no shadow: the house style for floating surfaces. */
+  border: 1px solid rgb(var(--v-theme-rule));
   border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
   display: flex; flex-direction: column; gap: 8px;
 }
 .popover-head { display: flex; align-items: baseline; gap: 10px; }

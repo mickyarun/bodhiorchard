@@ -16,11 +16,13 @@
 
 import uuid
 from datetime import UTC, datetime
+from unittest.mock import MagicMock
 
 import pytest
 
 from app.models.bud import BUDPriority
 from app.schemas.triage_session import TriageSessionRead
+from app.services import triage_priority
 
 
 def _read(priority: str | None) -> TriageSessionRead:
@@ -53,3 +55,12 @@ def test_bud_priority_follows_the_normaliser(priority: str | None, expected: BUD
 
 def test_bud_priority_is_serialised() -> None:
     assert _read("p1").model_dump(mode="json")["bud_priority"] == "P1"
+
+
+def test_unknown_priority_preview_does_not_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every list call serialises this; only approving the request should log a bad value."""
+    fake_logger = MagicMock()
+    monkeypatch.setattr(triage_priority, "logger", fake_logger)
+
+    assert _read("super-urgent").model_dump()["bud_priority"] == BUDPriority.P2
+    fake_logger.warning.assert_not_called()

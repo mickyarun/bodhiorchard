@@ -54,7 +54,7 @@ _PRIORITY_ALIASES: dict[str, BUDPriority] = {
 }
 
 
-def normalize_triage_priority(raw: str | None) -> BUDPriority:
+def normalize_triage_priority(raw: str | None, *, log_unknown: bool = True) -> BUDPriority:
     """Map a free-text priority value from triage into ``BUDPriority``.
 
     The triage form has historically accepted any string. The structured
@@ -63,12 +63,15 @@ def normalize_triage_priority(raw: str | None) -> BUDPriority:
 
     Unknown-but-truthy values are logged so operators can spot bad
     triage input — empty / NULL stays silent because that's the
-    documented "no opinion" case.
+    documented "no opinion" case. Pass ``log_unknown=False`` from read
+    paths (the API schema previews the priority on every list call) so
+    the warning fires only where a BUD is actually created.
     """
     if not raw:
         return BUDPriority.P2
     key = "".join(ch for ch in raw.lower() if ch.isalnum())
     if key in _PRIORITY_ALIASES:
         return _PRIORITY_ALIASES[key]
-    logger.warning("triage_priority_unknown", raw=raw)
+    if log_unknown:
+        logger.warning("triage_priority_unknown", raw=raw)
     return BUDPriority.P2

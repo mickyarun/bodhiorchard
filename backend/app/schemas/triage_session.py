@@ -48,8 +48,11 @@ class TriageSessionRead(BaseModel):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def bud_priority(self) -> BUDPriority:
-        """The priority the BUD gets if this request is approved."""
-        return normalize_triage_priority(self.priority)
+        """The priority the BUD gets if this request is approved.
+
+        A preview only, so an unknown value isn't logged here; approval logs it.
+        """
+        return normalize_triage_priority(self.priority, log_unknown=False)
 
 
 class TriageApprovalRequest(BaseModel):

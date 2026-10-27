@@ -96,9 +96,9 @@ function onClick(id: RepoRowMenuId): void {
   min-width: 156px;
   padding: 4px;
   background: rgb(var(--v-theme-surface));
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  /* Hairline edge, no shadow: the house style for floating surfaces. */
+  border: 1px solid rgb(var(--v-theme-rule));
   border-radius: 6px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 
 .row-menu-item {
