@@ -1,0 +1,116 @@
+/*
+ * Copyright 2025-2026 Arun Rajkumar
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/* Shared list frame for the Members page's People and Teams tables. */
+.m-table {
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid rgb(var(--v-theme-rule));
+  border-radius: 12px;
+  overflow: hidden;
+  min-width: 0;
+}
+.m-table__scroll {
+  overflow-x: auto;
+}
+.m-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.m-table th {
+  text-align: left;
+  padding: 11px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgb(var(--v-theme-on-surface-variant));
+  background: rgb(var(--v-theme-surface-variant));
+  white-space: nowrap;
+}
+.m-table td {
+  padding: 8px 12px;
+  border-top: 1px solid var(--color-rule-2);
+  vertical-align: middle;
+}
+.m-table th:first-child,
+.m-table td:first-child {
+  padding-left: 20px;
+}
+.m-table__inactive {
+  opacity: 0.6;
+}
+.m-table__who {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.m-table__name {
+  font-weight: 500;
+}
+.m-table__sub {
+  font-size: 12px;
+  color: rgb(var(--v-theme-on-surface-variant));
+  overflow-wrap: anywhere;
+}
+.m-table__muted {
+  color: rgb(var(--v-theme-ink-2));
+  white-space: nowrap;
+}
+.m-table__empty {
+  text-align: center;
+  padding: 32px 20px;
+  color: rgb(var(--v-theme-on-surface-variant));
+}
+.m-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+  color: rgb(var(--v-theme-ink-2));
+}
+.m-status::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgb(var(--dot, var(--v-theme-on-surface-variant)));
+}
+.m-status--on {
+  --dot: var(--v-theme-success);
+}
+@media (max-width: 600px) {
+  .m-table th,
+  .m-table td {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+  .m-table th:first-child,
+  .m-table td:first-child {
+    padding-left: 16px;
+  }
+  .m-table__wide {
+    display: none;
+  }
+  /* Narrow screens keep the name readable and let the card scroll
+     sideways rather than squeezing the person column. */
+  .m-table__who {
+    min-width: 120px;
+  }
+  .m-table__who > :first-child {
+    display: none;
+  }
+}
