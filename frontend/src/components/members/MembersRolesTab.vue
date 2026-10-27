@@ -22,6 +22,12 @@
       <p class="roles-tab__note">Built-in roles are read-only. Create custom roles for your organization.</p>
       <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" @click="openForm(null)">Create role</v-btn>
     </div>
+    <AppCallout v-if="store.error" variant="error">
+      {{ store.error }}
+      <template #actions>
+        <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="store.error = null" />
+      </template>
+    </AppCallout>
     <div class="roles-grid">
       <RoleCard v-for="role in store.roles" :key="role.id" :role="role" @edit="openForm" @delete="confirmDelete" />
     </div>
@@ -47,6 +53,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import AppCallout from '@/components/common/AppCallout.vue'
 import RoleCard from './RoleCard.vue'
 import RoleFormDialog from './RoleFormDialog.vue'
 import { useMembersStore, type RoleOption } from '@/stores/members'

@@ -39,8 +39,6 @@
       <v-tab value="roles">Roles</v-tab>
     </v-tabs>
 
-    <AppCallout v-if="store.error" variant="error">{{ store.error }}</AppCallout>
-
     <MembersPeopleTab v-if="tab === 'people'" />
     <MembersTeamsTab v-else-if="tab === 'teams'" />
     <MembersRolesTab v-else />
@@ -54,7 +52,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import AppCallout from '@/components/common/AppCallout.vue'
 import AppPage from '@/components/common/AppPage.vue'
 import AddMemberDialog from '@/components/members/AddMemberDialog.vue'
 import GithubImportDialog from '@/components/members/GithubImportDialog.vue'

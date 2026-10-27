@@ -27,6 +27,12 @@
       variant="outlined"
       class="people-tab__filter"
     />
+    <AppCallout v-if="store.error" variant="error">
+      {{ store.error }}
+      <template #actions>
+        <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="store.error = null" />
+      </template>
+    </AppCallout>
     <div v-if="store.loading" class="d-flex justify-center py-12">
       <v-progress-circular indeterminate color="primary" aria-label="Loading members" />
     </div>
@@ -47,6 +53,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import AppCallout from '@/components/common/AppCallout.vue'
 import MembersPeopleTable from './MembersPeopleTable.vue'
 import MergeMembersDialog from './MergeMembersDialog.vue'
 import SetPasswordDialog from './SetPasswordDialog.vue'

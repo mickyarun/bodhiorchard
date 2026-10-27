@@ -22,7 +22,8 @@
     <AppMonogram v-else :name="member.name" />
     <div class="who">
       <span class="m-table__name">{{ member.name }}</span>
-      <span class="m-table__sub">{{ member.email }}<template v-if="member.githubUsername"> · @{{ member.githubUsername }}</template></span>
+      <span class="m-table__sub email" :title="member.email">{{ member.email }}</span>
+      <span v-if="member.githubUsername" class="m-table__sub">@{{ member.githubUsername }}</span>
       <span v-if="member.emailAliases?.length" class="aliases" data-test="member-aliases">
         <v-chip
           v-for="alias in member.emailAliases"
@@ -60,6 +61,21 @@ const avatar = computed(() => resolveAvatarUrl(props.member.avatarUrl))
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+/* Long emails end in an ellipsis (full address on hover) instead of
+   breaking mid-word. */
+.email {
+  display: block;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+@media (max-width: 600px) {
+  .email {
+    max-width: 120px;
+  }
 }
 .aliases {
   display: flex;

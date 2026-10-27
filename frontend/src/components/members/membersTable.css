@@ -105,11 +105,7 @@
   .m-table__wide {
     display: none;
   }
-  /* Narrow screens keep the name readable and let the card scroll
-     sideways rather than squeezing the person column. */
-  .m-table__who {
-    min-width: 120px;
-  }
+  /* Narrow screens drop the monogram to give the name more room. */
   .m-table__who > :first-child {
     display: none;
   }

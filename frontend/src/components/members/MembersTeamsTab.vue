@@ -32,7 +32,12 @@
       <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" @click="openCreate">New team</v-btn>
     </div>
 
-    <AppCallout v-if="store.error" variant="error">{{ store.error }}</AppCallout>
+    <AppCallout v-if="store.error" variant="error">
+      {{ store.error }}
+      <template #actions>
+        <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="store.error = null" />
+      </template>
+    </AppCallout>
 
     <div v-if="store.loading" class="d-flex justify-center py-12">
       <v-progress-circular indeterminate color="primary" aria-label="Loading teams" />

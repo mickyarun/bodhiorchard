@@ -74,10 +74,15 @@ const open = defineModel<boolean>({ required: true })
 const store = useMembersStore()
 
 const saving = ref(false)
-const form = ref({ name: '', email: '', password: '', roleId: '' as string | null })
+const form = ref<{ name: string; email: string; password: string; roleId: string | null }>({
+  name: '',
+  email: '',
+  password: '',
+  roleId: null,
+})
 
 watch(open, isOpen => {
-  if (isOpen) form.value = { name: '', email: '', password: '', roleId: '' }
+  if (isOpen) form.value = { name: '', email: '', password: '', roleId: null }
 })
 
 const canSubmit = computed(

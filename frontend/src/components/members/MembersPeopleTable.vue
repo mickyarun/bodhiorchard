@@ -102,7 +102,8 @@ const store = useMembersStore()
 @media (max-width: 600px) {
   .role-select {
     min-width: 0;
-    width: 136px;
+    width: 100%;
+    max-width: 136px;
   }
   .role-select :deep(.v-field__input) {
     font-size: 13px;
