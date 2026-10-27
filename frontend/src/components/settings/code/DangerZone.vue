@@ -92,7 +92,7 @@
 
       <v-btn
         color="error"
-        variant="flat"
+        variant="outlined"
         prepend-icon="mdi-refresh"
         class="text-none"
         :loading="running"

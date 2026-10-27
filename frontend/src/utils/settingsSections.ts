@@ -68,7 +68,7 @@ const GROUPS: SettingsGroup[] = [
     items: [
       { title: 'Leave policies', to: '/settings/leave', needs: 'leave' },
       { title: 'Celebrations', to: '/settings/celebrations', needs: 'celebrations' },
-      { title: 'Presence', to: '/settings/presence', needs: 'presence' },
+      { title: 'Presence and auto mode', to: '/settings/presence', needs: 'presence' },
     ],
   },
   {

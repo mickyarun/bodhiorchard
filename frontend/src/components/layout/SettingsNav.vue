@@ -14,101 +14,20 @@
  * limitations under the License.
  -->
 
-<!-- Settings group at the foot of the sidebar. Each entry mirrors its
-     route's permission so visibility tracks what the user can open. -->
+<!-- Settings group at the foot of the sidebar. The pages, their order,
+     labels and permission checks come from utils/settingsSections.ts, the
+     same list the Integrations page shows beside its cards. -->
 <template>
-  <v-list-group v-if="canViewSettings || canConfigureLeave || canManageEmployees" value="settings">
+  <v-list-group v-if="links.length > 0" value="settings">
     <template #activator="{ props }">
-      <v-list-item
-        v-bind="props"
-        prepend-icon="mdi-cog-outline"
-        title="Settings"
-        rounded="lg"
-      />
+      <v-list-item v-bind="props" prepend-icon="mdi-cog-outline" title="Settings" rounded="lg" />
     </template>
     <v-list-item
-      v-if="canViewConnections"
-      title="Integrations"
-      to="/settings"
-      rounded="lg"
-      class="pl-10"
-    />
-    <v-list-item
-      v-if="canViewCodeSettings"
-      title="Code"
-      to="/settings/code"
-      rounded="lg"
-      class="pl-10"
-    />
-    <v-list-item
-      v-if="canViewDesignSystems"
-      title="Design Systems"
-      to="/settings/design-systems"
-      rounded="lg"
-      class="pl-10"
-    />
-    <v-list-item
-      v-if="canViewAgentPrompts"
-      title="Agent Prompts"
-      to="/settings/agent-prompts"
-      rounded="lg"
-      class="pl-10"
-    />
-    <v-list-item
-      v-if="canViewQAAutomation"
-      title="QA Automation"
-      to="/settings/qa-automation"
-      rounded="lg"
-      class="pl-10"
-    />
-    <v-list-item
-      v-if="canViewPresenceSettings"
-      title="Presence & Auto Mode"
-      to="/settings/presence"
-      rounded="lg"
-      class="pl-10"
-    />
-    <v-list-item
-      v-if="canViewJiraImport"
-      title="Jira Import"
-      to="/settings/jira-import"
-      rounded="lg"
-      class="pl-10"
-    />
-    <v-list-item
-      v-if="canManageQuiz"
-      title="Quiz Game"
-      to="/settings/quiz-game"
-      rounded="lg"
-      class="pl-10"
-    />
-    <v-list-item
-      v-if="canManageQuiz"
-      title="Quiz Review"
-      to="/settings/quiz-review"
-      rounded="lg"
-      class="pl-10"
-    />
-    <v-list-item
-      v-if="canConfigureLeave"
-      title="Leave"
-      to="/settings/leave"
-      rounded="lg"
-      class="pl-10"
-    />
-    <v-list-item
-      v-if="canManageEmployees"
-      title="Offices"
-      to="/settings/offices"
-      rounded="lg"
-      class="pl-10"
-    />
-    <!-- MCP Connect is self-service for anyone in the engineering
-         workspace (mint / revoke their own tokens). -->
-    <v-list-item
-      v-if="canAccessEngineering"
-      title="MCP Connect"
-      to="/settings/mcp-connect"
+      v-for="link in links"
+      :key="link.to"
+      :title="link.title"
+      :to="link.to"
+      :exact="link.to === '/settings'"
       rounded="lg"
       class="pl-10"
     />
@@ -116,20 +35,9 @@
 </template>
 
 <script setup lang="ts">
-import { usePermissions } from '@/composables/usePermissions'
+import { computed } from 'vue'
+import { useSettingsSections } from '@/composables/useSettingsSections'
 
-const {
-  canAccessEngineering,
-  canViewSettings,
-  canViewConnections,
-  canViewCodeSettings,
-  canViewDesignSystems,
-  canViewAgentPrompts,
-  canViewQAAutomation,
-  canViewPresenceSettings,
-  canViewJiraImport,
-  canManageQuiz,
-  canConfigureLeave,
-  canManageEmployees,
-} = usePermissions()
+const groups = useSettingsSections()
+const links = computed(() => groups.value.flatMap(g => g.items))
 </script>

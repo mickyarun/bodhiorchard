@@ -55,7 +55,7 @@
   </div>
   <AppCallout v-if="form.error.value" variant="error" class="mt-4">{{ form.error.value }}</AppCallout>
   <AppCallout v-else-if="saved" variant="success" class="mt-4">Saved.</AppCallout>
-  <v-btn color="primary" class="mt-5" :loading="form.saving.value" @click="save">Save</v-btn>
+  <v-btn color="primary" variant="tonal" class="mt-5" :loading="form.saving.value" @click="save">Save</v-btn>
 </template>
 
 <script setup lang="ts">

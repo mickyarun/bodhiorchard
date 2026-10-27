@@ -23,8 +23,7 @@
     running → progress drawer bound to the in-flight jobId
     done    → terminal summary + "Onboard more" / "View scan" CTAs
 
-  Phase H will mount this component into ``SourceCodeStep.vue`` and
-  ``RepoAddDialog.vue`` — those wrappers are NOT touched here.
+  Mounted by ``SourceCodeStep.vue`` and ``RepoAddDialog.vue``.
 -->
 <template>
   <div class="d-flex flex-column ga-4">
@@ -36,9 +35,9 @@
     />
 
     <template v-if="phase === 'picking'">
-      <v-alert v-if="onboard.errorMessage.value" type="error" variant="tonal" density="compact">
+      <AppCallout v-if="onboard.errorMessage.value" variant="error">
         {{ onboard.errorMessage.value }}
-      </v-alert>
+      </AppCallout>
       <v-progress-linear v-if="onboard.loadingInstallable.value" indeterminate />
       <RepoOnboardPickerList
         v-else
@@ -97,6 +96,7 @@
 </template>
 
 <script setup lang="ts">
+import AppCallout from '@/components/common/AppCallout.vue'
 import { computed, onMounted, ref } from 'vue'
 import GitHubAppConnectionCard from '@/components/settings/connections/GitHubAppConnectionCard.vue'
 import { GITHUB_APP_STATUS, type GitHubAppStatus } from '@/types/connections'

@@ -35,31 +35,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { usePermissions } from '@/composables/usePermissions'
-import { settingsSections } from '@/utils/settingsSections'
+import { useSettingsSections } from '@/composables/useSettingsSections'
 
 const route = useRoute()
-const p = usePermissions()
-
-const groups = computed(() =>
-  settingsSections({
-    connections: p.canViewConnections.value,
-    code: p.canViewCodeSettings.value,
-    designSystems: p.canViewDesignSystems.value,
-    agentPrompts: p.canViewAgentPrompts.value,
-    qa: p.canViewQAAutomation.value,
-    presence: p.canViewPresenceSettings.value,
-    jira: p.canViewJiraImport.value,
-    quiz: p.canManageQuiz.value,
-    leave: p.canConfigureLeave.value,
-    employees: p.canManageEmployees.value,
-    celebrations: p.canManageCelebrations.value,
-    members: p.canManageMembers.value,
-    engineering: p.canAccessEngineering.value,
-  }),
-)
+const groups = useSettingsSections()
 </script>
 
 <style scoped>

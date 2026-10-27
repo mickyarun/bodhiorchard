@@ -80,7 +80,7 @@
     <AppCallout v-if="sync.error.value" variant="error" class="mt-4">{{ sync.error.value }}</AppCallout>
     <AppCallout v-else-if="message" :variant="messageVariant" class="mt-4">{{ message }}</AppCallout>
     <div class="d-flex flex-wrap ga-2 mt-5">
-      <v-btn color="primary" :loading="sync.saving.value" @click="save">Save</v-btn>
+      <v-btn color="primary" variant="tonal" :loading="sync.saving.value" @click="save">Save</v-btn>
       <v-btn
         variant="tonal"
         :loading="testing"

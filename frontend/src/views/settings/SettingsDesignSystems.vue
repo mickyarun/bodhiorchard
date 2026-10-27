@@ -32,6 +32,9 @@
 
       <AppCallout v-if="dsStore.error" variant="error" class="mt-4">
         {{ dsStore.error }}
+        <template #actions>
+          <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="dsStore.error = null" />
+        </template>
       </AppCallout>
 
       <AppCallout v-if="extracting || jobActive" variant="info" class="mt-4">

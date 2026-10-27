@@ -37,6 +37,9 @@
 
       <AppCallout v-if="store.error" variant="error" class="mt-4">
         {{ store.error }}
+        <template #actions>
+          <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="store.error = null" />
+        </template>
       </AppCallout>
     </div>
 

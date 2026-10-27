@@ -42,13 +42,14 @@
         </template>
       </v-list-item>
     </v-list>
-    <v-alert v-if="errorMessage" type="error" variant="tonal" class="mt-3" density="compact">
+    <AppCallout v-if="errorMessage" variant="error" class="mt-3">
       {{ errorMessage }}
-    </v-alert>
+    </AppCallout>
   </v-card>
 </template>
 
 <script setup lang="ts">
+import AppCallout from '@/components/common/AppCallout.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useJobSocket } from '@/composables/useJobSocket'
 import {
