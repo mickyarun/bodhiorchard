@@ -39,12 +39,16 @@ export const useTriageStore = defineStore('triage', () => {
   const loading = ref(false)
   const error = ref('')
 
+  /**
+   * Load sessions in one status, or every session when ``status`` is
+   * left out. The endpoint defaults to ``awaiting_pm`` when the param is
+   * missing, so "every status" is sent as an empty ``status``.
+   */
   async function fetchSessions(status?: string): Promise<void> {
     loading.value = true
     error.value = ''
     try {
-      const params: Record<string, string> = {}
-      if (status) params.status = status
+      const params = { status: status ?? '' }
       const { data } = await api.get('/v1/triage-sessions/', { params })
       sessions.value = data
     } catch {
