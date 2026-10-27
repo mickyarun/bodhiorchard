@@ -16,7 +16,7 @@
 
 <!-- Employee directory: members who have an employee record. -->
 <template>
-  <LeavePage title="Employees" :subtitle="subtitle">
+  <AppPage title="Employees" :subtitle="subtitle">
     <template #actions>
       <v-btn v-if="canInviteMembers" variant="outlined" prepend-icon="mdi-account-plus-outline" @click="inviting = true">
         Invite new hire
@@ -33,7 +33,7 @@
       v-model:department="department"
       :departments="departments"
       :offices="offices"
-      :total="store.directory.length"
+      :total="officeRows.length"
     />
 
     <AppCallout v-if="store.error" variant="error">{{ store.error }}</AppCallout>
@@ -42,18 +42,19 @@
       :rows="rows"
       :total="store.directory.length"
       :loading="store.loading"
+      :failed="!!store.error"
       :empty-label="emptyLabel"
     />
 
     <AddEmployeeDialog v-model="adding" :preselect-user-id="preselect" />
     <InviteNewHireDialog v-model="inviting" @invited="invited" />
-  </LeavePage>
+  </AppPage>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
-import LeavePage from '@/components/leave/LeavePage.vue'
+import AppPage from '@/components/common/AppPage.vue'
 import AddEmployeeDialog from '@/components/people/AddEmployeeDialog.vue'
 import DirectoryFilters from '@/components/people/directory/DirectoryFilters.vue'
 import DirectoryTable from '@/components/people/directory/DirectoryTable.vue'
@@ -92,10 +93,17 @@ const status = ref<EmployeeStatus | null>('active')
 const department = ref<string | null>(null)
 const office = ref<string | null>(null)
 
-const departments = computed(() => departmentCounts(store.directory))
-const offices = computed(() => officeOptions(store.directory))
+// Each filter's choices and counts follow the other filter, so a chip's
+// count is what clicking it would show.
+const officeRows = computed(() =>
+  filterDirectory(store.directory, { department: null, office: office.value }),
+)
+const departments = computed(() => departmentCounts(officeRows.value))
+const offices = computed(() =>
+  officeOptions(filterDirectory(store.directory, { department: department.value, office: null })),
+)
 const rows = computed(() =>
-  filterDirectory(store.directory, { department: department.value, office: office.value }),
+  filterDirectory(officeRows.value, { department: department.value, office: null }),
 )
 
 // A new search can leave a picked department or office with nobody in it;

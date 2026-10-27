@@ -17,8 +17,10 @@
  * their next work anniversary and birthday, and the short leave summary
  * beside the profile.
  */
+import type { EmployeeWork } from '@/types/employee'
 import type { Balance } from '@/types/leave'
 import { balanceTotal, formatDays, meterPercents, swatchColor, toNumber } from '@/utils/leave'
+import { earnedSoFar } from '@/utils/leaveAccrual'
 
 /** "2022-01-10" as a local date (no time-zone shift), or null. */
 export function parseDateOnly(iso: string | null | undefined): Date | null {
@@ -53,6 +55,20 @@ export function tenureLabel(joining: string | null, today: Date): string | null 
   return [years ? plural(years, 'year') : '', rest ? plural(rest, 'month') : '']
     .filter(Boolean)
     .join(' ')
+}
+
+/**
+ * Tenure for the profile header. It stops at the exit date for someone who
+ * has left, and isn't shown at all when that date is missing.
+ */
+export function tenureFor(
+  work: Pick<EmployeeWork, 'date_of_joining' | 'date_of_exit' | 'status'>,
+  today: Date,
+): string | null {
+  if (work.status !== 'exited') return tenureLabel(work.date_of_joining, today)
+  const exit = parseDateOnly(work.date_of_exit)
+  if (!exit) return null
+  return tenureLabel(work.date_of_joining, exit < today ? exit : today)
 }
 
 /** The day-and-month of `source` in `year`; 29 Feb falls back to 28 Feb. */
@@ -101,7 +117,10 @@ export function formatDayMonth(date: Date): string {
 export interface LeaveSummaryRow {
   key: string
   name: string
-  /** "9 of 12 left", "0 left" (nothing allocated), "3 days taken" (no limit). */
+  /**
+   * "9 of 12 left"; "8 left · 10 earned of 12" while a monthly type is still
+   * building up; "0 left" with nothing allocated; "3 days taken" with no limit.
+   */
   left: string
   /** Share of the earned days still free, or null for a type with no limit. */
   percent: number | null
@@ -109,7 +128,10 @@ export interface LeaveSummaryRow {
   color: string
 }
 
-/** One row per leave type for the profile's "Leave this year" panel. */
+/**
+ * One row per leave type for the profile's "Leave this year" panel, worded
+ * like the Leave tab's balance cards so the two never disagree.
+ */
 export function leaveSummary(balances: Balance[]): LeaveSummaryRow[] {
   return balances.map(balance => {
     const base = {
@@ -125,11 +147,14 @@ export function leaveSummary(balances: Balance[]): LeaveSummaryRow[] {
     }
     const available = formatDays(Math.max(0, toNumber(balance.available)))
     if (total <= 0) return { ...base, left: `${available} left`, percent: 0 }
-    return {
-      ...base,
-      left: `${available} of ${formatDays(total)} left`,
-      percent: Math.max(0, 100 - meter.used - meter.pending),
+    // The bar's track is what is earned so far, as on the Leave tab.
+    const percent = Math.max(0, 100 - meter.used - meter.pending)
+    if (earnedSoFar(balance)) {
+      const earned = formatDays(toNumber(balance.earned))
+      const allocated = formatDays(toNumber(balance.allocated))
+      return { ...base, left: `${available} left · ${earned} earned of ${allocated}`, percent }
     }
+    return { ...base, left: `${available} of ${formatDays(total)} left`, percent }
   })
 }
 

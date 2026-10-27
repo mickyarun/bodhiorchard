@@ -17,7 +17,7 @@
 <!-- Team calendar: who's on leave or working from home this month.
      A month grid on wide screens, an agenda list under 720px. -->
 <template>
-  <LeavePage title="Team calendar" :subtitle="subtitle">
+  <AppPage title="Team calendar" :subtitle="subtitle">
     <template #actions>
       <div class="month-nav">
         <v-btn icon="mdi-chevron-left" variant="outlined" size="small" aria-label="Previous month" @click="calendar.step(-1)" />
@@ -56,18 +56,18 @@
       :context="calendar.context.value"
       @close="selected = null"
     />
-  </LeavePage>
+  </AppPage>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useDisplay } from 'vuetify'
 import AppCallout from '@/components/common/AppCallout.vue'
+import AppPage from '@/components/common/AppPage.vue'
 import CalendarAgenda from '@/components/leave/calendar/CalendarAgenda.vue'
 import CalendarDayDrawer from '@/components/leave/calendar/CalendarDayDrawer.vue'
 import CalendarLegend from '@/components/leave/calendar/CalendarLegend.vue'
 import CalendarMonthGrid from '@/components/leave/calendar/CalendarMonthGrid.vue'
-import LeavePage from '@/components/leave/LeavePage.vue'
 import { useTeamCalendar } from '@/composables/useTeamCalendar'
 import { monthSummary } from '@/utils/leaveCalendar'
 import { monthTitle, toIsoDate } from '@/utils/leaveDates'

@@ -14,18 +14,20 @@
  * limitations under the License.
  -->
 
-<!-- "Coming up" beside the profile: the next work anniversary and, when the
-     viewer can see the date of birth, the next birthday (never the year). -->
+<!-- "Coming up" beside the profile: the next work anniversary and birthday
+     (never the year). Both need the personal details, which carry the
+     person's announcement opt-outs; a viewer who can't see those sees
+     neither, so an opt-out is never worked around. -->
 <template>
   <AppPanel v-if="anniversary || birthday" title="Coming up">
     <ul class="coming">
       <li v-if="anniversary">
         {{ anniversary.years }}-year work anniversary on <strong>{{ formatFullDate(anniversary.date) }}</strong>.
-        <span v-if="personal && !personal.celebrate_anniversary" class="coming__muted">Not announced.</span>
+        <span v-if="!personal?.celebrate_anniversary" class="coming__muted">Not announced.</span>
       </li>
       <li v-if="birthday">
         Birthday on <strong>{{ formatDayMonth(birthday) }}</strong>.
-        <span v-if="personal && !personal.celebrate_birthday" class="coming__muted">Not announced.</span>
+        <span v-if="!personal?.celebrate_birthday" class="coming__muted">Not announced.</span>
       </li>
     </ul>
   </AppPanel>
@@ -44,7 +46,9 @@ const personal = computed(() => props.record.personal)
 // Nothing is coming up for someone who has left.
 const exited = computed(() => props.record.work.status === 'exited')
 const anniversary = computed(() =>
-  exited.value ? null : nextAnniversary(props.record.work.date_of_joining, today),
+  exited.value || !personal.value
+    ? null
+    : nextAnniversary(props.record.work.date_of_joining, today),
 )
 const birthday = computed(() =>
   exited.value ? null : nextBirthday(personal.value?.date_of_birth ?? null, today),

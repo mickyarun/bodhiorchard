@@ -18,7 +18,7 @@
      queue for holders of leave:approve. A list beside the selected request
      on wide screens; on narrow ones the request opens under its row. -->
 <template>
-  <LeavePage title="Approvals" :subtitle="subtitle">
+  <AppPage title="Approvals" :subtitle="subtitle">
     <template #actions>
       <AppPillToggle :model-value="store.status" :options="TABS" aria-label="Show" @update:model-value="store.fetch" />
     </template>
@@ -55,18 +55,18 @@
       </section>
       <ApprovalCard v-if="!narrow && current" ref="detail" :key="current.request.id" :item="current" />
     </div>
-  </LeavePage>
+  </AppPage>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useDisplay } from 'vuetify'
 import AppCallout from '@/components/common/AppCallout.vue'
+import AppPage from '@/components/common/AppPage.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import ApprovalCard from '@/components/leave/ApprovalCard.vue'
 import ApprovalFilters from '@/components/leave/ApprovalFilters.vue'
 import ApprovalQueueItem from '@/components/leave/ApprovalQueueItem.vue'
-import LeavePage from '@/components/leave/LeavePage.vue'
 import { useDebounced } from '@/composables/useDebounced'
 import { type ApprovalTab, useLeaveApprovalsStore } from '@/stores/leaveApprovals'
 import type { ApprovalItem } from '@/types/leave'

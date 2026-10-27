@@ -18,7 +18,7 @@
      filters and CSV export. HR and the owner see everyone; managers see
      their direct reports. Reasons never appear here. -->
 <template>
-  <LeavePage title="Leave reports" :subtitle="subtitle">
+  <AppPage title="Leave reports" :subtitle="subtitle">
     <template #actions>
       <AppPillToggle v-model="store.report" :options="REPORTS" aria-label="Report" />
       <v-btn
@@ -53,14 +53,14 @@
         <ReportBalancesTable v-else :report="store.balances" />
       </section>
     </template>
-  </LeavePage>
+  </AppPage>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
+import AppPage from '@/components/common/AppPage.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
-import LeavePage from '@/components/leave/LeavePage.vue'
 import ReportBalancesTable from '@/components/leave/reports/ReportBalancesTable.vue'
 import ReportFilterBar from '@/components/leave/reports/ReportFilterBar.vue'
 import ReportRegisterTable from '@/components/leave/reports/ReportRegisterTable.vue'

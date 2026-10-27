@@ -19,10 +19,12 @@
 <template>
   <AppPanel title="Leave this year">
     <template #action>
-      <v-btn variant="text" size="small" color="primary" @click="emit('details')">Details</v-btn>
+      <v-btn variant="text" size="small" color="primary" aria-label="Leave details" @click="emit('details')">
+        Details
+      </v-btn>
     </template>
     <v-progress-linear v-if="balances.loading.value" indeterminate color="primary" />
-    <p v-else-if="balances.error.value" class="leave-sum__empty">{{ balances.error.value }}</p>
+    <AppCallout v-else-if="balances.error.value" variant="error">{{ balances.error.value }}</AppCallout>
     <p v-else-if="rows.length === 0" class="leave-sum__empty">No leave types on this policy yet.</p>
     <ul v-else class="leave-sum">
       <li v-for="row in rows" :key="row.key" class="leave-sum__row">
@@ -40,6 +42,7 @@
 
 <script setup lang="ts">
 import { computed, watch } from 'vue'
+import AppCallout from '@/components/common/AppCallout.vue'
 import AppPanel from '@/components/common/AppPanel.vue'
 import { useMemberBalances } from '@/composables/useMemberBalances'
 import { leaveSummary } from '@/utils/employeeProfile'

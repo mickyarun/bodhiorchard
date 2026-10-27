@@ -62,7 +62,7 @@ import type { DepartmentCount } from '@/utils/employeeDirectory'
 defineProps<{
   departments: DepartmentCount[]
   offices: { title: string; value: string }[]
-  /** Everyone the search and status returned, for the "All" chip. */
+  /** Everyone the search, status and office filter leave, for the "All" chip. */
   total: number
 }>()
 

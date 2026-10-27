@@ -30,7 +30,12 @@
       </p>
       <ul v-else class="managers__list">
         <li v-for="m in managers" :key="m.user_id" class="managers__item">
-          <EmployeeAvatar :user-id="m.user_id" :name="m.name" :avatar-url="null" :size="30" />
+          <EmployeeAvatar
+            :user-id="m.user_id"
+            :name="m.name"
+            :avatar-url="avatarFrom(team.rows, m.user_id)"
+            :size="30"
+          />
           <span class="managers__name">{{ m.name }}</span>
           <span v-if="m.is_primary" class="managers__tag">Primary</span>
           <span v-if="!m.is_active" class="managers__tag">Deactivated</span>
@@ -85,8 +90,10 @@ import AppPanel from '@/components/common/AppPanel.vue'
 import EmployeeAvatar from '@/components/people/EmployeeAvatar.vue'
 import { useMemberDirectory } from '@/composables/useMemberDirectory'
 import { useEmployeesStore } from '@/stores/employees'
+import { useTeamDirectoryStore } from '@/stores/teamDirectory'
 import type { ManagerInput, ManagerRef } from '@/types/employee'
 import { normalizeManagers, setPrimary } from '@/utils/employee'
+import { avatarFrom } from '@/utils/employeeDirectory'
 
 const props = defineProps<{
   employeeId: string
@@ -96,6 +103,8 @@ const props = defineProps<{
 }>()
 
 const store = useEmployeesStore()
+// Photos only: the profile's Team card loads the directory when allowed.
+const team = useTeamDirectoryStore()
 const { entries, ensureLoaded, nameFor } = useMemberDirectory()
 
 const editing = ref(false)

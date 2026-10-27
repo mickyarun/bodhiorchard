@@ -15,14 +15,19 @@
  -->
 
 <!-- Team card beside the profile: their managers and, for viewers who can
-     see the directory, who else shares the primary manager and who reports
-     to this person. -->
+     read the directory (employees:view), who else shares the primary
+     manager and who reports to this person. -->
 <template>
   <AppPanel title="Team">
-    <p v-if="!record.managers.length" class="team__empty">No manager set. Leave requests go to HR.</p>
+    <p v-if="!record.managers.length" class="team__note">No manager set. Leave requests go to HR.</p>
     <ul v-else class="team__managers">
       <li v-for="m in record.managers" :key="m.user_id" class="team__person">
-        <EmployeeAvatar :user-id="m.user_id" :name="m.name" :avatar-url="null" :size="34" />
+        <EmployeeAvatar
+          :user-id="m.user_id"
+          :name="m.name"
+          :avatar-url="avatarFrom(team.rows, m.user_id)"
+          :size="34"
+        />
         <span class="team__text">
           <component :is="canViewEmployees ? RouterLink : 'span'" v-bind="profileLink(m.user_id)" class="team__name">
             {{ m.name }}
@@ -45,6 +50,10 @@
       </span>
       <span>{{ group.line }}</span>
     </div>
+    <p v-if="!canReadDirectory" class="team__note team__note--below">
+      The rest of the team shows to people with directory access.
+    </p>
+    <p v-else-if="team.error" class="team__note team__note--below">{{ team.error }}</p>
   </AppPanel>
 </template>
 
@@ -54,15 +63,19 @@ import { RouterLink } from 'vue-router'
 import AppPanel from '@/components/common/AppPanel.vue'
 import EmployeeAvatar from '@/components/people/EmployeeAvatar.vue'
 import { usePermissions } from '@/composables/usePermissions'
-import { useTeamDirectory } from '@/composables/useTeamDirectory'
+import { useAuthStore } from '@/stores/auth'
+import { useTeamDirectoryStore } from '@/stores/teamDirectory'
 import type { EmployeeRecord, ManagerRef } from '@/types/employee'
-import { reportsOf } from '@/utils/employeeDirectory'
+import { avatarFrom, teamGroups } from '@/utils/employeeDirectory'
 
 const props = defineProps<{ record: EmployeeRecord }>()
 const MAX_FACES = 4
 
-const { canViewEmployees } = usePermissions()
-const directory = useTeamDirectory()
+const { canViewEmployees, hasPermission } = usePermissions()
+const authStore = useAuthStore()
+const team = useTeamDirectoryStore()
+// The directory endpoint needs employees:view itself; manage alone is refused.
+const canReadDirectory = computed(() => hasPermission('employees:view'))
 const primary = computed(() => props.record.managers.find(m => m.is_primary) ?? null)
 
 function profileLink(userId: string): Record<string, unknown> {
@@ -74,36 +87,16 @@ function managerNote(m: ManagerRef): string {
   return m.is_active ? role : `${role} · deactivated`
 }
 
-function count(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`
-}
+const groups = computed(() =>
+  canReadDirectory.value ? teamGroups(team.rows, props.record, primary.value) : [],
+)
 
-// Peers under the same primary manager, then this person's own reports.
-const groups = computed(() => {
-  const self = props.record.user_id
-  const rows = directory.rows.value
-  const peers = primary.value ? reportsOf(rows, primary.value.user_id, self) : []
-  const reports = reportsOf(rows, self, self)
-  return [
-    {
-      key: 'peers',
-      people: peers,
-      line: `${count(peers.length, 'other reports', 'others report')} to ${primary.value?.name ?? ''}`,
-    },
-    {
-      key: 'reports',
-      people: reports,
-      line: `${count(reports.length, 'person reports', 'people report')} to ${props.record.name}`,
-    },
-  ].filter(group => group.people.length)
-})
-
-// The directory is open to employees:view only; without it, managers only.
+// Kept by the store, so this reads the directory once per viewer; a saved
+// record (new managers, say) drops it and the next look rereads it.
 watch(
-  canViewEmployees,
-  allowed => {
-    if (allowed) void directory.ensureLoaded()
-    else directory.clear()
+  () => [canReadDirectory.value, authStore.user?.id, props.record] as const,
+  ([allowed, viewerId]) => {
+    if (allowed && viewerId) void team.ensureLoaded(viewerId)
   },
   { immediate: true },
 )
@@ -139,13 +132,16 @@ a.team__name:hover {
   text-decoration: underline;
 }
 .team__sub,
-.team__empty {
+.team__note {
   font-size: 12px;
   color: rgb(var(--v-theme-on-surface-variant));
 }
-.team__empty {
+.team__note {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
+}
+.team__note--below {
+  margin-top: 12px;
 }
 .team__peers {
   display: flex;

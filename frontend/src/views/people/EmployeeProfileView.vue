@@ -44,7 +44,14 @@
         </template>
       </EmployeeHeaderCard>
 
-      <v-tabs v-model="tab" color="primary" slider-color="primary" class="profile__tabs" aria-label="Profile sections">
+      <v-tabs
+        v-model="tab"
+        color="primary"
+        slider-color="primary"
+        show-arrows
+        class="profile__tabs"
+        aria-label="Profile sections"
+      >
         <v-tab v-for="item in tabs" :key="item.value" :value="item.value">
           <v-icon v-if="item.locked" icon="mdi-lock-outline" size="14" class="mr-1" />
           {{ item.label }}
@@ -69,7 +76,13 @@
             <DocumentsTab :user-id="record.user_id" />
           </v-tabs-window-item>
         </v-tabs-window>
-        <ProfileAside v-if="showAside" :record="record" :show-leave="showLeave" @leave-details="tab = 'leave'" />
+        <!-- Hidden, not removed, on the other tabs: it keeps what it loaded. -->
+        <ProfileAside
+          v-show="showAside"
+          :record="record"
+          :show-leave="showLeave"
+          @leave-details="tab = 'leave'"
+        />
       </div>
     </template>
   </div>

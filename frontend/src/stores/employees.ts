@@ -23,6 +23,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 import api from '@/services/api'
+import { useTeamDirectoryStore } from '@/stores/teamDirectory'
 import type {
   CelebrationPrefs,
   DirectoryEntry,
@@ -116,6 +117,8 @@ export const useEmployeesStore = defineStore('employees', () => {
   async function save(request: () => Promise<{ data: EmployeeRecord }>, fallback: string) {
     try {
       record.value = (await request()).data
+      // Managers, status or name may have changed: the Team card rereads.
+      useTeamDirectoryStore().invalidate()
       return null
     } catch (err) {
       return extractApiError(err, fallback)

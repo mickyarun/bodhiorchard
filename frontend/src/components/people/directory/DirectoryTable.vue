@@ -44,10 +44,10 @@
               <div>{{ row.designation || '—' }}</div>
               <div v-if="row.department" class="muted small">{{ row.department }}</div>
             </td>
-            <td class="col-where ink-2">{{ worksFromLabel(row.work_arrangement, row.office) }}</td>
+            <td class="col-where ink-2">{{ workplaceLabel(row.work_arrangement, row.office) }}</td>
             <td class="col-manager ink-2">{{ managerLabel(row) }}</td>
           </tr>
-          <tr v-if="!loading && rows.length === 0">
+          <tr v-if="!loading && !failed && rows.length === 0">
             <td colspan="5" class="dir-table__empty">{{ emptyLabel }}</td>
           </tr>
         </tbody>
@@ -64,13 +64,15 @@
 import { useRouter } from 'vue-router'
 import DirectoryPersonCell from '@/components/people/directory/DirectoryPersonCell.vue'
 import type { DirectoryEntry } from '@/types/employee'
-import { worksFromLabel } from '@/utils/employeeDirectory'
+import { workplaceLabel } from '@/utils/employee'
 
 defineProps<{
   rows: DirectoryEntry[]
   /** How many the search and status returned, before department/office. */
   total: number
   loading: boolean
+  /** The load failed: the page shows why, so no "nobody yet" here. */
+  failed: boolean
   emptyLabel: string
 }>()
 

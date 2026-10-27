@@ -60,11 +60,10 @@ export const ARRANGEMENT_LABELS: Record<WorkArrangement, string> = {
   remote: 'Remote',
 }
 
-/** Where someone works, in a word or two: "Remote", "London", "London · Hybrid". */
-export function workplaceLabel(arrangement: WorkArrangement, office: OfficeRef | null): string | null {
-  if (arrangement === 'remote') return ARRANGEMENT_LABELS.remote
-  if (!office) return arrangement === 'hybrid' ? ARRANGEMENT_LABELS.hybrid : null
-  return arrangement === 'hybrid' ? `${office.name} · ${ARRANGEMENT_LABELS.hybrid}` : office.name
+/** Where someone works, how first: "Office · Chennai", "Hybrid · London", "Remote". */
+export function workplaceLabel(arrangement: WorkArrangement, office: OfficeRef | null): string {
+  const how = ARRANGEMENT_LABELS[arrangement]
+  return arrangement !== 'remote' && office ? `${how} · ${office.name}` : how
 }
 
 /** `{ title, value }` items for a v-select from a label map. */

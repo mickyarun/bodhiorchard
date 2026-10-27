@@ -22,7 +22,8 @@ import {
   officeOptions,
   REMOTE_FILTER,
   reportsOf,
-  worksFromLabel,
+  avatarFrom,
+  teamGroups,
 } from './employeeDirectory'
 
 const CHENNAI = { id: 'o-chennai', name: 'Chennai' }
@@ -136,11 +137,25 @@ describe('reportsOf', () => {
   })
 })
 
-describe('worksFromLabel', () => {
-  it('puts the arrangement first, then the office', () => {
-    expect(worksFromLabel('office', CHENNAI)).toBe('Office · Chennai')
-    expect(worksFromLabel('hybrid', LONDON)).toBe('Hybrid · London')
-    expect(worksFromLabel('hybrid', null)).toBe('Hybrid')
-    expect(worksFromLabel('remote', null)).toBe('Remote')
+describe('avatarFrom', () => {
+  it('finds a photo in the directory, or null', () => {
+    const rows = [{ ...ROWS[0], avatar_url: '/api/v1/employees/avatars/a.png' }]
+    expect(avatarFrom(rows, 'a')).toBe('/api/v1/employees/avatars/a.png')
+    expect(avatarFrom(rows, 'zz')).toBeNull()
+  })
+})
+
+describe('teamGroups', () => {
+  it('lists peers under the primary manager and the person\'s own reports', () => {
+    const rows = [...ROWS, row('e', null, 'office', CHENNAI, 'a')]
+    const groups = teamGroups(rows, { user_id: 'a', name: 'Asha' }, { user_id: 'm', name: 'Mo' })
+    expect(groups.map(g => [g.key, g.people.map(p => p.user_id), g.line])).toEqual([
+      ['peers', ['b', 'd'], '2 others report to Mo'],
+      ['reports', ['e'], '1 person reports to Asha'],
+    ])
+  })
+
+  it('leaves out empty groups and works without a manager', () => {
+    expect(teamGroups(ROWS, { user_id: 'c', name: 'Cy' }, null)).toEqual([])
   })
 })

@@ -18,7 +18,7 @@
      week and how their policy works. The landing page for every member
      outside the engineering workspace (sales, HR). -->
 <template>
-  <LeavePage title="My leave" :subtitle="subtitle">
+  <AppPage title="My leave" :subtitle="subtitle">
     <template #actions>
       <v-btn variant="text" :to="{ name: 'leave-team' }">Team calendar</v-btn>
       <v-btn v-if="summary?.work_arrangement !== 'remote'" variant="outlined" :disabled="!summary" @click="open('wfh')">
@@ -62,14 +62,14 @@
 
     <LeaveRequestPanel v-model="panelOpen" :preset="preset" @sent="notify('Request sent')" />
     <v-snackbar v-model="snackbar" color="success" :timeout="3000">{{ snackbarText }}</v-snackbar>
-  </LeavePage>
+  </AppPage>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
+import AppPage from '@/components/common/AppPage.vue'
 import BalanceGrid from '@/components/leave/BalanceGrid.vue'
-import LeavePage from '@/components/leave/LeavePage.vue'
 import LeaveRequestPanel from '@/components/leave/LeaveRequestPanel.vue'
 import MyRequestsTable from '@/components/leave/MyRequestsTable.vue'
 import OutSoonPanel from '@/components/leave/OutSoonPanel.vue'

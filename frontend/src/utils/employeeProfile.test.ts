@@ -22,6 +22,7 @@ import {
   nextBirthday,
   parseDateOnly,
   profileTabs,
+  tenureFor,
   tenureLabel,
 } from './employeeProfile'
 
@@ -52,6 +53,27 @@ describe('tenureLabel', () => {
     expect(tenureLabel('2026-10-20', TODAY)).toBe('Less than a month')
     expect(tenureLabel('2026-11-03', TODAY)).toBeNull()
     expect(tenureLabel(null, TODAY)).toBeNull()
+  })
+})
+
+describe('tenureFor', () => {
+  const work = { date_of_joining: '2022-01-10', date_of_exit: null, status: 'active' as const }
+
+  it('counts to today while they are here, notice period included', () => {
+    expect(tenureFor(work, TODAY)).toBe('4 years 9 months')
+    expect(tenureFor({ ...work, status: 'on_notice', date_of_exit: '2026-12-31' }, TODAY)).toBe(
+      '4 years 9 months',
+    )
+  })
+
+  it('stops at the exit date once they have left', () => {
+    const exited = { ...work, status: 'exited' as const, date_of_exit: '2024-07-31' }
+    expect(tenureFor(exited, TODAY)).toBe('2 years 6 months')
+    expect(tenureFor(exited, new Date(2030, 0, 1))).toBe('2 years 6 months')
+  })
+
+  it('says nothing for someone who left without an exit date', () => {
+    expect(tenureFor({ ...work, status: 'exited' }, TODAY)).toBeNull()
   })
 })
 
@@ -113,6 +135,13 @@ describe('leaveSummary', () => {
     expect(leaveSummary([balance()])).toEqual([
       { key: 'casual', name: 'Casual leave', color: 'swatch-2', left: '9 of 12 left', percent: 75 },
     ])
+  })
+
+  it('words a monthly type that is still building up like the Leave tab', () => {
+    const [row] = leaveSummary([
+      balance({ accrual: 'monthly', allocated: '12', earned: '10', used: '2', available: '8' }),
+    ])
+    expect(row).toMatchObject({ left: '8 left · 10 earned of 12', percent: 80 })
   })
 
   it('keeps pending days out of the free share', () => {

@@ -66,13 +66,13 @@ describe('workplaceLabel', () => {
     expect(workplaceLabel('remote', london)).toBe('Remote')
   })
 
-  it('names the office, noting hybrid', () => {
-    expect(workplaceLabel('office', london)).toBe('London')
-    expect(workplaceLabel('hybrid', london)).toBe('London · Hybrid')
+  it('puts the arrangement first, then the office', () => {
+    expect(workplaceLabel('office', london)).toBe('Office · London')
+    expect(workplaceLabel('hybrid', london)).toBe('Hybrid · London')
   })
 
-  it('has nothing to say for an office worker with no office set', () => {
-    expect(workplaceLabel('office', null)).toBeNull()
+  it('gives just the arrangement when no office is set', () => {
+    expect(workplaceLabel('office', null)).toBe('Office')
     expect(workplaceLabel('hybrid', null)).toBe('Hybrid')
   })
 })

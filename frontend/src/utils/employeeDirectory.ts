@@ -17,8 +17,7 @@
  * filters (applied to the rows the API already returned for the search and
  * status) and the one-line summary under the page title.
  */
-import type { DirectoryEntry, OfficeRef, WorkArrangement } from '@/types/employee'
-import { ARRANGEMENT_LABELS } from '@/utils/employee'
+import type { DirectoryEntry, ManagerRef } from '@/types/employee'
 
 /** Department chip label for people with no department set. */
 export const NO_DEPARTMENT = 'No department'
@@ -105,8 +104,41 @@ export function reportsOf(
   return rows.filter(row => row.primary_manager?.user_id === managerId && row.user_id !== selfId)
 }
 
-/** "Office · Chennai", "Hybrid · London", "Remote": how first, then where. */
-export function worksFromLabel(arrangement: WorkArrangement, office: OfficeRef | null): string {
-  const how = ARRANGEMENT_LABELS[arrangement]
-  return arrangement !== 'remote' && office ? `${how} · ${office.name}` : how
+/** A person's photo from the directory, or null when they aren't in it. */
+export function avatarFrom(rows: DirectoryEntry[], userId: string): string | null {
+  return rows.find(row => row.user_id === userId)?.avatar_url ?? null
+}
+
+export interface TeamGroup {
+  key: 'peers' | 'reports'
+  people: DirectoryEntry[]
+  /** "4 others report to Daniel Okafor", "1 person reports to Meera Iyer". */
+  line: string
+}
+
+function count(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`
+}
+
+/** Who shares the primary manager, then who reports to this person; empty groups left out. */
+export function teamGroups(
+  rows: DirectoryEntry[],
+  self: { user_id: string; name: string },
+  primary: Pick<ManagerRef, 'user_id' | 'name'> | null,
+): TeamGroup[] {
+  const peers = primary ? reportsOf(rows, primary.user_id, self.user_id) : []
+  const reports = reportsOf(rows, self.user_id, self.user_id)
+  const groups: TeamGroup[] = [
+    {
+      key: 'peers',
+      people: peers,
+      line: `${count(peers.length, 'other reports', 'others report')} to ${primary?.name ?? ''}`,
+    },
+    {
+      key: 'reports',
+      people: reports,
+      line: `${count(reports.length, 'person reports', 'people report')} to ${self.name}`,
+    },
+  ]
+  return groups.filter(group => group.people.length)
 }

@@ -44,7 +44,7 @@
         </span>
         <span v-else>No manager set</span>
         <span v-if="joined">{{ joined }}</span>
-        <span>{{ worksFromLabel(record.work.work_arrangement, record.office) }}</span>
+        <span>{{ workplaceLabel(record.work.work_arrangement, record.office) }}</span>
       </div>
     </div>
     <div class="summary__actions">
@@ -64,9 +64,8 @@ import EmployeeAvatar from '@/components/people/EmployeeAvatar.vue'
 import EmployeeStatusChip from '@/components/people/EmployeeStatusChip.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import type { EmployeeRecord } from '@/types/employee'
-import { EMPLOYMENT_TYPE_LABELS, formatDateOnly } from '@/utils/employee'
-import { worksFromLabel } from '@/utils/employeeDirectory'
-import { tenureLabel } from '@/utils/employeeProfile'
+import { EMPLOYMENT_TYPE_LABELS, formatDateOnly, workplaceLabel } from '@/utils/employee'
+import { tenureFor } from '@/utils/employeeProfile'
 
 const props = defineProps<{ record: EmployeeRecord }>()
 const editingName = ref(false)
@@ -93,7 +92,7 @@ const extraManagers = computed(() =>
 const joined = computed(() => {
   const date = props.record.work.date_of_joining
   if (!date) return ''
-  const tenure = tenureLabel(date, new Date())
+  const tenure = tenureFor(props.record.work, new Date())
   return [`Joined ${formatDateOnly(date)}`, tenure].filter(Boolean).join(' · ')
 })
 </script>

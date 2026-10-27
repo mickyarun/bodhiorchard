@@ -22,14 +22,16 @@
     <AppCallout v-if="policyNotice" :variant="policyNotice.variant">{{ policyNotice.text }}</AppCallout>
 
     <EmploymentEditForm v-if="editing" :record="record" @close="editing = false" />
-    <ProfileCards v-else>
-      <ProfileFieldCard title="Role" :fields="roleFields" :editable="record.access.edit_work" @edit="editing = true" />
-      <ProfileFieldCard
-        title="Dates and place"
-        :fields="placeFields"
-        :editable="record.access.edit_work"
-        @edit="editing = true"
-      />
+    <ProfileCards>
+      <template v-if="!editing">
+        <ProfileFieldCard title="Role" :fields="roleFields" :editable="record.access.edit_work" @edit="editing = true" />
+        <ProfileFieldCard
+          title="Dates and place"
+          :fields="placeFields"
+          :editable="record.access.edit_work"
+          @edit="editing = true"
+        />
+      </template>
       <ManagersEditor
         :employee-id="record.user_id"
         :employee-name="record.name"
