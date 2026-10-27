@@ -85,6 +85,14 @@ samp {
   box-shadow: 0 0 0 3px rgba(var(--v-theme-primary), 0.25);
 }
 
+// Buttons and tabs read in sentence case at Geist's own tracking; Vuetify's
+// wide default letter-spacing is for its uppercase labels. `html` lifts this
+// above Vuetify's own rule whatever the stylesheet order.
+html .v-btn,
+html .v-tab {
+  letter-spacing: 0;
+}
+
 // Token-driven tooltip (set as the global VTooltip contentClass in vuetify.ts).
 .bo-tooltip {
   background: rgb(var(--v-theme-surface-bright)) !important;
@@ -95,8 +103,7 @@ samp {
 }
 
 // Visible focus ring across the app — shown instantly, never animated.
-// Uses the dedicated --color-focus token (a brighter green than the primary
-// accent) defined per-theme in tokens.css.
+// Uses the dedicated --color-focus token defined per theme in tokens.css.
 :focus-visible {
   outline: 2px solid var(--color-focus, rgb(var(--v-theme-primary)));
   outline-offset: 2px;

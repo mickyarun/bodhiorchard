@@ -301,7 +301,7 @@ onMounted(() => {
   top: 8px;
   right: 8px;
   bottom: 8px;
-  width: 360px;
+  width: min(360px, calc(100% - 16px));
   z-index: 20;
   display: flex;
   flex-direction: column;

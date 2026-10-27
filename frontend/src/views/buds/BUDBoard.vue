@@ -308,131 +308,7 @@
       </div>
     </div>
 
-    <!-- Create BUD Dialog -->
-    <v-dialog v-model="showCreateDialog" max-width="560">
-      <v-card color="surface" class="pa-6">
-        <div class="text-h6 font-weight-bold mb-4">New BUD</div>
-        <v-text-field
-          v-model="newTitle"
-          label="Title"
-          placeholder="e.g. Payment retry logic"
-          autofocus
-          class="mb-3"
-          :rules="[v => !!v?.trim() || 'Title is required']"
-          @keyup.enter="createBUD"
-        />
-        <v-textarea
-          v-model="newContent"
-          label="Description (optional)"
-          placeholder="Brief description or requirements..."
-          rows="4"
-          variant="outlined"
-        />
-
-        <!-- Priority: defaults to P2 (normal). Drives the assignment
-             scorer (lower-priority work is preferred for displacement)
-             and the yield-offer flow. -->
-        <div class="d-flex align-center ga-3 mb-3">
-          <div class="text-body-2 text-medium-emphasis" style="min-width: 70px;">Priority</div>
-          <AppPillToggle v-model="newPriority" :options="PRIORITY_OPTIONS" size="sm" />
-        </div>
-
-        <!-- Advanced Settings: per-stage skill picker -->
-        <v-expansion-panels v-model="advancedPanel" variant="accordion" class="mt-3">
-          <v-expansion-panel value="advanced">
-            <v-expansion-panel-title>
-              <v-icon icon="mdi-tune-variant" size="20" class="mr-2" />
-              Advanced settings
-            </v-expansion-panel-title>
-            <v-expansion-panel-text>
-              <!-- Per-phase auto-generation. All phases default ON —
-                   our agents run by default for a new BUD; toggle any
-                   phase OFF to drive it yourself (typically via your
-                   local AI through Settings → MCP Connect). The
-                   per-stage skill picker only matters for phases that
-                   are still opted in. -->
-              <div class="text-caption text-medium-emphasis mb-3">
-                Pick which phases our AI agent should auto-run. Anything
-                left off, you drive yourself via the section editors
-                (typically using your local AI through
-                <strong>Settings → MCP Connect</strong>).
-              </div>
-              <div class="d-flex flex-column ga-2 mb-4">
-                <v-switch
-                  v-for="stage in advancedStages"
-                  :key="`gen-${stage.value}`"
-                  v-model="autoGeneratePhases[stage.value]"
-                  :label="`Auto-generate ${stage.label}`"
-                  color="primary"
-                  density="compact"
-                  hide-details
-                  inset
-                />
-              </div>
-              <AppCallout
-                v-if="autoGeneratePhases.closed === false"
-                variant="warning"
-                eyebrow="Learning recap disabled"
-                icon="mdi-alert-outline"
-                class="mb-4"
-              >
-                Without the post-close recap, this BUD's per-phase actuals
-                still feed the velocity rollup that powers future
-                estimates — but you lose the written retrospective and
-                the trend signal that recap embeddings provide to similar
-                BUDs. Leave this on unless you're explicitly using your
-                own LLM workflow for retrospectives.
-              </AppCallout>
-              <v-progress-circular
-                v-if="skillsStore.loading"
-                indeterminate
-                size="20"
-                class="my-3"
-              />
-              <div v-else class="d-flex flex-column ga-3">
-                <!-- Per-stage skill picker. Only enabled for phases the
-                     user explicitly opted in to via the switches above.
-                     Picking a skill for a phase that's off would have
-                     no runtime effect, so we dim/disable until opt-in. -->
-                <div
-                  v-for="stage in advancedStages"
-                  :key="stage.value"
-                  class="d-flex align-center ga-2"
-                  :style="{ opacity: autoGeneratePhases[stage.value] ? 1 : 0.4 }"
-                >
-                  <span class="stage-label">{{ stage.label }}</span>
-                  <v-select
-                    v-model="stageSkillPicks[stage.value]"
-                    :items="skillsForStage(stage.agentType)"
-                    item-title="label"
-                    item-value="id"
-                    density="compact"
-                    variant="outlined"
-                    hide-details
-                    :disabled="!autoGeneratePhases[stage.value]"
-                    class="flex-grow-1"
-                  />
-                </div>
-              </div>
-            </v-expansion-panel-text>
-          </v-expansion-panel>
-        </v-expansion-panels>
-
-        <v-card-actions class="pa-0 mt-4">
-          <v-spacer />
-          <v-btn variant="text" @click="showCreateDialog = false">Cancel</v-btn>
-          <v-btn
-            color="primary"
-            variant="flat"
-            :loading="creating"
-            :disabled="!newTitle.trim()"
-            @click="createBUD"
-          >
-            Create
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <BUDCreateDialog v-model="showCreateDialog" />
 
     <!-- Confirmation + result snackbar for restoring a discarded BUD.
          Shared with the BUD detail page so both entry points behave
@@ -443,19 +319,16 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import AppCallout from '@/components/common/AppCallout.vue'
 import { useBUDStore } from '@/stores/bud'
 import { useNotificationStore } from '@/stores/notifications'
 import { storeToRefs } from 'pinia'
-import { useAgentSkillsStore, type AgentType, type AgentSkill } from '@/stores/agentSkills'
 import { useSettingsStore } from '@/stores/settings'
 import { useTeamsStore } from '@/stores/teams'
 import { BUD_STATUS_LABELS, BUD_STATUS_COLORS, BUD_PRIORITIES } from '@/types'
 import type { BUDStatus, BUDPriority } from '@/types'
 import { usePhaseOrder } from '@/composables/usePhaseOrder'
 import { usePermissions } from '@/composables/usePermissions'
-import AppPillToggle from '@/components/common/AppPillToggle.vue'
+import BUDCreateDialog from '@/components/buds/BUDCreateDialog.vue'
 import BUDRestoreDialog from '@/components/buds/BUDRestoreDialog.vue'
 import YieldOfferNotice from '@/components/buds/YieldOfferNotice.vue'
 
@@ -469,11 +342,8 @@ const PRIORITY_COLORS: Record<BUDPriority, string> = {
   P3: 'on-surface-variant',
 }
 const PRIORITY_WEIGHTS: Record<BUDPriority, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }
-const PRIORITY_OPTIONS = BUD_PRIORITIES.map(p => ({ label: p, value: p }))
 
-const router = useRouter()
 const budStore = useBUDStore()
-const skillsStore = useAgentSkillsStore()
 const settingsStore = useSettingsStore()
 const teamsStore = useTeamsStore()
 
@@ -579,82 +449,6 @@ const filteredCount = computed(() =>
 )
 
 const showCreateDialog = ref(false)
-const newTitle = ref('')
-const newContent = ref('')
-const newPriority = ref<BUDPriority>('P2')
-const creating = ref(false)
-const advancedPanel = ref<string | null>(null)
-const stageSkillPicks = ref<Record<string, string | null>>({})
-// Per-phase auto-generate switches. ALL FALSE by default — fresh BUDs
-// ship in External-LLM mode and the user opts in per phase. Initialised
-// once below in prefillStageDefaults / closeAndReset rather than as a
-// const literal so future stage additions only need a single edit on
-// ``advancedStages``.
-const autoGeneratePhases = ref<Record<string, boolean>>({})
-
-// Single source of truth for which stages get a dropdown — mirrors
-// BUD_STAGE_AGENT_TYPE in backend/app/agents/skill_mapping.py. If a new
-// stage gets an agent on the backend, add it here too.
-interface StageConfig { value: BUDStatus; label: string; agentType: AgentType }
-const advancedStages: StageConfig[] = [
-  { value: 'bud' as BUDStatus, label: 'PRD writer', agentType: 'bud' },
-  { value: 'design' as BUDStatus, label: 'Design', agentType: 'design' },
-  { value: 'tech_arch' as BUDStatus, label: 'Tech plan', agentType: 'techPlan' },
-  { value: 'testing' as BUDStatus, label: 'Test plan', agentType: 'testPlan' },
-  { value: 'closed' as BUDStatus, label: 'Learning recap', agentType: 'learning' },
-]
-
-interface StageSkillOption { id: string; label: string; isDefault: boolean }
-
-function skillsForStage(agentType: AgentType): StageSkillOption[] {
-  return skillsStore.skills
-    .filter((s): s is AgentSkill & { id: string } => s.agentType === agentType && s.id !== null)
-    .map(s => ({
-      id: s.id,
-      label: s.isDefault ? `${s.name} · default` : s.name,
-      isDefault: s.isDefault,
-    }))
-}
-
-function defaultSkillIdForAgent(agentType: AgentType): string | null {
-  const def = skillsStore.skills.find(s => s.agentType === agentType && s.isDefault)
-  return def?.id ?? null
-}
-
-function prefillStageDefaults(): void {
-  for (const stage of advancedStages) {
-    stageSkillPicks.value[stage.value] = defaultSkillIdForAgent(stage.agentType)
-    // Default every phase ON for new BUDs (including the post-close
-    // Learning recap). The recap costs a Claude API call per close,
-    // but skipping it loses the calibration signal the estimator
-    // depends on, so the right default is "on" with a visible warning
-    // shown next to the switch when the user flips it off (see the
-    // closed-stage warning callout in the template).
-    if (autoGeneratePhases.value[stage.value] === undefined) {
-      autoGeneratePhases.value[stage.value] = true
-    }
-  }
-}
-
-// Lazy-load skills the first time the dialog opens, then pre-fill each
-// stage dropdown with that agent type's current default — gives users a
-// clear "what would run if I change nothing" signal instead of an empty
-// "Skill" placeholder.
-watch(showCreateDialog, async open => {
-  if (!open) return
-  if (skillsStore.skills.length === 0 && !skillsStore.loading) {
-    await skillsStore.fetchSkills()
-  }
-  prefillStageDefaults()
-})
-
-// If the skills load AFTER the dialog opened (slow network), re-prefill.
-watch(
-  () => skillsStore.skills.length,
-  () => {
-    if (showCreateDialog.value) prefillStageDefaults()
-  },
-)
 
 onMounted(() => {
   budStore.fetchBUDs()
@@ -683,46 +477,6 @@ watch(
     }
   },
 )
-
-async function createBUD(): Promise<void> {
-  if (!newTitle.value.trim()) return
-  creating.value = true
-  // Only persist overrides where the user picked a NON-default skill.
-  // Matching-the-default picks are dropped so the BUD continues to
-  // follow whatever the org admin marks as default later, rather than
-  // being pinned to today's default skill_id.
-  const overrides: Record<string, string> = {}
-  for (const stage of advancedStages) {
-    const picked = stageSkillPicks.value[stage.value]
-    if (!picked) continue
-    if (picked === defaultSkillIdForAgent(stage.agentType)) continue
-    overrides[stage.value] = picked
-  }
-  // Snapshot the switches by value so a later reset doesn't mutate the
-  // payload object reactively.
-  const phases: Record<string, boolean> = {}
-  for (const stage of advancedStages) {
-    phases[stage.value] = !!autoGeneratePhases.value[stage.value]
-  }
-  const bud = await budStore.createBUD(
-    newTitle.value.trim(),
-    newContent.value.trim() || undefined,
-    Object.keys(overrides).length > 0 ? overrides : undefined,
-    phases,
-    newPriority.value,
-  )
-  creating.value = false
-  if (bud) {
-    showCreateDialog.value = false
-    newTitle.value = ''
-    newContent.value = ''
-    newPriority.value = 'P2'
-    stageSkillPicks.value = {}
-    advancedPanel.value = null
-    autoGeneratePhases.value = {}
-    router.push(`/buds/${bud.id}`)
-  }
-}
 
 function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString('en-US', {
@@ -848,9 +602,4 @@ function deadlineColor(deadline: string): string {
   width: 200px;
 }
 
-.stage-label {
-  width: 110px;
-  font-size: 13px;
-  color: rgba(var(--v-theme-on-surface), 0.75);
-}
 </style>

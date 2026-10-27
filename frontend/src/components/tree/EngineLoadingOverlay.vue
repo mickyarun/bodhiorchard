@@ -22,7 +22,7 @@
       role="status"
       aria-live="polite"
       aria-busy="true"
-      :aria-label="`Loading orchard — ${currentPhaseLabel}`"
+      :aria-label="`Loading the garden — ${currentPhaseLabel}`"
     >
       <!-- Layered organic backdrop. Two radial glows + animated noise so the
            overlay reads as 'a world being summoned' rather than 'an empty
@@ -148,10 +148,10 @@ const PHASE_PROGRESS: Record<LoadingPhase, number> = {
 }
 
 const PHASE_LABELS: Record<LoadingPhase, string> = {
-  mounting:           'Preparing the orchard…',
-  engine_init:        'Gathering trees & seeds…',
-  building_scene:     'Planting the orchard…',
-  connecting:         'Calling the others…',
+  mounting:           'Preparing the garden view…',
+  engine_init:        'Loading the 3D engine…',
+  building_scene:     'Building the scene…',
+  connecting:         'Connecting to your team…',
   ready:              'Welcome.',
   entering_interior:  'Stepping inside…',
 }

@@ -15,7 +15,7 @@
 /**
  * Pinia store for scan state.
  *
- * Centralises the scan data that `SetupChecklist.vue` and
+ * Centralises the scan data that the dashboard setup card (`useSetupChecklist`) and
  * `ScanPhaseTimeline.vue` both read from, and exposes the resume
  * action the timeline surfaces. The WebSocket tracker (`useScanSocket`)
  * writes into this store on every tick so components only read refs,

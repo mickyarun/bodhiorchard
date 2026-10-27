@@ -58,6 +58,23 @@
   --color-warning:      #FBBF24;
   --color-info:         #38BDF8;
 
+  /* Lifecycle stages — one hue per BUD stage, readable as text on a card
+     and as a bar fill. Status colour, never decoration. */
+  --color-stage-bud:         #94A3B8;
+  --color-stage-design:      #818CF8;
+  --color-stage-tech-arch:   #A78BFA;
+  --color-stage-development: #60A5FA;
+  --color-stage-code-review: #22D3EE;
+  --color-stage-testing:     #FBBF24;
+  --color-stage-uat:         #FB923C;
+  --color-stage-prod:        #4ADE80;
+
+  /* Priority — chip text; the chip fill is the same hue at low alpha */
+  --color-priority-p0:  #FCA5A5;
+  --color-priority-p1:  #FDBA74;
+  --color-priority-p2:  #A5B4FC;
+  --color-priority-p3:  #CBD5E1;
+
   /* ── Type ─────────────────────────────────────────────────────────── */
   --font-display: "Geist", ui-sans-serif, system-ui, sans-serif;
   --font-body:    "Geist", ui-sans-serif, system-ui, sans-serif;
@@ -123,6 +140,20 @@
   --color-error:        #DC2626;
   --color-warning:      #B45309;
   --color-info:         #0369A1;
+
+  --color-stage-bud:         #64748B;
+  --color-stage-design:      #4F46E5;
+  --color-stage-tech-arch:   #7C3AED;
+  --color-stage-development: #2563EB;
+  --color-stage-code-review: #0E7490;
+  --color-stage-testing:     #B45309;
+  --color-stage-uat:         #C2410C;
+  --color-stage-prod:        #15803D;
+
+  --color-priority-p0:  #B91C1C;
+  --color-priority-p1:  #C2410C;
+  --color-priority-p2:  #4338CA;
+  --color-priority-p3:  #475569;
 }
 
 /* ── Brand panel ───────────────────────────────────────────────────────
