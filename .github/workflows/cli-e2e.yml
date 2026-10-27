@@ -44,7 +44,7 @@ jobs:
           context: ./backend
           file: ./backend/Dockerfile
           load: true
-          tags: mickyarun/bodhiorchard-backend:e2e
+          tags: mickyarun/glideship-backend:e2e
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
 
@@ -55,7 +55,7 @@ jobs:
           file: ./frontend/Dockerfile
           load: true
           build-args: VITE_API_BASE_URL=/api
-          tags: mickyarun/bodhiorchard-frontend:e2e
+          tags: mickyarun/glideship-frontend:e2e
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
@@ -65,7 +65,7 @@ jobs:
           context: .
           file: ./multiplayer/Dockerfile
           load: true
-          tags: mickyarun/bodhiorchard-multiplayer:e2e
+          tags: mickyarun/glideship-multiplayer:e2e
           cache-from: type=gha,scope=multiplayer
           cache-to: type=gha,mode=max,scope=multiplayer
 

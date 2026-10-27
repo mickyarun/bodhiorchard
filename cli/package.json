@@ -1,11 +1,11 @@
 {
-  "name": "bodhiorchard",
-  "version": "1.1.0",
+  "name": "glideship",
+  "version": "1.2.0",
   "description": "One-command installer for the Glideship stack — pulls prebuilt Docker images and runs the full platform locally",
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
-    "bodhiorchard": "dist/index.js"
+    "glideship": "dist/index.js"
   },
   "files": [
     "dist",

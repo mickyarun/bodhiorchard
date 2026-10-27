@@ -1,4 +1,4 @@
-// `bodhiorchard init [name]` — scaffold a project directory: resolve port
+// `glideship init [name]` — scaffold a project directory: resolve port
 // conflicts, generate secrets, write compose/.env/config, pre-pull images.
 import path from "node:path";
 import fs from "fs-extra";
@@ -65,9 +65,9 @@ export async function initCommand(projectDir: string, opts: InitOptions): Promis
   log.step("Pulling Docker images (first run downloads several GB)…");
   const pull = await compose(dir, ["-p", PROJECT_NAME, "pull"], { inherit: true });
   if (pull.code === 0) log.success("Images pulled.");
-  else log.warn("Image pull did not complete — `bodhiorchard start` will retry.");
+  else log.warn("Image pull did not complete — `glideship start` will retry.");
 
   const rel = path.relative(process.cwd(), dir) || ".";
   log.plain();
-  log.info(rel === "." ? "Next: bodhiorchard start" : `Next: cd ${rel} && bodhiorchard start`);
+  log.info(rel === "." ? "Next: glideship start" : `Next: cd ${rel} && glideship start`);
 }

@@ -1,4 +1,4 @@
-// `bodhiorchard update [--tag X.Y.Z]` — pull newer images and recreate the
+// `glideship update [--tag X.Y.Z]` — pull newer images and recreate the
 // stack. With --tag, pins to a specific release; otherwise tracks :latest.
 import path from "node:path";
 import { preflight } from "../lib/preflight.js";

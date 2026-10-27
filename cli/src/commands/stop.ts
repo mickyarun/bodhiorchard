@@ -1,4 +1,4 @@
-// `bodhiorchard stop` — stop the stack, preserving volumes (data survives).
+// `glideship stop` — stop the stack, preserving volumes (data survives).
 import path from "node:path";
 import { preflight } from "../lib/preflight.js";
 import { PROJECT_NAME } from "../lib/config.js";

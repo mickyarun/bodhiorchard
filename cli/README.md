@@ -1,6 +1,6 @@
-# bodhiorchard
+# glideship
 
-One command to run the [Glideship](https://github.com/) stack locally. Pulls
+One command to run the [Glideship](https://github.com/mickyarun/glideship) stack locally. Pulls
 prebuilt Docker images and starts everything — Postgres (pgvector), Redis, the
 API, the realtime server, and the web UI — then opens the setup wizard.
 
@@ -12,9 +12,9 @@ API, the realtime server, and the web UI — then opens the setup wizard.
 ## Quick start
 
 ```bash
-npx bodhiorchard init     # scaffold ./bodhiorchard, resolve ports, pull images
-cd bodhiorchard
-npx bodhiorchard start     # bring it up and open http://localhost:3000/setup
+npx glideship init     # scaffold ./glideship, resolve ports, pull images
+cd glideship
+npx glideship start     # bring it up and open http://localhost:3000/setup
 ```
 
 Finish configuration (organization, admin account, AI provider, repositories) in
@@ -48,3 +48,17 @@ Run fully non-interactively with `--yes` (auto-remaps any conflict).
 
 Use `--project-dir <path>` to target an install that isn't in the current
 directory.
+
+## Upgrading from `bodhiorchard`
+
+This package used to be published as `bodhiorchard`. Existing installs keep
+working: run the new CLI from inside your install directory and it switches the
+install over to the renamed images, keeping your data.
+
+```bash
+cd bodhiorchard          # your existing install directory
+npx glideship update
+```
+
+The install directory, its `.bodhiorchard/` config folder and the data volumes
+keep their names, so nothing needs to be moved or migrated.

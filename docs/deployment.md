@@ -68,12 +68,12 @@ Glideship ships in **two deployment modes**. The product is identical, only the 
 
 ### Fastest: one command with `npx` (no clone, no build)
 
-The quickest way to try Glideship. The [`bodhiorchard`](https://www.npmjs.com/package/bodhiorchard) npm package pulls prebuilt images from Docker Hub and runs the full Full-Docker stack — you don't clone the repo or build anything.
+The quickest way to try Glideship. The [`glideship`](https://www.npmjs.com/package/glideship) npm package pulls prebuilt images from Docker Hub and runs the full Full-Docker stack — you don't clone the repo or build anything.
 
 ```bash
-npx bodhiorchard init     # detect ports, generate secrets, pull images
-cd bodhiorchard
-npx bodhiorchard start     # start everything and open the setup wizard
+npx glideship init     # detect ports, generate secrets, pull images
+cd glideship
+npx glideship start     # start everything and open the setup wizard
 ```
 
 `init` writes this install's secrets, including the key that encrypts employee records (`HR_ENCRYPTION_KEYS`), to `bodhiorchard/.env`. Back that file up with your data: records encrypted with its key can't be read without it. Installs from before the key existed get one on their next `start` or `update`.
@@ -84,15 +84,15 @@ Manage the stack with these commands (run from the install directory):
 
 | Command | What it does |
 |---|---|
-| `bodhiorchard init [name]` | Scaffold the install: resolve ports, generate secrets, pull images |
-| `bodhiorchard start` | Start the stack and open the setup wizard |
-| `bodhiorchard stop` | Stop the stack — **containers come down, your data volumes are kept** |
-| `bodhiorchard status` | Show container status and the access URLs |
-| `bodhiorchard logs [service]` | Follow logs (optionally for one service) |
-| `bodhiorchard update [--tag X.Y.Z]` | Pull newer images and restart |
-| `bodhiorchard reset` | Stop **and delete all data volumes** (destructive) |
+| `glideship init [name]` | Scaffold the install: resolve ports, generate secrets, pull images |
+| `glideship start` | Start the stack and open the setup wizard |
+| `glideship stop` | Stop the stack — **containers come down, your data volumes are kept** |
+| `glideship status` | Show container status and the access URLs |
+| `glideship logs [service]` | Follow logs (optionally for one service) |
+| `glideship update [--tag X.Y.Z]` | Pull newer images and restart |
+| `glideship reset` | Stop **and delete all data volumes** (destructive) |
 
-To stop everything when you're done, run `bodhiorchard stop` (your database and cloned repos persist; `bodhiorchard start` brings it back up). It's the same stack as **Full Docker mode** below — just pulled instead of built. Use the `git clone` paths below if you want to build from source or run in **Hybrid** mode.
+To stop everything when you're done, run `glideship stop` (your database and cloned repos persist; `glideship start` brings it back up). It's the same stack as **Full Docker mode** below — just pulled instead of built. Use the `git clone` paths below if you want to build from source or run in **Hybrid** mode.
 
 ### Prerequisites
 
@@ -104,8 +104,8 @@ To stop everything when you're done, run `bodhiorchard stop` (your database and 
 ### Full Docker mode (one command)
 
 ```bash
-git clone https://github.com/mickyarun/bodhiorchard.git
-cd bodhiorchard
+git clone https://github.com/mickyarun/glideship.git
+cd glideship
 docker compose up
 ```
 
@@ -131,8 +131,8 @@ Keep the `secrets_data` volume with your database: without its `encryption_key` 
 ### Hybrid mode (hot reload)
 
 ```bash
-git clone https://github.com/mickyarun/bodhiorchard.git
-cd bodhiorchard
+git clone https://github.com/mickyarun/glideship.git
+cd glideship
 npm install        # frontend + multiplayer deps via workspaces
 npm run setup      # Python venv, .env files, infra, migrations
 npm run dev        # backend + frontend + multiplayer, one terminal

@@ -60,7 +60,7 @@ export async function materialize(
 export async function loadSecrets(projectDir: string): Promise<InfraSecrets> {
   const file = envFilePath(projectDir);
   if (!(await fs.pathExists(file))) {
-    throw new Error(`Missing ${ENV_FILE} in ${projectDir}. Run \`bodhiorchard init\` first.`);
+    throw new Error(`Missing ${ENV_FILE} in ${projectDir}. Run \`glideship init\` first.`);
   }
   const secrets = parseSecretsFromEnv(await fs.readFile(file, "utf8"));
   const hrKeyringLost =

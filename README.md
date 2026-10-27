@@ -1,6 +1,6 @@
 <div align="center">
 
-# Glideship
+# Glideship&trade;
 
 ### Ship software, not Scrum ceremonies.
 
@@ -22,6 +22,8 @@
 
 ---
 
+> **Bodhiorchard is now Glideship.** Same project, new name. Existing installs keep working — see [upgrading from bodhiorchard](cli/README.md#upgrading-from-bodhiorchard).
+
 **Glideship** replaces sprint, scrum, and Jira ceremony with **Agent-Driven Development (ADD)** — twelve specialised AI agents handle the busywork (triage, specs, estimates, test plans, retrospectives) while humans keep the decisions that matter, and developers earn XP for the work that actually reaches production. It's a **self-hosted Jira alternative** for the full lifecycle: intake → spec → design → development → testing → deploy → retrospective. The data plane stays on your hardware; inference runs through your choice of agent — [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [GitHub Copilot](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli), [OpenAI Codex](https://developers.openai.com/codex/cli), or [Ollama](https://ollama.com) for fully-local inference — picked per organization in setup.
 
 > **Less process. More shipped.** The full methodology lives at [bodhiorchard.ai](https://bodhiorchard.ai/).
@@ -31,18 +33,18 @@
 The fastest path — no clone, no build. Needs only **Docker (running)** and **Node.js 18+**:
 
 ```bash
-npx bodhiorchard init     # detect ports, generate secrets, pull prebuilt images
-cd bodhiorchard
-npx bodhiorchard start    # start the stack and open the setup wizard
+npx glideship init     # detect ports, generate secrets, pull prebuilt images
+cd glideship
+npx glideship start    # start the stack and open the setup wizard
 ```
 
-The wizard opens at **http://localhost:3000/setup** — finish there (organization, admin account, AI provider, repositories). `bodhiorchard stop` brings it down; your data volumes persist.
+The wizard opens at **http://localhost:3000/setup** — finish there (organization, admin account, AI provider, repositories). `glideship stop` brings it down; your data volumes persist.
 
 Prefer to build from source?
 
 ```bash
-git clone https://github.com/mickyarun/bodhiorchard.git
-cd bodhiorchard
+git clone https://github.com/mickyarun/glideship.git
+cd glideship
 docker compose up
 ```
 
@@ -52,7 +54,7 @@ Already running `claude` on your laptop? **Hybrid mode** reuses your Claude Pro/
 npm install && npm run setup && npm run dev
 ```
 
-→ All three paths, the full `bodhiorchard` CLI command list, prerequisites, mode-switching, and a ready-made demo dataset: **[Deployment Guide](docs/deployment.md)**
+→ All three paths, the full `glideship` CLI command list, prerequisites, mode-switching, and a ready-made demo dataset: **[Deployment Guide](docs/deployment.md)**
 
 ## Why Glideship
 
@@ -268,7 +270,7 @@ if it isn't running, re-scans fall back to a direct scan.
 
 ## Roadmap
 
-- **Shipped** — core platform (auth, multi-tenant, RBAC), BUD lifecycle, feature registry with vector search, repo scanning + code intelligence, skill profiling, 3D Living Tree, Slack-native triage **and real-time Slack bot conversations**, **GitHub webhook pipeline** (PR-merge → BUD status + repo re-scan), **automated test-plan generation from BUDs** (unit / integration / e2e / security / UAT), **CI/CD integration** (QA-automation repo wired via MCP; test commits flow back to the BUD), MCP server, 12 agent definitions, `npx bodhiorchard` installer, **People workspace** (leave and WFH with Slack approvals, holidays per location, offices and remote work, loss of pay, encrypted employee records)
+- **Shipped** — core platform (auth, multi-tenant, RBAC), BUD lifecycle, feature registry with vector search, repo scanning + code intelligence, skill profiling, 3D Living Tree, Slack-native triage **and real-time Slack bot conversations**, **GitHub webhook pipeline** (PR-merge → BUD status + repo re-scan), **automated test-plan generation from BUDs** (unit / integration / e2e / security / UAT), **CI/CD integration** (QA-automation repo wired via MCP; test commits flow back to the BUD), MCP server, 12 agent definitions, `npx glideship` installer, **People workspace** (leave and WFH with Slack approvals, holidays per location, offices and remote work, loss of pay, encrypted employee records)
 - **Next** — autonomous agent execution engine: small, low-risk BUDs run tech spec → code → review → test end to end, with a human approval gate before release (deliberately not lights-out)
 - **Future** — multi-org marketplace, custom agent builder, analytics dashboards, mobile companion, plugin ecosystem
 
@@ -296,6 +298,6 @@ Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 If Glideship helps your team, give it a ⭐ and spread the word.
 
-<sub>&copy; 2025-2026 Arun Rajkumar. Glideship is a trademark of Arun Rajkumar.<br>Independent open-source project — not affiliated with any employer or client.</sub>
+<sub>&copy; 2025-2026 Arun Rajkumar. Glideship&trade; is a trademark of Arun Rajkumar.<br>Independent open-source project — not affiliated with any employer or client.</sub>
 
 </div>

@@ -1,4 +1,4 @@
-// `bodhiorchard status` — show container state and the access URL.
+// `glideship status` — show container state and the access URL.
 import path from "node:path";
 import { preflight } from "../lib/preflight.js";
 import { readConfig, PROJECT_NAME } from "../lib/config.js";

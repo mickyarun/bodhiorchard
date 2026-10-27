@@ -1,4 +1,4 @@
-// `bodhiorchard start` — bring the stack up from persisted config, wait for
+// `glideship start` — bring the stack up from persisted config, wait for
 // readiness, then open the in-app setup wizard.
 import path from "node:path";
 import { preflight } from "../lib/preflight.js";
@@ -38,7 +38,7 @@ export async function startCommand(projectDir: string): Promise<void> {
   const healthSpin = spinner("Waiting for services to become ready…").start();
   const ready = await waitForHealth(config.services.backend.hostPort, frontendPort);
   if (ready) healthSpin.succeed("Glideship is ready.");
-  else healthSpin.warn("Services didn't report ready within 60s — check `bodhiorchard logs`.");
+  else healthSpin.warn("Services didn't report ready within 60s — check `glideship logs`.");
 
   log.plain();
   log.info(`Open the setup wizard: ${setupUrl}`);
