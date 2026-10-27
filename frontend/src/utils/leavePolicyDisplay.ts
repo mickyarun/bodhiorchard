@@ -24,7 +24,7 @@ import { GENDER_LABELS } from '@/utils/employee'
 export const FIELD_PROPS = { variant: 'outlined', density: 'comfortable', hideDetails: 'auto' } as const
 
 /** Readable names for the leave colour swatches, in swatch order. */
-const SWATCH_NAMES = ['Green', 'Blue', 'Amber', 'Red', 'Gold', 'Teal', 'Grey']
+const SWATCH_NAMES = ['Blue', 'Indigo', 'Amber', 'Red', 'Violet', 'Teal', 'Grey']
 
 export const SWATCH_OPTIONS = SWATCH_KEYS.map((key, index) => ({
   key,

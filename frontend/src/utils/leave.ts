@@ -64,20 +64,13 @@ export function pillOptions<T extends string>(labels: Record<T, string>): { labe
   return (Object.keys(labels) as T[]).map(value => ({ label: labels[value], value }))
 }
 
-/** Leave-type colour keys map onto theme colours so both themes work. */
-export const SWATCH_COLORS: Record<string, string> = {
-  'swatch-1': 'primary',
-  'swatch-2': 'info',
-  'swatch-3': 'warning',
-  'swatch-4': 'error',
-  'swatch-5': 'secondary',
-  'swatch-6': 'success',
-  'swatch-7': 'muted',
-}
-export const SWATCH_KEYS = Object.keys(SWATCH_COLORS)
+/** Leave-type colour keys are theme colours of the same name (tokens.css
+ *  --color-swatch-*), a categorical palette kept apart from status colours. */
+export const SWATCH_KEYS = ['swatch-1', 'swatch-2', 'swatch-3', 'swatch-4', 'swatch-5', 'swatch-6', 'swatch-7']
 
+/** Theme colour name for a leave type's colour key; unknown keys get the first swatch. */
 export function swatchColor(key: string | null | undefined): string {
-  return (key && SWATCH_COLORS[key]) || 'primary'
+  return key && SWATCH_KEYS.includes(key) ? key : SWATCH_KEYS[0]
 }
 
 /** Decimal from the API (string or number) as a number; blanks are 0. */

@@ -66,6 +66,15 @@ export const glideshipDark: ThemeDefinition = {
     'priority-p1': '#FDBA74',
     'priority-p2': '#A5B4FC',
     'priority-p3': '#CBD5E1',
+    // Leave-type swatches (tokens.css --color-swatch-*): categorical, picked
+    // per leave type by HR. Dots and meters only, never status.
+    'swatch-1': '#60A5FA',
+    'swatch-2': '#818CF8',
+    'swatch-3': '#FBBF24',
+    'swatch-4': '#F87171',
+    'swatch-5': '#A78BFA',
+    'swatch-6': '#2DD4BF',
+    'swatch-7': '#94A3B8',
   },
   variables: {
     'border-color': '#E5E9F0',
@@ -114,6 +123,13 @@ export const glideshipLight: ThemeDefinition = {
     'priority-p1': '#C2410C',
     'priority-p2': '#4338CA',
     'priority-p3': '#475569',
+    'swatch-1': '#2563EB',
+    'swatch-2': '#4F46E5',
+    'swatch-3': '#B45309',
+    'swatch-4': '#DC2626',
+    'swatch-5': '#7C3AED',
+    'swatch-6': '#0F766E',
+    'swatch-7': '#64748B',
   },
   variables: {
     'border-color': '#0F172A',

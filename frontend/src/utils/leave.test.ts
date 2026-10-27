@@ -147,9 +147,10 @@ describe('labels', () => {
     expect(codeFromName('  ')).toBe('')
   })
 
-  it('falls back to primary for unknown swatches', () => {
-    expect(swatchColor('swatch-2')).toBe('info')
-    expect(swatchColor('nope')).toBe('primary')
+  it('maps swatch keys onto their theme colours, unknown ones to the first', () => {
+    expect(swatchColor('swatch-2')).toBe('swatch-2')
+    expect(swatchColor('nope')).toBe('swatch-1')
+    expect(swatchColor(null)).toBe('swatch-1')
   })
 })
 

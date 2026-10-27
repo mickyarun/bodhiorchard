@@ -76,7 +76,7 @@ function optionalCard(optional: OptionalHolidayBalance) {
     key: 'optional-holidays',
     props: {
       title: 'Optional holidays',
-      color: 'secondary',
+      color: 'swatch-5',
       value: `${optional.remaining} of ${optional.quota}`,
       unit: 'left',
       meter: { used, pending: Math.min(100 - used, percent(optional.pending)) },
@@ -121,10 +121,17 @@ const cards = computed(() => {
 .balance-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
+  gap: 16px;
 }
 .balance-grid--compact {
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 8px;
+}
+@media (max-width: 600px) {
+  .balance-grid,
+  .balance-grid--compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
 }
 </style>

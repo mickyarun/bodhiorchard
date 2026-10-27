@@ -18,32 +18,29 @@
      lighter), a caption and an optional note under it. Presentational;
      BalanceGrid maps data in. -->
 <template>
-  <v-card
-    :color="compact ? undefined : 'surface'"
-    :variant="compact ? 'flat' : undefined"
-    rounded="lg"
+  <div
     class="balance-card"
-    :class="[compact ? 'pa-3 balance-card--compact' : 'pa-4', { 'balance-card--highlight': highlight }]"
+    :class="{ 'balance-card--compact': compact, 'balance-card--highlight': highlight }"
   >
-    <div class="d-flex align-center ga-2" :class="compact ? 'mb-2' : 'mb-3'">
+    <div class="balance-card__head">
       <span class="balance-card__dot" :style="{ background: tone }" aria-hidden="true" />
-      <span class="text-body-2 font-weight-medium text-truncate">{{ title }}</span>
+      <span class="balance-card__title">{{ title }}</span>
       <v-chip v-if="tag" size="x-small" variant="tonal" class="ml-auto">{{ tag }}</v-chip>
     </div>
-    <div class="d-flex align-baseline ga-2">
-      <span class="balance-card__value bo-display">{{ value }}</span>
-      <span v-if="unit" class="text-caption text-medium-emphasis">{{ unit }}</span>
+    <div class="balance-card__figure">
+      <span class="balance-card__value">{{ value }}</span>
+      <span v-if="unit" class="balance-card__unit">{{ unit }}</span>
     </div>
-    <div v-if="meter" class="balance-card__meter mt-3" role="img" :aria-label="caption">
+    <div v-if="meter" class="balance-card__meter" role="img" :aria-label="caption">
       <span class="balance-card__used" :style="{ width: `${meter.used}%`, background: tone }" />
       <span
         class="balance-card__pending"
         :style="{ width: `${meter.pending}%`, background: tone }"
       />
     </div>
-    <div class="text-caption text-medium-emphasis mt-2">{{ caption }}</div>
-    <div v-if="note" class="text-caption text-medium-emphasis font-italic">{{ note }}</div>
-  </v-card>
+    <div class="balance-card__caption">{{ caption }}</div>
+    <div v-if="note" class="balance-card__caption">{{ note }}</div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -69,35 +66,88 @@ const tone = computed(() => `rgb(var(--v-theme-${props.color}))`)
 </script>
 
 <style scoped>
+.balance-card {
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid rgb(var(--v-theme-rule));
+  border-radius: 12px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.balance-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .balance-card__dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
 }
+.balance-card__title {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.balance-card__figure {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+}
 .balance-card__value {
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 1;
+  font-size: 32px;
+  line-height: 36px;
+  font-weight: 600;
+  letter-spacing: var(--tracking-display);
+}
+.balance-card__unit,
+.balance-card__caption {
+  font-size: 13px;
+  color: rgb(var(--v-theme-on-surface-variant));
 }
 .balance-card__meter {
   display: flex;
-  height: 4px;
+  height: 6px;
   border-radius: 999px;
   overflow: hidden;
-  background: rgba(var(--v-theme-on-surface), 0.08);
-}
-.balance-card--compact {
-  background: rgba(var(--v-theme-on-surface), 0.04);
-}
-.balance-card--compact .balance-card__value {
-  font-size: 22px;
-}
-.balance-card--highlight {
-  box-shadow: inset 0 0 0 1.5px rgb(var(--v-theme-primary));
-  background: rgba(var(--v-theme-primary), 0.06);
+  background: rgb(var(--v-theme-surface-variant));
 }
 .balance-card__pending {
   opacity: 0.4;
+}
+.balance-card--compact {
+  padding: 12px 14px;
+  gap: 6px;
+  background: rgb(var(--v-theme-surface-variant));
+  border-color: transparent;
+}
+.balance-card--compact .balance-card__value {
+  font-size: 22px;
+  line-height: 28px;
+}
+.balance-card--compact .balance-card__meter {
+  height: 4px;
+  background: rgb(var(--v-theme-rule));
+}
+@media (max-width: 600px) {
+  .balance-card {
+    padding: 14px;
+    gap: 8px;
+  }
+  .balance-card__value {
+    font-size: 26px;
+    line-height: 30px;
+  }
+}
+.balance-card--highlight {
+  border-color: rgb(var(--v-theme-primary));
+  background: rgba(var(--v-theme-primary), 0.06);
 }
 </style>

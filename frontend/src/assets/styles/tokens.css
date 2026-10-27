@@ -75,6 +75,16 @@
   --color-priority-p2:  #A5B4FC;
   --color-priority-p3:  #CBD5E1;
 
+  /* Leave-type swatches — a categorical palette HR picks from per type.
+     Dots and meters only; never a status signal. */
+  --color-swatch-1:     #60A5FA;                /* blue                    */
+  --color-swatch-2:     #818CF8;                /* indigo                  */
+  --color-swatch-3:     #FBBF24;                /* amber                   */
+  --color-swatch-4:     #F87171;                /* red                     */
+  --color-swatch-5:     #A78BFA;                /* violet                  */
+  --color-swatch-6:     #2DD4BF;                /* teal                    */
+  --color-swatch-7:     #94A3B8;                /* grey                    */
+
   /* ── Type ─────────────────────────────────────────────────────────── */
   --font-display: "Geist", ui-sans-serif, system-ui, sans-serif;
   --font-body:    "Geist", ui-sans-serif, system-ui, sans-serif;
@@ -154,6 +164,14 @@
   --color-priority-p1:  #C2410C;
   --color-priority-p2:  #4338CA;
   --color-priority-p3:  #475569;
+
+  --color-swatch-1:     #2563EB;
+  --color-swatch-2:     #4F46E5;
+  --color-swatch-3:     #B45309;
+  --color-swatch-4:     #DC2626;
+  --color-swatch-5:     #7C3AED;
+  --color-swatch-6:     #0F766E;
+  --color-swatch-7:     #64748B;
 }
 
 /* ── Brand panel ───────────────────────────────────────────────────────
