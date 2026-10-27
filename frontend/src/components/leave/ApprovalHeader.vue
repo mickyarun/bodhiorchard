@@ -20,7 +20,7 @@
   <div class="head">
     <span class="head__avatar" aria-hidden="true">{{ initialsOf(request.user.name) }}</span>
     <div class="head__who">
-      <h2 :id="headingId" class="head__name">{{ request.user.name }}</h2>
+      <h2 :id="headingId" class="head__name" tabindex="-1">{{ request.user.name }}</h2>
       <span v-if="role" class="head__role">{{ role }}</span>
     </div>
     <span class="head__route">{{ ROUTE_TAGS[item.route] }}</span>
@@ -39,18 +39,14 @@ import { computed } from 'vue'
 import LeaveStatusChip from '@/components/leave/LeaveStatusChip.vue'
 import type { ApprovalItem } from '@/types/leave'
 import { initialsOf } from '@/utils/avatar'
-import { HALF_DAY_LABELS, pluralDays, requestTypeLabel, ROUTE_TAGS, toNumber } from '@/utils/leave'
+import { requestLength, requestTypeLabel, ROUTE_TAGS } from '@/utils/leave'
 import { formatDayRange } from '@/utils/leaveDates'
 
 const props = defineProps<{ item: ApprovalItem; headingId: string }>()
 
 const request = computed(() => props.item.request)
 const role = computed(() => [props.item.designation, props.item.department].filter(Boolean).join(' · '))
-const length = computed(() => {
-  const days = pluralDays(toNumber(request.value.days))
-  const half = request.value.half_day
-  return half === 'none' ? days : `${days}, ${HALF_DAY_LABELS[half].toLowerCase()}`
-})
+const length = computed(() => requestLength(request.value))
 </script>
 
 <style scoped>
@@ -82,6 +78,7 @@ const length = computed(() => {
 }
 .head__name {
   margin: 0;
+  outline: none;
   font-size: var(--text-md);
   font-weight: 600;
 }

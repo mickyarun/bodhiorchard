@@ -66,6 +66,12 @@ import { highLeaveForOthers, highLeaveVariant } from '@/utils/highLeave'
 const props = defineProps<{ item: ApprovalItem }>()
 
 const headingId = useId()
+
+/** Move focus to the requester's name, e.g. after picking this request. */
+function focusHeading(): void {
+  document.getElementById(headingId)?.focus()
+}
+defineExpose({ focusHeading })
 const request = computed(() => props.item.request)
 
 // Tiles show the current leave year; a request priced on another year

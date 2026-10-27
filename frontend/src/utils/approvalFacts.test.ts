@@ -20,8 +20,8 @@ import {
   lastLeaveLine,
   otherYearBalanceAfter,
   queueSummary,
-  sentAgo,
   timeAgo,
+  timestampAgo,
 } from '@/utils/approvalFacts'
 
 // Wednesday 21 October 2026, mid-morning local time.
@@ -83,10 +83,10 @@ describe('otherYearBalanceAfter', () => {
   })
 })
 
-describe('sentAgo', () => {
+describe('timestampAgo', () => {
   it('counts local days from a timestamp', () => {
-    expect(sentAgo(new Date(2026, 9, 19, 23, 50).toISOString(), TODAY)).toBe('2 days ago')
-    expect(sentAgo(new Date(2026, 9, 21, 8, 0).toISOString(), TODAY)).toBe('today')
+    expect(timestampAgo(new Date(2026, 9, 19, 23, 50).toISOString(), TODAY)).toBe('2 days ago')
+    expect(timestampAgo(new Date(2026, 9, 21, 8, 0).toISOString(), TODAY)).toBe('today')
   })
 })
 
@@ -97,11 +97,16 @@ describe('queueSummary', () => {
 
   it('counts the queue and says how old the oldest request is', () => {
     const items = [sent(new Date(2026, 9, 20, 9)), sent(new Date(2026, 9, 16, 9)), sent(new Date(2026, 9, 21, 9))]
-    expect(queueSummary(items, TODAY)).toBe('3 requests waiting on you · oldest sent 5 days ago')
+    expect(queueSummary(items, TODAY, false)).toBe('3 requests waiting on you · oldest sent 5 days ago')
+  })
+
+  it('says "matching" when filters are on', () => {
+    const items = [sent(new Date(2026, 9, 20, 9)), sent(new Date(2026, 9, 16, 9))]
+    expect(queueSummary(items, TODAY, true)).toBe('2 matching requests · oldest sent 5 days ago')
   })
 
   it('uses the singular, and is empty for an empty queue', () => {
-    expect(queueSummary([sent(new Date(2026, 9, 21, 9))], TODAY)).toBe('1 request waiting on you · oldest sent today')
-    expect(queueSummary([], TODAY)).toBe('')
+    expect(queueSummary([sent(new Date(2026, 9, 21, 9))], TODAY, false)).toBe('1 request waiting on you · oldest sent today')
+    expect(queueSummary([], TODAY, false)).toBe('')
   })
 })

@@ -53,13 +53,13 @@
           </li>
         </ul>
       </section>
-      <ApprovalCard v-if="!narrow && current" :key="current.request.id" :item="current" />
+      <ApprovalCard v-if="!narrow && current" ref="detail" :key="current.request.id" :item="current" />
     </div>
   </LeavePage>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useDisplay } from 'vuetify'
 import AppCallout from '@/components/common/AppCallout.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
@@ -94,15 +94,21 @@ const current = computed(
 function isOpen(item: ApprovalItem): boolean {
   return narrow.value ? item.request.id === selectedId.value : item === current.value
 }
-function select(item: ApprovalItem): void {
+const detail = ref<InstanceType<typeof ApprovalCard> | null>(null)
+
+async function select(item: ApprovalItem): Promise<void> {
   const id = item.request.id
   selectedId.value = narrow.value && selectedId.value === id ? null : id
+  if (narrow.value) return
+  // Beside the list, a pick takes keyboard and screen-reader users to it.
+  await nextTick()
+  detail.value?.focusHeading()
 }
 
 const subtitle = computed(() => {
   if (store.status === 'decided') return 'Requests decided recently, newest first.'
   if (store.error || (store.loading && !store.items.length)) return ''
-  return queueSummary(store.items, new Date()) || 'Nothing is waiting on you.'
+  return queueSummary(store.items, new Date(), filtered.value) || 'Nothing is waiting on you.'
 })
 
 const filtered = computed(() => Object.values(store.filters).some(Boolean))

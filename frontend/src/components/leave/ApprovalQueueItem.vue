@@ -46,9 +46,9 @@
 import { computed } from 'vue'
 import LeaveStatusChip from '@/components/leave/LeaveStatusChip.vue'
 import type { ApprovalItem } from '@/types/leave'
-import { sentAgo } from '@/utils/approvalFacts'
+import { timestampAgo } from '@/utils/approvalFacts'
 import { initialsOf } from '@/utils/avatar'
-import { HALF_DAY_LABELS, lopLabel, pluralDays, requestTypeLabel, toNumber } from '@/utils/leave'
+import { lopLabel, requestLength, requestTypeLabel } from '@/utils/leave'
 import { formatDayRange } from '@/utils/leaveDates'
 
 const props = defineProps<{
@@ -60,13 +60,14 @@ const props = defineProps<{
 const emit = defineEmits<(e: 'select') => void>()
 
 const request = computed(() => props.item.request)
-const age = computed(() => sentAgo(request.value.created_at, new Date()))
+// Pending rows say when they were sent; decided ones when they were decided.
+const age = computed(() => {
+  const r = request.value
+  if (r.status !== 'pending' && r.decided_at) return `Decided ${timestampAgo(r.decided_at, new Date())}`
+  return `Sent ${timestampAgo(r.created_at, new Date())}`
+})
 const lop = computed(() => lopLabel(request.value.lop_days))
-const length = computed(() =>
-  request.value.half_day === 'none'
-    ? pluralDays(toNumber(request.value.days))
-    : `Half day, ${HALF_DAY_LABELS[request.value.half_day].toLowerCase()}`,
-)
+const length = computed(() => requestLength(request.value))
 </script>
 
 <style scoped>

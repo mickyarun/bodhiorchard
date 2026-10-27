@@ -14,16 +14,16 @@
  * limitations under the License.
  -->
 
-<!-- Decide a pending request: one note for the requester, Approve as the
-     one primary action and Reject as an outlined one. A rejection needs the
-     note, so the requester knows why. -->
+<!-- Decide a pending request: Approve as the one primary action and Reject
+     as an outlined one. The note is only for a rejection, and it's needed so
+     the requester knows why; approving sends no note. -->
 <template>
   <div class="decision">
     <v-textarea
       ref="noteField"
       v-model="note"
-      :label="`Note to ${name}`"
-      :hint="`Optional when you approve, needed to reject. ${name} sees it.`"
+      label="Reason for rejecting"
+      :hint="`Needed only to reject. ${name} sees it.`"
       :error-messages="noteError"
       persistent-hint
       rows="2"
@@ -80,12 +80,13 @@ async function run(action: 'approve' | 'reject'): Promise<void> {
   busy.value = action
   error.value =
     (action === 'approve'
-      ? await store.approve(props.request.id, note.value)
+      ? await store.approve(props.request.id, '')
       : await store.reject(props.request.id, note.value)) ?? ''
   busy.value = null
 }
 
 function approve(): Promise<void> {
+  noteError.value = ''
   return run('approve')
 }
 
