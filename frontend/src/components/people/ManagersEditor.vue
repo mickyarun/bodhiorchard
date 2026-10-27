@@ -17,31 +17,25 @@
 <!-- Reporting managers. An employee can have several; any one of them
      approves leave, and the primary is the one shown in the directory. -->
 <template>
-  <section>
-    <div class="d-flex align-center justify-space-between mb-2">
-      <h2 class="text-subtitle-1 font-weight-bold">Reporting managers</h2>
-      <v-btn
-        v-if="editable && !editing"
-        variant="text"
-        size="small"
-        prepend-icon="mdi-pencil-outline"
-        @click="startEdit"
-      >
+  <AppPanel title="Reporting managers">
+    <template v-if="editable && !editing" #action>
+      <v-btn variant="text" size="small" color="primary" aria-label="Change reporting managers" @click="startEdit">
         Change
       </v-btn>
-    </div>
+    </template>
 
     <template v-if="!editing">
-      <p v-if="managers.length === 0" class="text-body-2 text-medium-emphasis">
+      <p v-if="managers.length === 0" class="managers__empty">
         No manager set. Leave requests from {{ employeeName }} go to HR.
       </p>
-      <div v-for="m in managers" :key="m.user_id" class="d-flex align-center ga-2 py-1">
-        <span class="text-body-2">{{ m.name }}</span>
-        <v-chip v-if="m.is_primary" size="x-small" label variant="tonal" color="primary">
-          Primary
-        </v-chip>
-        <v-chip v-if="!m.is_active" size="x-small" label variant="tonal">Deactivated</v-chip>
-      </div>
+      <ul v-else class="managers__list">
+        <li v-for="m in managers" :key="m.user_id" class="managers__item">
+          <EmployeeAvatar :user-id="m.user_id" :name="m.name" :avatar-url="null" :size="30" />
+          <span class="managers__name">{{ m.name }}</span>
+          <span v-if="m.is_primary" class="managers__tag">Primary</span>
+          <span v-if="!m.is_active" class="managers__tag">Deactivated</span>
+        </li>
+      </ul>
     </template>
 
     <template v-else>
@@ -78,15 +72,17 @@
       <AppCallout v-if="error" variant="error" class="mb-3">{{ error }}</AppCallout>
       <div class="d-flex justify-end ga-2">
         <v-btn variant="text" @click="editing = false">Cancel</v-btn>
-        <v-btn color="primary" :loading="saving" @click="save">Save managers</v-btn>
+        <v-btn color="primary" variant="flat" :loading="saving" @click="save">Save managers</v-btn>
       </div>
     </template>
-  </section>
+  </AppPanel>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
+import AppPanel from '@/components/common/AppPanel.vue'
+import EmployeeAvatar from '@/components/people/EmployeeAvatar.vue'
 import { useMemberDirectory } from '@/composables/useMemberDirectory'
 import { useEmployeesStore } from '@/stores/employees'
 import type { ManagerInput, ManagerRef } from '@/types/employee'
@@ -159,3 +155,38 @@ async function save(): Promise<void> {
   if (!error.value) editing.value = false
 }
 </script>
+
+<style scoped>
+.managers__empty {
+  margin: 0;
+  font-size: 14px;
+  color: rgb(var(--v-theme-on-surface-variant));
+}
+.managers__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.managers__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.managers__name {
+  font-size: 14px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.managers__tag {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--v-theme-surface-variant));
+  color: rgb(var(--v-theme-ink-2));
+}
+</style>

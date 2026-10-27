@@ -15,39 +15,25 @@
  -->
 
 <!-- One employee record: /people/:userId, or the caller's own at
-     /me/profile ("My details"). -->
+     /me/profile ("My details"). The first tab sits beside a side column
+     with leave, team and dates; the others take the full width. -->
 <template>
-  <div class="pa-6 profile">
-    <v-btn
-      v-if="!isOwn && canViewEmployees"
-      variant="text"
-      size="small"
-      prepend-icon="mdi-arrow-left"
-      class="mb-2"
-      :to="{ name: 'employees' }"
-    >
-      Employees
-    </v-btn>
+  <div class="profile">
+    <nav v-if="!isOwn && canViewEmployees" aria-label="Breadcrumb" class="profile__crumbs">
+      <router-link :to="{ name: 'employees' }">Employees</router-link>
+      <span aria-hidden="true">/</span>
+      <span aria-current="page">{{ record?.name ?? '' }}</span>
+    </nav>
 
     <v-progress-linear v-if="store.loading" indeterminate color="primary" />
 
-    <AppCallout
-      v-else-if="store.error"
-      :variant="isOwn && store.errorStatus === 404 ? 'info' : 'error'"
-      class="mb-4"
-    >
+    <AppCallout v-else-if="store.error" :variant="isOwn && store.errorStatus === 404 ? 'info' : 'error'">
       {{ store.error }}
     </AppCallout>
 
     <template v-else-if="record">
-      <AppCallout v-if="avatarError" variant="error" class="mb-4">
-        {{ avatarError }}
-      </AppCallout>
-      <EmployeeHeaderCard
-        :record="record"
-        @avatar-updated="onAvatarUpdated"
-        @avatar-error="avatarError = $event"
-      >
+      <AppCallout v-if="avatarError" variant="error">{{ avatarError }}</AppCallout>
+      <EmployeeHeaderCard :record="record" @avatar-updated="onAvatarUpdated" @avatar-error="avatarError = $event">
         <template #actions>
           <EmployeePasswordButton
             v-if="record.access.reset_password"
@@ -57,37 +43,34 @@
           />
         </template>
       </EmployeeHeaderCard>
-      <v-tabs v-model="tab" color="primary" density="compact" slider-color="primary" class="mb-4">
-        <v-tab v-if="record.personal" value="personal">Personal</v-tab>
-        <v-tab value="employment">Employment</v-tab>
-        <v-tab v-if="showLeave" value="leave">Leave</v-tab>
-        <v-tab v-if="showDetails" value="bank">Bank &amp; IDs</v-tab>
-        <v-tab v-if="showDocuments" value="documents">Documents</v-tab>
+
+      <v-tabs v-model="tab" color="primary" slider-color="primary" class="profile__tabs" aria-label="Profile sections">
+        <v-tab v-for="item in tabs" :key="item.value" :value="item.value">
+          <v-icon v-if="item.locked" icon="mdi-lock-outline" size="14" class="mr-1" />
+          {{ item.label }}
+        </v-tab>
       </v-tabs>
-      <v-card color="surface" rounded="lg" class="pa-6">
-        <v-tabs-window v-model="tab">
+
+      <div class="profile__body" :class="{ 'profile__body--aside': showAside }">
+        <v-tabs-window v-model="tab" class="profile__main">
           <v-tabs-window-item v-if="record.personal" value="personal">
-            <PersonalTab
-              :employee-id="record.user_id"
-              :personal="record.personal"
-              :mode="personalMode"
-              :is-self="isOwn"
-            />
+            <PersonalTab :employee-id="record.user_id" :personal="record.personal" :mode="personalMode" :is-self="isOwn" />
           </v-tabs-window-item>
           <v-tabs-window-item value="employment">
             <EmploymentTab :record="record" />
           </v-tabs-window-item>
-          <v-tabs-window-item v-if="showLeave" value="leave">
-            <MemberLeaveTab :user-id="record.user_id" />
+          <v-tabs-window-item v-if="has('leave')" value="leave">
+            <div class="profile__panel"><MemberLeaveTab :user-id="record.user_id" /></div>
           </v-tabs-window-item>
-          <v-tabs-window-item v-if="showDetails" value="bank">
+          <v-tabs-window-item v-if="has('bank')" value="bank">
             <BankIdsTab :user-id="record.user_id" :is-own="isOwn" />
           </v-tabs-window-item>
-          <v-tabs-window-item v-if="showDocuments" value="documents">
+          <v-tabs-window-item v-if="has('documents')" value="documents">
             <DocumentsTab :user-id="record.user_id" />
           </v-tabs-window-item>
         </v-tabs-window>
-      </v-card>
+        <ProfileAside v-if="showAside" :record="record" :show-leave="showLeave" @leave-details="tab = 'leave'" />
+      </div>
     </template>
   </div>
 </template>
@@ -96,33 +79,35 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppCallout from '@/components/common/AppCallout.vue'
+import MemberLeaveTab from '@/components/leave/MemberLeaveTab.vue'
 import BankIdsTab from '@/components/people/BankIdsTab.vue'
 import DocumentsTab from '@/components/people/DocumentsTab.vue'
 import EmployeeHeaderCard from '@/components/people/EmployeeHeaderCard.vue'
 import EmployeePasswordButton from '@/components/people/EmployeePasswordButton.vue'
 import EmploymentTab from '@/components/people/EmploymentTab.vue'
-import MemberLeaveTab from '@/components/leave/MemberLeaveTab.vue'
 import PersonalTab from '@/components/people/PersonalTab.vue'
+import ProfileAside from '@/components/people/profile/ProfileAside.vue'
 import { usePermissions } from '@/composables/usePermissions'
+import { useProfileAccess } from '@/composables/useProfileAccess'
 import { useAuthStore } from '@/stores/auth'
 import { useEmployeesStore } from '@/stores/employees'
+import type { ProfileTab } from '@/utils/employeeProfile'
 
 const route = useRoute()
 const store = useEmployeesStore()
 const authStore = useAuthStore()
-const {
-  canViewEmployees,
-  canApproveLeave,
-  canViewLeaveReports,
-  canManageEmployees,
-  canSeeEmployeeDocuments,
-} = usePermissions()
+const { canViewEmployees } = usePermissions()
 
 const routeUserId = computed(() => route.params.userId as string | undefined)
 const isOwn = computed(() => !routeUserId.value || routeUserId.value === authStore.user?.id)
 const record = computed(() => store.record)
-const tab = ref('personal')
+const { showLeave, personalMode, tabs } = useProfileAccess(record, isOwn)
+const tab = ref<ProfileTab>('personal')
 const avatarError = ref('')
+
+const has = (value: ProfileTab) => tabs.value.some(t => t.value === value)
+// The side column belongs to the first tab, the profile's overview.
+const showAside = computed(() => tab.value === tabs.value[0]?.value)
 
 /**
  * Keep the loaded record in step with the photo the child just changed,
@@ -132,26 +117,6 @@ function onAvatarUpdated(avatarUrl: string | null): void {
   avatarError.value = ''
   if (store.record) store.record.avatar_url = avatarUrl
 }
-// Balances are open to HR, the member and the member's managers (the
-// API enforces the same rule).
-const isManagerOfRecord = computed(
-  () => !!record.value?.managers.some(m => m.user_id === authStore.user?.id),
-)
-const showLeave = computed(
-  // Not leave:configure alone: balances reveal who used sick leave.
-  () =>
-    isOwn.value || canApproveLeave.value || canViewLeaveReports.value || isManagerOfRecord.value,
-)
-
-// HR (and the owner, who holds every permission) or the person themself;
-// the API enforces the same rules.
-const showDetails = computed(() => isOwn.value || canManageEmployees.value)
-const showDocuments = computed(() => isOwn.value || canSeeEmployeeDocuments.value)
-
-const personalMode = computed<'hr' | 'self' | 'view'>(() => {
-  if (record.value?.access.edit_personal) return 'hr'
-  return isOwn.value ? 'self' : 'view'
-})
 
 watch(
   () => routeUserId.value,
@@ -167,6 +132,57 @@ watch(
 
 <style scoped>
 .profile {
-  max-width: 1120px;
+  padding: 22px 36px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+  container-type: inline-size;
+}
+.profile__crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: rgb(var(--v-theme-on-surface-variant));
+}
+.profile__crumbs a {
+  color: var(--color-accent-text);
+  font-weight: 500;
+  text-decoration: none;
+}
+.profile__crumbs a:hover {
+  text-decoration: underline;
+}
+.profile__tabs {
+  border-bottom: 1px solid rgb(var(--v-theme-rule));
+}
+.profile__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.profile__main {
+  min-width: 0;
+}
+.profile__panel {
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid rgb(var(--v-theme-rule));
+  border-radius: 12px;
+  padding: 20px;
+}
+@container (min-width: 900px) {
+  .profile__body--aside {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+}
+@media (max-width: 600px) {
+  .profile {
+    padding: 20px 16px 32px;
+  }
+  .profile__panel {
+    padding: 16px;
+  }
 }
 </style>

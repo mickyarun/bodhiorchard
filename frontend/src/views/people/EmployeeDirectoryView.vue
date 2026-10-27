@@ -16,127 +16,64 @@
 
 <!-- Employee directory: members who have an employee record. -->
 <template>
-  <div class="pa-6 directory">
-    <div class="d-flex align-start justify-space-between flex-wrap ga-3 mb-6">
-      <div>
-        <h1 class="text-h5 font-weight-bold bo-display">Employees</h1>
-        <p class="text-body-2 text-medium-emphasis">{{ countLabel }}</p>
-      </div>
-      <div class="d-flex flex-wrap ga-2">
-        <v-btn v-if="canInviteMembers" variant="tonal" color="primary" prepend-icon="mdi-account-plus-outline" @click="inviting = true">
-          Invite new hire
-        </v-btn>
-        <v-btn v-if="canManageEmployees" color="primary" prepend-icon="mdi-plus" @click="addEmployee(null)">
-          Add employee
-        </v-btn>
-      </div>
-    </div>
+  <LeavePage title="Employees" :subtitle="subtitle">
+    <template #actions>
+      <v-btn v-if="canInviteMembers" variant="outlined" prepend-icon="mdi-account-plus-outline" @click="inviting = true">
+        Invite new hire
+      </v-btn>
+      <v-btn v-if="canManageEmployees" color="primary" variant="flat" prepend-icon="mdi-plus" @click="addEmployee(null)">
+        Add employee
+      </v-btn>
+    </template>
 
-    <div class="d-flex flex-wrap ga-3 mb-4">
-      <v-text-field
-        v-model="search"
-        prepend-inner-icon="mdi-magnify"
-        placeholder="Search name, code, email"
-        density="compact"
-        variant="outlined"
-        hide-details
-        clearable
-        style="max-width: 320px"
-      />
-      <v-select
-        v-model="status"
-        :items="STATUS_ITEMS"
-        label="Status"
-        density="compact"
-        variant="outlined"
-        hide-details
-        clearable
-        style="max-width: 180px"
-      />
-    </div>
+    <DirectoryFilters
+      v-model:search="search"
+      v-model:status="status"
+      v-model:office="office"
+      v-model:department="department"
+      :departments="departments"
+      :offices="offices"
+      :total="store.directory.length"
+    />
 
-    <AppCallout v-if="store.error" variant="error" class="mb-4">{{ store.error }}</AppCallout>
+    <AppCallout v-if="store.error" variant="error">{{ store.error }}</AppCallout>
 
-    <v-card color="surface" rounded="lg">
-      <v-progress-linear v-if="store.loading" indeterminate color="primary" />
-      <v-table density="comfortable" hover>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Code</th>
-            <th>Designation</th>
-            <th>Department</th>
-            <th>Works from</th>
-            <th>Manager</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="row in store.directory"
-            :key="row.user_id"
-            class="directory__row"
-            :class="{ 'directory__row--inactive': row.status === 'exited' || !row.is_active }"
-            @click="open(row.user_id)"
-          >
-            <td>
-              <div class="d-flex align-center ga-3">
-                <EmployeeAvatar
-                  :user-id="row.user_id"
-                  :name="row.name"
-                  :avatar-url="row.avatar_url"
-                  :size="36"
-                />
-                <div style="min-width: 0">
-                  <!-- A real link, so keyboards and screen readers can open it too. -->
-                  <router-link
-                    :to="{ name: 'employee-profile', params: { userId: row.user_id } }"
-                    class="directory__name font-weight-medium"
-                    @click.stop
-                  >
-                    {{ row.name }}
-                  </router-link>
-                  <div class="text-caption text-medium-emphasis">{{ row.email }}</div>
-                </div>
-              </div>
-            </td>
-            <td class="bo-mono">{{ row.employee_code || '—' }}</td>
-            <td>{{ row.designation || '—' }}</td>
-            <td>{{ row.department || '—' }}</td>
-            <td>{{ workplaceLabel(row.work_arrangement, row.office) || '—' }}</td>
-            <td>{{ managerLabel(row) }}</td>
-            <td><EmployeeStatusChip :status="row.status" /></td>
-          </tr>
-          <tr v-if="!store.loading && store.directory.length === 0">
-            <td colspan="7" class="text-center text-medium-emphasis pa-8">{{ emptyLabel }}</td>
-          </tr>
-        </tbody>
-      </v-table>
-    </v-card>
+    <DirectoryTable
+      :rows="rows"
+      :total="store.directory.length"
+      :loading="store.loading"
+      :empty-label="emptyLabel"
+    />
 
     <AddEmployeeDialog v-model="adding" :preselect-user-id="preselect" />
     <InviteNewHireDialog v-model="inviting" @invited="invited" />
-  </div>
+  </LeavePage>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import AppCallout from '@/components/common/AppCallout.vue'
+import LeavePage from '@/components/leave/LeavePage.vue'
 import AddEmployeeDialog from '@/components/people/AddEmployeeDialog.vue'
+import DirectoryFilters from '@/components/people/directory/DirectoryFilters.vue'
+import DirectoryTable from '@/components/people/directory/DirectoryTable.vue'
 import InviteNewHireDialog from '@/components/people/InviteNewHireDialog.vue'
-import EmployeeAvatar from '@/components/people/EmployeeAvatar.vue'
-import EmployeeStatusChip from '@/components/people/EmployeeStatusChip.vue'
 import { useDebounced } from '@/composables/useDebounced'
 import { usePermissions } from '@/composables/usePermissions'
 import { useEmployeesStore } from '@/stores/employees'
-import type { DirectoryEntry, EmployeeStatus } from '@/types/employee'
-import { selectItems, STATUS_LABELS, workplaceLabel } from '@/utils/employee'
+import type { EmployeeStatus } from '@/types/employee'
+import { STATUS_LABELS } from '@/utils/employee'
+import {
+  departmentCounts,
+  directorySummary,
+  filterDirectory,
+  officeOptions,
+} from '@/utils/employeeDirectory'
 
 const store = useEmployeesStore()
-const router = useRouter()
 const { canManageEmployees, canInviteMembers } = usePermissions()
 const inviting = ref(false)
+const adding = ref(false)
 const preselect = ref<string | null>(null)
 
 function addEmployee(userId: string | null): void {
@@ -149,59 +86,46 @@ function invited(userId: string): void {
   if (canManageEmployees.value) addEmployee(userId)
 }
 
-const STATUS_ITEMS = selectItems(STATUS_LABELS)
-const search = ref('')
+// Search and status go to the API; department and office filter the result.
+const search = ref<string | null>('')
 const status = ref<EmployeeStatus | null>('active')
-const adding = ref(false)
+const department = ref<string | null>(null)
+const office = ref<string | null>(null)
 
-const countLabel = computed(() => {
-  const n = store.directory.length
-  return `${n} ${n === 1 ? 'person' : 'people'}`
-})
-// The status filter defaults to "Active", so only a search counts as a
-// user filter for the first-run message.
-const emptyLabel = computed(() =>
-  search.value
-    ? `No one matches "${search.value}".`
-    : status.value && status.value !== 'active'
-      ? `No ${STATUS_LABELS[status.value].toLowerCase()} employees.`
-      : 'No employee records yet. Add your first employee to get started.',
+const departments = computed(() => departmentCounts(store.directory))
+const offices = computed(() => officeOptions(store.directory))
+const rows = computed(() =>
+  filterDirectory(store.directory, { department: department.value, office: office.value }),
 )
 
-function managerLabel(row: DirectoryEntry): string {
-  if (!row.primary_manager) return '—'
-  const extra = row.manager_count > 1 ? ` +${row.manager_count - 1}` : ''
-  return `${row.primary_manager.name}${extra}`
-}
+// A new search can leave a picked department or office with nobody in it;
+// drop the pick rather than show an empty list for a filter you can't see.
+watch(departments, list => {
+  if (department.value && !list.some(d => d.name === department.value)) department.value = null
+})
+watch(offices, list => {
+  if (office.value && !list.some(o => o.value === office.value)) office.value = null
+})
 
-function open(userId: string): void {
-  void router.push({ name: 'employee-profile', params: { userId } })
-}
+const subtitle = computed(() =>
+  store.loading && !store.directory.length ? '' : directorySummary(store.directory),
+)
+
+// The status filter defaults to "Active", so only a search or a narrowing
+// filter counts as the user's own for the first-run message.
+const emptyLabel = computed(() => {
+  if (search.value) return `No one matches "${search.value}".`
+  if (department.value || office.value) return 'No one matches these filters.'
+  if (status.value && status.value !== 'active') {
+    return `No ${STATUS_LABELS[status.value].toLowerCase()} employees.`
+  }
+  return 'No employee records yet. Add your first employee to get started.'
+})
 
 const debouncedSearch = useDebounced(search)
 function load(): void {
-  void store.fetchDirectory({ q: debouncedSearch.value, status: status.value })
+  void store.fetchDirectory({ q: debouncedSearch.value ?? '', status: status.value })
 }
 watch([debouncedSearch, status], load)
 onMounted(load)
 </script>
-
-<style scoped>
-.directory {
-  max-width: 1120px;
-}
-.directory__name {
-  color: inherit;
-  text-decoration: none;
-  display: block;
-}
-.directory__name:hover {
-  text-decoration: underline;
-}
-.directory__row {
-  cursor: pointer;
-}
-.directory__row--inactive {
-  opacity: 0.55;
-}
-</style>

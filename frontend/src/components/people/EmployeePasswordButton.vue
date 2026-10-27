@@ -19,7 +19,7 @@
      once, and shared by email (HR's mail app), Slack DM or copy. -->
 <template>
   <template v-if="login">
-    <v-btn variant="tonal" size="small" prepend-icon="mdi-key-variant" @click="open">
+    <v-btn variant="outlined" prepend-icon="mdi-key-variant" @click="open">
       {{ ACTION_LABEL[login.action] }}
     </v-btn>
     <v-dialog v-model="dialog" max-width="480">
@@ -53,8 +53,8 @@
               @click:append-inner="reveal = !reveal"
             />
             <div class="d-flex flex-wrap ga-2 mt-4">
-              <v-btn variant="tonal" prepend-icon="mdi-email-outline" :href="mailto">Share via email</v-btn>
-              <v-btn variant="tonal" prepend-icon="mdi-content-copy" @click="copy">
+              <v-btn variant="outlined" prepend-icon="mdi-email-outline" :href="mailto">Share via email</v-btn>
+              <v-btn variant="outlined" prepend-icon="mdi-content-copy" @click="copy">
                 {{ copied ? 'Copied' : 'Copy' }}
               </v-btn>
             </div>

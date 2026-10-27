@@ -21,7 +21,6 @@
     v-if="status !== 'active' || showActive"
     size="small"
     variant="tonal"
-    label
     :color="COLORS[status]"
     :prepend-icon="ICONS[status]"
   >

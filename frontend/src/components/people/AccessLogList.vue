@@ -18,13 +18,13 @@
      opened or deleted their sensitive details and documents. -->
 <template>
   <AppCallout v-if="error" variant="error">{{ error }}</AppCallout>
-  <p v-else-if="!loading && !entries.length" class="text-body-2 text-medium-emphasis">Nobody yet.</p>
-  <v-list v-else density="compact" bg-color="transparent" class="pa-0">
-    <v-list-item v-for="(entry, i) in entries" :key="i" class="px-0">
-      <v-list-item-title class="text-body-2">{{ accessLine(entry) }}</v-list-item-title>
-      <v-list-item-subtitle class="text-caption">{{ formatDateTime(entry.at) }}</v-list-item-subtitle>
-    </v-list-item>
-  </v-list>
+  <p v-else-if="!loading && !entries.length" class="access-log__empty">Nobody yet.</p>
+  <ul v-else class="access-log">
+    <li v-for="(entry, i) in entries" :key="i" class="access-log__item">
+      <span>{{ accessLine(entry) }}</span>
+      <span class="access-log__when">{{ formatDateTime(entry.at) }}</span>
+    </li>
+  </ul>
 </template>
 
 <script setup lang="ts">
@@ -56,3 +56,31 @@ async function load(): Promise<void> {
 
 watch(() => [props.userId, props.version], () => void load(), { immediate: true })
 </script>
+
+<style scoped>
+.access-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.access-log__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.access-log__item + .access-log__item {
+  border-top: 1px solid var(--color-rule-2);
+}
+.access-log__when,
+.access-log__empty {
+  font-size: 12px;
+  color: rgb(var(--v-theme-on-surface-variant));
+}
+.access-log__empty {
+  margin: 0;
+  font-size: 14px;
+}
+</style>

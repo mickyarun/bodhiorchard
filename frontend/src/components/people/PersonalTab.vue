@@ -14,96 +14,58 @@
  * limitations under the License.
  -->
 
-<!-- Personal tab: contact, emergency contact, and about. HR edits every
-     field; an employee edits their own contact and emergency details. -->
+<!-- Personal tab: contact, emergency contact, about and celebrations as
+     cards. HR edits every field; an employee edits their own contact and
+     emergency details. -->
 <template>
-  <section>
+  <section class="personal">
     <AppCallout
       v-if="!editing && mode === 'self' && !personal.emergency_contact_name"
       variant="info"
       eyebrow="Missing"
-      class="mb-4"
     >
       Add an emergency contact so HR can reach someone if needed.
       <template #actions>
-        <v-btn size="small" variant="tonal" @click="startEdit">Add now</v-btn>
+        <v-btn size="small" variant="outlined" @click="editing = true">Add now</v-btn>
       </template>
     </AppCallout>
 
-    <div class="d-flex justify-end mb-2">
-      <v-btn
-        v-if="mode !== 'view' && !editing"
-        variant="tonal"
-        size="small"
-        prepend-icon="mdi-pencil-outline"
-        @click="startEdit"
-      >
-        {{ mode === 'self' ? 'Edit my details' : 'Edit' }}
-      </v-btn>
-    </div>
-
-    <template v-if="!editing">
-      <div class="section-eyebrow">Contact</div>
-      <FieldGrid :fields="contactFields" />
-      <div class="section-eyebrow mt-6">Emergency contact</div>
-      <FieldGrid :fields="emergencyFields" />
-      <div class="section-eyebrow mt-6">About</div>
-      <FieldGrid :fields="aboutFields" />
-      <div class="section-eyebrow mt-6">Celebrations</div>
-      <div class="text-caption text-medium-emphasis mb-1">
-        Announcements show the day and month only — never the year.
-      </div>
-      <v-switch
-        v-for="pref in CELEBRATION_PREFS"
-        :key="pref.key"
-        :model-value="personal[pref.key]"
-        :label="isSelf ? pref.selfLabel : pref.otherLabel"
-        :disabled="!canChange(personal[pref.key]) || prefSaving !== null"
-        :loading="prefSaving === pref.key"
-        :hint="lockedHint(personal[pref.key])"
-        :persistent-hint="!!lockedHint(personal[pref.key])"
-        color="primary"
-        density="compact"
-        @update:model-value="value => setPref(pref.key, !!value)"
+    <PersonalEditForm
+      v-if="editing && mode !== 'view'"
+      :employee-id="employeeId"
+      :personal="personal"
+      :mode="mode"
+      @close="editing = false"
+    />
+    <ProfileCards v-else>
+      <ProfileFieldCard title="Contact" :fields="contactFields" :editable="canEdit" @edit="editing = true" />
+      <ProfileFieldCard
+        title="Emergency contact"
+        :fields="emergencyFields"
+        :editable="canEdit"
+        @edit="editing = true"
       />
-      <AppCallout v-if="prefError" variant="error" class="mt-2">{{ prefError }}</AppCallout>
-    </template>
-
-    <v-form v-else @submit.prevent="save">
-      <div class="form-grid">
-        <v-text-field v-model="draft.phone" label="Phone" v-bind="field" />
-        <v-text-field v-model="draft.personal_email" label="Personal email" type="email" v-bind="field" />
-        <v-text-field v-model="draft.emergency_contact_name" label="Emergency contact" v-bind="field" />
-        <v-text-field v-model="draft.emergency_contact_relation" label="Relation" v-bind="field" />
-        <v-text-field v-model="draft.emergency_contact_phone" label="Emergency phone" v-bind="field" />
-        <template v-if="mode === 'hr'">
-          <v-text-field v-model="draft.date_of_birth" label="Date of birth" type="date" v-bind="field" />
-          <v-select v-model="draft.gender" :items="GENDERS" label="Gender" clearable v-bind="field" />
-          <v-select v-model="draft.blood_group" :items="BLOOD_GROUPS" label="Blood group" clearable v-bind="field" />
-        </template>
-      </div>
-      <AppCallout v-if="error" variant="error" class="mt-3">{{ error }}</AppCallout>
-      <div class="d-flex justify-end ga-2 mt-4">
-        <v-btn variant="text" @click="editing = false">Cancel</v-btn>
-        <v-btn type="submit" color="primary" :loading="saving">Save changes</v-btn>
-      </div>
-    </v-form>
+      <ProfileFieldCard
+        title="About"
+        :fields="aboutFields"
+        :editable="mode === 'hr'"
+        @edit="editing = true"
+      />
+      <CelebrationsCard :employee-id="employeeId" :personal="personal" :mode="mode" :is-self="isSelf" />
+    </ProfileCards>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
-import FieldGrid, { type GridField } from '@/components/people/FieldGrid.vue'
-import { useEmployeesStore } from '@/stores/employees'
-import type { CelebrationPrefs, EmployeePersonal, EmployeePersonalRead } from '@/types/employee'
-import {
-  blankToNull,
-  BLOOD_GROUP_LABELS,
-  formatDateOnly,
-  GENDER_LABELS,
-  selectItems,
-} from '@/utils/employee'
+import CelebrationsCard from '@/components/people/CelebrationsCard.vue'
+import type { GridField } from '@/components/people/FieldGrid.vue'
+import PersonalEditForm from '@/components/people/PersonalEditForm.vue'
+import ProfileCards from '@/components/people/profile/ProfileCards.vue'
+import ProfileFieldCard from '@/components/people/profile/ProfileFieldCard.vue'
+import type { EmployeePersonalRead } from '@/types/employee'
+import { BLOOD_GROUP_LABELS, formatDateOnly, GENDER_LABELS } from '@/utils/employee'
 
 const props = defineProps<{
   employeeId: string
@@ -114,114 +76,49 @@ const props = defineProps<{
   isSelf: boolean
 }>()
 
-const store = useEmployeesStore()
 const editing = ref(false)
-const saving = ref(false)
-const error = ref('')
-const draft = ref<EmployeePersonal>(personalOnly(props.personal))
-const prefSaving = ref<keyof CelebrationPrefs | null>(null)
-const prefError = ref('')
+const canEdit = computed(() => props.mode !== 'view')
 
-type PrefKey = 'celebrate_birthday' | 'celebrate_anniversary'
-const CELEBRATION_PREFS: { key: PrefKey; selfLabel: string; otherLabel: string }[] = [
-  { key: 'celebrate_birthday', selfLabel: 'Announce my birthday', otherLabel: 'Announce birthday' },
-  {
-    key: 'celebrate_anniversary',
-    selfLabel: 'Announce my work anniversary',
-    otherLabel: 'Announce work anniversary',
-  },
-]
-
-/**
- * The opt-out is the employee's: they may switch it either way. HR may
- * mute on someone's behalf but never unmute — the API enforces the same.
- */
-function canChange(current: boolean): boolean {
-  if (props.isSelf) return true
-  return props.mode === 'hr' && current
+/** A field as shown, with "Add" beside it when it's empty and editable. */
+function field(label: string, value: string | null, editable: boolean, locked = false): GridField {
+  const add = editable && !value
+  return {
+    label,
+    value,
+    locked,
+    action: add
+      ? { label: 'Add', ariaLabel: `Add ${label.toLowerCase()}`, run: () => (editing.value = true) }
+      : undefined,
+  }
 }
 
-function lockedHint(current: boolean): string {
-  if (props.isSelf || props.mode !== 'hr' || current) return ''
-  return 'Muted by them or on their behalf. Only they can turn it back on.'
-}
-
-async function setPref(key: PrefKey, value: boolean): Promise<void> {
-  prefSaving.value = key
-  prefError.value = (await store.updateCelebrationPrefs(props.employeeId, { [key]: value })) ?? ''
-  prefSaving.value = null
-}
-
-/** The editable personal fields, without the read-only opt-outs. */
-function personalOnly(source: EmployeePersonalRead): EmployeePersonal {
-  const { celebrate_birthday: _b, celebrate_anniversary: _a, ...rest } = source
-  return rest
-}
-
-const GENDERS = selectItems(GENDER_LABELS)
-const BLOOD_GROUPS = selectItems(BLOOD_GROUP_LABELS)
-const field = { variant: 'outlined', density: 'compact', hideDetails: 'auto' } as const
-
-const locked = computed(() => props.mode === 'self')
 const contactFields = computed<GridField[]>(() => [
-  { label: 'Phone', value: props.personal.phone },
-  { label: 'Personal email', value: props.personal.personal_email },
+  field('Phone', props.personal.phone, canEdit.value),
+  field('Personal email', props.personal.personal_email, canEdit.value),
 ])
 const emergencyFields = computed<GridField[]>(() => [
-  { label: 'Name', value: props.personal.emergency_contact_name },
-  { label: 'Relation', value: props.personal.emergency_contact_relation },
-  { label: 'Phone', value: props.personal.emergency_contact_phone },
+  field('Name', props.personal.emergency_contact_name, canEdit.value),
+  field('Relation', props.personal.emergency_contact_relation, canEdit.value),
+  field('Phone', props.personal.emergency_contact_phone, canEdit.value),
 ])
-const aboutFields = computed<GridField[]>(() => [
-  { label: 'Date of birth', value: formatDateOnly(props.personal.date_of_birth), locked: locked.value },
-  {
-    label: 'Gender',
-    value: props.personal.gender ? GENDER_LABELS[props.personal.gender] : null,
-    locked: locked.value,
-  },
-  {
-    label: 'Blood group',
-    value: props.personal.blood_group ? BLOOD_GROUP_LABELS[props.personal.blood_group] : null,
-    locked: locked.value,
-  },
-])
-
-function startEdit(): void {
-  draft.value = personalOnly(props.personal)
-  error.value = ''
-  editing.value = true
-}
-
-async function save(): Promise<void> {
-  saving.value = true
-  const values = blankToNull(draft.value)
-  error.value =
-    (props.mode === 'self'
-      ? await store.updateMyContact({
-          phone: values.phone,
-          personal_email: values.personal_email,
-          emergency_contact_name: values.emergency_contact_name,
-          emergency_contact_relation: values.emergency_contact_relation,
-          emergency_contact_phone: values.emergency_contact_phone,
-        })
-      : await store.updatePersonal(props.employeeId, values)) ?? ''
-  saving.value = false
-  if (!error.value) editing.value = false
-}
+// Only HR changes these; the employee sees them with a lock.
+const aboutFields = computed<GridField[]>(() => {
+  const hr = props.mode === 'hr'
+  const locked = props.mode === 'self'
+  const { date_of_birth, gender, blood_group } = props.personal
+  return [
+    field('Date of birth', date_of_birth ? formatDateOnly(date_of_birth) : null, hr, locked),
+    field('Gender', gender ? GENDER_LABELS[gender] : null, hr, locked),
+    field('Blood group', blood_group ? BLOOD_GROUP_LABELS[blood_group] : null, hr, locked),
+  ]
+})
 </script>
 
 <style scoped>
-.section-eyebrow {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.7;
-  margin-bottom: 8px;
-}
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
+.personal {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
 }
 </style>

@@ -14,11 +14,12 @@
  * limitations under the License.
  -->
 
-<!-- Read-only label/value grid used across the employee profile tabs.
-     Two columns of pairs on wide screens, one pair per row on narrow. -->
+<!-- Read-only label/value list used inside the employee profile cards:
+     each label sits above its value. An empty value with an action (e.g.
+     "Add") reads "Not added"; without one it is a dash. -->
 <template>
   <dl class="field-grid">
-    <template v-for="field in fields" :key="field.label">
+    <div v-for="field in fields" :key="field.label" class="field-grid__item">
       <dt class="field-grid__label">
         {{ field.label }}
         <v-icon
@@ -27,24 +28,25 @@
           size="12"
           class="ml-1"
           :title="lockedHint"
+          :aria-label="lockedHint"
         />
       </dt>
       <dd class="field-grid__value" :class="{ 'field-grid__value--empty': !field.value }">
-        {{ field.value || '—' }}
+        <span>{{ field.value || (field.action ? 'Not added' : '—') }}</span>
         <v-btn
           v-if="field.action"
           variant="text"
           size="small"
           density="compact"
           color="primary"
-          class="ml-2"
+          class="field-grid__action"
           :aria-label="field.action.ariaLabel"
           @click="field.action.run"
         >
           {{ field.action.label }}
         </v-btn>
       </dd>
-    </template>
+    </div>
   </dl>
 </template>
 
@@ -54,7 +56,7 @@ export interface GridField {
   value: string | null | undefined
   /** Shown with a lock: the viewer can see but not change it. */
   locked?: boolean
-  /** A text button beside the value, e.g. "Change". */
+  /** A text button beside the value, e.g. "Change" or "Add". */
   action?: { label: string; ariaLabel: string; run: () => void }
 }
 
@@ -65,36 +67,36 @@ withDefaults(defineProps<{ fields: GridField[]; lockedHint?: string }>(), {
 
 <style scoped>
 .field-grid {
-  display: grid;
-  grid-template-columns: 160px minmax(0, 1fr) 160px minmax(0, 1fr);
-  gap: 12px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   margin: 0;
+}
+.field-grid__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 .field-grid__label {
   font-size: 12px;
-  color: rgb(var(--v-theme-muted, var(--v-theme-on-surface)));
-  opacity: 0.85;
+  color: rgb(var(--v-theme-on-surface-variant));
+  display: flex;
+  align-items: center;
 }
 .field-grid__value {
   margin: 0;
   font-size: 14px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   overflow-wrap: anywhere;
 }
-.field-grid__value--empty {
-  opacity: 0.5;
+.field-grid__value--empty > span {
+  color: rgb(var(--v-theme-on-surface-variant));
 }
-@media (max-width: 900px) {
-  .field-grid {
-    grid-template-columns: 140px minmax(0, 1fr);
-  }
-}
-@media (max-width: 600px) {
-  .field-grid {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 2px 0;
-  }
-  .field-grid__value {
-    margin-bottom: 10px;
-  }
+.field-grid__action {
+  margin-left: -4px;
 }
 </style>

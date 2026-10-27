@@ -14,38 +14,40 @@
  * limitations under the License.
  -->
 
-<!-- Bank & IDs: masked addresses, IDs and bank details, with Show for one
-     value at a time, and who has looked at or changed them. -->
+<!-- Bank and IDs: masked addresses, IDs and bank details, with Reveal for
+     one value at a time, and who has looked at or changed them. -->
 <template>
-  <section>
-    <v-progress-linear v-if="details.loading.value" indeterminate color="primary" class="mb-4" />
-    <AppCallout v-if="details.error.value" variant="error" class="mb-4">{{ details.error.value }}</AppCallout>
+  <section class="bank-ids">
+    <v-progress-linear v-if="details.loading.value" indeterminate color="primary" />
+    <AppCallout v-if="details.error.value" variant="error">{{ details.error.value }}</AppCallout>
     <template v-if="data">
-      <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-2">
-        <p class="text-body-2 text-medium-emphasis">
+      <div class="bank-ids__intro">
+        <p>
+          <v-icon icon="mdi-lock-outline" size="16" class="mr-1" />
           Encrypted. Only HR and {{ isOwn ? 'you' : 'this person' }} can see these, one value at a time.
         </p>
-        <v-btn v-if="data.can_edit" variant="tonal" size="small" prepend-icon="mdi-pencil-outline" @click="editing = true">
+        <v-btn v-if="data.can_edit" variant="outlined" size="small" prepend-icon="mdi-pencil-outline" @click="editing = true">
           Edit
         </v-btn>
       </div>
-      <div v-for="group in GROUPS" :key="group.title" class="mb-6">
-        <div class="text-overline text-medium-emphasis">{{ group.title }}</div>
-        <div v-if="group.title === 'Bank'" class="plain-row">
-          <span class="text-caption text-medium-emphasis">Bank / IFSC</span>
-          <span>{{ [data.bank_name, data.bank_ifsc].filter(Boolean).join(' · ') || '—' }}</span>
-        </div>
-        <SensitiveValueRow
-          v-for="field in group.fields"
-          :key="field"
-          :label="FIELD_LABELS[field]"
-          :value="data[field]"
-          :can-reveal="data.can_reveal"
-          :reveal="() => revealAndLog(field)"
-        />
-      </div>
-      <h3 class="text-subtitle-2 font-weight-bold mb-2">Who has looked at or changed these</h3>
-      <AccessLogList :user-id="userId" :version="logVersion" />
+      <ProfileCards>
+        <AppPanel v-for="group in GROUPS" :key="group.title" :title="group.title">
+          <div class="bank-ids__rows">
+            <FieldGrid v-if="group.title === 'Bank'" :fields="bankFields" />
+            <SensitiveValueRow
+              v-for="field in group.fields"
+              :key="field"
+              :label="FIELD_LABELS[field]"
+              :value="data[field]"
+              :can-reveal="data.can_reveal"
+              :reveal="() => revealAndLog(field)"
+            />
+          </div>
+        </AppPanel>
+        <AppPanel title="Access log" note="Who has looked at or changed these">
+          <AccessLogList :user-id="userId" :version="logVersion" />
+        </AppPanel>
+      </ProfileCards>
     </template>
     <SensitiveEditDialog v-model="editing" :save="saveAndLog" />
   </section>
@@ -54,7 +56,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
+import AppPanel from '@/components/common/AppPanel.vue'
 import AccessLogList from '@/components/people/AccessLogList.vue'
+import FieldGrid, { type GridField } from '@/components/people/FieldGrid.vue'
+import ProfileCards from '@/components/people/profile/ProfileCards.vue'
 import SensitiveEditDialog from '@/components/people/SensitiveEditDialog.vue'
 import SensitiveValueRow from '@/components/people/SensitiveValueRow.vue'
 import { useSensitiveDetails } from '@/composables/useSensitiveDetails'
@@ -70,6 +75,12 @@ const GROUPS: { title: string; fields: SensitiveField[] }[] = [
 const props = defineProps<{ userId: string; isOwn: boolean }>()
 const details = useSensitiveDetails(() => props.userId)
 const data = computed(() => details.data.value)
+const bankFields = computed<GridField[]>(() => [
+  {
+    label: 'Bank and IFSC',
+    value: [data.value?.bank_name, data.value?.bank_ifsc].filter(Boolean).join(' · ') || null,
+  },
+])
 const editing = ref(false)
 // Bumped after each save or reveal so the access log shows it straight away.
 const logVersion = ref(0)
@@ -90,11 +101,27 @@ watch(() => props.userId, () => void details.load(), { immediate: true })
 </script>
 
 <style scoped>
-.plain-row {
-  display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  gap: 16px;
-  padding: 10px 0;
-  border-bottom: 1px solid rgb(var(--v-border-color), var(--v-border-opacity));
+.bank-ids {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.bank-ids__intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.bank-ids__intro p {
+  margin: 0;
+  font-size: 14px;
+  color: rgb(var(--v-theme-on-surface-variant));
+}
+.bank-ids__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 </style>

@@ -18,29 +18,30 @@
      REVEAL_SECONDS; every reveal is in the person's access log. -->
 <template>
   <div class="value-row">
-    <div class="value-row__label text-caption text-medium-emphasis">{{ label }}</div>
+    <div class="value-row__label">{{ label }}</div>
     <div class="value-row__value">
       <span v-if="shown !== null" class="revealed">{{ shown || '—' }}</span>
-      <span v-else :class="{ 'text-medium-emphasis': !value.is_set }">{{ maskLabel(value) }}</span>
-    </div>
-    <div class="value-row__action">
+      <span v-else :class="{ 'value-row__unset': !value.is_set }">{{ maskLabel(value) }}</span>
       <template v-if="shown !== null">
-        <span class="text-caption text-medium-emphasis mr-2">Hides in {{ remaining }}s</span>
-        <v-btn size="small" variant="text" @click="hide">Hide</v-btn>
+        <v-btn size="small" variant="outlined" density="comfortable" :aria-label="`Hide ${label}`" @click="hide">
+          Hide
+        </v-btn>
+        <span class="value-row__timer">Hides in {{ remaining }}s</span>
       </template>
       <v-btn
         v-else-if="canReveal && value.is_set"
         size="small"
-        variant="text"
+        variant="outlined"
+        density="comfortable"
         prepend-icon="mdi-eye-outline"
         :loading="revealing"
-        :aria-label="`Show ${label}`"
+        :aria-label="`Reveal ${label}`"
         @click="show"
       >
-        Show
+        Reveal
       </v-btn>
     </div>
-    <div v-if="error" class="value-row__error text-caption text-error">{{ error }}</div>
+    <div v-if="error" class="value-row__error">{{ error }}</div>
   </div>
 </template>
 
@@ -96,28 +97,35 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .value-row {
-  display: grid;
-  grid-template-columns: 180px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 4px 16px;
-  padding: 10px 0;
-  border-bottom: 1px solid rgb(var(--v-border-color), var(--v-border-opacity));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.value-row__label {
+  font-size: 12px;
+  color: rgb(var(--v-theme-on-surface-variant));
 }
 .value-row__value {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
+.value-row__unset,
+.value-row__timer {
+  color: rgb(var(--v-theme-on-surface-variant));
+}
+.value-row__timer {
+  font-size: 12px;
+}
 .value-row__error {
-  grid-column: 2 / -1;
+  font-size: 12px;
+  color: rgb(var(--v-theme-error));
 }
 .revealed {
-  font-family: var(--font-mono, ui-monospace, monospace);
-}
-@media (max-width: 600px) {
-  .value-row {
-    grid-template-columns: 1fr auto;
-  }
-  .value-row__label {
-    grid-column: 1 / -1;
-  }
+  font-family: var(--font-mono);
 }
 </style>
