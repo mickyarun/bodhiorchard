@@ -18,8 +18,7 @@
      linked email aliases (each can be unlinked). -->
 <template>
   <div class="m-table__who">
-    <v-avatar v-if="avatar" size="32"><v-img :src="avatar" alt="" /></v-avatar>
-    <AppMonogram v-else :name="member.name" />
+    <AppMonogram :name="member.name" :src="member.avatarUrl" />
     <div class="who">
       <span class="m-table__name">{{ member.name }}</span>
       <span class="m-table__sub email" :title="member.email">{{ member.email }}</span>
@@ -44,15 +43,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import AppMonogram from '@/components/common/AppMonogram.vue'
 import type { Member } from '@/stores/members'
-import { resolveAvatarUrl } from '@/utils/avatar'
 
-const props = defineProps<{ member: Member }>()
+defineProps<{ member: Member }>()
 const emit = defineEmits<{ unlink: [string] }>()
-
-const avatar = computed(() => resolveAvatarUrl(props.member.avatarUrl))
 </script>
 
 <style scoped src="./membersTable.css"></style>
