@@ -188,9 +188,21 @@ class BUDRepository(BaseRepository[BUDDocument]):
     async def next_bud_number(self) -> int:
         """Get the next auto-incremented BUD number for the organization.
 
+        Takes a transaction-scoped advisory lock keyed on the org first, so
+        two creates in the same org serialise here: the second one waits
+        for the first to commit and then reads the new max. Without it
+        both read the same max and the loser fails on
+        ``uq_bud_org_number`` with a 500. The lock is released at commit
+        or rollback, and each org locks its own key.
+
         Returns:
             The next available BUD number (max + 1, or 1 if none exist).
         """
+        await self._db.execute(
+            select(
+                func.pg_advisory_xact_lock(func.hashtextextended(f"bud_number:{self._org_id}", 0))
+            )
+        )
         result = await self._db.execute(
             select(func.coalesce(func.max(BUDDocument.bud_number), 0)).where(
                 BUDDocument.org_id == self._org_id
