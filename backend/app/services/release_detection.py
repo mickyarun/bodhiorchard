@@ -301,6 +301,7 @@ async def _maybe_auto_close_bud(
         return  # Not all repos have shipped yet
 
     # All impacted repos have merged to prod \u2014 auto-close
+    previous_status = bud.status
     bud.status = BUDStatus.CLOSED
 
     # Record FeatureLearning (cycle time) — the manual PATCH handler calls
@@ -318,7 +319,8 @@ async def _maybe_auto_close_bud(
         bud_id,
         "status_change",
         detail={
-            "from": "prod",
+            # A BUD can close straight from UAT; record where it really was.
+            "from": previous_status.value,
             "to": "closed",
             "auto": True,
             "reason": "All impacted repos merged to production",
