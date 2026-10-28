@@ -108,14 +108,6 @@ async def test_deactivating_the_member_over_http_closes_their_stream(
     assert rejoin.status_code == 401
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "the heartbeat re-checks only the token row, not the owner's account, so a "
-        "deactivated owner whose token survived keeps the stream; fixed by branch "
-        "fix/sse-heartbeat-rechecks-owner"
-    ),
-)
 async def test_owner_deactivated_without_revocation_loses_the_stream(
     client: AsyncClient, app_sessions: Factory, checks: TokenChecks
 ) -> None:
