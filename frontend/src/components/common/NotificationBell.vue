@@ -18,10 +18,9 @@
   <v-menu
     v-model="menuOpen"
     location="bottom end"
-    :offset="[0, 6]"
+    :offset="6"
     :close-on-content-click="false"
     max-width="420"
-    min-width="360"
   >
     <template #activator="{ props: menuProps }">
       <v-btn
@@ -35,6 +34,7 @@
       >
         <v-badge
           :content="totalUnread"
+          max="99"
           :model-value="totalUnread > 0"
           color="error"
           dot-margin="-2px"

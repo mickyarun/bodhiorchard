@@ -15,7 +15,7 @@
  -->
 
 <template>
-  <v-app>
+  <v-app :style="{ '--app-topbar-height': `${TOP_BAR_HEIGHT}px` }">
     <!-- Phones get a top bar; the sidebar opens over the page from its
          menu button instead of taking a third of the screen. -->
     <MobileTopBar v-if="compact" v-model:drawer="overlayOpen" />
@@ -96,6 +96,7 @@ import PeopleNav from '@/components/layout/PeopleNav.vue'
 import SettingsNav from '@/components/layout/SettingsNav.vue'
 import SidebarFoot from '@/components/layout/SidebarFoot.vue'
 import SidebarHead from '@/components/layout/SidebarHead.vue'
+import { TOP_BAR_HEIGHT } from '@/constants/layout'
 import { useAppDrawer } from '@/composables/useAppDrawer'
 import { usePermissions } from '@/composables/usePermissions'
 import { useNavigationProgress } from '@/composables/useNavigationProgress'
@@ -182,11 +183,15 @@ onMounted(() => {
 .app-scroll {
   height: 100%;
   overflow-y: auto;
+  /* The containing block for absolutely positioned content (screen-reader
+     labels, overlays), so none of it can stretch the page past the
+     window and add a second scrollbar. */
+  position: relative;
 }
 
-/* Pin the bar to the top of the main content area, above scrolled
-   content, without participating in layout flow (so it never shifts the
-   page as it appears/disappears). */
+/* Pin the bar to the very top of the window (over the top bar and the
+   sidebar), above scrolled content, without taking part in layout, so it
+   never shifts the page as it appears or disappears. */
 .route-progress {
   position: absolute;
   top: 0;

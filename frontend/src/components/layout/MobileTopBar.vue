@@ -17,7 +17,7 @@
 <!-- Phone-width top bar: menu button for the sidebar, the logo, and the
      account cluster (notifications and the account menu). -->
 <template>
-  <v-app-bar color="surface" flat density="comfortable" class="mobile-top-bar">
+  <v-app-bar color="surface" flat :height="TOP_BAR_HEIGHT" class="mobile-top-bar">
     <v-btn
       icon="mdi-menu"
       variant="text"
@@ -34,12 +34,13 @@
 <script setup lang="ts">
 import BrandLogo from '@/components/common/BrandLogo.vue'
 import AccountCluster from '@/components/layout/AccountCluster.vue'
+import { TOP_BAR_HEIGHT } from '@/constants/layout'
 
 const drawer = defineModel<boolean>('drawer', { required: true })
 </script>
 
 <style scoped>
 .mobile-top-bar {
-  border-bottom: 1px solid rgb(var(--v-theme-rule));
+  box-shadow: inset 0 -1px 0 rgb(var(--v-theme-rule));
 }
 </style>

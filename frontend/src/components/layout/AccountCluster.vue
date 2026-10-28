@@ -35,6 +35,7 @@ const auth = useAuthStore()
 .account-cluster {
   display: flex;
   align-items: center;
-  gap: 4px;
+  /* Room for a two-digit unread badge beside the avatar. */
+  gap: 8px;
 }
 </style>

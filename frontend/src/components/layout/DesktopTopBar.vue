@@ -14,13 +14,14 @@
  * limitations under the License.
  -->
 
-<!-- Desktop and tablet top bar: a slim strip above the page, beside the
-     sidebar, holding only the account cluster at the top right. It sits
-     on the page background with a hairline, so page headers below keep
-     their own spacing and actions. Its 56px height matches the sidebar's
-     logo row (SidebarHead), so the two hairlines meet in one line. -->
+<!-- Wide-screen top bar (960px and up; narrower screens use the phone
+     bar): a slim strip above the page, beside the sidebar, holding only
+     the account cluster at the top right. It sits on the page background
+     with a hairline, so page headers below keep their own spacing and
+     actions. It shares TOP_BAR_HEIGHT with the sidebar's logo row, and
+     both draw their hairline inside that height, so the lines meet. -->
 <template>
-  <v-app-bar flat :height="56" color="background" class="desktop-top-bar">
+  <v-app-bar flat :height="TOP_BAR_HEIGHT" color="background" class="desktop-top-bar">
     <v-spacer />
     <AccountCluster class="desktop-top-bar__cluster" />
   </v-app-bar>
@@ -28,14 +29,17 @@
 
 <script setup lang="ts">
 import AccountCluster from '@/components/layout/AccountCluster.vue'
+import { TOP_BAR_HEIGHT } from '@/constants/layout'
 </script>
 
 <style scoped>
 .desktop-top-bar {
-  border-bottom: 1px solid rgb(var(--v-theme-rule));
+  box-shadow: inset 0 -1px 0 rgb(var(--v-theme-rule));
 }
-/* Lines the cluster up with the page content's right edge. */
+/* Pages pad their sides by 36px; the avatar sits 4px inside its button,
+   so 32px puts it roughly in line with the page content's right edge
+   (pages that scroll sit a scrollbar's width further in). */
 .desktop-top-bar__cluster {
-  margin-right: 28px;
+  margin-right: 32px;
 }
 </style>

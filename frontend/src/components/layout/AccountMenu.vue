@@ -17,7 +17,7 @@
 <!-- Signed-in user's menu, opened from their avatar in the top bar:
      profile links, theme (Auto / Light / Dark), sign out. -->
 <template>
-  <v-menu location="bottom end" :offset="[0, 6]">
+  <v-menu location="bottom end" :offset="6">
     <template #activator="{ props }">
       <v-btn
         v-bind="props"
@@ -31,10 +31,11 @@
     </template>
 
     <v-list density="compact" min-width="260">
-      <div class="account-menu__who px-4 pt-2 pb-3">
-        <div class="text-body-2 font-weight-medium text-truncate">{{ authStore.user?.name || 'User' }}</div>
-        <div class="text-caption text-medium-emphasis text-truncate">{{ authStore.user?.email || '' }}</div>
-      </div>
+      <v-list-item
+        class="account-menu__who"
+        :title="authStore.user?.name || 'User'"
+        :subtitle="authStore.user?.email || ''"
+      />
       <v-divider class="mb-1" />
       <!-- XP profile, garden character and MCP token are all
            engineering-workspace features. -->
@@ -64,7 +65,7 @@
         title="Notification Settings"
         to="/profile/notifications"
       />
-      <div class="theme-pref px-3 pt-2 pb-1">
+      <div class="theme-pref px-3 pt-2 pb-1" role="listitem">
         <div class="text-caption text-medium-emphasis px-1 mb-1">Theme</div>
         <div class="theme-seg" role="radiogroup" aria-label="Theme">
           <button
@@ -126,7 +127,7 @@ function handleLogout(): void {
   max-width: 260px;
 }
 
-/* Auto / Light / Dark segmented control in the user menu. */
+/* Auto / Light / Dark segmented control in the account menu. */
 .theme-seg {
   display: flex;
   gap: 2px;
@@ -155,9 +156,9 @@ function handleLogout(): void {
   color: rgb(var(--v-theme-on-surface));
 }
 .theme-seg__btn--active {
-  background: rgb(var(--v-theme-surface));
-  color: rgb(var(--v-theme-primary));
-  box-shadow: inset 0 0 0 1px rgb(var(--v-theme-rule));
+  /* The accent wash reads as selected on the track in both themes. */
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
 }
 .theme-seg__btn:focus-visible {
   outline: 2px solid var(--color-focus, rgb(var(--v-theme-primary)));
