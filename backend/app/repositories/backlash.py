@@ -41,6 +41,7 @@ class BacklashLeaderboardRow:
     draws: int
     matches: int
     win_rate: float
+    avatar_url: str | None = None
 
 
 class BacklashRepository:
@@ -112,6 +113,7 @@ class BacklashRepository:
             select(
                 BacklashPlayerStats.user_id,
                 User.name,
+                User.avatar_url,
                 BacklashPlayerStats.wins,
                 BacklashPlayerStats.losses,
                 BacklashPlayerStats.draws,
@@ -139,6 +141,7 @@ class BacklashRepository:
                 draws=row.draws,
                 matches=row.matches,
                 win_rate=round(float(row.win_rate or 0), 4),
+                avatar_url=row.avatar_url,
             )
             for row in rows
         ]

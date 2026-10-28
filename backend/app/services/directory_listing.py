@@ -55,6 +55,27 @@ def in_clone_root(candidate: str) -> bool:
         return False  # unrelated roots / different drives
 
 
+def _repo_flag(child: Path) -> bool | None:
+    """Whether ``child`` is a git repo, or ``None`` if it is not a listable folder.
+
+    Either stat can raise for a path the backend user may not open: a
+    folder with no permissions fails the ``.git`` check, and a symlink
+    into such a folder fails ``is_dir`` itself. Neither may escape, or one
+    such entry refuses the whole listing, home included. A folder we
+    cannot look inside is still listed, as not a repo; a link we cannot
+    follow is left out, since we cannot tell it is a folder.
+    """
+    try:
+        if not child.is_dir():
+            return None
+    except OSError:
+        return None
+    try:
+        return (child / ".git").exists()
+    except OSError:
+        return False
+
+
 def list_subdirectories(target: Path) -> list[DirectoryEntry]:
     """Walk ``target`` one level deep, flagging git repos and monorepos.
 
@@ -67,9 +88,11 @@ def list_subdirectories(target: Path) -> list[DirectoryEntry]:
     """
     entries: list[DirectoryEntry] = []
     for child in sorted(target.iterdir()):
-        if child.name.startswith(".") or not child.is_dir():
+        if child.name.startswith("."):
             continue
-        is_git = (child / ".git").exists()
+        is_git = _repo_flag(child)
+        if is_git is None:
+            continue
         # For a git repo, peek one level down to flag monorepos — short-
         # circuits at the first nested `.git`, so the cost is one
         # iterdir call plus at most a handful of stats per repo.
