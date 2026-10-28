@@ -59,7 +59,7 @@ export function resolveInitialThemeName(): string {
 }
 
 // One preference for the whole app, so every control that shows it (the
-// sidebar switch, the user menu) agrees.
+// sidebar switch, the account menu) agrees.
 const preference = ref<ThemePreference>(readStoredPreference())
 // The OS colour-scheme listener is app-wide too: added once, by the first
 // caller, and kept for the life of the page.

@@ -152,6 +152,7 @@ class QuizLeaderboardEntry(BaseModel):
     user_name: str = Field(serialization_alias="userName")
     total_points: int = Field(serialization_alias="totalPoints")
     correct_count: int = Field(serialization_alias="correctCount")
+    avatar_url: str | None = Field(default=None, serialization_alias="avatarUrl")
 
     model_config = {"populate_by_name": True}
 

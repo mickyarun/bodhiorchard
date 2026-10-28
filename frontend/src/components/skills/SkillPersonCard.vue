@@ -19,7 +19,7 @@
 <template>
   <article class="skill-card">
     <header class="skill-card__head">
-      <AppMonogram :name="profile.userName" :size="38" />
+      <AppMonogram :name="profile.userName" :src="profile.avatarUrl" :size="38" />
       <span class="skill-card__who">
         <span class="skill-card__name">{{ profile.userName }}</span>
         <span class="skill-card__sub">{{ profile.email }}</span>
