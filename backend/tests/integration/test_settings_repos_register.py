@@ -69,7 +69,12 @@ async def test_add_by_path_detects_branches_and_a_readd_reactivates(
     repo = init_repo(root / "café-api", "develop")
 
     added = await client.post(REPOS, headers=org.owner.headers, json={"path": str(repo)})
-    await client.request("DELETE", REPOS, headers=org.owner.headers, json={"path": str(repo)})
+    removed = await client.request(
+        "DELETE", REPOS, headers=org.owner.headers, json={"path": str(repo)}
+    )
+    assert removed.status_code == 200, removed.text
+    (gone,) = await _rows(pg_session_factory, org.id)
+    assert gone.status == RepoStatus.REMOVED
     again = await client.post(
         REPOS, headers=org.owner.headers, json={"path": f"{repo}/../café-api"}
     )

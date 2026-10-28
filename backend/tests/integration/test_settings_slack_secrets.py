@@ -27,8 +27,12 @@ import pytest
 from httpx import AsyncClient
 
 from app.api.v1 import settings as settings_api
-from app.core.encryption import decrypt_secret
-from tests.integration.settings_support import Factory, load_org, make_org
+from tests.integration.settings_support import (
+    Factory,
+    assert_ciphertext_of,
+    load_org,
+    make_org,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -75,9 +79,8 @@ async def test_secrets_are_encrypted_at_rest_and_masked_on_read(
     assert slack["teamId"] == slack_teams[BOT]
 
     stored = await load_org(pg_session_factory, org.id)
-    assert BOT not in (stored.slack_bot_token or "")
-    assert decrypt_secret(stored.slack_bot_token or "") == BOT
-    assert decrypt_secret(stored.slack_signing_secret or "") == SIGNING
+    assert_ciphertext_of(stored.slack_bot_token, BOT)
+    assert_ciphertext_of(stored.slack_signing_secret, SIGNING)
 
 
 async def test_sending_the_masked_values_back_keeps_the_real_ones(
@@ -101,9 +104,10 @@ async def test_sending_the_masked_values_back_keeps_the_real_ones(
     )
 
     assert response.status_code == 200, response.text
+    assert BOT not in response.text and SIGNING not in response.text
     stored = await load_org(pg_session_factory, org.id)
-    assert decrypt_secret(stored.slack_bot_token or "") == BOT
-    assert decrypt_secret(stored.slack_signing_secret or "") == SIGNING
+    assert_ciphertext_of(stored.slack_bot_token, BOT)
+    assert_ciphertext_of(stored.slack_signing_secret, SIGNING)
 
 
 @pytest.mark.parametrize("secret", ["not-hex-at-all-but-long-enough-00", "abcdef", ""])
@@ -116,6 +120,9 @@ async def test_a_malformed_signing_secret_is_a_400_and_rolls_back_the_bot_token(
 
     assert response.status_code == 400
     assert "hex string" in response.json()["detail"]
+    assert BOT not in response.text
+    if secret:
+        assert secret not in response.text
     stored = await load_org(pg_session_factory, org.id)
     assert stored.slack_bot_token is None
     assert stored.slack_signing_secret is None
@@ -136,6 +143,7 @@ async def test_a_workspace_already_connected_elsewhere_is_a_409(
     )
 
     assert taken.status_code == 409
+    assert "xoxb-second-org-token-0000" not in taken.text and BOT not in taken.text
     stored = await load_org(pg_session_factory, second.id)
     assert (stored.slack_bot_token, stored.slack_team_id) == (None, None)
 

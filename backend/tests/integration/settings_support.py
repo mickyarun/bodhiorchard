@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.encryption import decrypt_secret
 from app.core.security import create_access_token
 from app.models.organization import Organization
 from app.models.tracked_repository import RepoStatus, TrackedRepository
@@ -98,6 +99,19 @@ async def add_tracked_repo(factory: Factory, org_id: uuid.UUID, path: str) -> uu
         db.add(repo)
         await db.commit()
         return repo.id
+
+
+def assert_ciphertext_of(stored: str | None, plaintext: str) -> None:
+    """``stored`` is ``plaintext`` encrypted, not ``plaintext`` itself.
+
+    ``decrypt_secret`` hands back a value without the ``enc:`` prefix
+    unchanged (legacy rows), so a decrypt round trip alone would also pass
+    for a secret stored in the clear.
+    """
+    assert stored is not None
+    assert stored.startswith("enc:"), "stored without the encryption prefix"
+    assert plaintext not in stored
+    assert decrypt_secret(stored) == plaintext
 
 
 async def load_org(factory: Factory, org_id: uuid.UUID) -> Organization:

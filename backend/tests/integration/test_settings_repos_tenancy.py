@@ -25,8 +25,10 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import func, select
 
 from app.api.v1 import settings_repos
+from app.models.organization import Organization
 from app.models.tracked_repository import RepoStatus, TrackedRepository
 from app.models.user_mcp_token import UserMCPToken
 from tests.integration.settings_support import Factory, add_tracked_repo, make_org
@@ -126,6 +128,25 @@ async def test_removing_a_repo_hides_it_from_the_list_but_keeps_the_row(
     assert listed.json() == []
 
 
+async def test_removing_a_shared_path_in_one_org_leaves_the_other_active(
+    client: AsyncClient, pg_session_factory: Factory
+) -> None:
+    one, two = await make_org(pg_session_factory), await make_org(pg_session_factory)
+    path = f"/srv/{uuid.uuid4().hex}/shared"
+    kept = await add_tracked_repo(pg_session_factory, one.id, path)
+    dropped = await add_tracked_repo(pg_session_factory, two.id, path)
+
+    response = await client.request(
+        "DELETE", REPOS, headers=two.owner.headers, json={"path": path}
+    )
+
+    assert response.status_code == 200, response.text
+    assert (await _repo(pg_session_factory, dropped)).status == RepoStatus.REMOVED
+    assert (await _repo(pg_session_factory, kept)).status == RepoStatus.ACTIVE
+    listed = await client.get(REPOS, headers=one.owner.headers)
+    assert [r["path"] for r in listed.json()] == [path]
+
+
 async def test_another_orgs_record_reads_as_not_found(
     client: AsyncClient, pg_session_factory: Factory
 ) -> None:
@@ -155,6 +176,9 @@ async def test_only_an_owner_creates_an_org_and_slugs_are_unique(
 
     assert by_developer.status_code == 403
     assert taken.status_code == 409
+    async with pg_session_factory() as db:
+        created = await db.scalar(select(func.count()).where(Organization.slug == slug))
+    assert created == 0
 
 
 async def test_mcp_tokens_of_another_org_are_neither_listed_nor_revocable(
@@ -186,4 +210,5 @@ async def test_mcp_tokens_of_another_org_are_neither_listed_nor_revocable(
     assert revoked.status_code == 404
     assert by_developer.status_code == 403
     assert [t["id"] for t in theirs_listed.json()] == [str(token_id)]
+    assert "token_hash" not in theirs_listed.json()[0]
     assert "hash" not in theirs_listed.json()[0].values()

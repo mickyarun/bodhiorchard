@@ -31,14 +31,13 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from app.config import settings as app_settings
-from app.core.encryption import decrypt_secret
 from app.core.security import verify_password, verify_token
 from app.models.organization import Organization
 from app.models.role import Role
 from app.models.user import OrgToUser, User
 from app.schemas.setup import InitOrgRequest
 from app.services import setup_init
-from tests.integration.settings_support import Factory
+from tests.integration.settings_support import Factory, assert_ciphertext_of
 
 pytestmark = pytest.mark.integration
 
@@ -91,9 +90,7 @@ async def test_provisions_an_owner_with_secrets_at_rest_only_as_hashes_or_cipher
         org = await db.get(Organization, result.org.id)
         assert org is not None
         assert org.claude_auth_mode == "api_key"
-        stored = org.claude_api_key_encrypted or ""
-        assert "sk-ant-secret-123" not in stored
-        assert decrypt_secret(stored) == "sk-ant-secret-123"
+        assert_ciphertext_of(org.claude_api_key_encrypted, "sk-ant-secret-123")
         assert verify_password(result.mcp_token, org.mcp_token_hash or "")
         assert result.mcp_token not in (org.mcp_token_hash or "")
         role_name = await db.scalar(
@@ -124,7 +121,7 @@ async def test_subscription_token_is_encrypted_and_host_stores_nothing(
         sub_org = await db.get(Organization, sub.org.id)
         host_org = await db.get(Organization, host.org.id)
         assert sub_org is not None and host_org is not None
-        assert decrypt_secret(sub_org.claude_api_key_encrypted or "") == "oat-xyz"
+        assert_ciphertext_of(sub_org.claude_api_key_encrypted, "oat-xyz")
         assert host_org.claude_api_key_encrypted is None
 
 

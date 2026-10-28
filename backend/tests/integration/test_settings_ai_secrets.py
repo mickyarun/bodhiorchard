@@ -28,8 +28,12 @@ from httpx import AsyncClient
 
 from app.api.v1 import settings as settings_api
 from app.api.v1 import settings_claude
-from app.core.encryption import decrypt_secret
-from tests.integration.settings_support import Factory, load_org, make_org
+from tests.integration.settings_support import (
+    Factory,
+    assert_ciphertext_of,
+    load_org,
+    make_org,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -65,8 +69,7 @@ async def test_an_api_key_is_stored_encrypted_and_never_returned(
     assert KEY not in saved.text and KEY not in read.text
     assert read.json()["has_api_key"] is True
     stored = await load_org(pg_session_factory, org.id)
-    assert KEY not in (stored.claude_api_key_encrypted or "")
-    assert decrypt_secret(stored.claude_api_key_encrypted or "") == KEY
+    assert_ciphertext_of(stored.claude_api_key_encrypted, KEY)
 
 
 async def test_switching_mode_needs_a_new_credential_and_host_clears_it(
@@ -80,10 +83,8 @@ async def test_switching_mode_needs_a_new_credential_and_host_clears_it(
     assert switched.status_code == 400
     assert "oauth_token is required" in switched.json()["detail"]
     kept = await load_org(pg_session_factory, org.id)
-    assert (kept.claude_auth_mode, decrypt_secret(kept.claude_api_key_encrypted or "")) == (
-        "api_key",
-        KEY,
-    )
+    assert kept.claude_auth_mode == "api_key"
+    assert_ciphertext_of(kept.claude_api_key_encrypted, KEY)
 
     same_mode = await client.patch(CLAUDE, headers=headers, json={"auth_mode": "api_key"})
     assert same_mode.json()["has_api_key"] is True
@@ -134,14 +135,17 @@ async def test_the_github_app_key_is_encrypted_and_only_its_presence_is_read(
     body = {"github": {"appId": 4242, "privateKey": PEM, "webhookSecret": "whsec-plain"}}
 
     saved = await client.patch(CONNECTIONS, headers=org.owner.headers, json=body)
+    read = await client.get(CONNECTIONS, headers=org.owner.headers)
 
-    assert saved.status_code == 200, saved.text
-    assert "plaintextkeymaterial" not in saved.text and "whsec-plain" not in saved.text
+    assert saved.status_code == read.status_code == 200, saved.text
+    for response in (saved, read):
+        assert "plaintextkeymaterial" not in response.text
+        assert "whsec-plain" not in response.text
+        assert "BEGIN RSA PRIVATE KEY" not in response.text
     github = saved.json()["github"]
     assert (github["hasPrivateKey"], github["webhookConfigured"]) == (True, True)
     assert github["status"] == "awaiting_install"
     assert no_side_effects == ["validate"]
     stored = await load_org(pg_session_factory, org.id)
-    assert decrypt_secret(stored.github_app_private_key or "") == PEM
-    assert decrypt_secret(stored.github_webhook_secret or "") == "whsec-plain"
-    assert "plaintextkeymaterial" not in (stored.github_app_private_key or "")
+    assert_ciphertext_of(stored.github_app_private_key, PEM)
+    assert_ciphertext_of(stored.github_webhook_secret, "whsec-plain")

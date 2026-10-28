@@ -27,10 +27,15 @@ from typing import Any
 import pytest
 from httpx import AsyncClient
 
-from app.core.encryption import decrypt_secret
 from app.models.jira_import import JiraImportSession, JiraIssueBudMap, MapStatus
 from app.services.jira_client import JiraApiError, JiraClient
-from tests.integration.settings_support import Factory, SeededOrg, load_org, make_org
+from tests.integration.settings_support import (
+    Factory,
+    SeededOrg,
+    assert_ciphertext_of,
+    load_org,
+    make_org,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -94,8 +99,7 @@ async def test_connect_encrypts_the_token_and_never_returns_it(
         "ops@acme.dev",
     )
     stored = (await load_org(pg_session_factory, org.id)).config["jira"]
-    assert TOKEN not in stored["api_token"]
-    assert decrypt_secret(stored["api_token"]) == TOKEN
+    assert_ciphertext_of(stored["api_token"], TOKEN)
 
 
 async def test_a_rejected_token_stores_nothing(
