@@ -16,7 +16,8 @@
 
 <!-- Top of the sidebar: the mark, centred, on a collapsed rail; logo and
      wordmark when open or hovered. One fixed height in both, so nothing
-     below it moves when a rail opens under the pointer. -->
+     below it moves when a rail opens under the pointer; it matches the
+     desktop top bar, so their hairlines meet. -->
 <template>
   <div class="sidebar-head" :class="{ 'sidebar-head--collapsed': collapsed }">
     <BrandLogo :size="28" :show-text="!collapsed" />
@@ -33,7 +34,7 @@ defineProps<{ collapsed: boolean }>()
 .sidebar-head {
   display: flex;
   align-items: center;
-  height: 64px;
+  height: 56px;
   padding: 0 16px;
   border-bottom: 1px solid rgb(var(--v-theme-rule));
   margin-bottom: 4px;

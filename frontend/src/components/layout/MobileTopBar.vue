@@ -14,8 +14,8 @@
  * limitations under the License.
  -->
 
-<!-- Phone-width top bar: menu button for the sidebar, the logo, and
-     notifications. Desktop keeps these in the sidebar itself. -->
+<!-- Phone-width top bar: menu button for the sidebar, the logo, and the
+     account cluster (notifications and the account menu). -->
 <template>
   <v-app-bar color="surface" flat density="comfortable" class="mobile-top-bar">
     <v-btn
@@ -27,17 +27,15 @@
     />
     <BrandLogo :size="24" />
     <v-spacer />
-    <NotificationBell v-if="auth.user?.id" :user-id="auth.user.id" class="mr-2" />
+    <AccountCluster class="mr-2" />
   </v-app-bar>
 </template>
 
 <script setup lang="ts">
 import BrandLogo from '@/components/common/BrandLogo.vue'
-import NotificationBell from '@/components/common/NotificationBell.vue'
-import { useAuthStore } from '@/stores/auth'
+import AccountCluster from '@/components/layout/AccountCluster.vue'
 
 const drawer = defineModel<boolean>('drawer', { required: true })
-const auth = useAuthStore()
 </script>
 
 <style scoped>

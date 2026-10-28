@@ -14,35 +14,28 @@
  * limitations under the License.
  -->
 
-<!-- Signed-in user's menu: profile links, theme switch, sign out. -->
+<!-- Signed-in user's menu, opened from their avatar in the top bar:
+     profile links, theme (Auto / Light / Dark), sign out. -->
 <template>
-<!-- User menu -->
-<div class="px-3 pb-3" :class="{ 'd-flex justify-center': rail }">
-  <v-menu location="top start" :offset="[0, 4]">
+  <v-menu location="bottom end" :offset="[0, 6]">
     <template #activator="{ props }">
-      <button
+      <v-btn
         v-bind="props"
-        type="button"
-        class="user-menu d-flex align-center ga-2 pa-2 rounded-lg"
-        :class="{ 'user-menu--rail': rail }"
+        icon
+        variant="text"
+        density="comfortable"
         :aria-label="`Account menu for ${authStore.user?.name || 'you'}`"
       >
         <AppMonogram :name="authStore.user?.name" :size="32" />
-        <template v-if="!rail">
-          <div class="flex-grow-1 overflow-hidden">
-            <div class="text-body-2 font-weight-medium text-truncate">
-              {{ authStore.user?.name || 'User' }}
-            </div>
-            <div class="text-caption text-medium-emphasis text-truncate">
-              {{ authStore.user?.email || '' }}
-            </div>
-          </div>
-          <v-icon icon="mdi-chevron-up" size="16" class="text-medium-emphasis" />
-        </template>
-      </button>
+      </v-btn>
     </template>
 
-    <v-list density="compact" min-width="244">
+    <v-list density="compact" min-width="260">
+      <div class="account-menu__who px-4 pt-2 pb-3">
+        <div class="text-body-2 font-weight-medium text-truncate">{{ authStore.user?.name || 'User' }}</div>
+        <div class="text-caption text-medium-emphasis text-truncate">{{ authStore.user?.email || '' }}</div>
+      </div>
+      <v-divider class="mb-1" />
       <!-- XP profile, garden character and MCP token are all
            engineering-workspace features. -->
       <template v-if="canAccessEngineering">
@@ -98,7 +91,6 @@
       />
     </v-list>
   </v-menu>
-</div>
 </template>
 
 <script setup lang="ts">
@@ -107,8 +99,6 @@ import AppMonogram from '@/components/common/AppMonogram.vue'
 import { useAuthStore } from '@/stores/auth'
 import { usePermissions } from '@/composables/usePermissions'
 import { useThemePreference, type ThemePreference } from '@/composables/useThemePreference'
-
-defineProps<{ rail: boolean }>()
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -132,22 +122,8 @@ function handleLogout(): void {
 </script>
 
 <style scoped>
-.user-menu {
-  /* The name-and-email height in both states, so the rows above it don't
-     move when a rail opens under the pointer. */
-  min-height: 56px;
-  width: 100%;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: start;
-  cursor: pointer;
-  transition: background-color 0.15s ease;
-}
-
-.user-menu:hover {
-  background: rgb(var(--v-theme-surface-bright));
+.account-menu__who {
+  max-width: 260px;
 }
 
 /* Auto / Light / Dark segmented control in the user menu. */
@@ -181,7 +157,7 @@ function handleLogout(): void {
 .theme-seg__btn--active {
   background: rgb(var(--v-theme-surface));
   color: rgb(var(--v-theme-primary));
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  box-shadow: inset 0 0 0 1px rgb(var(--v-theme-rule));
 }
 .theme-seg__btn:focus-visible {
   outline: 2px solid var(--color-focus, rgb(var(--v-theme-primary)));

@@ -37,8 +37,6 @@
       <SidebarHead v-if="!compact" :collapsed="collapsed" />
 
       <v-list density="compact" nav class="px-2">
-        <!-- Phones have the bell in the top bar. -->
-        <NotificationBell v-if="!compact && authStore.user?.id" :user-id="authStore.user.id" variant="nav" />
         <EngineeringNav v-if="canAccessEngineering" :rail="collapsed" />
         <PeopleNav :rail="collapsed" :show-heading="canAccessEngineering" />
       </v-list>
@@ -56,12 +54,14 @@
           <SettingsNav />
         </v-list>
 
-        <UserMenu :rail="collapsed" />
-
         <v-divider />
         <SidebarFoot :rail="rail" :can-rail="!compact" @toggle-rail="toggleRail" />
       </template>
     </v-navigation-drawer>
+
+    <!-- Notifications and the account menu, top right. After the drawer,
+         so the bar starts beside the sidebar rather than above it. -->
+    <DesktopTopBar v-if="!compact" />
 
     <!-- Main content -->
     <v-main class="app-main">
@@ -90,13 +90,12 @@ import { onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import EngineeringNav from '@/components/layout/EngineeringNav.vue'
 import EngineeringOverlays from '@/components/layout/EngineeringOverlays.vue'
+import DesktopTopBar from '@/components/layout/DesktopTopBar.vue'
 import MobileTopBar from '@/components/layout/MobileTopBar.vue'
-import NotificationBell from '@/components/common/NotificationBell.vue'
 import PeopleNav from '@/components/layout/PeopleNav.vue'
 import SettingsNav from '@/components/layout/SettingsNav.vue'
 import SidebarFoot from '@/components/layout/SidebarFoot.vue'
 import SidebarHead from '@/components/layout/SidebarHead.vue'
-import UserMenu from '@/components/layout/UserMenu.vue'
 import { useAppDrawer } from '@/composables/useAppDrawer'
 import { usePermissions } from '@/composables/usePermissions'
 import { useNavigationProgress } from '@/composables/useNavigationProgress'

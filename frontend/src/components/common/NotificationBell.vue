@@ -17,36 +17,14 @@
 <template>
   <v-menu
     v-model="menuOpen"
-    :location="variant === 'nav' ? 'bottom start' : 'top start'"
+    location="bottom end"
+    :offset="[0, 6]"
     :close-on-content-click="false"
     max-width="420"
     min-width="360"
   >
     <template #activator="{ props: menuProps }">
-      <!-- In the sidebar it is a nav row: the same place whether the rail
-           is collapsed or open, and its left edge never moves, so the
-           open menu stays put when the rail collapses under it. -->
-      <v-list-item
-        v-if="variant === 'nav'"
-        v-bind="menuProps"
-        title="Notifications"
-        rounded="lg"
-        :aria-label="bellLabel"
-      >
-        <template #prepend>
-          <v-badge
-            :content="totalUnread"
-            :model-value="totalUnread > 0"
-            color="error"
-            offset-x="-2"
-            offset-y="-2"
-          >
-            <v-icon icon="mdi-bell-outline" />
-          </v-badge>
-        </template>
-      </v-list-item>
       <v-btn
-        v-else
         v-bind="menuProps"
         icon
         variant="text"
@@ -289,11 +267,7 @@ import type { AppNotification, BacklashInviteMeta, RaceInviteMeta, YieldOffer } 
 import { isInviteUnexpired } from '@/utils/inviteExpiry'
 import { SHORT_AGO, relativeTime } from '@/utils/date'
 
-const props = withDefaults(defineProps<{
-  userId: string
-  /** ``icon`` for a top bar; ``nav`` for a row in the sidebar list. */
-  variant?: 'icon' | 'nav'
-}>(), { variant: 'icon' })
+const props = defineProps<{ userId: string }>()
 
 const store = useNotificationStore()
 const yieldStore = useYieldOfferStore()
@@ -453,6 +427,8 @@ function notifColor(type: string): string {
 }
 
 .notification-panel {
+  /* Sized here: the menu's min-width gives way to the bell's own width. */
+  width: min(360px, calc(100vw - 24px));
   max-height: 480px;
   display: flex;
   flex-direction: column;
