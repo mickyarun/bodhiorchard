@@ -31,7 +31,7 @@ from tests.integration.gamification_fakes.quiz_fake_support import (
     enable_quiz,
     seed_score,
 )
-from tests.integration.gamification_fakes.streak_support import FrozenClock
+from tests.integration.gamification_fakes.streak_support import install_clock
 
 pytestmark = pytest.mark.integration
 
@@ -67,14 +67,14 @@ async def test_the_top_scorer_wins_the_whole_prize_once_and_no_xp_moves(
     ("scores", "expected"),
     [
         ([(250, 2, 900), (250, 2, 900)], [0.5, 0.5]),
-        ([(250, 2, 900), (250, 2, 901)], [1.0]),
-        ([(250, 3, 9000), (250, 2, 900)], [1.0]),
+        ([(250, 2, 901), (250, 2, 900)], [None, 1.0]),
+        ([(250, 2, 900), (250, 3, 9000)], [None, 1.0]),
         ([(100, 1, 50), (100, 1, 50), (100, 1, 50)], [0.33, 0.33, 0.33]),
     ],
     ids=["exact-tie-splits", "faster-wins", "more-correct-wins", "three-way-tie-rounds-down"],
 )
 async def test_ties_split_only_when_points_correct_and_time_all_match(
-    app_sessions: Factory, scores: list[tuple[int, int, int]], expected: list[float]
+    app_sessions: Factory, scores: list[tuple[int, int, int]], expected: list[float | None]
 ) -> None:
     org_id, players = await _players(app_sessions, *[f"p{i}" for i in range(len(scores))])
     for user, (points, correct, time_ms) in zip(players, scores, strict=True):
@@ -85,7 +85,7 @@ async def test_ties_split_only_when_points_correct_and_time_all_match(
     await finalize_org_month(org_id, period_month=FEB, amount=1.0)
 
     paid = _paid(await sp_ledger(app_sessions, org_id), org_id, FEB)
-    assert [paid[str(u)] for u in players if str(u) in paid] == expected
+    assert [paid.get(str(u)) for u in players] == expected
 
 
 async def test_a_champion_who_left_hands_the_prize_to_the_next_active_player(
@@ -141,8 +141,7 @@ async def test_the_daily_sweep_pays_the_month_that_just_ended(
         return [org_id, disabled_id]
 
     monkeypatch.setattr(OrganizationRepository, "list_all_ids", only_these)
-    FrozenClock.set_local(now)
-    monkeypatch.setattr(quiz_monthly_rollup, "datetime", FrozenClock)
+    install_clock(monkeypatch, quiz_monthly_rollup, now)
 
     assert await sweep_once() == 1
     assert await sweep_once() == 0

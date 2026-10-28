@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, date, datetime, tzinfo
+from types import ModuleType
 
+import pytest
 from sqlalchemy import select
 
 from app.models.developer_xp import DeveloperXP, RewardEvent
@@ -40,6 +42,15 @@ class FrozenClock:
     def set_local(cls, local: datetime) -> None:
         """Move the clock to an aware local wall time (any zone)."""
         cls.instant = local.astimezone(UTC)
+
+
+def install_clock(
+    monkeypatch: pytest.MonkeyPatch, module: ModuleType, start: datetime
+) -> type[FrozenClock]:
+    """Swap ``module.datetime`` for the clock, starting at ``start``; both undone at teardown."""
+    monkeypatch.setattr(FrozenClock, "instant", start.astimezone(UTC))
+    monkeypatch.setattr(module, "datetime", FrozenClock)
+    return FrozenClock
 
 
 async def seed_streak(

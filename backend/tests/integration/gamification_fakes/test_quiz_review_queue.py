@@ -107,6 +107,7 @@ async def test_another_orgs_question_is_not_found_and_members_cannot_review(
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AssertionError,
     reason="a played question can be approved again and replayed, "
     "fixed by branch fix/quiz-review-used-question",
 )
@@ -128,6 +129,7 @@ async def test_a_question_that_already_ran_cannot_be_approved_or_edited_again(
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AssertionError,
     reason="an admin edit may make a question print its own answer, "
     "fixed by branch fix/quiz-answer-giveaways",
 )

@@ -51,6 +51,7 @@ def jobs(monkeypatch: pytest.MonkeyPatch) -> JobRecorder:
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AssertionError,
     reason="generated questions that print their own answer are accepted, "
     "fixed by branch fix/quiz-answer-giveaways",
 )

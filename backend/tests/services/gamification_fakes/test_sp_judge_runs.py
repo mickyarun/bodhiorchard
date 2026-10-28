@@ -62,7 +62,7 @@ async def test_two_reviewers_alone_are_enough_to_ask_the_judge(
     result = await judge_sp_attribution([], ["a", "b"], org_id=None)
 
     assert result.review_validity == {"a": True, "b": False}
-    assert "(none)" not in fake_claude.runs[0].prompt
+    assert "- a\n- b\n" in fake_claude.runs[0].prompt
 
 
 async def test_a_judge_that_never_answers_is_killed_and_falls_back(

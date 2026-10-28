@@ -34,6 +34,7 @@ from app.services import xp_service
 from tests.fakes.seed import Factory, auth_headers, seed_member, seed_org
 from tests.integration.gamification_fakes.streak_support import (
     FrozenClock,
+    install_clock,
     rewards,
     streak_row,
     tick,
@@ -48,8 +49,7 @@ LOS_ANGELES = ZoneInfo("America/Los_Angeles")
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> type[FrozenClock]:
     """Let each test move ``xp_service``'s clock to a wall time of its choosing."""
-    monkeypatch.setattr(xp_service, "datetime", FrozenClock)
-    return FrozenClock
+    return install_clock(monkeypatch, xp_service, datetime(2026, 3, 2, 12, 0, tzinfo=UTC))
 
 
 async def _streak_after(

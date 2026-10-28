@@ -28,7 +28,7 @@ from app.services.quiz_scoring import QuizWindowClosedError, SubmitResult, submi
 from tests.fakes.seed import Factory, seed_member, seed_org
 from tests.integration.gamification_fakes.ledger_support import xp_event_count
 from tests.integration.gamification_fakes.quiz_fake_support import open_quiz
-from tests.integration.gamification_fakes.streak_support import FrozenClock
+from tests.integration.gamification_fakes.streak_support import FrozenClock, install_clock
 
 pytestmark = pytest.mark.integration
 
@@ -41,8 +41,7 @@ WRONG = {"index": 3}
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> type[FrozenClock]:
     """Freeze ``quiz_scoring``'s clock; each test moves it."""
-    monkeypatch.setattr(quiz_scoring, "datetime", FrozenClock)
-    return FrozenClock
+    return install_clock(monkeypatch, quiz_scoring, OPEN)
 
 
 async def _setup(factory: Factory) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:

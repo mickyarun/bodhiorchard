@@ -169,8 +169,9 @@ async def test_the_completion_bonus_pays_sp_only_above_an_80_score(
 
 @pytest.mark.xfail(
     strict=True,
-    reason="quality SP is paid twice per BUD: award_quality_bonus in xp_service.py still pays "
-    "sp_quality under a second source_ref; reported, not fixed here (xp_service.py is off-limits)",
+    raises=AssertionError,
+    reason="quality SP is paid twice per BUD: award_quality_bonus still pays sp_quality under "
+    "its own source_ref next to the close-time bonus; reported, no fix branch yet",
 )
 async def test_a_developer_gets_one_quality_bonus_per_bud_across_both_award_paths(
     app_sessions: Factory,
