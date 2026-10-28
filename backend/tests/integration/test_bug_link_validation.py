@@ -91,6 +91,14 @@ async def _bug_count(factory: Factory, org: uuid.UUID) -> int:
         return len(rows.all())
 
 
+async def _stored_assignee(factory: Factory, bug_id: uuid.UUID) -> uuid.UUID | None:
+    """The bug's assignee as stored, read in a fresh session."""
+    async with factory() as db:
+        bug = await db.get(Bug, bug_id)
+        assert bug is not None
+        return bug.assignee_id
+
+
 @pytest.mark.parametrize("field", ["budId", "featureId"])
 async def test_filing_a_bug_against_another_orgs_bud_or_feature_is_refused(
     client: AsyncClient, pg_session_factory: Factory, field: str
@@ -124,15 +132,18 @@ async def test_assigning_a_bug_to_someone_outside_the_org_is_refused(
     _, outsider, _ = await _org(pg_session_factory)
     bug_id = (await client.post(BUGS, json={"title": "x"}, headers=headers)).json()["id"]
 
+    own = await client.patch(f"{BUGS}/{bug_id}", json={"assigneeId": str(me)}, headers=headers)
+    assert own.status_code == 200 and own.json()["assigneeId"] == str(me)
+
     foreign = await client.patch(
         f"{BUGS}/{bug_id}", json={"assigneeId": str(outsider)}, headers=headers
     )
-    own = await client.patch(f"{BUGS}/{bug_id}", json={"assigneeId": str(me)}, headers=headers)
-    cleared = await client.patch(f"{BUGS}/{bug_id}", json={"assigneeId": None}, headers=headers)
-
     assert foreign.status_code == 404
-    assert own.status_code == 200 and own.json()["assigneeId"] == str(me)
+    assert await _stored_assignee(pg_session_factory, uuid.UUID(bug_id)) == me
+
+    cleared = await client.patch(f"{BUGS}/{bug_id}", json={"assigneeId": None}, headers=headers)
     assert cleared.status_code == 200 and cleared.json()["assigneeId"] is None
+    assert await _stored_assignee(pg_session_factory, uuid.UUID(bug_id)) is None
 
 
 @pytest.mark.parametrize(

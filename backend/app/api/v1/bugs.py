@@ -35,7 +35,6 @@ from app.models.user import User
 from app.repositories.bud import BUDRepository
 from app.repositories.bug import BugRepository
 from app.repositories.feature import FeatureRepository
-from app.repositories.user import UserRepository
 from app.schemas.bug import (
     BugBoardResponse,
     BugCreate,
@@ -47,6 +46,7 @@ from app.schemas.bug import (
 from app.services.bug_linker import embed_and_link_bug
 from app.services.bug_testing_gate import check_bug_threshold
 from app.services.embedding_service import embedding_service
+from app.services.org_members import assert_new_assignee_in_org
 from app.services.sp_qa import award_qa_sp_on_bug_status
 
 logger = structlog.get_logger(__name__)
@@ -287,11 +287,10 @@ async def update_bug(
             )
 
     await _ensure_links_in_org(
-        db,
-        current_user.org_id,
-        bud_id=update.get("bud_id"),
-        feature_id=update.get("feature_id"),
-        assignee_id=update.get("assignee_id"),
+        db, current_user.org_id, bud_id=update.get("bud_id"), feature_id=update.get("feature_id")
+    )
+    await assert_new_assignee_in_org(
+        db, current_user.org_id, update.get("assignee_id"), bug.assignee_id
     )
 
     # Stamp ``resolved_at`` on first transition to resolved / closed.
@@ -333,12 +332,13 @@ async def _ensure_links_in_org(
     *,
     bud_id: uuid.UUID | None = None,
     feature_id: uuid.UUID | None = None,
-    assignee_id: uuid.UUID | None = None,
 ) -> None:
-    """404 unless every BUD, feature and assignee the bug points at is in ``org_id``.
+    """404 unless the BUD and feature the bug points at are in ``org_id``.
 
     The foreign keys are global, so without this a bug could be linked to
-    another org's BUD or feature, or assigned to someone outside the org.
+    another org's BUD or feature. The assignee goes through
+    :func:`~app.services.org_members.assert_new_assignee_in_org`, the check
+    BUDs and todos share.
     """
     if bud_id is not None and not await BUDRepository(db, org_id=org_id).get_by_id(bud_id):
         raise HTTPException(status_code=404, detail="BUD not found")
@@ -346,10 +346,6 @@ async def _ensure_links_in_org(
         feature_id
     ):
         raise HTTPException(status_code=404, detail="Feature not found")
-    if assignee_id is not None and not await UserRepository(db).get_membership(
-        assignee_id, org_id
-    ):
-        raise HTTPException(status_code=404, detail="Assignee not found")
 
 
 async def _decide_bug_type(
