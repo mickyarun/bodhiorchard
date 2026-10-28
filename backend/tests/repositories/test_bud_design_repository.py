@@ -34,9 +34,13 @@ from app.repositories.bud import BUDDesignRepository
 async def test_design_upsert_select_uses_for_update() -> None:
     """The select in ``upsert`` must carry the ``FOR UPDATE`` lock."""
     db = MagicMock()
+    # The BUD and repo org-scope checks run first and find their rows; the
+    # last execute is the design select, which finds no existing row.
+    found = MagicMock()
+    found.scalar_one_or_none.return_value = uuid.uuid4()
     result_obj = MagicMock()
     result_obj.scalar_one_or_none.return_value = None
-    db.execute = AsyncMock(return_value=result_obj)
+    db.execute = AsyncMock(side_effect=[found, found, result_obj])
     db.flush = AsyncMock()
     db.refresh = AsyncMock()
     db.add = MagicMock()

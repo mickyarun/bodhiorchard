@@ -35,7 +35,7 @@ from app.mcp.handlers_bud_writes import (
     handle_update_bud,
 )
 from app.models.bud import BUDStatus
-from app.repositories.bud import BUDRepository
+from app.repositories.bud import BUDRepository, DesignTargetNotInOrgError
 
 
 def _auth(user_id: uuid.UUID | None = None) -> MCPAuthResult:
@@ -255,22 +255,32 @@ async def test_update_bud_design_phase_requires_repo_id(monkeypatch: Any) -> Non
 
 @pytest.mark.asyncio
 async def test_update_bud_design_phase_rejects_cross_org_repo(monkeypatch: Any) -> None:
-    """The validation defends multi-tenancy — passing a repo_id that
-    isn't a tracked repo in the caller's org returns repo_not_found."""
+    """The design repository refuses a repo_id that isn't a tracked repo in
+    the caller's org; the handler maps that to repo_not_found and stores no
+    history snapshot for the refused write."""
     user_id = uuid.uuid4()
     auth = _auth(user_id)
     bud = _fake_bud(status=BUDStatus.DESIGN, assignee_id=user_id)
+    snapshots: list[dict[str, Any]] = []
 
     async def _get(self: Any, bud_id: uuid.UUID) -> MagicMock:
         return bud
 
-    async def _repo_lookup(self: Any, repo_id: uuid.UUID) -> Any:
-        return None  # repo absent / belongs to another org
+    async def _list_for_bud(self: Any, bud_id: uuid.UUID) -> list[Any]:
+        return []
+
+    async def _upsert(self: Any, bud_id: uuid.UUID, repo_id: Any, **kw: Any) -> Any:
+        raise DesignTargetNotInOrgError("repo", repo_id)
+
+    async def _commit_snapshot(db: Any, **kw: Any) -> Any:
+        snapshots.append(kw)
+        return MagicMock()
 
     monkeypatch.setattr(BUDRepository, "get_by_id", _get)
+    monkeypatch.setattr("app.repositories.bud.BUDDesignRepository.list_for_bud", _list_for_bud)
+    monkeypatch.setattr("app.repositories.bud.BUDDesignRepository.upsert", _upsert)
     monkeypatch.setattr(
-        "app.repositories.tracked_repository.TrackedRepoRepository.get_by_id",
-        _repo_lookup,
+        "app.mcp.handlers_bud_writes.bud_version_repo.commit_snapshot", _commit_snapshot
     )
 
     result = await handle_update_bud(
@@ -285,6 +295,7 @@ async def test_update_bud_design_phase_rejects_cross_org_repo(monkeypatch: Any) 
     )
     assert result["success"] is False
     assert result["code"] == "repo_not_found"
+    assert snapshots == []
 
 
 @pytest.mark.asyncio
@@ -316,18 +327,11 @@ async def test_update_bud_design_phase_routes_to_repo_upsert(monkeypatch: Any) -
         snapshots.append(kw)
         return MagicMock()
 
-    async def _repo_lookup(self: Any, repo_id: uuid.UUID) -> Any:
-        return MagicMock(id=target_repo)
-
     monkeypatch.setattr(BUDRepository, "get_by_id", _get)
     monkeypatch.setattr("app.repositories.bud.BUDDesignRepository.list_for_bud", _list_for_bud)
     monkeypatch.setattr("app.repositories.bud.BUDDesignRepository.upsert", _upsert)
     monkeypatch.setattr(
         "app.mcp.handlers_bud_writes.bud_version_repo.commit_snapshot", _commit_snapshot
-    )
-    monkeypatch.setattr(
-        "app.repositories.tracked_repository.TrackedRepoRepository.get_by_id",
-        _repo_lookup,
     )
 
     db = MagicMock(flush=AsyncMock())

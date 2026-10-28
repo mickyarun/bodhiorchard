@@ -113,10 +113,7 @@
           :key="m.user_id"
           class="d-flex align-center ga-2 py-1"
         >
-          <v-avatar size="24" color="purple-lighten-4">
-            <v-img v-if="m.avatar_url" :src="m.avatar_url" />
-            <v-icon v-else icon="mdi-account" size="16" />
-          </v-avatar>
+          <AppMonogram :name="m.name" :src="m.avatar_url" :size="24" />
           <div class="flex-grow-1 overflow-hidden">
             <div class="text-body-2 text-truncate">{{ m.name }}</div>
             <div class="text-caption text-medium-emphasis text-truncate">
@@ -134,6 +131,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import AppMonogram from '@/components/common/AppMonogram.vue'
 import type {
   RepoLimbData,
   FeatureItem,

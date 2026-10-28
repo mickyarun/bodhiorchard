@@ -31,13 +31,14 @@ indexer → empty file list → ``"no source files found in repo"``.
 from __future__ import annotations
 
 import re
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
 
 from app.config import settings
+from app.core.paths import is_strictly_under, rmtree_strictly_under
+from app.schemas.git_ref import branch_name_problem
 from app.services.git_operations import run_git
 from app.services.scan.stages._origin_auth import (
     build_app_https_url_for_origin,
@@ -113,6 +114,13 @@ async def ensure_scan_test_worktree(
 
     Returns the absolute path of the worktree to operate on.
     """
+    # Branch names are validated on the way in, but rows stored before
+    # that still reach here. Refuse them before the name becomes a git
+    # argument (``-b`` would read as an option) or a folder name (``..``).
+    problem = branch_name_problem(main_branch)
+    if problem is not None:
+        raise RuntimeError(f"invalid main branch {main_branch!r}: {problem}")
+
     current_branch_out, _, _ = await run_git(
         ["rev-parse", "--abbrev-ref", "HEAD"],
         cwd=repo_path,
@@ -129,6 +137,11 @@ async def ensure_scan_test_worktree(
     parent.mkdir(parents=True, exist_ok=True)
     wt_path = parent / main_branch.replace("/", "-")
     wt_str = str(wt_path)
+    # Defence in depth: whatever the name, the worktree must sit strictly
+    # inside its parent, never be the parent shared by every repo's
+    # worktrees.
+    if not is_strictly_under(wt_path, parent):
+        raise RuntimeError(f"scan worktree for branch {main_branch!r} escapes {parent}")
 
     await run_git(["worktree", "prune"], cwd=repo_path)
     # If a worktree on ``main_branch`` is still registered at a path
@@ -145,7 +158,8 @@ async def ensure_scan_test_worktree(
     # add`` below rebuilds it cleanly against the current ``repo_path``.
     if wt_path.exists() and not await _worktree_is_healthy(wt_str):
         logger.info("scan_ingest_rebuilding_dangling_worktree", path=wt_str, repo=repo_path)
-        shutil.rmtree(wt_path, ignore_errors=True)
+        if not rmtree_strictly_under(wt_path, parent):
+            raise RuntimeError(f"refusing to delete {wt_str}: not inside {parent}")
         await run_git(["worktree", "prune"], cwd=repo_path)
 
     if not wt_path.exists():
