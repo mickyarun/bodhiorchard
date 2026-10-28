@@ -130,3 +130,28 @@ async def test_resending_an_assignee_who_left_does_not_block_other_edits(
     edited = await client.patch(route.path(a), json=body, headers=headers)
     assert edited.status_code == 200, edited.text
     assert edited.json()["title"] == "Renamed"
+    assert await _assignee(pg_session_factory, route, a) == a.dev
+
+
+@pytest.mark.parametrize("name", sorted(ROUTES))
+async def test_an_assignee_who_left_cannot_be_set_again_once_changed(
+    client: AsyncClient, pg_session_factory: Factory, name: str
+) -> None:
+    """The resend pass covers only the stored value, not a past one."""
+    route = ROUTES[name]
+    a = await _org(pg_session_factory)
+    headers = as_user(a.owner, a.org)
+    given = await client.patch(route.path(a), json={route.key: str(a.dev)}, headers=headers)
+    assert given.status_code == 200, given.text
+    async with pg_session_factory() as db:
+        await db.execute(
+            delete(OrgToUser).where(OrgToUser.user_id == a.dev, OrgToUser.org_id == a.org)
+        )
+        await db.commit()
+    moved = await client.patch(route.path(a), json={route.key: str(a.owner)}, headers=headers)
+    assert moved.status_code == 200, moved.text
+
+    back = await client.patch(route.path(a), json={route.key: str(a.dev)}, headers=headers)
+
+    assert back.status_code == 404, back.text
+    assert await _assignee(pg_session_factory, route, a) == a.owner

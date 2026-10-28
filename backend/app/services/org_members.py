@@ -36,10 +36,21 @@ async def assert_new_assignee_in_org(
 ) -> None:
     """Raise 404 unless a newly chosen assignee is a member of ``org_id``.
 
-    Clearing the assignee, or resending the one already stored, passes
-    unchecked: an edit to something else shouldn't fail because the current
-    assignee has since left. 404 rather than 403, so the answer is the same
-    whether the user exists in another org or not at all.
+    This is the one assignee check for every org-scoped row that names an
+    assignee (BUDs, todos and bugs), so the rule below is the same for all:
+
+    - Clearing the assignee (``None``) always passes.
+    - Resending the assignee already stored on the row (``assignee_id ==
+      current_id``) is a no-op and passes, even if that person has since
+      left the org. Forms send the whole row back, so an edit to something
+      else must not fail because of who it was assigned to before; and the
+      write stores the same value, so nothing new crosses an org boundary.
+    - Any other id must be a current member of ``org_id``. Once the stored
+      assignee is changed or cleared, someone who has left can't be set
+      again.
+
+    404 rather than 403, so the answer is the same whether the user exists
+    in another org or not at all.
     """
     if assignee_id is None or assignee_id == current_id:
         return
