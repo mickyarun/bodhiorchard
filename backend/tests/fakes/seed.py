@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -56,11 +57,12 @@ async def seed_org(
     *,
     github: FakeGitHub | None = None,
     slack: FakeSlack | None = None,
+    config: dict[str, Any] | None = None,
 ) -> SeededOrg:
     """An org with an ``org_owner`` member, optionally wired to the fake GitHub / Slack."""
     tag = uuid.uuid4().hex[:8]
     async with factory() as db:
-        org = Organization(name=f"Fake Org {tag}", slug=f"fake-{tag}", config={})
+        org = Organization(name=f"Fake Org {tag}", slug=f"fake-{tag}", config=config or {})
         org.github_webhook_secret = encrypt_secret(WEBHOOK_SECRET)
         if github is not None:
             org.github_app_id = github.app_id
@@ -79,7 +81,7 @@ async def seed_org(
 
 
 async def _add_user(db: AsyncSession, org_id: uuid.UUID, name: str, role: str | None) -> uuid.UUID:
-    user = User(email=f"{name}@acme.dev", name=name, password_hash="x")
+    user = User(email=f"{name}@example.test", name=name, password_hash="x")
     db.add(user)
     await db.flush()
     membership = OrgToUser(user_id=user.id, org_id=org_id)

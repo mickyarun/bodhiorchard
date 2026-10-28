@@ -41,6 +41,8 @@ from app import database
 from app.config import settings
 from app.services import event_bus, redis_client
 
+_ENTRYPOINTS = ("app.scripts", "app.main", "app.mcp.stdio_bridge")
+
 
 @cache
 def import_app_modules() -> int:
@@ -48,11 +50,12 @@ def import_app_modules() -> int:
 
     Several modules import collaborators inside functions; without this a
     module first imported mid-test would still hold the dev-database
-    ``AsyncSessionLocal``. ``app.scripts`` (one-off CLIs) is skipped.
+    ``AsyncSessionLocal``. Entry points are skipped: ``app.scripts`` (one-off
+    CLIs), ``app.main`` (configures logging at import) and the MCP stdio bridge.
     """
     count = 0
     for info in pkgutil.walk_packages(app.__path__, "app."):
-        if info.name.startswith("app.scripts"):
+        if info.name.startswith(_ENTRYPOINTS):
             continue
         importlib.import_module(info.name)
         count += 1
@@ -73,6 +76,18 @@ def bind_app_sessions(
             monkeypatch.setattr(module, "AsyncSessionLocal", factory)
             bound += 1
     return bound
+
+
+async def drain_tasks_started_since(before: set[asyncio.Task[Any]], timeout: float = 5.0) -> None:
+    """Let tasks started after ``before`` finish (up to ``timeout``), then cancel the rest."""
+    current = asyncio.current_task()
+    started = [t for t in asyncio.all_tasks() - before if t is not current and not t.done()]
+    if not started:
+        return
+    _, pending = await asyncio.wait(started, timeout=timeout)
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*pending, return_exceptions=True)
 
 
 def disable_redis(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -110,6 +125,8 @@ class EventRecorder:
         return [data for name, data in self.events if name == topic]
 
     async def settle(self) -> None:
-        """Let the bus's detached transport tasks run."""
+        """Wait until every transport task the bus has started has finished."""
         await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        pending = [task for task in event_bus._transport_tasks if not task.done()]
+        if pending:
+            await asyncio.wait(pending, timeout=5.0)

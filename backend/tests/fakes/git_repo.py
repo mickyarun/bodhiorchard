@@ -35,7 +35,7 @@ from pathlib import Path
 from tests.fakes.sample_code import SAMPLE_TREE
 
 _FIXED_DATE = "2026-01-05T10:00:00+00:00"
-DEFAULT_AUTHOR_EMAIL = "fixture.dev@acme.dev"
+DEFAULT_AUTHOR_EMAIL = "fixture.dev@example.test"
 _GIT_ENV = {
     "GIT_AUTHOR_NAME": "Fixture Dev",
     "GIT_COMMITTER_NAME": "Fixture Dev",
@@ -50,7 +50,10 @@ _GIT_ENV = {
 def git(cwd: Path, *args: str, author_email: str = DEFAULT_AUTHOR_EMAIL) -> str:
     """Run ``git args`` in ``cwd`` with the fixture identity; return stdout."""
     identity = {"GIT_AUTHOR_EMAIL": author_email, "GIT_COMMITTER_EMAIL": author_email}
-    env = {**os.environ, **_GIT_ENV, **identity}
+    # Drop inherited GIT_* (a git hook running pytest sets GIT_DIR and
+    # GIT_INDEX_FILE, which would point these commands at the real repo).
+    inherited = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env = {**inherited, **_GIT_ENV, **identity}
     done = subprocess.run(
         ["git", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main", *args],
         cwd=cwd,

@@ -31,11 +31,19 @@ test:
 
 - DNS lookups and socket connects to anything but loopback are refused. Unix sockets (the
   Docker daemon) are allowed, so the testcontainers Postgres still works.
-- Loopback connects to the dev database and dev Redis ports from the app settings are
-  refused, so a stray `AsyncSessionLocal()` can never write to your dev data.
-- Spawning `claude`, `codex` or `copilot` is refused. `git` still runs, with
-  `GIT_ALLOW_PROTOCOL=file`, so it can only talk to local repositories.
-- `get_redis()` answers `None`, so every Redis user takes its fail-open path.
+- Loopback connects to the local services named in the app settings (database, Redis,
+  backend, frontend, multiplayer) and to Ollama's port are refused, so a stray
+  `AsyncSessionLocal()` or HTTP call can never reach your dev stack. `guard.allow_port(n)`
+  lets one through.
+- Any command line that runs `claude`, `codex` or `copilot` is refused, wherever the binary
+  appears in it (`sandbox-exec ... claude`, `env X=1 codex`, shell strings). `git` still
+  runs, with `GIT_ALLOW_PROTOCOL=file`, so it can only talk to local repositories.
+- `BODHIORCHARD_HYBRID_SANDBOX` and `BODHI_MOCK_PR_FILES_PATH` are cleared, so neither the
+  macOS agent sandbox nor the PR-files mock file can route around the fakes.
+- `get_redis()` answers `None`, so every Redis user takes its fail-open path (the MCP rate
+  limiter included).
+- Background tasks the test started are awaited (up to 5 s), then cancelled, before the
+  patches come off.
 
 Each refusal raises in the caller (the code sees a failed connection) and is recorded; the
 test fails at teardown if anything was recorded, even when the code swallowed the error.
@@ -71,7 +79,10 @@ script = AgentScript.ok(
 results), for ids that only exist at runtime. Tool calls are executed for real: the fake
 POSTs to `/mcp/tools/{name}` with the token from the run's MCP config, exactly as the stdio
 bridge does. With `mcp_claude` that request goes through the app's MCP route on the test
-database, so the call is authenticated, rate limited, audited and persisted like a real one.
+database, so the call is authenticated, audited and persisted like a real one (rate limiting
+fails open, because Redis is off). If the route itself crashes, the call is recorded as a 500
+(what the bridge reports) and the test fails at teardown. All tool calls of a run happen when
+the process is spawned, before the runner reads any output.
 A tool outside the run's `BODHIORCHARD_MCP_TOOLS` or `--allowedTools` list is refused
 without a request, as the CLI would.
 
@@ -82,13 +93,16 @@ Choosing a script for a run:
 - `fake_claude.enqueue(s1, s2)`: in order, for runs no rule matched;
 - `fake_claude.default = script`: anything else.
 
-A run with no script exits non-zero and fails the test at teardown.
+A run with no script exits non-zero and fails the test at teardown. So does a command line
+the real CLI would reject (`stream-json` without `--verbose`, an empty prompt, an MCP config
+that does not launch the bridge script or lacks a backend URL or token) and a `ToolCall`
+params callable that raises. A `claude --version` probe is answered without using a script.
 
 Failure modes, all through the real runner:
 
 | Script | What the runner sees | Result |
 | --- | --- | --- |
-| `AgentScript.timeout(*steps)` | steps run, then the process never answers | `TIMEOUT`, process killed |
+| `AgentScript.timeout(*steps)` | steps run, then the process hangs until killed | `TIMEOUT`, process killed |
 | `AgentScript.crash(2, "boom")` | exit 2, stderr `boom`, no result event | `UNKNOWN`, "exit code 2; boom" |
 | `AgentScript.malformed("{oops")` | exit 0, stdout is not JSON | success, raw stdout as output |
 | `AgentScript.max_turns()` | result event with `error_max_turns` | `MAX_TURNS` |
@@ -97,6 +111,10 @@ Failure modes, all through the real runner:
 | `AgentScript.ok("x")` | no tool calls at all | success, nothing written |
 | `ToolCall` to a failing tool | MCP answers `{"error": ...}` or 4xx | `ToolCallRecord.is_error` |
 
+A hanging script is only ended by the runner's own `asyncio.wait_for`, so give the run a
+small timeout (`ClaudeRunnerConfig(timeout_seconds=1)`, or `seed_org(config={"scan":
+{"timeout_seconds": 1}})` for scans); a runner that lost its deadline would hang the test.
+
 For assertions: `fake_claude.runs` (each `AgentRun` has `prompt`, `argv`, `flag()`, `env`,
 `mcp_token`, `mcp_tools`, `tool_calls`, `killed`) and `fake_claude.tool_calls("name")`.
 
@@ -104,11 +122,15 @@ For assertions: `fake_claude.runs` (each `AgentRun` has `prompt`, `argv`, `flag(
 
 `fake_github` is an in-memory `api.github.com` for one App installation:
 
-- the App JWT to installation-token exchange (the JWT's signature is checked against the
-  fake App's RSA key, so a wrong key or app id is refused);
-- installable repos and branches with `Link` pagination (`page_size`, default 2);
-- repo to installation lookup, pull requests (list, create), PR commits, PR files, reviews;
-- org members and user profiles.
+- the App JWT to installation-token exchange and the repo to installation lookup (both
+  need an App JWT whose signature is checked against the fake App's RSA key, so a wrong key
+  or app id is refused; `FakeGitHub(key_pair=new_key_pair())` gives an App its own key);
+- installable repos, branches, PR commits and PR files, paginated like GitHub: `per_page`
+  (default 30) up to `max_page_size` (100), with a `Link: rel="next"` header. Lower
+  `max_page_size` to force several pages for callers that follow `Link`;
+- pull requests: list filtered by `state`, `base` and `head` (`owner:branch`), create
+  (a second open PR for the same head answers 422), reviews;
+- org members and user profiles. Every reply's `(path, status)` is kept in `responses`.
 
 Installation-token routes need a token the fake issued (or one added to `extra_tokens`
 for PAT callers). `fake_github.fail(method, path_regex, 401 | 404 | 500)` and
@@ -127,8 +149,10 @@ recorded as a `SlackCall(method, args, token)`; `posted_texts()` and `calls_to(m
 assertions. It answers `chat.postMessage` (threads are kept, so `conversations.replies`
 returns them), `chat.update`, `chat.postEphemeral`, `reactions.add/remove`, `users.info`,
 `users.list`, `users.getPresence`, `users.profile.get/set`, `conversations.open`,
-`conversations.history`, `views.open`, `auth.test` and `auth.revoke`. Add people with
-`add_user(id, name, email)`. `fail(method, "missing_scope")` and `rate_limit(method)`
+`conversations.history`, `views.open`, `auth.test`, `auth.revoke` and `oauth.v2.access`
+(any code but `bad-code` returns a user token). A call with no token answers `not_authed`;
+a token that is not `xox…`-shaped, or was revoked, answers `invalid_auth`. Profiles and
+statuses are kept per token. Add people with `add_user(id, name, email)`. `fail(method, "missing_scope")` and `rate_limit(method)`
 (HTTP 429 `ratelimited`, `Retry-After: 0`) queue errors.
 
 Inbound requests are signed like Slack signs them: `signed_slack_event`,
@@ -162,7 +186,7 @@ tree always has the same SHAs. `repo.commit({"path": "text"}, "message", branch=
 adds and pushes a commit; `repo.head("main")` reads `origin/main`. `git_repo_factory(name)`
 builds more. The real indexer, worktrees and `git fetch origin` all work against it.
 
-Every commit is authored by `fixture.dev@acme.dev` unless you pass `author_email=`. A scan
+Every commit is authored by `fixture.dev@example.test` unless you pass `author_email=`. A scan
 turns git authors into members of the scanning org and an email is unique across orgs, so a
 test that scans in more than one org should give each repo its own author.
 
@@ -175,12 +199,14 @@ test that scans in more than one org should give each repo its own author.
   `tmp_path`.
 - `event_recorder`: records every `event_bus.publish(topic, data)`; call `await
   recorder.settle()` before asserting.
-- `tests.fakes.seed`: `seed_org`, `seed_member`, `seed_repo`, `auth_headers`.
+- `tests.fakes.seed`: `seed_org` (optionally wired to the fake GitHub / Slack, with an org
+  `config`), `seed_member`, `seed_repo`, `auth_headers`. Seeded emails use the reserved
+  `example.test` domain.
 
 ## Example: a scripted agent writing through MCP
 
-The end-to-end scan tests (`tests/integration/scan_e2e/`) do this; `synthesis_writing` and
-`start_scan_over_http` come from their `scan_support.py`.
+The end-to-end scan tests (`tests/integration/scan_e2e/`, added on top of this package) do
+this; `synthesis_writing` and `start_scan_over_http` come from their `scan_support.py`.
 
 ```python
 pytestmark = pytest.mark.integration
@@ -214,7 +240,9 @@ with `-m "integration and not slow"`.
 ## What the fakes do not cover
 
 - Codex, Copilot and Ollama providers: only the Claude CLI spawn is faked. An org set to
-  another provider will hit the guard.
+  another provider hits the guard (the CLI spawn or Ollama's port is refused).
+- Timing between tool calls and output: all tool calls run at spawn, so a test cannot cancel
+  an agent between two of its MCP writes.
 - The real MCP stdio bridge process: the fake makes the same HTTP call the bridge makes,
   but the bridge's JSON-RPC framing itself is not exercised.
 - Google Calendar and Giphy have no fake yet; mount one on `http_router` the same way.

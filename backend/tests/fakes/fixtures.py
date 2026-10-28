@@ -24,13 +24,20 @@ The database-bound fixtures live in :mod:`tests.fakes.fixtures_db`.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+import asyncio
+from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from app.services import github_app_auth
-from tests.fakes.app_state import EventRecorder, disable_redis, isolate_data_dir
+from tests.fakes.app_state import (
+    EventRecorder,
+    disable_redis,
+    drain_tasks_started_since,
+    isolate_data_dir,
+)
 from tests.fakes.claude_runner import FakeClaudeRunner
 from tests.fakes.embeddings import FakeEmbedder
 from tests.fakes.git_repo import DEFAULT_AUTHOR_EMAIL, LocalGitRepo, build_git_repo
@@ -43,13 +50,20 @@ from tests.fakes.slack import API_HOST as SLACK_HOST
 from tests.fakes.slack import FakeSlack
 
 
-@pytest.fixture(autouse=True)
-def external_guard(monkeypatch: pytest.MonkeyPatch) -> Iterator[ExternalCallGuard]:
-    """Refuse real network, dev DB / Redis and agent CLIs; fail the test if tried."""
+@pytest_asyncio.fixture(autouse=True)
+async def external_guard(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[ExternalCallGuard]:
+    """Refuse real network, dev DB / Redis and agent CLIs; fail the test if tried.
+
+    Background tasks the test started (audit writes, event-bus transports,
+    slug back-fills) are awaited, then cancelled, before the patches come
+    off, so they cannot reach the outside world unguarded after the test.
+    """
     guard = ExternalCallGuard()
     guard.install(monkeypatch)
     disable_redis(monkeypatch)
+    before = asyncio.all_tasks()
     yield guard
+    await drain_tasks_started_since(before)
     guard.assert_clean()
 
 

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""One RSA key pair for the fake GitHub App, generated once per test session."""
+"""RSA key pairs for the fake GitHub App: one shared per session, or a fresh one."""
 
 from __future__ import annotations
 
@@ -22,9 +22,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 
-@cache
-def app_key_pair() -> tuple[str, str]:
-    """``(private_pem, public_pem)`` for signing and checking App JWTs."""
+def new_key_pair() -> tuple[str, str]:
+    """A fresh ``(private_pem, public_pem)`` RSA pair."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     private_pem = key.private_bytes(
         serialization.Encoding.PEM,
@@ -37,3 +36,9 @@ def app_key_pair() -> tuple[str, str]:
         .decode()
     )
     return private_pem, public_pem
+
+
+@cache
+def app_key_pair() -> tuple[str, str]:
+    """The session's shared key pair for the fake App (generated once)."""
+    return new_key_pair()

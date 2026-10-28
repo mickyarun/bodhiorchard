@@ -15,69 +15,58 @@
 """An in-memory ``api.github.com`` for one GitHub App installation.
 
 Mounted on the :class:`FakeHttpRouter`, it serves the REST calls the app
-makes: the App JWT → installation-token exchange (the JWT signature is
-checked against the fake App's key), installable repos and branches with
-``Link`` pagination, repo → installation lookup, pull requests, PR commits
-and files, reviews, org members and user profiles. Installation-token calls
-need a token the fake issued. ``fail()`` queues 401 / 404 / rate-limit
-replies for any route.
+makes. Auth follows GitHub: ``/app/*`` and ``/repos/{x}/installation`` need
+an App JWT signed with the fake App's private key (signature and ``iss``
+are checked); everything else needs an installation token the fake issued
+(or a PAT added to ``extra_tokens``). Repo routes live in
+:mod:`.github_repos`. ``fail()`` / ``rate_limit()`` queue error replies.
 """
 
 from __future__ import annotations
 
 import itertools
 import re
-from dataclasses import dataclass, field
-from typing import Any
 
 import httpx
 import jwt
 
 from tests.fakes.github_keys import app_key_pair
-from tests.fakes.http_util import FaultPlan, InjectedFault, json_response, request_json
+from tests.fakes.github_repos import FakeGitHubRepo, RepoRoutes
+from tests.fakes.http_util import FaultPlan, InjectedFault, json_response
 
 API_HOST = "api.github.com"
 FIXED_EXPIRY = "2099-01-01T00:00:00Z"
 
 
-@dataclass
-class FakeGitHubRepo:
-    """A repository visible to the installation."""
-
-    full_name: str
-    branches: dict[str, str] = field(default_factory=lambda: {"main": "a" * 40})
-    private: bool = True
-    default_branch: str = "main"
-    pushed_at: str = "2026-01-02T03:04:05Z"
-
-
-class FakeGitHub:
+class FakeGitHub(RepoRoutes):
     """See the module docstring. All state is plain attributes a test can set."""
 
-    def __init__(self, app_id: int = 1001, installation_id: int = 4242) -> None:
+    def __init__(
+        self,
+        app_id: int = 1001,
+        installation_id: int = 4242,
+        key_pair: tuple[str, str] | None = None,
+    ) -> None:
+        super().__init__()
         self.app_id = app_id
         self.installation_id = installation_id
         self.app_slug = "glideship-test-app"
-        self.private_key_pem, self._public_key_pem = app_key_pair()
-        self.page_size = 2
-        self.repos: dict[str, FakeGitHubRepo] = {}
-        self.pulls: dict[tuple[str, int], dict[str, Any]] = {}
-        self.pr_commits: dict[tuple[str, int], list[str]] = {}
-        self.pr_files: dict[tuple[str, int], list[str]] = {}
-        self.members: dict[str, dict[str, Any]] = {}
+        self.private_key_pem, self._public_key_pem = key_pair or app_key_pair()
+        self.members: dict[str, dict[str, object]] = {}
         self.issued_tokens: list[str] = []
         self.extra_tokens: set[str] = set()
-        self.reviews: list[dict[str, Any]] = []
         self.requests: list[httpx.Request] = []
+        self.responses: list[tuple[str, int]] = []
         self.faults = FaultPlan()
-        self._ids = itertools.count(1)
+        self._shas = itertools.count(1)
 
     # ── test setup ────────────────────────────────────────────────
     def add_repo(self, full_name: str, *branches: str, private: bool = True) -> FakeGitHubRepo:
         """Make ``full_name`` visible to the installation with ``branches``."""
         names = branches or ("main",)
-        shas = {name: f"{next(self._ids):040x}" for name in names}
-        repo = FakeGitHubRepo(full_name, shas, private=private, default_branch=names[0])
+        shas = {name: f"{next(self._shas):040x}" for name in names}
+        repo_id = 500_000 + len(self.repos)
+        repo = FakeGitHubRepo(full_name, repo_id, shas, private, names[0])
         self.repos[full_name] = repo
         return repo
 
@@ -112,35 +101,35 @@ class FakeGitHub:
         token = self._bearer(request)
         return token in self.issued_tokens or token in self.extra_tokens
 
-    def _page(self, request: httpx.Request, items: list[Any], key: str | None) -> httpx.Response:
-        page = int(request.url.params.get("page", "1"))
-        start = (page - 1) * self.page_size
-        chunk = items[start : start + self.page_size]
-        headers: dict[str, str] = {}
-        if start + self.page_size < len(items):
-            nxt = request.url.copy_merge_params({"page": str(page + 1)})
-            headers["Link"] = f'<{nxt}>; rel="next"'
-        body: Any = {"total_count": len(items), key: chunk} if key else chunk
-        return json_response(200, body, headers)
-
     def handle(self, request: httpx.Request) -> httpx.Response:
         """Serve one request (mount this on the router for ``api.github.com``)."""
         self.requests.append(request)
-        injected = self.faults.take(request)
-        if injected is not None:
-            return injected
+        response = self.faults.take(request) or self._route(request)
+        self.responses.append((request.url.path, response.status_code))
+        return response
+
+    def _route(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
-        if path == "/app" or path.startswith("/app/"):
+        if path == "/app" or path.startswith("/app/") or path.endswith("/installation"):
             return self._app_routes(request, path)
         if not self._token_ok(request):
             return json_response(401, {"message": "Bad credentials"})
-        return self._token_routes(request, path)
+        if re.fullmatch(r"/orgs/[^/]+/members", path):
+            return json_response(200, [{"login": m, "avatar_url": ""} for m in self.members])
+        if match := re.fullmatch(r"/users/([^/]+)", path):
+            member = self.members.get(match.group(1))
+            return json_response(200, member) if member else json_response(404, {})
+        return self.repo_route(request, path)
 
     def _app_routes(self, request: httpx.Request, path: str) -> httpx.Response:
         if not self._app_jwt_ok(request):
             return json_response(401, {"message": "A JSON web token could not be decoded"})
         if path == "/app":
             return json_response(200, {"id": self.app_id, "slug": self.app_slug})
+        if match := re.fullmatch(r"/repos/([^/]+/[^/]+)/installation", path):
+            if match.group(1) not in self.repos:
+                return json_response(404, {"message": "Not Found"})
+            return json_response(200, {"id": self.installation_id, "app_id": self.app_id})
         match = re.fullmatch(r"/app/installations/(\d+)/access_tokens", path)
         if match and request.method == "POST":
             if int(match.group(1)) != self.installation_id:
@@ -149,69 +138,3 @@ class FakeGitHub:
             self.issued_tokens.append(token)
             return json_response(201, {"token": token, "expires_at": FIXED_EXPIRY})
         return json_response(404, {"message": "Not Found"})
-
-    def _token_routes(self, request: httpx.Request, path: str) -> httpx.Response:
-        if path == "/installation/repositories":
-            items = [self._repo_json(r) for r in self.repos.values()]
-            return self._page(request, items, "repositories")
-        if re.fullmatch(r"/orgs/[^/]+/members", path):
-            return json_response(200, [{"login": m, "avatar_url": ""} for m in self.members])
-        if match := re.fullmatch(r"/users/([^/]+)", path):
-            member = self.members.get(match.group(1))
-            return json_response(200, member) if member else json_response(404, {})
-        match = re.fullmatch(r"/repos/([^/]+/[^/]+)(/.*)?", path)
-        repo = self.repos.get(match.group(1)) if match else None
-        if match is None or repo is None:
-            return json_response(404, {"message": "Not Found"})
-        return self._repo_routes(request, repo, match.group(2) or "")
-
-    def _repo_routes(
-        self, request: httpx.Request, repo: FakeGitHubRepo, rest: str
-    ) -> httpx.Response:
-        key = repo.full_name
-        if rest == "/installation":
-            return json_response(200, {"id": self.installation_id})
-        if rest == "/branches":
-            items = [{"name": n, "commit": {"sha": s}} for n, s in repo.branches.items()]
-            return self._page(request, items, None)
-        if rest == "/pulls" and request.method == "GET":
-            return json_response(200, [p for (r, _), p in self.pulls.items() if r == key])
-        if rest == "/pulls" and request.method == "POST":
-            return json_response(201, self._create_pull(key, request_json(request)))
-        if match := re.fullmatch(r"/pulls/(\d+)/(commits|files|reviews)", rest):
-            number, kind = int(match.group(1)), match.group(2)
-            if kind == "commits":
-                shas = self.pr_commits.get((key, number), [])
-                return json_response(200, [{"sha": sha} for sha in shas])
-            if kind == "files":
-                files = self.pr_files.get((key, number), [])
-                return json_response(200, [{"filename": f, "status": "modified"} for f in files])
-            review = {"id": next(self._ids), "pull": number, **request_json(request)}
-            self.reviews.append(review)
-            return json_response(200, review)
-        return json_response(404, {"message": "Not Found"})
-
-    def _create_pull(self, full_name: str, body: dict[str, Any]) -> dict[str, Any]:
-        number = next(self._ids)
-        pull = {
-            "number": number,
-            "state": "open",
-            "title": body.get("title", ""),
-            "html_url": f"https://github.com/{full_name}/pull/{number}",
-            "head": {"ref": body.get("head")},
-            "base": {"ref": body.get("base")},
-        }
-        self.pulls[(full_name, number)] = pull
-        return pull
-
-    def _repo_json(self, repo: FakeGitHubRepo) -> dict[str, Any]:
-        owner, name = repo.full_name.split("/", 1)
-        return {
-            "full_name": repo.full_name,
-            "name": name,
-            "owner": {"login": owner},
-            "private": repo.private,
-            "default_branch": repo.default_branch,
-            "pushed_at": repo.pushed_at,
-            "clone_url": f"https://github.com/{repo.full_name}.git",
-        }

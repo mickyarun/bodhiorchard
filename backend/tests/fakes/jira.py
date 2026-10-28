@@ -69,7 +69,7 @@ def jira_issue(
 class FakeJira:
     """See the module docstring."""
 
-    def __init__(self, email: str = "pm@acme.dev", api_token: str = "jira-token") -> None:
+    def __init__(self, email: str = "pm@example.test", api_token: str = "jira-token") -> None:
         creds = base64.b64encode(f"{email}:{api_token}".encode()).decode()
         self._expected_auth = f"Basic {creds}"
         self.site_url = SITE_URL

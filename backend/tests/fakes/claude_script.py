@@ -71,7 +71,8 @@ class AgentScript:
     ``result`` is the final ``result`` text the CLI reports. ``exit_code``,
     ``stderr`` and ``subtype`` shape the failure paths; ``raw_stdout``
     replaces the JSON output entirely (malformed output); ``times_out``
-    makes the process never answer so the runner takes its timeout path.
+    makes the process hang until killed, so only the runner's own deadline
+    ends the run (use a small ``timeout_seconds`` in the test).
     """
 
     steps: Sequence[Step] = ()
@@ -91,7 +92,7 @@ class AgentScript:
 
     @classmethod
     def timeout(cls, *steps: Step) -> AgentScript:
-        """Makes ``steps`` and then hangs until the runner's deadline."""
+        """Makes ``steps`` and then hangs until the runner's deadline kills it."""
         return cls(steps=steps, times_out=True)
 
     @classmethod
@@ -145,6 +146,7 @@ class AgentRun:
     cwd: str | None
     env: dict[str, str]
     output_format: str
+    mcp_config: dict[str, Any] | None = None
     mcp_backend_url: str | None = None
     mcp_token: str | None = None
     mcp_tools: list[str] = field(default_factory=list)

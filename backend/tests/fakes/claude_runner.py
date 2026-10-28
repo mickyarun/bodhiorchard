@@ -20,53 +20,39 @@ the filtered env) and spawns it with ``asyncio.create_subprocess_exec``.
 :class:`FakeClaudeRunner` intercepts that spawn when ``argv[0]`` is
 ``claude`` and, instead of a process:
 
-1. records the invocation as an :class:`AgentRun`;
+1. records the invocation as an :class:`AgentRun` and checks the parts of
+   the command line the real CLI would reject (see :mod:`.claude_contract`);
 2. picks the :class:`AgentScript` for it (first matching rule, else the
    next queued script, else the default);
 3. executes the script's MCP tool calls **for real** by POSTing to the app's
    ``/mcp/tools/{name}`` route with the token from the run's MCP config,
-   exactly as the stdio bridge does;
+   exactly as the stdio bridge does (a crash in the route is recorded as a
+   500, the way the bridge reports it);
 4. returns a :class:`FakeProcess` that replays CLI-shaped stdout, so the
    runner's parsing, error mapping and progress callbacks run unchanged.
 
-Any other program (``git``) is passed through to the real spawn.
+All tool calls run at spawn time, before the runner reads any output. Any
+other program (``git``) is passed through to the real spawn.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 from collections import deque
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
 from app.services import claude_runner
-from tests.fakes.claude_process import MCP_PREFIX, FakeProcess
+from tests.fakes.claude_contract import contract_problems, parse_argv, tool_allowed
+from tests.fakes.claude_process import FakeProcess
 from tests.fakes.claude_script import AgentRun, AgentScript, ToolCall, ToolCallRecord
 from tests.fakes.guard import binary_name
 
 Matcher = Callable[[AgentRun], bool]
-
-
-def _parse_argv(argv: list[str], cwd: str | None, env: dict[str, str]) -> AgentRun:
-    run = AgentRun(argv=argv, prompt="", cwd=cwd, env=env, output_format="json")
-    run.prompt = run.flag("-p") or ""
-    run.output_format = run.flag("--output-format") or "json"
-    allowed = run.flag("--allowedTools")
-    run.allowed_tools = allowed.split(",") if allowed else []
-    config_path = run.flag("--mcp-config")
-    if config_path:
-        server = json.loads(Path(config_path).read_text())["mcpServers"]["bodhiorchard"]
-        server_env = server["env"]
-        run.mcp_backend_url = server_env["BODHIORCHARD_BACKEND_URL"]
-        run.mcp_token = server_env["BODHIORCHARD_MCP_TOKEN"]
-        tools = server_env.get("BODHIORCHARD_MCP_TOOLS", "")
-        run.mcp_tools = [t for t in tools.split(",") if t]
-    return run
+VERSION_SCRIPT = AgentScript.malformed("2.0.0 (Claude Code)")
 
 
 class FakeClaudeRunner:
@@ -76,6 +62,7 @@ class FakeClaudeRunner:
         self.mcp_client = mcp_client
         self.runs: list[AgentRun] = []
         self.unscripted: list[AgentRun] = []
+        self.problems: list[str] = []
         self.default: AgentScript | None = None
         self._rules: list[tuple[Matcher, AgentScript]] = []
         self._queue: deque[AgentScript] = deque()
@@ -107,19 +94,26 @@ class FakeClaudeRunner:
 
     # ── execution ─────────────────────────────────────────────────
     async def _call_tool(self, run: AgentRun, call: ToolCall) -> ToolCallRecord:
-        params = call.resolve(run)
-        exposed = not run.mcp_tools or call.name in run.mcp_tools
-        allowed = not run.allowed_tools or MCP_PREFIX + call.name in run.allowed_tools
-        if run.mcp_token is None or not exposed or not allowed:
+        try:
+            params = call.resolve(run)
+        except Exception as exc:  # noqa: BLE001 — a broken script must fail the test
+            self.problems.append(f"params for {call.name!r} raised {exc!r}")
+            return ToolCallRecord(call.name, {}, None, {"error": "bad script"}, refused=True)
+        if run.mcp_token is None or not tool_allowed(run, call.name):
             reason = "no MCP server configured" if run.mcp_token is None else "tool not exposed"
             return ToolCallRecord(call.name, params, None, {"error": reason}, refused=True)
         if self.mcp_client is None:
-            raise AssertionError("FakeClaudeRunner.mcp_client is not set; cannot run MCP tools")
-        response = await self.mcp_client.post(
-            f"/mcp/tools/{call.name}",
-            json={"params": params},
-            headers={"Authorization": f"Bearer {run.mcp_token}"},
-        )
+            self.problems.append("FakeClaudeRunner.mcp_client is not set; cannot run MCP tools")
+            return ToolCallRecord(call.name, params, None, {"error": "no client"}, refused=True)
+        try:
+            response = await self.mcp_client.post(
+                f"/mcp/tools/{call.name}",
+                json={"params": params},
+                headers={"Authorization": f"Bearer {run.mcp_token}"},
+            )
+        except Exception as exc:  # noqa: BLE001 — the bridge reports a crash as HTTP 500
+            self.problems.append(f"MCP route crashed on {call.name!r}: {exc!r}")
+            return ToolCallRecord(call.name, params, 500, {"error": "Backend returned HTTP 500"})
         try:
             body: Any = response.json()
         except ValueError:
@@ -129,8 +123,11 @@ class FakeClaudeRunner:
     async def spawn(self, argv: list[str], kwargs: dict[str, Any]) -> FakeProcess:
         """Run the script for one ``claude`` spawn and hand back a process."""
         env = dict(kwargs.get("env") or {})
-        run = _parse_argv(argv, kwargs.get("cwd"), env)
+        run = parse_argv(argv, kwargs.get("cwd"), env)
+        if "--version" in argv:
+            return FakeProcess(run, VERSION_SCRIPT)
         self.runs.append(run)
+        self.problems.extend(contract_problems(run))
         script = self._pick(run)
         if script is None:
             self.unscripted.append(run)
@@ -161,7 +158,8 @@ class FakeClaudeRunner:
         return [c for c in calls if tool is None or c.name == tool]
 
     def assert_all_scripted(self) -> None:
-        """Fail when a run had no script (the test missed an agent call)."""
-        if self.unscripted:
-            prompts = [run.prompt[:120] for run in self.unscripted]
-            pytest.fail(f"unscripted agent runs: {prompts}", pytrace=False)
+        """Fail on unscripted runs, broken scripts, crashes and CLI contract breaks."""
+        failures = [f"unscripted agent run: {run.prompt[:120]!r}" for run in self.unscripted]
+        failures.extend(self.problems)
+        if failures:
+            pytest.fail("FakeClaudeRunner:\n  - " + "\n  - ".join(failures), pytrace=False)

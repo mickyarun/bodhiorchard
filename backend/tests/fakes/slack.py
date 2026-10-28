@@ -19,7 +19,11 @@ The app talks to Slack through plain ``httpx`` calls (``slack_client``,
 mounted on the :class:`FakeHttpRouter`. Every Web API call is recorded as a
 :class:`SlackCall` (method, merged query/body args, bearer token) and
 answered from small dicts the test can fill: ``users``, ``threads``,
-``presence``. ``fail()`` makes a method answer ``{"ok": false, "error": …}``
+``presence``. A call without a token answers ``not_authed``; a token that is
+not a Slack-shaped ``xox…`` string, or one listed in ``revoked_tokens``,
+answers ``invalid_auth``. Profiles (``users.profile.*``) are kept per token.
+``oauth.v2.access`` hands out a user token for any ``code`` except
+``bad-code``. ``fail()`` makes a method answer ``{"ok": false, "error": …}``
 (``missing_scope``, ``channel_not_found``…); ``rate_limit()`` answers HTTP
 429 ``ratelimited`` with ``Retry-After: 0``.
 """
@@ -59,6 +63,7 @@ class FakeSlack:
         self.threads: dict[str, list[dict[str, Any]]] = {}
         self.presence: dict[str, str] = {}
         self.statuses: dict[str, dict[str, Any]] = {}
+        self.revoked_tokens: set[str] = set()
         self.faults = FaultPlan()
         self._ts = itertools.count(1)
         self._ids = itertools.count(1)
@@ -104,12 +109,22 @@ class FakeSlack:
         method = request.url.path.removeprefix("/api/")
         args = {**dict(request.url.params), **request_json(request)}
         token = request.headers.get("authorization", "").removeprefix("Bearer ")
+        if method == "oauth.v2.access":
+            token = "basic-auth"
         self.calls.append(SlackCall(method, args, token))
         injected = self.faults.take(request)
         if injected is not None:
             return injected
+        if not token:
+            return json_response(200, {"ok": False, "error": "not_authed"})
+        if token != "basic-auth" and (not token.startswith("xox") or token in self.revoked_tokens):
+            return json_response(200, {"ok": False, "error": "invalid_auth"})
         handler = self._routes().get(method)
-        body = handler(args) if handler else {"ok": False, "error": "unknown_method"}
+        body = (
+            handler({**args, "_token": token})
+            if handler
+            else {"ok": False, "error": "unknown_method"}
+        )
         return json_response(200, body)
 
     def _routes(self) -> dict[str, Callable[[dict[str, Any]], dict[str, Any]]]:
@@ -125,14 +140,18 @@ class FakeSlack:
                 "ok": True,
                 "presence": self.presence.get(str(a.get("user")), "away"),
             },
-            "users.profile.get": lambda a: {"ok": True, "profile": self.statuses.get("me", {})},
+            "users.profile.get": lambda a: {
+                "ok": True,
+                "profile": self.statuses.get(str(a["_token"]), {}),
+            },
             "users.profile.set": self._set_profile,
             "conversations.open": lambda a: {"ok": True, "channel": {"id": f"D{a.get('users')}"}},
             "conversations.replies": lambda a: self._messages(str(a.get("ts"))),
             "conversations.history": lambda a: self._messages(str(a.get("channel"))),
             "views.open": lambda a: {"ok": True, "view": {"id": f"V{next(self._ids):05d}"}},
             "auth.test": lambda a: {"ok": True, "team_id": self.team_id, "user_id": BOT_USER_ID},
-            "auth.revoke": lambda a: {"ok": True, "revoked": True},
+            "auth.revoke": self._revoke,
+            "oauth.v2.access": self._oauth,
         }
 
     def _next_ts(self) -> str:
@@ -143,6 +162,8 @@ class FakeSlack:
         message = {"ts": ts, "text": args.get("text", ""), "user": BOT_USER_ID}
         thread = str(args.get("thread_ts") or ts)
         self.threads.setdefault(thread, []).append(message)
+        if not args.get("thread_ts"):
+            self.threads.setdefault(str(args.get("channel")), []).append(message)
         return {"ok": True, "channel": args.get("channel"), "ts": ts, "message": message}
 
     def _users_info(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -150,8 +171,19 @@ class FakeSlack:
         return {"ok": True, "user": user} if user else {"ok": False, "error": "user_not_found"}
 
     def _set_profile(self, args: dict[str, Any]) -> dict[str, Any]:
-        self.statuses["me"] = dict(args.get("profile") or {})
-        return {"ok": True, "profile": self.statuses["me"]}
+        token = str(args["_token"])
+        self.statuses[token] = dict(args.get("profile") or {})
+        return {"ok": True, "profile": self.statuses[token]}
+
+    def _revoke(self, args: dict[str, Any]) -> dict[str, Any]:
+        self.revoked_tokens.add(str(args["_token"]))
+        return {"ok": True, "revoked": True}
+
+    def _oauth(self, args: dict[str, Any]) -> dict[str, Any]:
+        if args.get("code") == "bad-code":
+            return {"ok": False, "error": "invalid_code"}
+        user = {"id": "U0OAUTH", "access_token": f"xoxp-user-{next(self._ids)}"}
+        return {"ok": True, "team": {"id": self.team_id}, "authed_user": user}
 
     def _messages(self, key: str) -> dict[str, Any]:
         return {"ok": True, "messages": list(self.threads.get(key, [])), "has_more": False}
