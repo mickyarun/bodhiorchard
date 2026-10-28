@@ -1916,20 +1916,37 @@ async def retry_agent_task(
         await db.refresh(new_task)
         return BUDAgentTaskRead.model_validate(new_task)
     else:
-        job = create_job(
-            JOB_BUD_AGENT,
-            payload=BUDAgentTaskPayload(
-                org_id=str(current_user.org_id),
-                bud_id=str(bud_id),
-                task_id=str(new_task.id),
-            ).model_dump(),
-            user_id=str(current_user.id),
-        )
+        # Commit BEFORE enqueueing. The worker opens its own session at READ
+        # COMMITTED and otherwise races us to a row that isn't visible yet,
+        # failing the retry with "Agent task not found" — pattern documented
+        # in bud_agent_trigger.py.
+        await db.commit()
+        await db.refresh(new_task)
+        try:
+            job = create_job(
+                JOB_BUD_AGENT,
+                payload=BUDAgentTaskPayload(
+                    org_id=str(current_user.org_id),
+                    bud_id=str(bud_id),
+                    task_id=str(new_task.id),
+                ).model_dump(),
+                user_id=str(current_user.id),
+            )
+        except Exception as exc:
+            # The committed PENDING row would hold the one-active-task slot
+            # and block every later retry; mark it failed before answering.
+            new_task.status = AgentTaskStatus.FAILED
+            new_task.error_message = f"Failed to enqueue agent job: {exc}"
+            await db.commit()
+            logger.exception("agent_task_retry_enqueue_failed", task_id=str(new_task.id))
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Job queue unavailable; please retry",
+            ) from exc
 
     new_task.job_id = job.job_id
     new_task.status = AgentTaskStatus.RUNNING
 
-    # Single atomic commit — must happen before return so the worker can read the task
     await db.commit()
     await db.refresh(new_task)
 
