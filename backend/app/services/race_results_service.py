@@ -15,8 +15,9 @@
 """Orchestration layer between the race-results REST endpoint and repo.
 
 Enforces invariants that span the whole request (distance_m validation,
-non-empty placings) before hitting the repository, so the DB layer sees
-only sanitised inputs.
+non-empty placings) before hitting the repository, and drops placings for
+users who are not members of the org, so the DB layer sees only sanitised
+inputs.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.race_result import (
@@ -31,6 +33,9 @@ from app.repositories.race_result import (
     RaceResultInput,
     RaceResultRepository,
 )
+from app.repositories.user import UserRepository
+
+logger = structlog.get_logger(__name__)
 
 # Kept in sync with shared/race/RaceConstants.ts ALLOWED_DISTANCES_M and the
 # CHECK constraint on `race_results.distance_m`.
@@ -79,8 +84,26 @@ async def post_results(db: AsyncSession, req: PostRaceResultsRequest) -> int:
         if not row.finished and row.finish_time_ms is not None:
             raise RaceResultsValidationError("finished=False requires finish_time_ms=None")
 
+    # Org-membership check, as on every other bridge write: a compromised
+    # bridge can't put another org's people on this org's race board. Only the
+    # offending rows are dropped, so one racer who has left the org since
+    # joining the room doesn't cost everyone else their result.
+    members = await UserRepository(db).member_ids_of_org(
+        {row.user_id for row in req.placings}, req.org_id
+    )
+    placings = [row for row in req.placings if row.user_id in members]
+    if len(placings) != len(req.placings):
+        logger.warning(
+            "race_results_non_member_dropped",
+            org_id=str(req.org_id),
+            room_id=req.room_id,
+            user_ids=sorted(str(r.user_id) for r in req.placings if r.user_id not in members),
+        )
+    if not placings:
+        return 0
+
     repo = RaceResultRepository(db, org_id=req.org_id)
-    return await repo.upsert_many(req.room_id, req.placings)
+    return await repo.upsert_many(req.room_id, placings)
 
 
 async def get_leaderboard(

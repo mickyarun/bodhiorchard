@@ -22,7 +22,7 @@
     <p v-if="out.error.value" class="out__empty">{{ out.error.value }}</p>
     <ul v-else-if="out.rows.value.length" class="out">
       <li v-for="row in out.rows.value" :key="row.id" class="out__row">
-        <AppMonogram :name="row.name" :size="30" tone="brand" />
+        <AppMonogram :name="row.name" :src="row.avatarUrl" :size="30" tone="brand" />
         <span class="out__text">
           <span class="out__name">{{ row.name }}</span>
           <span class="out__when">{{ formatDayRange(row.start, row.end) }}</span>

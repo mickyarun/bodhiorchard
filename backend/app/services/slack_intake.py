@@ -216,7 +216,7 @@ async def handle_pm_approval(
         approved: True if approved (✅), False if rejected (❌).
     """
     repo = TriageSessionRepository(db, org_id=org.id)
-    session = await repo.get_by_summary_msg(channel, message_ts)
+    session = await repo.get_by_summary_msg_for_update(channel, message_ts)
 
     if session is None:
         return  # Not a triage summary message

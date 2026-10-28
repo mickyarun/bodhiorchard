@@ -104,7 +104,8 @@ function decline(): void {
 
 <style scoped>
 .invite {
-  position: fixed; z-index: 2050; top: 24px; right: 24px; display: grid;
+  /* Below the top bar, so the bell and account menu stay reachable. */
+  position: fixed; z-index: 2050; top: calc(var(--app-topbar-height, 0px) + 12px); right: 24px; display: grid;
   grid-template-columns: 112px minmax(210px, 1fr); width: min(430px, calc(100vw - 32px));
   overflow: hidden; border: 1px solid rgba(219, 153, 83, .45); border-radius: 18px;
   background: linear-gradient(135deg, #160f0c, #431d18); color: #fff5e2;

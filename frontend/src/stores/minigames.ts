@@ -37,6 +37,7 @@ export interface LeaderboardEntry {
   user_name: string
   best_score: number
   plays: number
+  avatar_url?: string | null
 }
 
 interface MinigameStatus {

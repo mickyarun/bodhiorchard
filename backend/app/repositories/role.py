@@ -17,12 +17,13 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import Select, or_, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
 from app.models.permission import Permission
 from app.models.role import Role, RolePermission, RoleScopeType
+from app.models.user import OrgToUser
 from app.repositories.base import BaseRepository
 from app.schemas.permission import PermissionRead
 from app.schemas.role import RoleRead
@@ -114,6 +115,13 @@ class RoleRepository(BaseRepository[Role]):
         )
         result = await self._db.execute(stmt)
         return [(row[0], row[1], row[2]) for row in result.all()]
+
+    async def count_holders(self, role_id: uuid.UUID) -> int:
+        """Number of memberships, in any org, that hold ``role_id``."""
+        result = await self._db.execute(
+            select(func.count()).select_from(OrgToUser).where(OrgToUser.role_id == role_id)
+        )
+        return int(result.scalar_one())
 
     async def list_custom_role_ids(self) -> list[uuid.UUID]:
         """Return every CUSTOM role id, active or not, across all orgs.

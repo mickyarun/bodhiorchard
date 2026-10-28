@@ -68,6 +68,7 @@ async def list_profiles(
                 user_id=profile.user_id,
                 user_name=user.name if user else "Unknown",
                 email=user.email if user else "",
+                avatar_url=user.avatar_url if user else None,
                 modules=[],
             )
         profiles_map[key].modules.append(

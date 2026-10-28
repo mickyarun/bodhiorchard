@@ -26,7 +26,7 @@
     :aria-current="!controls && selected ? 'true' : undefined"
     @click="emit('select')"
   >
-    <AppMonogram :name="request.user.name" :size="34" tone="brand" />
+    <AppMonogram :name="request.user.name" :src="request.user.avatar_url" :size="34" tone="brand" />
     <span class="queue-item__text">
       <span class="queue-item__top">
         <span class="queue-item__name">{{ request.user.name }}</span>
