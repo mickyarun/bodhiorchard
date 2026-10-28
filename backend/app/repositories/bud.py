@@ -101,6 +101,20 @@ class BUDRepository(BaseRepository[BUDDocument]):
         )
         return result.scalar_one_or_none() is not None
 
+    async def lock_for_edit(self, bud_id: uuid.UUID) -> bool:
+        """Take the BUD's row lock for this transaction; False if no such BUD.
+
+        ``FOR NO KEY UPDATE`` rather than ``FOR UPDATE``: it serialises
+        writers of the BUD row, but does not block inserts of rows that
+        reference it (timeline events, dev activity, PRs, bugs), which
+        only take a key-share lock on the parent.
+        """
+        stmt = self._scoped(
+            select(BUDDocument.id).where(BUDDocument.id == bud_id).with_for_update(key_share=True)
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
     async def get_by_id_for_update(self, entity_id: uuid.UUID) -> BUDDocument | None:
         """Fetch a BUD with a row-level lock (SELECT ... FOR UPDATE).
 
