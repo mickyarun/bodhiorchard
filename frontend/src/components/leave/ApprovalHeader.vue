@@ -18,7 +18,7 @@
      they asked for in three tiles, and their reason when they gave one. -->
 <template>
   <div class="head">
-    <AppMonogram :name="request.user.name" :size="48" tone="brand" />
+    <AppMonogram :name="request.user.name" :src="request.user.avatar_url" :size="48" tone="brand" />
     <div class="head__who">
       <h2 :id="headingId" class="head__name" tabindex="-1">{{ request.user.name }}</h2>
       <span v-if="role" class="head__role">{{ role }}</span>

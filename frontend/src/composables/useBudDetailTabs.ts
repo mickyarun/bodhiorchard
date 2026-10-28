@@ -81,9 +81,11 @@ export function useBudDetailTabs(bud: ComputedRef<BUDDocument | null>) {
     () => currentSection.value === 'design' && (bud.value?.designs ?? []).length === 0,
   )
 
-  // UAT switched off elsewhere while its tab is open: fall back to Prod.
-  watch(uatStageEnabled, (enabled) => {
-    if (!enabled && activeTab.value === 'uat') activeTab.value = 'prod'
+  // No UAT tab while the org has UAT off: fall back to Prod, whether UAT
+  // was switched off with its tab open or the tab was asked for (a BUD
+  // left in UAT opens on its stage tab; a ?tab=uat link).
+  watch([uatStageEnabled, activeTab], ([enabled, tab]) => {
+    if (!enabled && tab === 'uat') activeTab.value = 'prod'
   })
   // A status change on the open BUD opens the tab for the new stage. The
   // first load (and a switch to another BUD) is left to the loader, so a

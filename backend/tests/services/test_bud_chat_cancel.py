@@ -108,7 +108,7 @@ async def test_alive_signals_cancel_and_defers_cleanup_to_worker() -> None:
 
 @pytest.mark.asyncio
 async def test_stale_pointer_clears_directly_and_commits() -> None:
-    """Pointer present but in-memory task gone → lazy clear + commit."""
+    """No running task → queued job dropped (no-op if gone), lazy clear + commit."""
     db = MagicMock()
     db.commit = AsyncMock()
     bud_id = uuid.uuid4()
@@ -127,7 +127,7 @@ async def test_stale_pointer_clears_directly_and_commits() -> None:
             reason="user",
         )
     assert out == "stale-job"
-    cancel_signal.assert_not_called()
+    cancel_signal.assert_called_once_with("stale-job", reason="user")
     repo.clear_active_job.assert_awaited_once_with(bud_id, "design", None)
     db.commit.assert_awaited_once()
 
