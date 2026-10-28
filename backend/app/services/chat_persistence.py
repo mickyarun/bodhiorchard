@@ -22,13 +22,17 @@ import uuid as uuid_mod
 import structlog
 
 from app.database import AsyncSessionLocal
+from app.models.bud_version import BUDEditSource
+from app.repositories import bud_version as bud_version_repo
 from app.repositories.bud import BUDChatMessageRepository, BUDRepository
+from app.services.bud_edit_policy import FIELD_OWNING_STATUS
 from app.services.event_bus import publish
 from app.services.tech_planner_patch import apply_tech_spec_edit
 
 logger = structlog.get_logger(__name__)
 
 _TECH_SPEC_SECTION = "tech_spec_md"
+_CHAT_EDIT_REASON = "chat edit"
 
 
 async def persist_chat_message(
@@ -61,8 +65,13 @@ async def persist_chat_update(
     org_id: str,
     section: str,
     content: str,
+    user_id: str | None = None,
 ) -> None:
     """Write updated chat content to the BUD in the database.
+
+    The pre-edit BUD is snapshotted into ``bud_versions`` (attributed to
+    ``user_id``, the person who sent the chat message) so the History tab
+    can restore what the chat replaced. Unchanged content records nothing.
 
     For ``tech_spec_md`` edits on a BUD already in DEVELOPMENT, the
     Implementation TODO section is refreshed (LLM patch on body changes,
@@ -84,6 +93,17 @@ async def persist_chat_update(
             return
 
         old_value = getattr(bud, section, None)
+        if old_value != content:
+            await bud_version_repo.insert_snapshot(
+                db,
+                bud=bud,
+                # The section's owning phase, not the live status: the BUD
+                # can advance while the chat reply is still generating.
+                phase=FIELD_OWNING_STATUS.get(section, bud.status),
+                source=BUDEditSource.AGENT,
+                edited_by=uuid_mod.UUID(user_id) if user_id else None,
+                reason=_CHAT_EDIT_REASON,
+            )
         setattr(bud, section, content)
         await db.commit()
         logger.info("chat_content_persisted", bud_id=bud_id, section=section)

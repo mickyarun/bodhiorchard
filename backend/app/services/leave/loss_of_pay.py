@@ -20,10 +20,13 @@ days count against the balance.
 
 A request is re-priced whenever its days or the balance behind it may
 have moved (approval, cancelling the rest of a leave under way, a holiday
-change). Re-pricing uses the balance without this request's own paid
-days, so when a request shrinks its loss-of-pay days go first. When
-balance frees up (an adjustment, a cancelled or rejected request), the
-member's leave that still has loss of pay is re-priced, oldest first.
+change). Re-pricing uses the balance without this request, so when a
+request shrinks its loss-of-pay days go first. When the
+balance moves under leave already booked (an adjustment either way, a
+cancelled or rejected request, a recalculated allocation), the member's
+leave of that type is re-priced together, so the balance never ends up
+below zero: whatever it can't cover is loss of pay, and the earliest
+leave is paid first.
 """
 
 import uuid
@@ -49,23 +52,17 @@ def split_paid(days: Decimal, available: Decimal | None) -> tuple[Decimal, Decim
     return paid, days - paid
 
 
-def paid_days(request: LeaveRequest) -> Decimal:
-    """Days of ``request`` that come out of the balance."""
-    return request.days - request.lop_days
-
-
 async def reprice(db: AsyncSession, member: MemberPolicy, request: LeaveRequest) -> None:
     """Re-split an open leave request into paid and loss-of-pay days.
 
     Callers hold the member's lock and have already set ``request.days``.
-    The request still counts in the balance, so its own paid days are
-    added back before splitting.
+    It is priced against the balance without its own paid days, so for
+    the balance query it is all loss of pay until it is split.
     """
     if request.leave_type_id is None:
         return
-    # Fewer days than loss of pay: give the extra back before the database
-    # sees it. Then let the balance query see this request as it is now.
-    request.lop_days = min(request.lop_days, request.days)
+    had = min(request.lop_days, request.days)
+    request.lop_days = request.days
     await db.flush()
     policy = member.policy
     year = leave_year_bounds(request.start_date, policy.year_start_month)
@@ -81,27 +78,42 @@ async def reprice(db: AsyncSession, member: MemberPolicy, request: LeaveRequest)
     line = find_line(lines, request.leave_type_id)
     if line is None:
         # The type was switched off: there's no balance to price against,
-        # so keep the loss of pay it already had.
-        pass
+        # so keep the loss of pay it already had (no more than its days).
+        request.lop_days = had
     elif line.available is None:
         request.lop_days = ZERO
     else:
-        available = line.available + paid_days(request)
-        _paid, request.lop_days = split_paid(request.days, available)
+        _paid, request.lop_days = split_paid(request.days, line.available)
     await db.flush()
 
 
-async def give_back(
+async def rebalance(
     db: AsyncSession, member: MemberPolicy, user_id: uuid.UUID, leave_type_id: uuid.UUID, on: date
 ) -> None:
-    """Re-price a member's leave with loss of pay after balance freed up.
+    """Re-price a member's leave of one type after its balance moved, either way.
 
     ``on`` is any day in the leave year that changed (counted on
-    ``member``'s policy). Callers hold the member's lock.
+    ``member``'s policy). Every approved and pending request of the type in
+    that year is released and priced again in date order, so paid days go
+    to the earliest leave: days freed up reach the oldest loss of pay, and
+    days taken away turn the latest leave unpaid first. Nothing is touched
+    while the balance covers everything booked. Callers hold the member's lock.
     """
-    year = leave_year_bounds(on, member.policy.year_start_month)
-    requests = await LeaveUsageRepository(db, org_id=member.policy.org_id).open_with_lop(
+    policy = member.policy
+    year = leave_year_bounds(on, policy.year_start_month)
+    lines = await balances_for(
+        db, policy=policy, profile=member.profile, user_id=user_id, year=year, on=year.start
+    )
+    line = find_line(lines, leave_type_id)
+    if line is None or line.available is None:
+        # Switched off or no limit: there's no balance to price against.
+        return
+    requests = await LeaveUsageRepository(db, org_id=policy.org_id).active_in_year(
         user_id, leave_type_id, year.start, year.end
     )
+    if line.short == ZERO and not any(r.lop_days > ZERO for r in requests):
+        return
     for request in requests:
-        await reprice(db, await policy_for_request(db, member.policy.org_id, request), request)
+        request.lop_days = request.days
+    for request in requests:
+        await reprice(db, await policy_for_request(db, policy.org_id, request), request)

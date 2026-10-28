@@ -32,7 +32,7 @@ from app.repositories.leave_request import LeaveRequestRepository
 from app.services.leave.calendar_math import count_days
 from app.services.leave.errors import LeaveConflictError, LeaveForbiddenError
 from app.services.leave.lifecycle import load_request
-from app.services.leave.loss_of_pay import give_back
+from app.services.leave.loss_of_pay import rebalance
 from app.services.leave.policies import mandatory_holidays, policy_for_request, today_for
 
 
@@ -93,5 +93,5 @@ async def cancel(
     await db.refresh(request)
     if request.leave_type_id is not None:
         # Its paid days are free again: they may cover loss of pay elsewhere.
-        await give_back(db, member, actor, request.leave_type_id, request.start_date)
+        await rebalance(db, member, actor, request.leave_type_id, request.start_date)
     return request

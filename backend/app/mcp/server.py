@@ -110,6 +110,16 @@ class MCPToolCallRequest(BaseModel):
     params: dict[str, Any] = {}
 
 
+# Shared by every ``code_*`` tool. Agents that only see a repo's name or
+# path otherwise pass that, and the call fails.
+_CODE_GRAPH_REPO_ID_SCHEMA: dict[str, Any] = {
+    "type": "string",
+    "description": (
+        "Tracked repository UUID (not the repo name or path). Agent prompts list "
+        "it next to each repo; a wrong value returns the org's repos with their ids."
+    ),
+}
+
 MCP_TOOLS: list[MCPToolDefinition] = [
     MCPToolDefinition(
         name="get_bud_context",
@@ -906,10 +916,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
                     "type": "string",
                     "description": "Symbol label or node id (case-insensitive).",
                 },
-                "repo_id": {
-                    "type": "string",
-                    "description": "Tracked repo UUID.",
-                },
+                "repo_id": _CODE_GRAPH_REPO_ID_SCHEMA,
                 "direction": {
                     "type": "string",
                     "enum": ["upstream", "downstream", "both"],
@@ -935,7 +942,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
             "type": "object",
             "properties": {
                 "query": {"type": "string"},
-                "repo_id": {"type": "string"},
+                "repo_id": _CODE_GRAPH_REPO_ID_SCHEMA,
                 "limit": {"type": "integer", "default": 10},
             },
             "required": ["query", "repo_id"],
@@ -950,7 +957,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
             "type": "object",
             "properties": {
                 "symbol": {"type": "string"},
-                "repo_id": {"type": "string"},
+                "repo_id": _CODE_GRAPH_REPO_ID_SCHEMA,
             },
             "required": ["symbol", "repo_id"],
         },
@@ -965,7 +972,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
             "type": "object",
             "properties": {
                 "cluster_id": {"type": "string"},
-                "repo_id": {"type": "string"},
+                "repo_id": _CODE_GRAPH_REPO_ID_SCHEMA,
             },
             "required": ["cluster_id", "repo_id"],
         },
@@ -979,7 +986,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_id": {"type": "string"},
+                "repo_id": _CODE_GRAPH_REPO_ID_SCHEMA,
                 "limit": {"type": "integer", "default": 20},
             },
             "required": ["repo_id"],
@@ -994,7 +1001,7 @@ MCP_TOOLS: list[MCPToolDefinition] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_id": {"type": "string"},
+                "repo_id": _CODE_GRAPH_REPO_ID_SCHEMA,
             },
             "required": ["repo_id"],
         },
@@ -1124,6 +1131,7 @@ async def call_tool(
         token_id=auth.token_id,
         tool_name=tool_name,
         transport="http",
+        params=body.params,
         status_code=status.HTTP_200_OK,
     )
     return result
@@ -1134,7 +1142,6 @@ async def call_tool(
 # Handlers that only need the org. Signature: ``(db, org, params)``.
 TOOL_HANDLERS: dict[str, Any] = {
     "get_bud_context": handle_get_bud_context,
-    "write_bud": handle_write_bud,
     "get_features": handle_get_features,
     "search_bugs": handle_search_bugs,
     "post_slack_message": handle_post_slack_message,
@@ -1166,6 +1173,8 @@ AUTH_TOOL_HANDLERS: dict[str, Any] = {
     "create_bud": handle_create_bud,
     "update_bud": handle_update_bud,
     "get_bud_by_id": handle_get_bud_by_id,
+    # Needs the caller identity to attribute the History snapshot.
+    "write_bud": handle_write_bud,
     # Needs the caller identity to attribute the design_updated event.
     "write_bud_design": handle_write_bud_design,
 }

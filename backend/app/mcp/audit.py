@@ -120,6 +120,14 @@ _AUDITABLE_PARAM_KEYS: frozenset[str] = frozenset(
         # design-phase update_bud's repo_id reuses that same entry,
         # so admins get "which repo did this token touch" for free.
         "expected_phase",
+        # Code-graph read arguments (symbol names, traversal knobs). Without
+        # them a failing ``code_*`` call can't be told apart from a
+        # succeeding one in the audit table.
+        "symbol",
+        "target",
+        "direction",
+        "depth",
+        "cluster_id",
     }
 )
 # Per-value cap so a runaway 50 KB "query" doesn't bloat the audit table.

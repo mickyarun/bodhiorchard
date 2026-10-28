@@ -85,6 +85,39 @@ def _month_number(day: date) -> int:
     return day.year * 12 + day.month - 1
 
 
+def headroom_from(
+    allocated: Decimal,
+    accrual: LeaveAccrual,
+    effective_from: date | None,
+    year_start: date,
+    year_end: date,
+    on: date,
+    added: Decimal,
+    removed: Decimal,
+    bookings: Sequence[Booking],
+) -> Decimal:
+    """The tightest month from ``on`` on: below zero when booked paid days outrun it.
+
+    The headroom at a day is what is earned by then, plus days added, less
+    the paid days of leave starting by then. Earned only rises on the 1st,
+    so a month is tightest on its last day: the headroom is checked at the
+    end of ``on``'s month and of every later one, and the smallest wins. For
+    an upfront type that is always the year end: allocation + adjustments −
+    everything booked.
+
+    Days added (``added`` ≥ 0) are usable straight away; days taken away
+    (``removed`` ≤ 0, a carry-forward out included) only come off the
+    year's total, so leave already taken early in the year keeps its pay.
+    """
+    return min(
+        earned_by(allocated, accrual, effective_from, year_start, year_end, day)
+        + added
+        + (removed if day >= year_end else ZERO)
+        - sum((b.days for b in bookings if b.start <= day), ZERO)
+        for day in _month_ends_from(on, year_end)
+    )
+
+
 def usable_from(
     allocated: Decimal,
     accrual: LeaveAccrual,
@@ -92,23 +125,21 @@ def usable_from(
     year_start: date,
     year_end: date,
     on: date,
-    adjustments: Decimal,
+    added: Decimal,
+    removed: Decimal,
     bookings: Sequence[Booking],
 ) -> Decimal:
     """Days that can still be booked starting ``on`` without overdrawing any later month.
 
-    The headroom at a day is what is earned by then, plus adjustments, less
-    the paid days of leave starting by then. Earned only rises on the 1st,
-    so a month is tightest on its last day: the headroom is checked at the
-    end of ``on``'s month and of every later one, and the smallest wins. For
-    an upfront type that is always the year end: allocation + adjustments −
-    everything booked.
+    :func:`headroom_from`, never below zero: when the balance shrinks under
+    booked leave, the days it no longer covers are re-priced as loss of pay
+    (:func:`app.services.leave.loss_of_pay.rebalance`).
     """
-    return min(
-        earned_by(allocated, accrual, effective_from, year_start, year_end, day)
-        + adjustments
-        - sum((b.days for b in bookings if b.start <= day), ZERO)
-        for day in _month_ends_from(on, year_end)
+    return max(
+        headroom_from(
+            allocated, accrual, effective_from, year_start, year_end, on, added, removed, bookings
+        ),
+        ZERO,
     )
 
 

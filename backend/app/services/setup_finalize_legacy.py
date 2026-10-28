@@ -24,6 +24,7 @@ onboard.
 
 from __future__ import annotations
 
+import os
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,9 +32,11 @@ from pathlib import Path
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.organization import Organization
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.setup import SetupSourceCode
+from app.services.directory_listing import in_clone_root, picker_roots
 from app.services.scan_kickoff import kick_off_onboard_scan
 
 logger = structlog.get_logger(__name__)
@@ -60,12 +63,43 @@ async def finalize_legacy_source_code(
     display). Idempotent through ``TrackedRepoRepository.upsert``;
     calling this twice with the same paths re-uses existing rows
     rather than creating duplicates.
+
+    Paths are held to the bar of ``POST /settings/repos``: under a
+    :func:`picker_roots` root and outside the shared clone root, which
+    holds every org's clones side by side. One part of the clone root is
+    allowed, the org's own ``<repos_dir>/<slug>``, because the wizard's
+    GitHub-clone tab lists its clones here to get them scanned. A path
+    that fails is skipped like any other unusable entry.
     """
     repo_repo = TrackedRepoRepository(db, org_id=org.id)
     valid_repo_ids: list[uuid.UUID] = []
+    own_clones = os.path.realpath(str(settings.storage.repos_dir / org.slug))
 
     for repo_cfg in source_code.repos:
-        repo_path = Path(repo_cfg.path).resolve()
+        # Containment check, inline and on the raw string — see
+        # :func:`settings_repos_local.browse_directories` for why it cannot
+        # move into a helper.
+        candidate = os.path.realpath(os.path.expanduser(repo_cfg.path))
+        within = False
+        for root in picker_roots():
+            base = os.path.realpath(str(root))
+            try:
+                within = os.path.commonpath([base, candidate]) == base
+            except ValueError:
+                within = False  # unrelated roots / different drives
+            if within:
+                break
+        # The org's own clones are the one exception to the clone-root
+        # deny (the wizard sends them back after a GitHub clone). The
+        # allow side stays exact, so case can only ever over-refuse.
+        try:
+            own_clone = os.path.commonpath([own_clones, candidate]) == own_clones
+        except ValueError:
+            own_clone = False
+        if not own_clone and (not within or in_clone_root(candidate)):
+            logger.warning("setup_skip_repo_outside_roots", path=candidate, org_id=str(org.id))
+            continue
+        repo_path = Path(candidate)
         if not repo_path.exists() or not (repo_path / ".git").exists():
             logger.warning("setup_skip_invalid_repo", path=str(repo_path))
             continue

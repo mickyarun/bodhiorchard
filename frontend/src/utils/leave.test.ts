@@ -43,6 +43,7 @@ function balance(overrides: Partial<Balance> = {}): Balance {
     allocated: '12.0',
     earned: '12.0',
     adjustments: '0',
+    added: '0',
     used: '3.0',
     pending: '1.0',
     available: '8.0',

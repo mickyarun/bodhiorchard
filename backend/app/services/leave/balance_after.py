@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.leave_request import LeaveKind, LeaveRequest
 from app.repositories.employee_profile import EmployeeProfileRepository
 from app.repositories.leave_ledger import LeaveLedgerRepository
+from app.repositories.leave_ledger_totals import NO_TOTALS
 from app.repositories.leave_policy import LeavePolicyRepository
 from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.leave_usage import LeaveUsageRepository
@@ -40,7 +41,6 @@ from app.services.leave.balances import booking, proration_rule
 from app.services.leave.calendar_math import LeaveYearBounds, leave_year_bounds
 from app.services.leave.policies import effective_from
 
-ZERO = Decimal("0")
 UsageKey = tuple[uuid.UUID, uuid.UUID, int]
 
 
@@ -90,7 +90,8 @@ async def balances_after(
             out[request.id] = AfterApproval(days=None, year=year.label)
             continue
         key = (request.user_id, leave_type.id, year.label)
-        allocated, adjustments = ledger.get(key, (None, ZERO))
+        totals = ledger.get(key, NO_TOTALS)
+        allocated = totals.allocation
         joined = effective_from(profiles.get(request.user_id))
         if allocated is None:
             allocated = allocation_for_year(
@@ -109,7 +110,8 @@ async def balances_after(
             year.start,
             year.end,
             request.start_date,
-            adjustments,
+            totals.added,
+            totals.removed,
             usage.get(key, []),
         )
         out[request.id] = AfterApproval(days=days, year=year.label)

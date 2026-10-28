@@ -13,7 +13,7 @@
 // limitations under the License.
 
 /** Wording for leave types whose allowance is earned month by month. */
-import type { Balance } from '@/types/leave'
+import type { Balance, Decimalish, LeavePreview } from '@/types/leave'
 import { formatDays, pluralDays, toNumber, toNumberOrNull } from '@/utils/leave'
 
 /** "Earned 15 of 18 so far" while a monthly type is still building up; '' otherwise. */
@@ -49,20 +49,35 @@ export function monthlyLimitNote(balance: Pick<Balance, 'monthly_limit_days'>): 
 }
 
 /**
- * For a monthly type, "days left" can be more than earned − used − pending:
- * leave booked for a later month is covered by what is earned by then, so
- * it takes less from today's balance. Returns a line saying so when that
- * happens, so the numbers on the card add up for the reader; '' otherwise.
+ * For a monthly type, "days left" can be more than earned + added − used −
+ * pending: leave booked for a later month is covered by what is earned by
+ * then, so it takes less from today's balance. Returns a line saying so
+ * when that happens, so the numbers on the card add up for the reader;
+ * '' otherwise. Days taken away only come off the year's total, so they
+ * aren't counted here.
  */
 export function bookedAheadNote(
-  balance: Pick<Balance, 'accrual' | 'earned' | 'adjustments' | 'used' | 'pending' | 'available'>,
+  balance: Pick<Balance, 'accrual' | 'earned' | 'added' | 'used' | 'pending' | 'available'>,
 ): string {
   if (balance.accrual !== 'monthly') return ''
   const earned = toNumberOrNull(balance.earned)
   const available = toNumberOrNull(balance.available)
   if (earned === null || available === null) return ''
-  const plain =
-    earned + toNumber(balance.adjustments) - toNumber(balance.used) - toNumber(balance.pending)
+  const plain = earned + toNumber(balance.added) - toNumber(balance.used) - toNumber(balance.pending)
   // Decimal strings: compare to a hundredth so rounding never shows the note.
   return available - plain > 0.005 ? BOOKED_AHEAD_NOTE : ''
+}
+
+/**
+ * A type's days left for the request being drafted. Once the preview has
+ * priced the dates, it's what is left on the start date, the same number
+ * the preview's "before" shows; until then, what is left today.
+ */
+export function daysLeftForDraft(
+  balance: Pick<Balance, 'leave_type' | 'available'>,
+  preview: Pick<LeavePreview, 'balances_on_start'> | null,
+): Decimalish | null {
+  const onStart = preview?.balances_on_start ?? {}
+  const id = balance.leave_type.id
+  return id in onStart ? (onStart[id] ?? null) : balance.available
 }

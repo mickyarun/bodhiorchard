@@ -71,7 +71,7 @@ async def test_unused_days_carry_up_to_the_cap_once(pg_session_factory: Factory)
     async with pg_session_factory() as db:
         # What's left of the old year (8 unused, 5 moved) can't pay twice.
         totals = await LeaveLedgerRepository(db, org_id=org).totals(rested, OLD)
-        assert totals[casual] == (D(18), D(-5))
+        assert totals[casual] == (D(18), D(0), D(-5))
     # The old year's allocation the carry was worked out from is now fixed.
     frozen = await entries(pg_session_factory, rested, LedgerEntryType.ALLOCATION)
     assert [(e.leave_year, e.days) for e in frozen] == [(OLD, D(18))]

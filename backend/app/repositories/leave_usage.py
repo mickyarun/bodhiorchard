@@ -58,12 +58,12 @@ class LeaveUsageRepository(BaseRepository[LeaveRequest]):
         )
         return Decimal((await self._db.execute(stmt)).scalar_one())
 
-    async def open_with_lop(
+    async def active_in_year(
         self, user_id: uuid.UUID, leave_type_id: uuid.UUID, start: date, end: date
     ) -> list[LeaveRequest]:
-        """Approved and pending leave of one type in a leave year that has loss of pay.
+        """Approved and pending leave of one type starting in a leave year.
 
-        Oldest first, so days freed up go to the earliest leave.
+        Oldest first, the order it is paid in.
         """
         stmt = self._scoped(
             select(LeaveRequest)
@@ -71,7 +71,6 @@ class LeaveUsageRepository(BaseRepository[LeaveRequest]):
                 LeaveRequest.user_id == user_id,
                 LeaveRequest.leave_type_id == leave_type_id,
                 LeaveRequest.status.in_(ACTIVE),
-                LeaveRequest.lop_days > 0,
                 LeaveRequest.start_date >= start,
                 LeaveRequest.start_date <= end,
             )
@@ -144,7 +143,6 @@ class LeaveUsageRepository(BaseRepository[LeaveRequest]):
                 LeaveRequest.user_id.in_(user_ids),
                 LeaveRequest.kind == LeaveKind.LEAVE,
                 LeaveRequest.status.in_(ACTIVE),
-                LeaveRequest.lop_days > 0,
                 LeaveRequest.start_date >= start,
                 LeaveRequest.start_date <= end,
             )

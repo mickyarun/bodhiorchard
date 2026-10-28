@@ -42,7 +42,7 @@ from app.services.leave.errors import (
     LeaveForbiddenError,
     LeaveInvalidError,
 )
-from app.services.leave.loss_of_pay import give_back
+from app.services.leave.loss_of_pay import rebalance
 from app.services.leave.member_balances import require_member
 from app.services.leave.policies import (
     MemberPolicy,
@@ -93,8 +93,9 @@ async def adjust(db: AsyncSession, change: BalanceChange, days: Decimal, note: s
             created_by=change.actor_id,
         )
     )
-    if days > 0:
-        await give_back(db, member, change.user_id, leave_type.id, year.start)
+    # Either way the booked leave is re-priced: added days cover loss of pay,
+    # removed ones turn leave the balance no longer covers into loss of pay.
+    await rebalance(db, member, change.user_id, leave_type.id, year.start)
     return year.label
 
 
@@ -104,7 +105,8 @@ async def recalculate(db: AsyncSession, change: BalanceChange) -> Recalculation:
     Use it after fixing a joining date or a policy's proration rule: the
     year's allocation was fixed on first use, so it doesn't follow those
     edits by itself. The gap is written as a correction, so the original
-    allocation and every earlier fix stay visible in the ledger.
+    allocation and every earlier fix stay visible in the ledger. Booked
+    leave is then re-priced against the result.
     """
     member, leave_type, year = await _prepare(db, change)
     if leave_type.annual_quota_days is None:
@@ -141,8 +143,9 @@ async def recalculate(db: AsyncSession, change: BalanceChange) -> Recalculation:
                 created_by=change.actor_id,
             )
         )
-        if correction > 0:
-            await give_back(db, member, change.user_id, leave_type.id, year.start)
+    # Also with no correction: leave priced under an earlier rule is put
+    # right against the balance as it stands.
+    await rebalance(db, member, change.user_id, leave_type.id, year.start)
     return Recalculation(year.label, frozen, recalculated, correction)
 
 

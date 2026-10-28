@@ -547,7 +547,13 @@ async def _run_chat_job(job_id: str, payload: ChatJobPayload) -> None:
     if payload.section != "design":
         updated = response.get("updated_content")
         if updated is not None:
-            await persist_chat_update(payload.bud_id, payload.org_id, payload.section, updated)
+            await persist_chat_update(
+                payload.bud_id,
+                payload.org_id,
+                payload.section,
+                updated,
+                user_id=payload.user_id,
+            )
 
     reply_text = response.get("reply", "Done.")
     await persist_chat_message(

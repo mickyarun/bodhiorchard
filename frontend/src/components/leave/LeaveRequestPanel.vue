@@ -32,7 +32,7 @@
         class="align-self-start"
       />
       <LeaveBalanceStrip v-if="summary" :summary="summary" :kind="form.kind.value" :selected-type-id="form.leaveTypeId.value" />
-      <LeaveTypePicker v-if="form.kind.value === 'leave'" v-model="form.leaveTypeId.value" :balances="summary?.balances ?? []" />
+      <LeaveTypePicker v-if="form.kind.value === 'leave'" v-model="form.leaveTypeId.value" :balances="summary?.balances ?? []" :preview="form.preview.value" />
       <v-select
         v-if="form.kind.value === 'optional_holiday'"
         v-model="form.holidayId.value"

@@ -21,6 +21,7 @@ state. Every endpoint that returns a ``RepoInfo`` row delegates to
 place.
 """
 
+import os
 import uuid
 from pathlib import Path
 
@@ -30,7 +31,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1._repo_info_builder import build_repo_info
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.repo_layer import RepoLayer
 from app.models.tracked_repository import RepoStatus
 from app.models.user import User
@@ -62,6 +63,7 @@ from app.schemas.settings import (
     RepoInfo,
     RepoStatusRequest,
 )
+from app.services.directory_listing import in_clone_root, picker_roots
 from app.services.git_operations import get_github_repo_full_name
 from app.services.github_install_repos import (
     list_installation_repos,
@@ -120,14 +122,48 @@ async def list_repos(
     ]
 
 
-@router.post("/repos", response_model=RepoInfo)
+@router.post(
+    "/repos",
+    response_model=RepoInfo,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
 async def add_repo(
     body: AddRepoRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> RepoInfo:
-    """Add a repository by absolute path. Any valid git checkout is accepted."""
-    repo_path = Path(body.path).resolve()
+    """Add a git checkout by absolute path.
+
+    Held to the same bar as the folder picker that feeds it
+    (:mod:`settings_repos_local`): ``settings:edit``, and a path under
+    :func:`picker_roots`. The backend's clone root is refused even when it
+    sits under a root (a host install keeps it in the checkout, so under
+    home): it holds every org's clones side by side, and clones are
+    registered by ``POST /repos/clone``, never by path.
+    """
+    # Containment check, inline and on the raw string — see
+    # :func:`settings_repos_local.browse_directories` for why it cannot
+    # move into a helper.
+    candidate = os.path.realpath(os.path.expanduser(body.path))
+    within = False
+    for root in picker_roots():
+        base = os.path.realpath(str(root))
+        try:
+            within = os.path.commonpath([base, candidate]) == base
+        except ValueError:
+            within = False  # unrelated roots / different drives
+        if within:
+            break
+    outside = HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Path is outside the directories repositories can be added from.",
+    )
+    if not within:
+        raise outside
+    # Separate from the barrier above so CodeQL still recognises it.
+    if in_clone_root(candidate):
+        raise outside
+    repo_path = Path(candidate)
     if not repo_path.exists():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

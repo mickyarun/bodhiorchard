@@ -119,14 +119,15 @@ export function eventTitle(event: ConfigEventRead): string {
   }
 }
 
-/** "Was 12 days, now 6.5: booked −5.5 days." or "Already matches the current rules." */
+/** "Was 12 days, now 6.5: booked −5.5 days." or "The allocation already matches the current rules." */
 export function recalculationSummary(result: {
   frozen: string | number
   recalculated: string | number
   correction: string | number
 }): string {
   const correction = Number(result.correction)
-  if (!correction) return 'Already matches the current rules; nothing changed.'
+  // Booked leave is still re-priced, so don't say nothing changed.
+  if (!correction) return 'The allocation already matches the current rules.'
   const sign = correction > 0 ? '+' : '−'
   return `Was ${Number(result.frozen)} days, now ${Number(result.recalculated)}: booked ${sign}${Math.abs(correction)} days.`
 }

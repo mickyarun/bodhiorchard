@@ -40,7 +40,7 @@ from app.repositories.leave_type import LeaveTypeRepository
 from app.schemas.leave_report_filters import PeopleFilters
 from app.services.leave.calendar_math import LeaveYearBounds, leave_year_by_label
 from app.services.leave.carry_rule import added_in, carry_days, carry_notes, due_year
-from app.services.leave.loss_of_pay import give_back
+from app.services.leave.loss_of_pay import rebalance
 from app.services.leave.policies import MemberPolicy, today_for
 from app.services.leave.reports.balance_lines import balance_lines
 from app.services.leave.reports.population import Person, people
@@ -177,4 +177,4 @@ async def _write(db: AsyncSession, carry: Carry) -> None:
         )
     # Leave already booked in the new year as loss of pay is re-priced
     # against the carried days, as after any added days.
-    await give_back(db, carry.member, carry.user_id, carry.leave_type_id, carry.new_year.start)
+    await rebalance(db, carry.member, carry.user_id, carry.leave_type_id, carry.new_year.start)

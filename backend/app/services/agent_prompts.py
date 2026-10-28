@@ -178,7 +178,7 @@ async def build_tech_arch_prompt(
     ds_repo = DesignSystemRefRepository(db, org_id=org_id)
     has_design_system = bool(await ds_repo.get_default())
 
-    repo_context = _build_repo_context(repo_pairs)
+    repo_context = _build_repo_context(repo_triples)
 
     ctx = await load_bud_agent_context(db, bud_id=bud.id, org_id=org_id)
     linked_section = format_code_locations_section(
@@ -256,12 +256,13 @@ async def build_code_review_prompt(
         confirmed_repos,
         last_shas,
         pr_branches,
+        repo_ids_by_path=await _repo_ids_by_path(db, org_id),
     )
 
     if not repo_sections:
         raise ValueError("No confirmed repos with commits for code review")
 
-    repo_list = "\n".join(repo_sections)
+    repo_list = "\n".join(repo_sections) + _CODE_INTEL_REPO_ID_NOTE
 
     design_refs = _build_design_mcp_directive(bud, purpose="reviewing")
 
@@ -329,8 +330,13 @@ async def build_testing_prompt(
         confirmed_repos,
         last_shas,
         pr_branches={},
+        repo_ids_by_path=await _repo_ids_by_path(db, org_id),
     )
-    repo_list = "\n".join(repo_sections) if repo_sections else "(no repos confirmed)"
+    repo_list = (
+        "\n".join(repo_sections) + _CODE_INTEL_REPO_ID_NOTE
+        if repo_sections
+        else "(no repos confirmed)"
+    )
 
     draft_auto = meta.get("automation_test_plan_md", "")
     draft_manual = meta.get("manual_test_plan_md", "")
@@ -404,11 +410,32 @@ def _build_qa_mode_block(enabled: bool, framework: str) -> str:
 
 # ── Shared helpers ────────────────────────────────────────────────
 
+# The code-intel MCP tools look repos up by tracked-repository UUID only; a
+# name or path gets an error back, so every prompt that points the agent at
+# those tools must show the id next to each repo.
+_CODE_INTEL_REPO_ID_NOTE = (
+    "\n\nThe bodhi code-intel MCP tools (`code_query`, `code_context`, "
+    "`code_impact`, …) take the `repo_id` UUID shown for each repo above — "
+    "not its name or path."
+)
+
+
+async def _repo_ids_by_path(db: Any, org_id: uuid_mod.UUID) -> dict[str, str]:
+    """Map each active tracked repo's clone path to its id.
+
+    ``metadata.confirmed_repos`` only carries ``repo_path`` / ``repo_name``,
+    so the code-review and testing prompts resolve ids at build time — that
+    also covers BUDs whose metadata was written before ids were needed.
+    """
+    triples = await TrackedRepoRepository(db, org_id=org_id).get_active_id_path_name()
+    return {path: str(rid) for rid, path, _name in triples if path}
+
 
 def _build_repo_diff_sections(
     confirmed_repos: list[dict[str, Any]],
     last_shas: dict[str, str],
     pr_branches: dict[str, str],
+    repo_ids_by_path: dict[str, str],
 ) -> tuple[list[str], str | None]:
     """Build repo sections with diff commands (shared by code review & testing)."""
     sections: list[str] = []
@@ -422,11 +449,15 @@ def _build_repo_diff_sections(
         if working_dir is None:
             working_dir = repo_path
 
+        header = f"- **{repo_name}**: `{repo_path}`\n"
+        repo_id = repo_ids_by_path.get(repo_path)
+        if repo_id:
+            header += f"  - repo_id: `{repo_id}`\n"
+
         pr_branch = pr_branches.get(repo_name)
         if pr_branch:
             sections.append(
-                f"- **{repo_name}**: `{repo_path}`\n"
-                f"  - PR branch: `{pr_branch}`\n"
+                header + f"  - PR branch: `{pr_branch}`\n"
                 f"  - First run: `git fetch origin {pr_branch}`\n"
                 f"  - Diff command: `git diff main...origin/{pr_branch} --stat --patch`"
             )
@@ -435,8 +466,7 @@ def _build_repo_diff_sections(
             develop_wt = Path(repo_path) / ".bodhiorchard" / "develop"
             diff_base = "develop" if develop_wt.exists() else "HEAD~10"
             sections.append(
-                f"- **{repo_name}**: `{repo_path}`\n"
-                f"  - Last commit: `{last_sha}`\n"
+                header + f"  - Last commit: `{last_sha}`\n"
                 f"  - Diff command: `git diff {diff_base}...{last_sha} --stat --patch`"
             )
 
@@ -473,13 +503,15 @@ def _build_design_mcp_directive(bud: BUDDocument, *, purpose: str) -> str:
     )
 
 
-def _build_repo_context(repo_pairs: list[tuple[str, str]]) -> str:
+def _build_repo_context(repo_triples: list[tuple[uuid_mod.UUID, str, str]]) -> str:
     """Build repo context with code-intelligence MCP instructions."""
-    if not repo_pairs:
+    if not repo_triples:
         return ""
-    repo_list = "\n".join(f"- **{name}**: `{path}`" for path, name in repo_pairs)
+    repo_list = "\n".join(
+        f"- **{name}**: `{path}` — repo_id: `{rid}`" for rid, path, name in repo_triples
+    )
     return (
-        f"\n## Available Repositories\n\n{repo_list}\n\n"
+        f"\n## Available Repositories\n\n{repo_list}{_CODE_INTEL_REPO_ID_NOTE}\n\n"
         "## IMPORTANT: Code Exploration Rules\n\n"
         "Use bodhi code-intel MCP tools to explore the codebase. "
         "Do NOT use bash find/grep/ls.\n\n"

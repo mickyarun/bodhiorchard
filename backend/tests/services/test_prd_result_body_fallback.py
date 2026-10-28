@@ -112,3 +112,15 @@ async def test_does_not_clobber_a_successful_write_bud() -> None:
     bud, snapshot = await _run(FENCE, existing_requirements="written by write_bud")
     assert bud.requirements_md == "written by write_bud"
     snapshot.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prose_body_drops_insight_blocks_but_keeps_the_document() -> None:
+    insight = (
+        "`★ Insight ─────────────────────────────────────`\n"
+        "- The README predates the CLI.\n"
+        "`─────────────────────────────────────────────────`\n"
+    )
+    body = f"{DOC}\n\n# of retries is capped at 3"
+    bud, _ = await _run(f"{insight}\n{body}\n\n{FENCE}", existing_requirements="")
+    assert bud.requirements_md == body

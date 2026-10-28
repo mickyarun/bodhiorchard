@@ -23,10 +23,14 @@ from typing import Any
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.mcp.auth import MCPAuthResult
 from app.mcp.handler_utils import require_non_empty
 from app.models.bud import BUDDocument, BUDStatus
+from app.models.bud_version import BUDEditSource
 from app.models.organization import Organization
+from app.repositories import bud_version as bud_version_repo
 from app.repositories.bud import BUDRepository
+from app.services.bud_edit_policy import FIELD_OWNING_STATUS
 
 logger = structlog.get_logger(__name__)
 
@@ -113,7 +117,7 @@ _TERMINAL_BUD_STATUSES: tuple[BUDStatus, ...] = (
 
 async def handle_write_bud(
     db: AsyncSession,
-    org: Organization,
+    auth: MCPAuthResult,
     params: dict[str, Any],
 ) -> dict[str, Any]:
     """Save or update a BUD document.
@@ -127,6 +131,10 @@ async def handle_write_bud(
     Refuses empty bodies — silently clobbering an existing BUD's
     ``requirements_md`` with ``""`` is how we shipped data loss in the
     first place.
+
+    Updates snapshot the pre-edit BUD into ``bud_versions`` so the
+    History tab can restore what the write replaced. A write that changes
+    neither title nor body records nothing.
     """
     # Canonical contract: the schema declares `requirements_md`
     # (matching the DB column) as the required body field. If Claude
@@ -141,6 +149,7 @@ async def handle_write_bud(
     body = params.get("requirements_md", "")
     bud_number = params.get("bud_number")
 
+    org = auth.org
     bud_repo = BUDRepository(db, org_id=org.id)
 
     # Update existing BUD if bud_number is provided
@@ -148,6 +157,18 @@ async def handle_write_bud(
         existing = await bud_repo.get_by_number(int(bud_number))
         if existing is None:
             return {"success": False, "error": f"BUD-{bud_number:03d} not found"}
+
+        if existing.title != title or existing.requirements_md != body:
+            await bud_version_repo.insert_snapshot(
+                db,
+                bud=existing,
+                # Filed under the body's owning phase so the Requirements
+                # history shows it even when the BUD has moved on.
+                phase=FIELD_OWNING_STATUS["requirements_md"],
+                source=BUDEditSource.MCP,
+                edited_by=auth.user.id if auth.user else None,
+                mcp_token_id=auth.token_id,
+            )
 
         existing.title = title
         existing.requirements_md = body

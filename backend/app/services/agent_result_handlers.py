@@ -34,6 +34,7 @@ from app.repositories.bud import BUDRepository
 from app.repositories.bud_feature_link import BUDFeatureLinkRepository
 from app.repositories.feature_learning import FeatureLearningRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
+from app.services.agent_markdown import clean_agent_markdown, strip_insights
 from app.services.bud_estimation import estimate_bud_dates
 from app.services.bud_timeline import record_event
 from app.services.embedding_service import embedding_service
@@ -128,7 +129,9 @@ async def handle_prd_result(
         # store their sections. Guarded on an empty body so a successful
         # write_bud is never clobbered.
         if not (bud.requirements_md or "").strip():
-            body = _strip_trailing_json_fence(output)
+            # The PM format has no ``# `` title to anchor a lead-in strip
+            # on, so only insight blocks are removed here.
+            body = strip_insights(_strip_trailing_json_fence(output))
             if body:
                 await _snapshot_agent_write(db, bud)
                 bud.requirements_md = body
@@ -316,15 +319,17 @@ async def handle_tech_arch_result(
 
     The agent outputs markdown followed by a JSON block with impacted_repos.
     We parse that JSON to determine which repos actually need changes,
-    then strip the JSON block before storing the markdown.
+    then strip the JSON block before storing the markdown. Chat lead-in and
+    ``★ Insight`` blocks around the spec are dropped too, so the stored
+    section starts at the spec's own ``# `` heading.
     """
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if bud:
         await _snapshot_agent_write(db, bud)
         # Extract impacted repos from the last JSON fence, then strip it
-        impacted_names, clean_output = _extract_impacted_repos_json(output)
-        bud.tech_spec_md = clean_output
+        impacted_names, spec_body = _extract_impacted_repos_json(output)
+        bud.tech_spec_md = clean_agent_markdown(spec_body)
 
         repo_repo = TrackedRepoRepository(db, org_id=org_id)
         repo_triples = await repo_repo.get_active_id_path_name()

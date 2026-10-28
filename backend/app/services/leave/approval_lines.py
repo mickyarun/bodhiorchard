@@ -29,8 +29,7 @@ from app.services.leave.messages import days_text, format_range, number
 
 
 def format_balance(balance: Balance) -> str:
-    """One leave type's figure for an approver: "Casual 4 of 12 left", "Unpaid 3 taken"
-    or "Casual overdrawn by 2" (after a downward adjustment, say).
+    """One leave type's figure for an approver: "Casual 4 of 12 left" or "Unpaid 3 taken".
 
     Pending days aren't shown: a pending figure on one type would hint at
     which type this request is.
@@ -38,8 +37,6 @@ def format_balance(balance: Balance) -> str:
     name = balance.leave_type.name
     if balance.available is None or balance.allocated is None:
         return f"{name} {number(balance.used)} taken"
-    if balance.available < 0:
-        return f"{name} overdrawn by {number(-balance.available)}"
     return f"{name} {number(balance.available)} of {number(balance.allocated)} left"
 
 

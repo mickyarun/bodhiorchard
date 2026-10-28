@@ -74,7 +74,9 @@ def booked(*items: tuple[date, str, bool]) -> list[Booking]:
 
 
 def usable(on: date, bookings: list[Booking], accrual: LeaveAccrual = MONTHLY) -> Decimal:
-    return usable_from(Decimal(18), accrual, None, YEAR_START, YEAR_END, on, Decimal(0), bookings)
+    return usable_from(
+        Decimal(18), accrual, None, YEAR_START, YEAR_END, on, Decimal(0), Decimal(0), bookings
+    )
 
 
 def test_leave_booked_ahead_uses_its_own_months_allowance() -> None:

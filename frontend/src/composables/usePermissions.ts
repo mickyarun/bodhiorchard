@@ -95,6 +95,11 @@ export function usePermissions() {
   // Same gate as the other configure pages so visibility tracks edit
   // ability rather than splitting view-only access from action access.
   const canViewCodeSettings = computed(() => hasPermission('integrations:configure'))
+  // Registering a local checkout by path — the folder picker and
+  // POST /v1/settings/repos — needs settings:edit on the backend (owner,
+  // admin, tech lead). Narrower than canViewCodeSettings, so the page can
+  // be open to someone who still can't add a folder from disk.
+  const canAddLocalRepos = computed(() => hasPermission('settings:edit'))
 
   // Company Quiz Game admin (settings + question review/approval). Gated on a
   // standalone permission so it can be granted to a "Quiz Master" custom role
@@ -138,6 +143,7 @@ export function usePermissions() {
     canViewPresenceSettings,
     canViewJiraImport,
     canViewCodeSettings,
+    canAddLocalRepos,
     canManageQuiz,
     canViewBugs,
     canReportBugs,

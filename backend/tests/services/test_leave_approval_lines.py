@@ -89,11 +89,6 @@ def test_balances_show_what_is_left_or_taken_never_pending() -> None:
     assert "pending" not in (line or "")
 
 
-def test_an_overdrawn_balance_says_so_instead_of_a_negative_number() -> None:
-    line = balances_line([_balance("Casual", "12", "-1.5")])  # type: ignore[list-item]
-    assert line == "Balances: Casual overdrawn by 1.5"
-
-
 def test_unused_types_without_allocation_are_skipped() -> None:
     line = balances_line(
         [

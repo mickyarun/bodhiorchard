@@ -37,7 +37,7 @@ from app.services.leave.cancellation import days_between
 from app.services.leave.changes import CHANGED_MEANWHILE, changeable, decided_fields
 from app.services.leave.errors import LeaveConflictError, LeaveInvalidError
 from app.services.leave.evaluation import evaluate
-from app.services.leave.loss_of_pay import give_back, reprice
+from app.services.leave.loss_of_pay import rebalance, reprice
 from app.services.leave.policies import MemberPolicy
 
 # The editor is an approver, so "nobody can approve this" doesn't apply.
@@ -86,7 +86,7 @@ async def reschedule(
     await reprice(db, member, request)
     if request.leave_type_id is not None:
         for day in {old_start, request.start_date}:
-            await give_back(db, member, request.user_id, request.leave_type_id, day)
+            await rebalance(db, member, request.user_id, request.leave_type_id, day)
     return request
 
 

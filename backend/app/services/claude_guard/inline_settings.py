@@ -126,6 +126,10 @@ def build_inline_settings_json() -> str:
             # the script. That produced sh-cannot-open errors on stderr
             # and, when the same pattern hit SessionStart, aborted the
             # session before any API call (returncode 0 / empty stdout).
+            # Hooks from different setting sources merge, so these empty
+            # lists alone don't remove anything: the user file is kept out
+            # by ``--setting-sources project,local`` in claude_runner (hooks
+            # from the target repo's own settings still apply).
             "SessionStart": [],
             "SessionEnd": [],
         },

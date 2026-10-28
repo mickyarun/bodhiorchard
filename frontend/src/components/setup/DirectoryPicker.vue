@@ -266,7 +266,7 @@ async function navigateTo(path: string): Promise<void> {
   error.value = ''
 
   try {
-    const { data } = await api.get('/setup/browse-directories', {
+    const { data } = await api.get('/v1/settings/repos/browse-directories', {
       params: { path },
     })
     currentPath.value = data.current_path

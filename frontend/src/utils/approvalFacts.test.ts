@@ -55,7 +55,7 @@ describe('lastLeaveLine', () => {
 function item(balanceAfter: string | null, afterYear: number | null): ApprovalItem {
   const type = { id: 't1', name: 'Casual', code: 'CL', color_key: 'swatch-1' }
   const balance: Balance = {
-    leave_type: type, is_paid: true, accrual: 'upfront', allocated: '12', earned: '12', adjustments: '0', used: '0', pending: '3', available: '9',
+    leave_type: type, is_paid: true, accrual: 'upfront', allocated: '12', earned: '12', adjustments: '0', added: '0', used: '0', pending: '3', available: '9',
   }
   return {
     request: { leave_type: type } as ApprovalItem['request'],

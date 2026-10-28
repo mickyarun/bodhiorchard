@@ -15,7 +15,9 @@
  -->
 
 <!-- Leave type for a request, as a group of radio cards that each say how
-     much of that type is left. -->
+     much of that type is left: on the request's start date once the preview
+     has priced the dates (the same number as its before/after line),
+     until then what is left today. -->
 <template>
   <fieldset class="types">
     <legend class="types__legend">Leave type</legend>
@@ -39,16 +41,18 @@
 
 <script setup lang="ts">
 import { useId } from 'vue'
-import type { Balance } from '@/types/leave'
+import type { Balance, LeavePreview } from '@/types/leave'
 import { formatDays, toNumber } from '@/utils/leave'
+import { daysLeftForDraft } from '@/utils/leaveAccrual'
 
-defineProps<{ balances: Balance[] }>()
+const props = defineProps<{ balances: Balance[]; preview?: LeavePreview | null }>()
 const model = defineModel<string | null>({ required: true })
 const group = useId()
 
 function leftLabel(b: Balance): string {
-  if (b.available === null) return 'No limit'
-  const left = toNumber(b.available)
+  const available = daysLeftForDraft(b, props.preview ?? null)
+  if (available === null) return 'No limit'
+  const left = toNumber(available)
   return `${formatDays(left)} ${left === 1 ? 'day' : 'days'} left`
 }
 </script>

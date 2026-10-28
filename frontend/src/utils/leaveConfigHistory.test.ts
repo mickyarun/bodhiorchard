@@ -102,12 +102,12 @@ describe('eventTitle', () => {
 })
 
 describe('recalculationSummary', () => {
-  it('says what was booked, or that nothing changed', () => {
+  it('says what was booked, or that the allocation already matches', () => {
     expect(recalculationSummary({ frozen: '12', recalculated: '6.5', correction: '-5.5' })).toBe(
       'Was 12 days, now 6.5: booked −5.5 days.',
     )
     expect(recalculationSummary({ frozen: '6', recalculated: '6', correction: '0' })).toBe(
-      'Already matches the current rules; nothing changed.',
+      'The allocation already matches the current rules.',
     )
   })
 })

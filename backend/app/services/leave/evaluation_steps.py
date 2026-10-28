@@ -55,6 +55,9 @@ class Evaluation:
     days: Decimal = ZERO
     excluded: list[tuple[date, str]] = field(default_factory=list)
     balance_before: Decimal | None = None
+    # Every usable type's days left on the start date (None: no limit),
+    # so the type picker reads the same as ``balance_before``.
+    balances_on_start: dict[uuid.UUID, Decimal | None] = field(default_factory=dict)
     # Days the balance doesn't cover; they're taken as loss of pay.
     lop_days: Decimal = ZERO
     holiday: PolicyHoliday | None = None
@@ -169,6 +172,7 @@ async def apply_balance(
         on=result.start,
         persist_type_id=leave_type_id if persist else None,
     )
+    result.balances_on_start = {line.leave_type.id: line.available for line in lines}
     line = find_line(lines, leave_type_id)
     result.balance_before = line.available if line else None
     _paid, result.lop_days = split_paid(result.days, result.balance_before)
