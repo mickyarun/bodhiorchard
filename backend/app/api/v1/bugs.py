@@ -35,6 +35,7 @@ from app.models.user import User
 from app.repositories.bud import BUDRepository
 from app.repositories.bug import BugRepository
 from app.repositories.feature import FeatureRepository
+from app.repositories.user import UserRepository
 from app.schemas.bug import (
     BugBoardResponse,
     BugCreate,
@@ -90,8 +91,9 @@ async def create_bug(
       and the production-bug-closed reward / bug-rejected penalty fire on the
       bug status transition (:func:`app.services.sp_qa.award_qa_sp_on_bug_status`).
     """
-    bud_uuid = uuid.UUID(body.bud_id) if body.bud_id else None
-    feature_uuid = uuid.UUID(body.feature_id) if body.feature_id else None
+    bud_uuid = body.bud_id
+    feature_uuid = body.feature_id
+    await _ensure_links_in_org(db, current_user.org_id, bud_id=bud_uuid, feature_id=feature_uuid)
 
     bug_type = await _decide_bug_type(
         db, current_user.org_id, body.bug_type, bud_uuid, feature_uuid
@@ -169,8 +171,8 @@ async def list_bugs(
     db: AsyncSession = Depends(get_db),
     status_filter: str | None = Query(None, alias="status"),
     severity: str | None = None,
-    bud_id: str | None = Query(None, alias="budId"),
-    feature_id: str | None = Query(None, alias="featureId"),
+    bud_id: uuid.UUID | None = Query(None, alias="budId"),
+    feature_id: uuid.UUID | None = Query(None, alias="featureId"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
 ) -> BugListResponse:
@@ -179,8 +181,8 @@ async def list_bugs(
     items, total = await bug_repo.list_filtered(
         status=status_filter,
         severity=severity,
-        bud_id=uuid.UUID(bud_id) if bud_id else None,
-        feature_id=uuid.UUID(feature_id) if feature_id else None,
+        bud_id=bud_id,
+        feature_id=feature_id,
         page=page,
         page_size=page_size,
     )
@@ -200,8 +202,8 @@ async def list_bug_board(
     db: AsyncSession = Depends(get_db),
     bug_type: str | None = Query(None, alias="bugType"),
     severity: str | None = None,
-    feature_id: str | None = Query(None, alias="featureId"),
-    assignee_id: str | None = Query(None, alias="assigneeId"),
+    feature_id: uuid.UUID | None = Query(None, alias="featureId"),
+    assignee_id: uuid.UUID | None = Query(None, alias="assigneeId"),
 ) -> BugBoardResponse:
     """Bugs grouped by status for the Kanban board.
 
@@ -221,8 +223,8 @@ async def list_bug_board(
     items = await bug_repo.list_board(
         bug_type=resolved_bug_type,
         severity=severity,
-        feature_id=uuid.UUID(feature_id) if feature_id else None,
-        assignee_id=uuid.UUID(assignee_id) if assignee_id else None,
+        feature_id=feature_id,
+        assignee_id=assignee_id,
     )
     list_items = await bugs_to_list_items(db, items, current_user.org_id)
     columns: dict[str, list[BugListItem]] = {s.value: [] for s in BugStatus}
@@ -284,20 +286,13 @@ async def update_bug(
                 detail="Reassigning bugs requires bugs:assign.",
             )
 
-    if "bud_id" in update:
-        update["bud_id"] = uuid.UUID(update["bud_id"]) if update["bud_id"] else None
-        if update["bud_id"] is not None:
-            bud_check = BUDRepository(db, org_id=current_user.org_id)
-            if not await bud_check.get_by_id(update["bud_id"]):
-                raise HTTPException(status_code=404, detail="BUD not found")
-    if "feature_id" in update:
-        update["feature_id"] = uuid.UUID(update["feature_id"]) if update["feature_id"] else None
-        if update["feature_id"] is not None:
-            feature_check = FeatureRepository(db, org_id=current_user.org_id)
-            if not await feature_check.get_by_id(update["feature_id"]):
-                raise HTTPException(status_code=404, detail="Feature not found")
-    if "assignee_id" in update:
-        update["assignee_id"] = uuid.UUID(update["assignee_id"]) if update["assignee_id"] else None
+    await _ensure_links_in_org(
+        db,
+        current_user.org_id,
+        bud_id=update.get("bud_id"),
+        feature_id=update.get("feature_id"),
+        assignee_id=update.get("assignee_id"),
+    )
 
     # Stamp ``resolved_at`` on first transition to resolved / closed.
     if (
@@ -330,6 +325,31 @@ async def update_bug(
 
 
 _background_tasks: set[asyncio.Task[None]] = set()
+
+
+async def _ensure_links_in_org(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    *,
+    bud_id: uuid.UUID | None = None,
+    feature_id: uuid.UUID | None = None,
+    assignee_id: uuid.UUID | None = None,
+) -> None:
+    """404 unless every BUD, feature and assignee the bug points at is in ``org_id``.
+
+    The foreign keys are global, so without this a bug could be linked to
+    another org's BUD or feature, or assigned to someone outside the org.
+    """
+    if bud_id is not None and not await BUDRepository(db, org_id=org_id).get_by_id(bud_id):
+        raise HTTPException(status_code=404, detail="BUD not found")
+    if feature_id is not None and not await FeatureRepository(db, org_id=org_id).get_by_id(
+        feature_id
+    ):
+        raise HTTPException(status_code=404, detail="Feature not found")
+    if assignee_id is not None and not await UserRepository(db).get_membership(
+        assignee_id, org_id
+    ):
+        raise HTTPException(status_code=404, detail="Assignee not found")
 
 
 async def _decide_bug_type(
