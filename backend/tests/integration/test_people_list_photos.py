@@ -16,16 +16,20 @@
 
 Covers the queries that changed to select the photo: the name-and-photo
 lookups, the leave calendar and request views (dashboard time off, out
-soon, the approval queue) and a repo's top contributors.
+soon, the approval queue), a repo's top contributors and a BUD's commit
+contributors.
 """
 
 from __future__ import annotations
 
 import uuid
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
 
+from app.api.v1.bud import get_dev_activity
+from app.models.bud import BUDDocument
 from app.models.dev_activity import DevActivityLog
 from app.models.tracked_repository import TrackedRepository
 from app.models.user import User
@@ -113,3 +117,36 @@ async def test_repo_contributors_carry_member_photos(pg_session_factory: Factory
         ("Asha", 2, PHOTO),
         ("Ghost", 1, None),
     ]
+
+
+async def test_bud_commit_contributors_carry_member_photos(pg_session_factory: Factory) -> None:
+    org, (asha,), _ = await setup_org(pg_session_factory, "Asha")
+    await _set_photo(pg_session_factory, asha)
+    async with pg_session_factory() as db:
+        bud = BUDDocument(org_id=org, bud_number=1, title="Checkout retries")
+        db.add(bud)
+        await db.flush()
+        for n, (user_id, actor) in enumerate(((asha, "Asha"), (None, "Ghost"))):
+            db.add(
+                DevActivityLog(
+                    org_id=org,
+                    bud_id=bud.id,
+                    user_id=user_id,
+                    event_type="commit",
+                    source="hook",
+                    actor_name=actor,
+                    commit_sha=f"{n:040x}",
+                    metadata_={"author_email": f"{actor.lower()}@example.com"},
+                )
+            )
+        await db.commit()
+        me = SimpleNamespace(org_id=org)
+        activity = await get_dev_activity(
+            bud.id,
+            role=None,
+            exclude_role=None,
+            current_user=me,
+            db=db,  # type: ignore[arg-type]
+        )
+    photos = {c.author_name: c.avatar_url for c in activity.contributors}
+    assert photos == {"Asha": PHOTO, "Ghost": None}

@@ -143,21 +143,13 @@
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
-.bud-header__avatar {
+/* Unassigned: an empty dashed ring where the assignee's photo would be. */
+.bud-header__avatar-empty {
   width: 24px;
   height: 24px;
+  flex-shrink: 0;
   box-sizing: border-box;
   border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--color-accent-text);
-  background: var(--color-accent-soft);
-}
-.bud-header__avatar--empty {
-  background: transparent;
   border: 1px dashed rgb(var(--v-theme-on-surface-variant));
 }
 .bud-header__actions {

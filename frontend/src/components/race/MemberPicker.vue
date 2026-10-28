@@ -41,7 +41,7 @@
           :disabled="isCapped(m.id)"
           @click="toggle(m.id)"
         >
-          <span class="member-picker__avatar">{{ initialsOf(m.name) }}</span>
+          <AppMonogram class="member-picker__avatar" :name="m.name" :src="m.avatar_url" />
           <span class="member-picker__text">
             <span class="member-picker__name">{{ m.name }}</span>
             <span class="member-picker__email">{{ m.email }}</span>
@@ -60,12 +60,14 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { initialsOf } from '@/utils/avatar'
+import AppMonogram from '@/components/common/AppMonogram.vue'
 
 export interface MemberPickerEntry {
   id: string
   name: string
   email: string
+  /** The stored photo; initials without one. */
+  avatar_url?: string | null
 }
 
 const props = withDefaults(
@@ -160,22 +162,18 @@ function toggle(id: string): void {
   opacity: 0.35;
   cursor: not-allowed;
 }
-.member-picker__avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
+/* The race palette for initials; a photo covers it. Scoped under the item
+   so it outranks the monogram's own wash. */
+.member-picker__item .member-picker__avatar {
   font-weight: 700;
+  letter-spacing: 0.02em;
   background: linear-gradient(135deg, #4b7bb0, #2d5680);
   color: #fff;
-  letter-spacing: 0.02em;
 }
 .member-picker__item--selected .member-picker__avatar {
   background: linear-gradient(135deg, #7dd57d, #5bae5b);
   color: #06130b;
+  box-shadow: 0 0 0 2px #30d66d;
 }
 .member-picker__text {
   display: flex;

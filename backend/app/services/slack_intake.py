@@ -240,7 +240,7 @@ async def handle_pm_approval(
         return  # Session not in approval state
 
     # Verify the approver is a PM or org owner
-    pair = await UserRepository(db).get_by_slack_id_with_role(org.id, approver_slack_id)
+    pair = await UserRepository(db).get_active_by_slack_id_with_role(org.id, approver_slack_id)
     approver = pair[0] if pair else None
     approver_role_val = pair[1] if pair else None
 

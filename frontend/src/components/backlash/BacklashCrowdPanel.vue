@@ -22,7 +22,7 @@
     <p>{{ viewer ? 'Send the players a quick reaction.' : 'React to a clever move.' }}</p>
     <div v-if="viewers.length" class="crowd-panel__watchers" aria-label="People watching">
       <span v-for="(watcher, index) in viewers" :key="`${watcher.userId}-${index}`">
-        <i>{{ initialsOf(watcher.name) }}</i>{{ watcher.name }}
+        <AppMonogram class="crowd-panel__face" :name="watcher.name" :src="photoFor(watcher.userId)" :size="20" />{{ watcher.name }}
       </span>
     </div>
     <div v-else class="crowd-panel__empty">No one is watching yet</div>
@@ -42,12 +42,14 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import {
   BACKLASH_ENCOURAGEMENTS,
   type BacklashEncouragement,
 } from '@shared/minigames/backlashSocial'
 import type { BacklashViewerSnapshot } from '@/multiplayer/BacklashRoomClient'
-import { initialsOf } from '@/utils/avatar'
+import AppMonogram from '@/components/common/AppMonogram.vue'
+import { useMemberDirectory } from '@/composables/useMemberDirectory'
 
 defineProps<{
   viewer: boolean
@@ -59,6 +61,11 @@ defineProps<{
 const emit = defineEmits<{
   encourage: [reaction: BacklashEncouragement]
 }>()
+
+// Watchers' photos come from the shared member directory; the room state
+// carries names only.
+const { ensureLoaded, photoFor } = useMemberDirectory()
+onMounted(() => void ensureLoaded())
 </script>
 
 <style scoped>
@@ -68,8 +75,8 @@ const emit = defineEmits<{
 .crowd-panel__title span { display: inline-flex; align-items: center; gap: 4px; color: rgba(245,234,211,.42); font-size: 8px; white-space: nowrap; }
 .crowd-panel p { margin: 7px 0 9px; color: rgba(245,234,211,.46); font-size: 9px; }
 .crowd-panel__watchers { display: flex; flex-wrap: wrap; gap: 5px; max-height: 72px; margin-bottom: 10px; overflow-y: auto; }
-.crowd-panel__watchers span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; border: 1px solid rgba(231,174,113,.16); border-radius: 999px; padding: 3px 7px 3px 3px; background: rgba(231,174,113,.07); color: rgba(255,241,219,.7); font-size: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.crowd-panel__watchers i { display: grid; place-items: center; flex: 0 0 20px; width: 20px; height: 20px; border-radius: 50%; background: rgba(220,160,100,.2); color: #efbd89; font-style: normal; font-size: 7px; font-weight: 900; }
+.crowd-panel__watchers > span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; border: 1px solid rgba(231,174,113,.16); border-radius: 999px; padding: 3px 7px 3px 3px; background: rgba(231,174,113,.07); color: rgba(255,241,219,.7); font-size: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crowd-panel__watchers .crowd-panel__face { background: rgba(220,160,100,.2); color: #efbd89; font-size: 7px; font-weight: 900; }
 .crowd-panel__empty { margin-bottom: 10px; color: rgba(245,234,211,.3); font-size: 8px; }
 .crowd-panel__actions { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
 .crowd-panel__actions button { border: 1px solid rgba(255,255,255,.1); border-radius: 8px; padding: 7px 3px; background: rgba(255,255,255,.04); font-size: 19px; cursor: pointer; transition: transform .16s, background .16s; }

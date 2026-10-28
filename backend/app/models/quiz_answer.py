@@ -20,6 +20,11 @@ once; a re-submit is an idempotent no-op. The ``response`` JSONB is type-shaped
 fill-blank: ``{"text": "..."}``) so one table serves every question type.
 ``latency_ms`` is snapshotted from ``answered_at - quiz.open_at`` at submit time
 to drive the speed bonus without recomputation.
+
+``scored_at`` records when the answer's points went into the monthly totals.
+That happens when the quiz is revealed, never at submit, so the monthly board
+can't hint at correctness while the quiz is open. The marker also makes the
+fold exactly-once per answer.
 """
 
 from __future__ import annotations
@@ -61,6 +66,7 @@ class QuizAnswer(BaseModel):
     points_awarded: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     answered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
         return (
