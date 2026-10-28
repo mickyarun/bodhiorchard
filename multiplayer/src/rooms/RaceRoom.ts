@@ -63,14 +63,11 @@ import {
   type RaceCreateOptions,
 } from "./RaceRoomHelpers"
 import { driveBots } from "./RaceBotDriver"
-import {
-  authenticateRaceJoin,
-  raceIdentityFrom,
-  raceIdentityOf,
-  type RaceJoinOptions,
-} from "./RaceRoomAuth"
+import { raceIdentityFrom, raceIdentityOf, type RaceJoinOptions } from "./RaceRoomAuth"
 import { postRaceInvite, postRaceResults } from "../bridge/BackendClient"
 import { fireRaceDispose, fireRacePhase } from "../bridge/RaceRegistry"
+import { consumeRaceCreateTicket } from "../bridge/RaceCreateTickets"
+import { verifyJoin, type JoinIdentity } from "../auth/verifyJoin"
 
 const SIM_TICK_MS = TICK_MS
 
@@ -86,6 +83,9 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
   private runningStartedAtMs = 0
 
   onCreate(rawOptions: unknown): void {
+    // Only OrgRaceHandler, for a verified host, opens races (see RaceCreateTickets).
+    const ticket = (rawOptions as { createTicket?: unknown } | null)?.createTicket
+    if (!consumeRaceCreateTicket(ticket)) throw new Error("race rooms are created by the server")
     const options = assertRaceCreateOptions(rawOptions, ALLOWED_DISTANCES_M)
     this.seedState(options)
     this.seedBots(options.botCount)
@@ -99,15 +99,18 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     this.clock.setTimeout(() => this.expireLobbyIfStillWaiting(), LOBBY_MAX_MS)
   }
 
-  /** Verify the join token; its user becomes the client's racer identity. */
-  async onAuth(_client: Client, options: RaceJoinOptions): Promise<RaceJoinOptions> {
-    return authenticateRaceJoin(options, this.state.orgId)
+  /** Verify the join token for this race's org; its user becomes the racer identity. */
+  async onAuth(_client: Client, options: RaceJoinOptions): Promise<JoinIdentity> {
+    return verifyJoin(options, this.state.orgId)
   }
 
-  onJoin(client: Client, options: RaceJoinOptions, auth?: RaceJoinOptions): void {
+  onJoin(client: Client, options: RaceJoinOptions, auth?: JoinIdentity): void {
     // `options` are the raw client join options; `auth` is what onAuth
     // returned. Racing, host actions and inputs all key off this identity.
-    const identity = raceIdentityFrom(auth ?? options)
+    const identity = raceIdentityFrom(auth, options)
+    // Invites quote the host's name, so it is the verified one, not the
+    // name the room was created with.
+    if (identity.userId === this.state.hostUserId) this.state.hostName = identity.name
     client.userData = identity ?? undefined
     console.log(
       `[RaceRoom ${this.roomId}] ${identity?.name ?? "anonymous"} (${client.sessionId}) joined`,
@@ -233,12 +236,18 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
       return
     }
     if (this.state.phase !== "lobby") return
+    if (!this.mayRace(identity.userId)) return
     if (this.state.racers.size >= MAX_RACERS) return
     const r = buildRacerState(identity, this.state.racers.size)
     if (!r) return
     r.connected = true
     this.state.racers.set(r.userId, r)
     this.physicsRacers.push(makeRacer(r.userId))
+  }
+
+  /** Only the host and the users they invited take a lane; anyone else watches. */
+  private mayRace(userId: string): boolean {
+    return userId === this.state.hostUserId || this.state.invitedUserIds.includes(userId)
   }
 
   /**

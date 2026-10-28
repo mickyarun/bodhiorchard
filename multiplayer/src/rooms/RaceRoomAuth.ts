@@ -13,21 +13,22 @@
 // limitations under the License.
 
 /**
- * RaceRoom join authentication and per-client identity.
+ * RaceRoom per-client identity.
  *
- * A client's racer identity comes only from here: the JWT verified in
- * `onAuth` (or, in development without a token, the claimed join options,
- * matching OrgRoom and MinigameRoom). The `race_join` payload never chooses
- * which user a client races as, and host-only actions compare against it.
+ * A client's racer identity comes only from the join `verifyJoin` accepted
+ * in `onAuth` (the token's user, in the race's org). The `race_join` payload
+ * never chooses which user a client races as, and host-only actions compare
+ * against this identity.
  */
 import type { Client } from "colyseus"
-import { verifyUserToken } from "../bridge/BackendClient"
+import {
+  requireJoinIdentity,
+  type JoinCredentials,
+  type JoinIdentity,
+} from "../auth/verifyJoin"
 
-export interface RaceJoinOptions {
-  userId?: string
-  name?: string
+export interface RaceJoinOptions extends JoinCredentials {
   characterModel?: string
-  token?: string
 }
 
 /** Identity stored on `client.userData` once a client has joined. */
@@ -37,31 +38,15 @@ export interface RaceClientIdentity {
   characterModel: string
 }
 
-/** Verify a join against the backend; the result replaces client claims. */
-export async function authenticateRaceJoin(
+/**
+ * The identity a joined client acts as: the verified user, plus the avatar
+ * it asked for (cosmetic). Refuses a join that did not pass onAuth.
+ */
+export function raceIdentityFrom(
+  auth: JoinIdentity | undefined,
   options: RaceJoinOptions,
-  orgId: string,
-): Promise<RaceJoinOptions> {
-  if (!options.token) {
-    if (process.env.NODE_ENV === "production") throw new Error("auth token required")
-    return options
-  }
-  const result = await verifyUserToken(options.token, orgId)
-  if (!result.valid || !result.user_id) {
-    const reason = result.reason ?? "token_invalid"
-    if (reason === "backend_unreachable") throw new Error("auth backend unreachable")
-    if (reason === "backend_http_error") throw new Error("auth backend rejected request")
-    throw new Error("invalid auth token — JWT may be expired, try refreshing the page")
-  }
-  if (orgId && result.org_id && result.org_id !== orgId) throw new Error("token org mismatch")
-  return { ...options, userId: result.user_id, name: result.name ?? options.name }
-}
-
-/** Build the identity a joined client acts as, or null when it has none. */
-export function raceIdentityFrom(options: RaceJoinOptions): RaceClientIdentity | null {
-  const userId = typeof options.userId === "string" ? options.userId : ""
-  if (!userId) return null
-  const name = typeof options.name === "string" && options.name.trim() ? options.name.trim() : userId
+): RaceClientIdentity {
+  const { userId, name } = requireJoinIdentity(auth)
   const characterModel = typeof options.characterModel === "string" ? options.characterModel : ""
   return { userId, name, characterModel }
 }

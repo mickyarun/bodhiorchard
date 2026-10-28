@@ -21,7 +21,15 @@
 import type { Client } from "colyseus"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { COUNTDOWN_MS } from "../../../shared/race/RaceConstants"
-import { RaceRoom } from "./RaceRoom"
+import {
+  connect as connectTo,
+  createRaceRoom,
+  fakeBackend,
+  join as joinRoom,
+  send as sendTo,
+  verifiedName,
+} from "../testing/raceRoom"
+import type { RaceRoom } from "./RaceRoom"
 
 interface PhysicsView {
   physicsRacers: Array<{ id: string; isMoving: boolean; sprintUntilMs: number }>
@@ -32,26 +40,15 @@ const fetchMock = vi.fn()
 let room: RaceRoom
 
 function send(client: Client, type: string, payload?: unknown): void {
-  const events = (room as unknown as {
-    onMessageEvents: { emit(type: string, client: Client, message: unknown): void }
-  }).onMessageEvents
-  events.emit(type, client, payload)
+  sendTo(room, client, type, payload)
 }
 
-/** Join the room the way Colyseus does: onAuth, then onJoin with its result. */
-async function connect(sessionId: string, options: Record<string, string>): Promise<Client> {
-  const client = { sessionId, userData: undefined, send: vi.fn() } as unknown as Client
-  const auth = await room.onAuth(client, options)
-  room.onJoin(client, options, auth)
-  room.clients.push(client)
-  return client
+function connect(sessionId: string, options: Record<string, string>): Promise<Client> {
+  return connectTo(room, sessionId, options)
 }
 
-/** A development join without a token, then a racer-slot request. */
-async function join(sessionId: string, userId: string): Promise<Client> {
-  const client = await connect(sessionId, { userId, name: userId })
-  send(client, "race_join", { userId, name: userId })
-  return client
+function join(sessionId: string, userId: string): Promise<Client> {
+  return joinRoom(room, sessionId, userId)
 }
 
 function physics(): PhysicsView {
@@ -67,19 +64,12 @@ function startRunning(host: Client): void {
 }
 
 beforeEach(() => {
-  vi.stubEnv("NODE_ENV", "development")
-  fetchMock.mockReset().mockResolvedValue(new Response("{}"))
+  fetchMock.mockReset()
+  fakeBackend(fetchMock)
   vi.stubGlobal("fetch", fetchMock)
   vi.spyOn(console, "log").mockImplementation(() => undefined)
-  room = new RaceRoom()
-  room.roomId = "race-identity"
-  room.onCreate({
-    orgId: "org-a",
-    hostUserId: "host",
-    hostName: "Host",
-    distanceM: 100,
-    invitedUserIds: ["guest"],
-  })
+  vi.spyOn(console, "warn").mockImplementation(() => undefined)
+  room = createRaceRoom()
   vi.spyOn(room, "broadcast").mockImplementation(() => room as never)
 })
 
@@ -92,8 +82,8 @@ afterEach(() => {
 })
 
 describe("join authentication", () => {
-  it("rejects a tokenless join in production", async () => {
-    vi.stubEnv("NODE_ENV", "production")
+  it("rejects a tokenless join unless the operator opted in", async () => {
+    vi.stubEnv("NODE_ENV", "development")
     await expect(connect("s-x", { userId: "host", name: "Host" })).rejects.toThrow(
       "auth token required",
     )
@@ -106,20 +96,21 @@ describe("join authentication", () => {
     )
   })
 
+  it("rejects a backend answer that names no org instead of skipping the org check", async () => {
+    fetchMock.mockResolvedValue(Response.json({ valid: true, user_id: "eve", name: "Eve" }))
+    await expect(connect("s-x", { token: "jwt" })).rejects.toThrow("named no user or org")
+  })
+
   it("ignores a race_join that names another user", async () => {
-    fetchMock.mockResolvedValue(
-      Response.json({ valid: true, user_id: "mallory", org_id: "org-a", name: "Mallory" }),
-    )
-    const mallory = await connect("s-mallory", { userId: "host", name: "Host", token: "jwt" })
-    send(mallory, "race_join", { userId: "host", name: "Host" })
-    await join("s-guest", "guest")
+    const guest = await connect("s-guest", { userId: "host", name: "Host", token: "jwt-guest" })
+    send(guest, "race_join", { userId: "host", name: "Host" })
 
     expect(room.state.racers.has("host")).toBe(false)
-    expect(room.state.racers.get("mallory")?.name).toBe("Mallory")
+    expect(room.state.racers.get("guest")?.name).toBe(verifiedName("guest"))
 
-    send(mallory, "race_add_invitees", { userIds: ["someone"] })
-    send(mallory, "race_cancel", {})
-    send(mallory, "race_start", {})
+    send(guest, "race_add_invitees", { userIds: ["someone"] })
+    send(guest, "race_cancel", {})
+    send(guest, "race_start", {})
     expect([...room.state.invitedUserIds]).toEqual(["guest"])
     expect(room.broadcast).not.toHaveBeenCalled()
     expect(room.state.phase).toBe("lobby")
