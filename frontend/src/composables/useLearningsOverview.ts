@@ -53,6 +53,7 @@ export interface VelocityTrendPoint {
 export interface TopContributor {
   user_id: string
   name: string
+  avatar_url?: string | null
   buds_shipped_30d: number
   total_commits_30d: number
   total_prs_merged_30d: number

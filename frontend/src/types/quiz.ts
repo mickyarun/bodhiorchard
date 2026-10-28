@@ -74,6 +74,7 @@ export interface QuizLeaderboardEntry {
   userName: string
   totalPoints: number
   correctCount: number
+  avatarUrl?: string | null
 }
 
 export interface QuizReviewItem {
