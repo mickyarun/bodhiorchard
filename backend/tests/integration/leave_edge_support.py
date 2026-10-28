@@ -42,10 +42,17 @@ _REAL_TODAY_FOR = policies.today_for
 
 
 def freeze_today(monkeypatch: pytest.MonkeyPatch, day: date) -> None:
-    """Make every policy's today ``day``, in each module that imported ``today_for``."""
-    monkeypatch.setattr(policies, "today_for", lambda _policy: day)
+    """Make every policy's today ``day``, in each module that imported ``today_for``.
+
+    The defining module keeps the real one, so a module first imported
+    while frozen can't keep the frozen day after the test.
+    """
     for name, module in list(sys.modules.items()):
-        if name.startswith("app.") and getattr(module, "today_for", None) is _REAL_TODAY_FOR:
+        if (
+            name.startswith("app.")
+            and module is not policies
+            and getattr(module, "today_for", None) is _REAL_TODAY_FOR
+        ):
             monkeypatch.setattr(module, "today_for", lambda _policy: day)
 
 
