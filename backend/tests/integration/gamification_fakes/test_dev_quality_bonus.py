@@ -172,12 +172,6 @@ async def test_the_completion_bonus_maps_the_effectiveness_score_to_xp(
     assert await _legacy_bonus(app_sessions, org_id, bud_id, dev) == xp
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="quality SP is paid twice per BUD: award_quality_bonus still pays sp_quality under "
-    "its own source_ref next to the close-time bonus; fixed by branch fix/quality-sp-paid-once",
-)
 async def test_a_developer_gets_one_quality_bonus_per_bud_across_both_award_paths(
     app_sessions: Factory,
 ) -> None:

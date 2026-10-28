@@ -122,20 +122,38 @@ async def test_no_payout_without_a_positive_score_or_a_prize(
 
 
 @pytest.mark.parametrize(
-    ("now", "paid_month"),
+    ("now", "zone", "paid_month"),
     [
-        (datetime(2026, 3, 1, 0, 0, 30, tzinfo=UTC), "2026-02"),
-        (datetime(2026, 3, 31, 23, 59, tzinfo=UTC), "2026-02"),
-        (datetime(2026, 1, 1, 0, 1, tzinfo=UTC), "2025-12"),
+        (datetime(2026, 3, 1, 0, 0, 30, tzinfo=UTC), "UTC", None),
+        (datetime(2026, 3, 1, 1, 0, tzinfo=UTC), "UTC", "2026-02"),
+        (datetime(2026, 3, 31, 23, 59, tzinfo=UTC), "UTC", "2026-02"),
+        (datetime(2026, 1, 1, 0, 1, tzinfo=UTC), "UTC", None),
+        (datetime(2026, 1, 1, 1, 0, tzinfo=UTC), "UTC", "2025-12"),
+        (datetime(2026, 3, 1, 8, 59, tzinfo=UTC), "America/Los_Angeles", None),
+        (datetime(2026, 3, 1, 9, 0, tzinfo=UTC), "America/Los_Angeles", "2026-02"),
     ],
-    ids=["first-minute-of-march", "last-minute-of-march", "new-year"],
+    ids=[
+        "first-minute-of-march-still-in-the-last-window",
+        "march-once-the-last-window-closed",
+        "last-minute-of-march",
+        "new-year-still-in-the-last-window",
+        "new-year-once-the-last-window-closed",
+        "pacific-month-not-yet-settled",
+        "pacific-month-settled",
+    ],
 )
-async def test_the_daily_sweep_pays_the_month_that_just_ended(
-    app_sessions: Factory, monkeypatch: pytest.MonkeyPatch, now: datetime, paid_month: str
+async def test_the_daily_sweep_pays_last_month_only_once_its_last_window_has_closed(
+    app_sessions: Factory,
+    monkeypatch: pytest.MonkeyPatch,
+    now: datetime,
+    zone: str,
+    paid_month: str | None,
 ) -> None:
+    """A month settles one answer window after it ends at local midnight in the org's zone."""
     org_id, (ana, ben) = await _players(app_sessions, "ana", "ben")
     disabled_id, (cy,) = await _players(app_sessions, "cy")
-    await enable_quiz(app_sessions, disabled_id, enabled=False)
+    await enable_quiz(app_sessions, org_id, timezone=zone, windowMinutes=60)
+    await enable_quiz(app_sessions, disabled_id, enabled=False, timezone="UTC", windowMinutes=60)
     for month in ("2025-12", "2026-01", "2026-02", "2026-03"):
         winner = ana if month == paid_month else ben
         await seed_score(app_sessions, org_id, winner, month, points=200, correct=2)
@@ -147,9 +165,12 @@ async def test_the_daily_sweep_pays_the_month_that_just_ended(
     monkeypatch.setattr(OrganizationRepository, "list_all_ids", only_these)
     install_clock(monkeypatch, quiz_monthly_rollup, now)
 
-    assert await sweep_once() == 1
+    assert await sweep_once() == (0 if paid_month is None else 1)
     assert await sweep_once() == 0
 
+    await assert_nobody_paid(app_sessions, disabled_id)
+    if paid_month is None:
+        await assert_nobody_paid(app_sessions, org_id)
+        return
     ledger = await sp_ledger(app_sessions, org_id)
     assert ledger == {f"sp_quiz_monthly:{org_id}:{paid_month}:{ana}": 1.0}
-    await assert_nobody_paid(app_sessions, disabled_id)

@@ -12,7 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Answer submission at frozen instants: speed bonus, window edges, month of the points."""
+"""Answer submission at frozen instants: speed bonus, window edges, month of the points.
+
+Points are scored at submit but only reach the monthly board when the reveal
+pass folds them in, so every test reads the board before and after reveal.
+"""
 
 from __future__ import annotations
 
@@ -23,7 +27,9 @@ from typing import Any
 import pytest
 
 from app.repositories.quiz_score import QuizScoreRepository
+from app.schemas.settings import QuizGameSettings
 from app.services import quiz_scoring
+from app.services.quiz_scheduler import _reveal_pass
 from app.services.quiz_scoring import QuizWindowClosedError, SubmitResult, submit_answer
 from tests.fakes.seed import Factory, seed_member, seed_org
 from tests.integration.gamification_fakes.frozen_clock import FrozenClock, install_clock
@@ -36,6 +42,7 @@ OPEN = datetime(2026, 1, 31, 23, 30, tzinfo=UTC)
 REVEAL = OPEN + timedelta(hours=2)
 RIGHT = {"index": 0}
 WRONG = {"index": 3}
+SETTINGS = QuizGameSettings.model_validate({"timezone": "UTC"})
 
 
 @pytest.fixture
@@ -75,6 +82,11 @@ async def _points(factory: Factory, org_id: uuid.UUID, user: uuid.UUID, month: s
         return row.total_points if row else None
 
 
+async def _reveal(org_id: uuid.UUID) -> None:
+    """Run the scheduler's reveal pass once the window has closed (on 1 February)."""
+    await _reveal_pass(org_id, SETTINGS, REVEAL)
+
+
 @pytest.mark.parametrize(
     ("after", "response", "points"),
     [
@@ -98,6 +110,10 @@ async def test_points_are_base_plus_a_decaying_speed_bonus_for_the_quiz_month(
     result = await _submit(app_sessions, org_id, player, quiz_id, response)
 
     assert result == SubmitResult(accepted=True, already_answered=False)
+    assert await _points(app_sessions, org_id, player, "2026-01") is None
+
+    await _reveal(org_id)
+
     assert await _points(app_sessions, org_id, player, "2026-01") == points
     assert await _points(app_sessions, org_id, player, "2026-02") is None
     assert await xp_event_count(app_sessions, org_id) == 0
@@ -114,6 +130,7 @@ async def test_answers_outside_the_window_are_refused_and_not_recorded(
 
     with pytest.raises(QuizWindowClosedError):
         await _submit(app_sessions, org_id, player, quiz_id, RIGHT)
+    await _reveal(org_id)
 
     assert await _points(app_sessions, org_id, player, "2026-01") is None
 
@@ -129,4 +146,6 @@ async def test_a_second_answer_is_acknowledged_but_never_rescored(
     again = await _submit(app_sessions, org_id, player, quiz_id, RIGHT)
 
     assert again == SubmitResult(accepted=True, already_answered=True)
+    await _reveal(org_id)
+    await _reveal(org_id)
     assert await _points(app_sessions, org_id, player, "2026-01") == 0

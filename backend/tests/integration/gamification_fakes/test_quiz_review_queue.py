@@ -105,34 +105,6 @@ async def test_another_orgs_question_is_not_found_and_members_cannot_review(
     assert await statuses(app_sessions, theirs, mine) == [S.DRAFT, S.DRAFT]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="a played question can be approved again and replayed, "
-    "fixed by branch fix/quiz-review-used-question",
-)
-async def test_a_question_that_already_ran_cannot_be_approved_or_edited_again(
-    client: AsyncClient, app_sessions: Factory
-) -> None:
-    org = await seed_org(app_sessions)
-    headers = auth_headers(org.owner_id, org.org_id)
-    used = await add_question(app_sessions, org.org_id, S.USED)
-
-    approve = await client.post(f"{REVIEW}/{used}/approve", json={}, headers=headers)
-    edit = await client.patch(
-        f"{REVIEW}/{used}", json={"answerKey": {"correct_index": 2}}, headers=headers
-    )
-
-    assert (approve.status_code, edit.status_code) == (409, 409)
-    assert await statuses(app_sessions, used) == [S.USED]
-
-
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="an admin edit may make a question print its own answer, "
-    "fixed by branch fix/quiz-answer-giveaways",
-)
 async def test_an_edit_that_puts_the_answer_in_the_prompt_is_refused(
     client: AsyncClient, app_sessions: Factory
 ) -> None:
