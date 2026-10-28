@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +35,17 @@ class QuestionStats:
 
     total: int
     correct: int
+
+
+@dataclass(slots=True, frozen=True)
+class ClaimedAnswer:
+    """One answer claimed for folding into the monthly totals."""
+
+    user_id: uuid.UUID
+    is_correct: bool
+    points: int
+    latency_ms: int
+    answered_at: datetime
 
 
 @dataclass(slots=True, frozen=True)
@@ -104,6 +115,33 @@ class QuizAnswerRepository:
             if existing is None:
                 raise
             return existing, False
+
+    async def claim_unscored(
+        self, *, quiz_id: uuid.UUID, scored_at: datetime
+    ) -> list[ClaimedAnswer]:
+        """Mark a quiz's not-yet-scored answers as scored and return them, oldest first.
+
+        A single conditional UPDATE, so each answer is claimed by exactly one
+        transaction: a concurrent claimer waits on the row locks, then sees
+        ``scored_at`` set and skips the row.
+        """
+        stmt = (
+            update(QuizAnswer)
+            .where(QuizAnswer.org_id == self._org_id)
+            .where(QuizAnswer.quiz_id == quiz_id)
+            .where(QuizAnswer.scored_at.is_(None))
+            .values(scored_at=scored_at)
+            .returning(
+                QuizAnswer.user_id,
+                QuizAnswer.is_correct,
+                QuizAnswer.points_awarded,
+                QuizAnswer.latency_ms,
+                QuizAnswer.answered_at,
+            )
+        )
+        # RETURNING columns are listed in ClaimedAnswer's field order.
+        claimed = [ClaimedAnswer(*r) for r in (await self._db.execute(stmt)).all()]
+        return sorted(claimed, key=lambda a: a.answered_at)
 
     async def list_for_user_quiz(
         self, *, user_id: uuid.UUID, quiz_id: uuid.UUID

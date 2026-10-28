@@ -33,6 +33,7 @@
  * they don't pass a config. See `extractLocalTimeParts` for the rationale.
  */
 import type { PresenceSettingsPayload, WeekdayKey } from "../bridge/BackendClient"
+import { safeLog } from "../bridge/logSanitize"
 
 /**
  * Normalised per-org presence configuration as consumed by the sim.
@@ -111,7 +112,7 @@ export function buildPresenceConfig(
       timezone = payload.timezone
     } catch (_err) {
       console.warn(
-        `[PresenceSim] Invalid IANA timezone "${payload.timezone}" — ` +
+        `[PresenceSim] Invalid IANA timezone "${safeLog(payload.timezone)}" — ` +
           `falling back to server-local time`,
       )
     }
@@ -128,7 +129,7 @@ export function buildPresenceConfig(
   if (workingDays.size === 0) {
     console.error(
       `[PresenceConfig] workingDays empty after mapping payload ` +
-        `${JSON.stringify(payload.workingDays)} — using default Mon-Fri`,
+        `${safeLog(JSON.stringify(payload.workingDays))} — using default Mon-Fri`,
     )
     return DEFAULT_PRESENCE_CONFIG
   }

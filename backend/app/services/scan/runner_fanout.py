@@ -54,6 +54,9 @@ logger = structlog.get_logger(__name__)
 # in-flight task instead of just flipping the DB row.
 _BACKGROUND_SCANS: dict[uuid.UUID, asyncio.Task[None]] = {}
 
+# The stage whose reconcile settles the repo's features for this SHA.
+_SYNTHESIS_STAGE = "synthesize"
+
 
 def cancel_background_task(scan_id: uuid.UUID) -> bool:
     """Cancel the in-flight asyncio task for ``scan_id`` if any.
@@ -185,6 +188,19 @@ async def _execute_scan(
     # under ``scan_cfg``.
     scan_cfg_overrides = await load_scan_cfg(org_id)
 
+    async def _restore_slice(descriptor: RepoDescriptor) -> None:
+        # Reactivate just this repo's soft-deleted features so one repo's
+        # failed synthesis (empty output, timeout, crash) doesn't leave the
+        # org with silently wiped features. Siblings are untouched.
+        slice_ids = deactivated_by_repo.get(descriptor.repo_id, [])
+        if slice_ids:
+            await rollback_soft_deleted_for_repo(
+                org_id=org_id,
+                scan_id=scan_id,
+                repo_id=descriptor.repo_id,
+                feature_ids=slice_ids,
+            )
+
     async def _run_one(descriptor: RepoDescriptor) -> None:
         observer = DBTimelineObserver(org_id=org_id, scan_id=scan_id, repo_id=descriptor.repo_id)
         # Per-stage skip predicates own the "is this work already
@@ -213,7 +229,7 @@ async def _execute_scan(
             # advance to ``run_global_phases`` / mark the Scan terminal
             # until each repo's full stage walk — including the Claude
             # synthesis subprocess — has actually returned.
-            await start_run(
+            run = await start_run(
                 repo_path=descriptor.repo_path,
                 repo_name=descriptor.repo_name,
                 config=config,
@@ -241,23 +257,25 @@ async def _execute_scan(
                 scan_id=str(scan_id),
                 repo_id=str(descriptor.repo_id),
             )
-            # Restore this repo's soft-deleted slice so a single repo's
-            # synthesis failure (Claude empty output, MCP registration
-            # rejected, indexer crash) doesn't leave the org with
-            # silently-wiped features. Siblings whose synthesis
-            # succeeded are untouched — only this repo's slice
-            # reactivates. The orchestration-level rollback below
-            # remains as a backstop for cancellation paths that skip
-            # this handler entirely.
-            slice_ids = deactivated_by_repo.get(descriptor.repo_id, [])
-            if slice_ids:
-                await rollback_soft_deleted_for_repo(
-                    org_id=org_id,
-                    scan_id=scan_id,
-                    repo_id=descriptor.repo_id,
-                    feature_ids=slice_ids,
-                )
+            # Nothing tells us how far the run got, so restore.
+            await _restore_slice(descriptor)
             await observer.on_run_failed(error=f"{type(exc).__name__}: {exc}"[:500])
+        else:
+            # A failing stage does not raise out of ``start_run``: the
+            # workflow catches it, stamps the run row FAILED and returns,
+            # so the run's status is the only signal. Restore only when
+            # synthesis never finished: once it has, the reconciler has
+            # already written the fresh rows and deliberately left
+            # features for removed code inactive, and a later stage
+            # failing (skill extraction, routes) must not revive them.
+            if run.status == "failed" and _SYNTHESIS_STAGE not in run.completed_stages:
+                logger.warning(
+                    "scan_repo_run_failed_restoring_features",
+                    scan_id=str(scan_id),
+                    repo_id=str(descriptor.repo_id),
+                    error=(run.error or "")[:200],
+                )
+                await _restore_slice(descriptor)
 
     try:
         await gather_repos([_run_one(d) for d in repo_descriptors])

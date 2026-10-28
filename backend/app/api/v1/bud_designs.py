@@ -22,11 +22,15 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
-from app.models.bud import BUDDesignStatus
+from app.models.bud import BUDDesign, BUDDesignStatus
+from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
 from app.models.user import User
-from app.repositories.bud import BUDDesignRepository, BUDRepository
+from app.repositories.bud import (
+    BUDDesignRepository,
+    BUDRepository,
+    DesignTargetNotInOrgError,
+)
 from app.repositories.design_system import DesignSystemRefRepository
-from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.bud_design import BUDDesignRead, DesignGenerateRequest, DesignHtmlUpdate
 from app.schemas.jobs import DesignAgentJobPayload
 from app.services.agent_task_cancel import (
@@ -49,18 +53,28 @@ router = APIRouter()
 MAX_DESIGN_UPLOAD_BYTES = 5 * 1024 * 1024
 
 
-async def _assert_repo_in_org(db: AsyncSession, org_id: uuid.UUID, repo_id: uuid.UUID) -> None:
-    """Raise 404 unless ``repo_id`` is a tracked repo in ``org_id``.
+async def _upsert_design(
+    design_repo: BUDDesignRepository,
+    bud_id: uuid.UUID,
+    repo_id: uuid.UUID | None,
+    *,
+    design_status: BUDDesignStatus,
+    design_html: str | None = None,
+    notes: str | None = None,
+) -> BUDDesign:
+    """Upsert a design row, turning a foreign BUD or repo into a 404.
 
-    ``bud_designs.repo_id`` FKs ``tracked_repositories.id`` with no
-    composite org constraint, so a crafted request could otherwise attach a
-    design row to another tenant's repo — and leak its name back via the
-    ``list_with_repo_names`` join. The org-scoped ``get_by_id`` returns None
-    for a foreign or missing repo, which we translate into a 404.
+    The repository refuses a BUD or repo outside the caller's org before it
+    writes anything; a 404 keeps another tenant's ids indistinguishable from
+    ids that don't exist.
     """
-    repo = await TrackedRepoRepository(db, org_id=org_id).get_by_id(repo_id)
-    if repo is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found")
+    try:
+        return await design_repo.upsert(
+            bud_id, repo_id, design_html=design_html, status=design_status, notes=notes
+        )
+    except DesignTargetNotInOrgError as exc:
+        detail = "Repository not found" if exc.kind == "repo" else "BUD not found"
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail) from exc
 
 
 async def _assert_design_system_available(
@@ -107,6 +121,30 @@ async def list_designs(
     return await design_repo.list_with_repo_names(bud_id)
 
 
+async def _fail_unqueued_designs(
+    db: AsyncSession,
+    designs: list[BUDDesign],
+    queued: list[tuple[BUDDesign, str]],
+    task: BUDAgentTask | None,
+    exc: Exception,
+) -> None:
+    """Fail the design rows whose job never got queued (and a new task if none did)."""
+    queued_ids = {design.id for design, _ in queued}
+    for design in designs:
+        if design.id not in queued_ids:
+            design.status = BUDDesignStatus.FAILED
+    for design, job_id in queued:
+        design.job_id = job_id
+    if task is not None:
+        if queued:
+            task.job_id = queued[0][1]
+        else:
+            task.status = AgentTaskStatus.FAILED
+            task.error_message = f"Failed to enqueue design job: {exc}"
+    await db.commit()
+    logger.exception("design_generate_enqueue_failed", bud_id=str(designs[0].bud_id))
+
+
 @router.post(
     "/generate",
     status_code=status.HTTP_202_ACCEPTED,
@@ -128,23 +166,16 @@ async def generate_designs(
     design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
     repo_ids: list[uuid.UUID | None] = list(body.repo_ids) if body.repo_ids else [None]
 
-    # Reject any foreign/unknown repo before creating rows or enqueuing jobs,
-    # so a crafted repo_ids list can't seed design rows against another
-    # tenant's repositories.
-    for rid in repo_ids:
-        if rid is not None:
-            await _assert_repo_in_org(db, current_user.org_id, rid)
-
     await _assert_design_system_available(db, current_user.org_id, repo_ids)
 
-    design_rows: list[tuple[uuid.UUID | None, str]] = []
+    # A foreign/unknown repo id raises 404 from the upsert before any job is
+    # enqueued, and the request transaction rolls back the rows already made.
+    designs: list[BUDDesign] = []
     for rid in repo_ids:
-        design = await design_repo.upsert(
-            bud_id=bud.id,
-            repo_id=rid,
-            status=BUDDesignStatus.PENDING,
+        design = await _upsert_design(
+            design_repo, bud.id, rid, design_status=BUDDesignStatus.PENDING
         )
-        design_rows.append((rid, str(design.id)))
+        designs.append(design)
     await db.flush()
 
     # Resolve skill + create agent task BEFORE enqueuing jobs
@@ -154,7 +185,6 @@ async def generate_designs(
     # here, otherwise the design generation still runs the seeded designer.
     from app.agents.skill_mapping import resolve_skill_for_agent
     from app.models.bud import BUDStatus
-    from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
     from app.repositories.agent_skill import AgentSkillRepository
     from app.repositories.bud_agent_task import BUDAgentTaskRepository
 
@@ -175,6 +205,7 @@ async def generate_designs(
     active = await task_repo.get_active_for_bud(bud_id)
     task_id_str: str | None = str(active.id) if active else None
 
+    new_task: BUDAgentTask | None = None
     if not active and designer_skill:
         task = BUDAgentTask(
             org_id=current_user.org_id,
@@ -188,54 +219,64 @@ async def generate_designs(
         db.add(task)
         await db.flush()
         task_id_str = str(task.id)
+        new_task = task
 
-    results = []
-    for rid, design_id in design_rows:
-        payload = DesignAgentJobPayload(
-            org_id=str(current_user.org_id),
-            bud_id=str(bud.id),
-            bud_number=bud.bud_number,
-            title=bud.title,
-            requirements_md=bud.requirements_md or "",
-            repo_id=str(rid) if rid else None,
-            design_id=design_id,
-            skill_id=skill_id_str,
-            task_id=task_id_str,
-        )
-        job = create_job(
-            JOB_DESIGN_AGENT,
-            payload=payload.model_dump(),
-            user_id=str(current_user.id),
-        )
-
-        design_obj = await design_repo.get_by_id(uuid.UUID(design_id))
-        if design_obj:
-            design_obj.job_id = job.job_id
-            design_obj.status = BUDDesignStatus.GENERATING
-
-        # Backfill job_id on the task (first job wins)
-        if task_id_str and not active:
-            active_task = await task_repo.get_by_id(uuid.UUID(task_id_str))
-            if active_task and not active_task.job_id:
-                active_task.job_id = job.job_id
-
-        results.append(
-            {
-                "designId": design_id,
-                "repoId": str(rid) if rid else None,
-                "jobId": job.job_id,
-            }
-        )
-        logger.info(
-            "design_job_created",
-            bud_id=str(bud.id),
-            repo_id=str(rid) if rid else None,
-            job_id=job.job_id,
-            design_id=design_id,
-        )
-
+    # Commit the rows a design job reads and writes BEFORE enqueueing. The
+    # worker runs in its own session at READ COMMITTED: it could not see an
+    # uncommitted task row, and a job that finished first would have its READY
+    # row and its task's terminal status overwritten by this request's
+    # GENERATING / RUNNING. After queueing only the job ids are written.
+    for design in designs:
+        design.status = BUDDesignStatus.GENERATING
     await db.commit()
-    return results
+
+    queued: list[tuple[BUDDesign, str]] = []
+    try:
+        for design in designs:
+            payload = DesignAgentJobPayload(
+                org_id=str(current_user.org_id),
+                bud_id=str(bud.id),
+                bud_number=bud.bud_number,
+                title=bud.title,
+                requirements_md=bud.requirements_md or "",
+                repo_id=str(design.repo_id) if design.repo_id else None,
+                design_id=str(design.id),
+                skill_id=skill_id_str,
+                task_id=task_id_str,
+            )
+            job = create_job(
+                JOB_DESIGN_AGENT,
+                payload=payload.model_dump(),
+                user_id=str(current_user.id),
+            )
+            queued.append((design, job.job_id))
+            logger.info(
+                "design_job_created",
+                bud_id=str(bud.id),
+                repo_id=str(design.repo_id) if design.repo_id else None,
+                job_id=job.job_id,
+                design_id=str(design.id),
+            )
+    except Exception as exc:
+        await _fail_unqueued_designs(db, designs, queued, new_task, exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Job queue unavailable; please retry",
+        ) from exc
+
+    for design, job_id in queued:
+        design.job_id = job_id
+    if new_task is not None and queued:
+        new_task.job_id = queued[0][1]
+    await db.commit()
+    return [
+        {
+            "designId": str(design.id),
+            "repoId": str(design.repo_id) if design.repo_id else None,
+            "jobId": job_id,
+        }
+        for design, job_id in queued
+    ]
 
 
 @router.put(
@@ -304,11 +345,6 @@ async def upload_design(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
     assert_design_editable(bud)
 
-    # Reject a repo_id that isn't in the caller's org before writing, so a
-    # crafted form can't attach a design row to another tenant's repository.
-    if repo_id is not None:
-        await _assert_repo_in_org(db, current_user.org_id, repo_id)
-
     filename = file.filename or ""
     is_html = filename.lower().endswith((".html", ".htm")) or (file.content_type or "").startswith(
         "text/html"
@@ -339,11 +375,13 @@ async def upload_design(
         )
 
     design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
-    design = await design_repo.upsert(
+    # A repo_id outside the caller's org is refused with 404 before writing.
+    design = await _upsert_design(
+        design_repo,
         bud_id,
         repo_id,
+        design_status=BUDDesignStatus.READY,
         design_html=sanitize_design_html(html),
-        status=BUDDesignStatus.READY,
         notes=notes,
     )
     await record_event(

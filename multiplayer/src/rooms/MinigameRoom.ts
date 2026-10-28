@@ -20,36 +20,60 @@
  * engine (`FireflyEngine` / `FishingEngine` / `PollenEngine`) owns the rules.
  * Lifecycle:
  *   onCreate: pick the engine from `options.game`, thin state, message handler.
- *   onAuth:   verify the JWT (trust boundary) → authoritative userId/orgId.
- *   onJoin:   start the engine + (for timed games) the 20Hz sim loop.
+ *   onAuth:   static, before matchmaking: verify the JWT for the org the
+ *             client names (trust boundary) → authoritative userId/orgId,
+ *             and take one of the player's open-game slots (minigameSlots).
+ *   onJoin:   bind the slot, start the engine + (for timed games) the 20Hz
+ *             sim loop.
+ *   onDispose: release the slot.
  *   finish:   POST the server-computed score via the bridge, relay the outcome.
  */
-import { Room, Client } from "colyseus"
+import { Room, Client, type RoomException, type RoomMethodName } from "colyseus"
+import { reportRoomException } from "./roomExceptions"
+import type { Delayed } from "colyseus"
 import { MinigameRoomState } from "../schema/MinigameRoomState"
 import type { MinigameEngine, MinigameHost } from "./minigame/MinigameEngine"
 import { FireflyEngine } from "./minigame/FireflyEngine"
 import { FishingEngine } from "./minigame/FishingEngine"
 import { PollenEngine } from "./minigame/PollenEngine"
-import { postMinigameResults, verifyUserToken } from "../bridge/BackendClient"
+import { postMinigameResults } from "../bridge/BackendClient"
+import {
+  requireJoinIdentity,
+  type JoinCredentials,
+  type JoinIdentity,
+} from "../auth/verifyJoin"
+import { safeError, safeLog } from "../bridge/logSanitize"
+import {
+  authenticateMinigameJoin,
+  bindMinigameSlot,
+  MINIGAME_SEAT_SECONDS,
+  releaseMinigameSlot,
+} from "./minigameSlots"
 
 const SIM_TICK_MS = 50
 /** Reap an abandoned room (player left a game open) after this long. */
 const MAX_GAME_MS = 5 * 60 * 1000
 const GAMES = new Set(["firefly", "fishing", "pollen_pop"])
 
-interface JoinOptions {
+interface JoinOptions extends JoinCredentials {
   game?: string
-  userId?: string
-  name?: string
-  orgId?: string
-  token?: string
 }
 
 export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements MinigameHost {
   maxClients = 1
+  /** A pending open-game slot lapses with this reservation (see minigameSlots). */
+  seatReservationTimeout = MINIGAME_SEAT_SECONDS
+
+  /**
+   * Verify every join before matchmaking creates the room (see auth/roomAuth).
+   * A play room belongs to the org its creator names; the token must be for
+   * exactly that org, and the score is posted for the token's user. The
+   * player must also have an open-game slot left.
+   */
+  static onAuth = authenticateMinigameJoin
 
   private engine: MinigameEngine | null = null
-  private simHandle: NodeJS.Timeout | null = null
+  private simHandle: Delayed | null = null
   private posted = false
   private userName = ""
 
@@ -65,43 +89,22 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
     this.clock.setTimeout(() => this.endGame(), MAX_GAME_MS)
   }
 
-  async onAuth(_client: Client, options: JoinOptions): Promise<JoinOptions> {
-    const claimedOrg = options.orgId ?? ""
-    if (!options.token) {
-      if (process.env.NODE_ENV === "production") throw new Error("auth token required")
-      console.warn(`[MinigameRoom] dev-mode join without token userId=${options.userId}`)
-      return options
-    }
-    const result = await verifyUserToken(options.token, claimedOrg)
-    if (!result.valid) {
-      const reason = result.reason ?? "token_invalid"
-      if (reason === "backend_unreachable") throw new Error("auth backend unreachable")
-      if (reason === "backend_http_error") throw new Error("auth backend rejected request")
-      throw new Error("invalid auth token — JWT may be expired, try refreshing the page")
-    }
-    // If the client claimed an org, it must match the token's — defence in depth
-    // (the returned orgId is the token's regardless, but reject a mismatched claim).
-    if (claimedOrg && result.org_id && result.org_id !== claimedOrg) {
-      throw new Error("token org mismatch")
-    }
-    // Authoritative identity from the verified token replaces client claims.
-    return {
-      ...options,
-      userId: result.user_id ?? options.userId,
-      name: result.name ?? options.name,
-      orgId: result.org_id ?? claimedOrg,
-    }
-  }
-
-  onJoin(client: Client, options: JoinOptions): void {
+  onJoin(client: Client, _options: JoinOptions, auth?: JoinIdentity): void {
     if (!this.state.game) {
       client.send("mg_error", { reason: "unknown_game" })
       this.disconnect()
       return
     }
-    this.state.userId = options.userId ?? ""
-    this.state.orgId = options.orgId ?? ""
-    this.userName = options.name ?? ""
+    // `options` are the raw client join options; `auth` is what the static
+    // onAuth returned from the verified token. The score is posted for this
+    // identity. Unlike the other rooms there is no room org to compare it
+    // with: a play room has one seat (`maxClients = 1`) and takes its org
+    // from the one verified player, so `requireRoomIdentity` does not apply.
+    const identity = requireJoinIdentity(auth)
+    bindMinigameSlot(identity.userId, this.roomId)
+    this.state.userId = identity.userId
+    this.state.orgId = identity.orgId
+    this.userName = identity.name
     client.userData = { userId: this.state.userId }
 
     const engine = makeEngine(this.state.game)
@@ -112,14 +115,31 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
     this.engine = engine
     engine.start(this)
     if (engine.tick) {
-      this.simHandle = setInterval(() => {
+      // Room clock: guarded by onUncaughtException and cleared on dispose.
+      this.simHandle = this.clock.setInterval(() => {
         if (this.state.phase === "playing") engine.tick?.(this, Date.now())
       }, SIM_TICK_MS)
     }
   }
 
+  /** Report a throwing handler or timer instead of letting it exit the process. */
+  onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
+    reportRoomException(this, error, methodName)
+    // The engine tick is the only interval: one that threw will throw on
+    // every tick, so end the game unrecorded instead of logging it at 20Hz.
+    if (methodName === "setInterval") this.abandonBrokenGame()
+  }
+
+  private abandonBrokenGame(): void {
+    this.stopSim()
+    this.state.phase = "finished"
+    this.posted = true
+    this.broadcast("mg_result", { recorded: false, game: this.state.game, score: 0 })
+  }
+
   onDispose(): void {
     this.stopSim()
+    releaseMinigameSlot(this.roomId)
   }
 
   // ─── MinigameHost ────────────────────────
@@ -172,7 +192,11 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
       game: this.state.game,
       score,
     }).catch((err: unknown) => {
-      console.error(`[MinigameRoom ${this.roomId}] postMinigameResults failed:`, err)
+      console.error(
+        "[MinigameRoom %s] postMinigameResults failed: %s",
+        safeLog(this.roomId),
+        safeError(err),
+      )
       return null
     })
     this.broadcast("mg_result", result ?? { recorded: false, game: this.state.game, score })
@@ -180,7 +204,7 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
 
   private stopSim(): void {
     if (this.simHandle) {
-      clearInterval(this.simHandle)
+      this.simHandle.clear()
       this.simHandle = null
     }
   }

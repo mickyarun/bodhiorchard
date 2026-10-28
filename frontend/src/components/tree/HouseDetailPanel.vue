@@ -18,9 +18,9 @@
   <v-card class="house-detail-panel" elevation="8" rounded="lg">
     <!-- Header -->
     <div class="d-flex align-center px-4 pt-3 pb-1">
-      <v-avatar size="32" color="brown-lighten-4" class="mr-2">
-        <v-img v-if="member?.avatar_url" :src="member.avatar_url" />
-        <v-icon v-else icon="mdi-home" size="20" />
+      <AppMonogram v-if="member" class="mr-2" :name="member.name" :src="member.avatar_url" :size="32" />
+      <v-avatar v-else size="32" color="brown-lighten-4" class="mr-2">
+        <v-icon icon="mdi-home" size="20" />
       </v-avatar>
       <div class="flex-grow-1 overflow-hidden">
         <div class="text-subtitle-1 font-weight-bold text-truncate">
@@ -116,6 +116,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import AppMonogram from '@/components/common/AppMonogram.vue'
 import type { HouseInfo, HouseActivity } from './types'
 import type { MemberActivity } from '@/types/dashboard'
 

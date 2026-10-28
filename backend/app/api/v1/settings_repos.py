@@ -30,6 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1._github_upstream import explain_github_errors
 from app.api.v1._repo_info_builder import build_repo_info
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.repo_layer import RepoLayer
@@ -164,12 +165,13 @@ async def add_repo(
     if in_clone_root(candidate):
         raise outside
     repo_path = Path(candidate)
-    if not repo_path.exists():
+    # os.path, not Path: a name too long for the filesystem reads as missing.
+    if not os.path.exists(repo_path):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Path does not exist: {body.path}",
         )
-    if not (repo_path / ".git").exists():
+    if not os.path.exists(repo_path / ".git"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Path is not a git repository: {body.path}",
@@ -208,7 +210,11 @@ class CloneRepoBody(BaseModel):
     )
 
 
-@router.post("/repos/clone", response_model=RepoInfo)
+@router.post(
+    "/repos/clone",
+    response_model=RepoInfo,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
 async def clone_and_add_repo(
     body: CloneRepoBody,
     current_user: User = Depends(get_current_user),
@@ -282,7 +288,11 @@ async def get_repos_deploy_key(
     }
 
 
-@router.delete("/repos", status_code=status.HTTP_200_OK)
+@router.delete(
+    "/repos",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
 async def remove_repo(
     body: AddRepoRequest,
     current_user: User = Depends(get_current_user),
@@ -323,7 +333,11 @@ async def remove_repo(
     return {"removed": body.path, "deactivated": deactivated_count}
 
 
-@router.patch("/repos/{repo_id}/status", response_model=RepoInfo)
+@router.patch(
+    "/repos/{repo_id}/status",
+    response_model=RepoInfo,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
 async def update_repo_status(
     repo_id: uuid.UUID,
     body: RepoStatusRequest,
@@ -376,7 +390,11 @@ async def get_repo_branches(
     )
 
 
-@router.post("/repos/{repo_id}/classify", response_model=RepoInfo)
+@router.post(
+    "/repos/{repo_id}/classify",
+    response_model=RepoInfo,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
 async def classify_repo_endpoint(
     repo_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -413,7 +431,11 @@ async def classify_repo_endpoint(
     return build_repo_info(repo, include_classification=True)
 
 
-@router.post("/repos/{repo_id}/extract-routes", response_model=RepoInfo)
+@router.post(
+    "/repos/{repo_id}/extract-routes",
+    response_model=RepoInfo,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
 async def extract_routes_endpoint(
     repo_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -451,7 +473,11 @@ async def extract_routes_endpoint(
     return build_repo_info(repo, include_classification=True)
 
 
-@router.patch("/repos/{repo_id}/branches", response_model=RepoInfo)
+@router.patch(
+    "/repos/{repo_id}/branches",
+    response_model=RepoInfo,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
 async def update_repo_branches(
     repo_id: uuid.UUID,
     body: RepoBranchUpdate,
@@ -515,7 +541,8 @@ async def list_installable_repos(
         # Serialize to plain dicts so the cache layer can JSON-encode.
         return [r.model_dump(by_alias=False) for r in repos]
 
-    raw = await get_or_set_json(cache_key, ttl=INSTALLABLE_CACHE_TTL_SECONDS, loader=_load)
+    with explain_github_errors():
+        raw = await get_or_set_json(cache_key, ttl=INSTALLABLE_CACHE_TTL_SECONDS, loader=_load)
     repos = [InstallableRepo.model_validate(item) for item in raw]
     return InstallableListResponse(
         app_install_state=state,
@@ -552,14 +579,16 @@ async def list_installable_repo_branches(
         )
 
     full_name = f"{owner}/{repo}"
-    installable = await list_installation_repos(org, db)
+    with explain_github_errors():
+        installable = await list_installation_repos(org, db)
     if not any(item.full_name == full_name for item in installable):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository is not in the installation set.",
         )
 
-    branches = await list_remote_branches_via_api(org, full_name)
+    with explain_github_errors():
+        branches = await list_remote_branches_via_api(org, full_name)
     return InstallableRepoBranchList(branches=branches)
 
 
@@ -567,6 +596,7 @@ async def list_installable_repo_branches(
     "/repos/bulk-onboard",
     response_model=JobCreatedResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_permissions("settings:edit"))],
 )
 async def bulk_onboard_repos(
     body: BulkOnboardRequest,
@@ -591,7 +621,8 @@ async def bulk_onboard_repos(
             detail="GitHub App installation is not ready.",
         )
 
-    installable = await list_installation_repos(org, db)
+    with explain_github_errors():
+        installable = await list_installation_repos(org, db)
     installable_names = {item.full_name for item in installable}
     unknown = [item.full_name for item in body.items if item.full_name not in installable_names]
     if unknown:

@@ -130,5 +130,6 @@ testpaths = ["tests"]
 # is reachable (see ``tests/integration/conftest.py``).
 markers = [
     "integration: spins up a real Postgres container; needs Docker.",
+    "slow: takes several seconds (real git, indexer or scan pipeline); deselect with -m 'not slow'.",
 ]
 addopts = "-m 'not integration'"

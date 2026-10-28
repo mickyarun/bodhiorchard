@@ -190,6 +190,8 @@ async def index_and_cache(
         main_branch,
         skip_fetch=skip_fetch,
         org=org,
+        org_id=org_id,
+        repo_id=repo_id,
     )
 
     resolved_sha = head_sha

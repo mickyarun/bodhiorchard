@@ -46,6 +46,7 @@ def fake_indexer_success(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     captured: dict[str, Any] = {
         "main_branch_for": None,
         "worktree_args": None,
+        "worktree_scope": None,
         "rev_parse_path": None,
         "indexed_path": None,
         "indexed_sha": None,
@@ -75,9 +76,16 @@ def fake_indexer_success(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             return object()
 
     async def _ensure_worktree(
-        repo_path: str, main_branch: str, *, skip_fetch: bool, org: Any
+        repo_path: str,
+        main_branch: str,
+        *,
+        skip_fetch: bool,
+        org: Any,
+        org_id: uuid.UUID | None,
+        repo_id: uuid.UUID | None,
     ) -> str:
         captured["worktree_args"] = (repo_path, main_branch, skip_fetch)
+        captured["worktree_scope"] = (org_id, repo_id)
         return f"/tmp/scan-worktrees/{Path(repo_path).name}/{main_branch}"
 
     async def _run_git(args: list[str], *, cwd: str) -> tuple[str, str, int]:
@@ -162,6 +170,8 @@ async def test_index_and_cache_happy_path(fake_indexer_success: dict[str, Any]) 
     assert repo_arg == "/tmp/repo"
     assert branch_arg == "main"
     assert skip_fetch_arg is False
+    # The worktree folder is keyed by this org and repo, not the repo name.
+    assert fake_indexer_success["worktree_scope"] == (org_id, repo_id)
 
 
 async def test_index_and_cache_resolves_head_when_none(

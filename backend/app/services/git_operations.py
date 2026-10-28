@@ -102,10 +102,10 @@ async def _detect_main_branch(repo_path: str) -> str | None:
         Branch name ('main' or 'master'), or None if neither found.
     """
     # Check remote branches first
-    stdout, _, _ = await run_git(["branch", "-r"], cwd=repo_path)
-    for candidate in ("origin/main", "origin/master"):
-        if candidate in stdout:
-            return candidate.split("/", 1)[1]
+    remote = set(await list_remote_branches(repo_path))
+    for candidate in ("main", "master"):
+        if candidate in remote:
+            return candidate
     # Fallback: check local branches (for repos without a remote)
     local_branches = set(await list_local_branches(repo_path))
     for candidate in ("main", "master"):
@@ -127,10 +127,10 @@ async def _detect_develop_branch(repo_path: str) -> str | None:
         Branch name ('develop' or 'dev'), or None if neither found.
     """
     # Check remote branches first
-    stdout, _, _ = await run_git(["branch", "-r"], cwd=repo_path)
-    for candidate in ("origin/develop", "origin/dev"):
-        if candidate in stdout:
-            return candidate.split("/", 1)[1]
+    remote = set(await list_remote_branches(repo_path))
+    for candidate in ("develop", "dev"):
+        if candidate in remote:
+            return candidate
     # Fallback: check local branches
     local_branches = set(await list_local_branches(repo_path))
     for candidate in ("develop", "dev"):
@@ -348,7 +348,13 @@ async def list_local_branches(repo_path: str) -> list[str]:
 
 
 async def list_remote_branches(repo_path: str) -> list[str]:
-    """List all remote branch names (origin/main → 'main').
+    """List the branch names on ``origin`` (``origin/main`` → ``main``).
+
+    Reads ref names rather than ``git branch -r`` text, for the reason
+    :func:`list_local_branches` gives, and so that callers compare whole
+    names: searching that text took ``origin/devops`` for ``origin/dev``.
+    ``lstrip=3`` drops ``refs/remotes/origin/`` and keeps slashes inside a
+    branch name; the symbolic ``origin/HEAD`` is not a branch and is left out.
 
     Args:
         repo_path: Absolute path to the git repository.
@@ -356,12 +362,7 @@ async def list_remote_branches(repo_path: str) -> list[str]:
     Returns:
         Sorted list of unique branch names.
     """
-    stdout, _, _ = await run_git(["branch", "-r"], cwd=repo_path)
-    branches = []
-    for line in stdout.splitlines():
-        line = line.strip()
-        if "->" in line or not line:
-            continue
-        if "/" in line:
-            branches.append(line.split("/", 1)[1])
-    return sorted(set(branches))
+    stdout, _, _ = await run_git(
+        ["for-each-ref", "--format=%(refname:lstrip=3)", "refs/remotes/origin"], cwd=repo_path
+    )
+    return sorted({line.strip() for line in stdout.splitlines() if line.strip()} - {"HEAD"})

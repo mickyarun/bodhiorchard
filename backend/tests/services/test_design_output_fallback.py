@@ -34,6 +34,8 @@ from app.services.design_output_fallback import (
 
 _MOD = "app.services.design_output_fallback"
 DOC = "<!DOCTYPE html>\n<html><body><h1>Wireframe</h1></body></html>"
+# What ``handle_write_bud_design`` answers when it stored the HTML.
+_SAVED = {"saved": True, "design_id": "d", "length": 1}
 
 
 def test_extracts_an_html_fence() -> None:
@@ -127,7 +129,7 @@ class _AsyncCM:
 @pytest.mark.asyncio
 async def test_persists_through_the_tools_own_handler() -> None:
     """Reuse keeps sanitisation, READY marking and the timeline event identical."""
-    saved, handler = await _save(f"```html\n{DOC}\n```", {"success": True})
+    saved, handler = await _save(f"```html\n{DOC}\n```", _SAVED)
 
     assert saved is True
     params = handler.await_args.args[2]
@@ -138,7 +140,7 @@ async def test_persists_through_the_tools_own_handler() -> None:
 
 @pytest.mark.asyncio
 async def test_reports_miss_when_there_is_no_document_to_recover() -> None:
-    saved, handler = await _save("Sorry, no design.", {"success": True})
+    saved, handler = await _save("Sorry, no design.", _SAVED)
 
     assert saved is False
     handler.assert_not_awaited()

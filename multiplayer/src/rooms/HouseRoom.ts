@@ -22,59 +22,92 @@
  * Messages:
  *   "move" → { x, z, yaw, animState } — player position update (~20Hz)
  */
-import { Room, Client } from "colyseus"
+import { Room, Client, type RoomException, type RoomMethodName } from "colyseus"
+import { reportRoomException } from "./roomExceptions"
 import { Schema, MapSchema, type } from "@colyseus/schema"
 import { PlayerState } from "../schema/PlayerState"
+import { safeLog } from "../bridge/logSanitize"
+import type { JoinCredentials, JoinIdentity } from "../auth/verifyJoin"
+import { authenticateJoin, requireRoomIdentity } from "../auth/roomAuth"
+import { requireRoomKey } from "./roomKeys"
+
+interface HouseJoinOptions extends JoinCredentials {
+  characterModel?: string
+}
 
 class HouseRoomState extends Schema {
   @type({ map: PlayerState }) players = new MapSchema<PlayerState>()
   @type("string") ownerId: string = ""  // whose house this is
 }
 
+interface HouseMoveMessage {
+  x: number
+  z: number
+  yaw: number
+  animState: string
+}
+
+const VALID_ANIMS = ["idle", "walk", "sit", "sleep", "brew", "drink"]
+
 export class HouseRoom extends Room<{ state: HouseRoomState }> {
   maxClients = 10
 
-  onCreate(options: { ownerId?: string }) {
+  /** Verify every join before matchmaking reserves a seat (see auth/roomAuth). */
+  static onAuth = authenticateJoin
+
+  /** Org the house belongs to; only that org's members may visit. */
+  private orgId = ""
+
+  onCreate(options: unknown) {
     this.setState(new HouseRoomState())
-    if (options.ownerId) {
-      this.state.ownerId = options.ownerId
-    }
+    this.orgId = requireRoomKey(options, "orgId")
+    this.state.ownerId = requireRoomKey(options, "ownerId")
 
     // Handle position updates with server-side validation
-    this.onMessage("move", (client, data: {
-      x: number
-      z: number
-      yaw: number
-      animState: string
-    }) => {
-      const player = this.state.players.get(client.sessionId)
-      if (!player) return
-      if (typeof data.x !== "number" || !isFinite(data.x)) return
-      if (typeof data.z !== "number" || !isFinite(data.z)) return
-      if (typeof data.yaw !== "number" || !isFinite(data.yaw)) return
-      const validAnims = ["idle", "walk", "sit", "sleep", "brew", "drink"]
-      if (!validAnims.includes(data.animState)) return
-      player.x = data.x
-      player.z = data.z
-      player.yaw = data.yaw
-      player.animState = data.animState
-    })
+    this.onMessage("move", (client, data: unknown) => this.handleMove(client, data))
   }
 
-  onJoin(client: Client, options: { userId: string; name: string; characterModel?: string }) {
-    console.log(`[HouseRoom] ${options.name} (${client.sessionId}) joined`)
+  /**
+   * Apply a visitor position update. The payload is untrusted decoded
+   * msgpack and may be `null`/`undefined`; reading a field off those would
+   * throw inside the WebSocket listener and take the whole process down.
+   */
+  private handleMove(client: Client, data: unknown): void {
+    if (typeof data !== "object" || data === null) return
+    const move = data as Partial<HouseMoveMessage>
+    const player = this.state.players.get(client.sessionId)
+    if (!player) return
+    if (typeof move.x !== "number" || !isFinite(move.x)) return
+    if (typeof move.z !== "number" || !isFinite(move.z)) return
+    if (typeof move.yaw !== "number" || !isFinite(move.yaw)) return
+    if (typeof move.animState !== "string" || !VALID_ANIMS.includes(move.animState)) return
+    player.x = move.x
+    player.z = move.z
+    player.yaw = move.yaw
+    player.animState = move.animState
+  }
+
+  /** Only a verified member of the house's org may visit. */
+  onJoin(client: Client, options: HouseJoinOptions, auth?: JoinIdentity) {
+    const identity = requireRoomIdentity(auth, this.orgId)
+    console.log(`[HouseRoom] ${safeLog(identity.name)} (${client.sessionId}) joined`)
     const player = new PlayerState()
-    player.userId = options.userId || client.sessionId
-    player.name = options.name || "Visitor"
-    player.characterModel = options.characterModel || ""
+    player.userId = identity.userId
+    player.name = identity.name
+    player.characterModel = typeof options.characterModel === "string" ? options.characterModel : ""
     player.connected = true
     this.state.players.set(client.sessionId, player)
   }
 
   onLeave(client: Client) {
     const player = this.state.players.get(client.sessionId)
-    console.log(`[HouseRoom] ${player?.name || client.sessionId} left`)
+    console.log(`[HouseRoom] ${safeLog(player?.name || client.sessionId)} left`)
     this.state.players.delete(client.sessionId)
+  }
+
+  /** Report a throwing handler or timer instead of letting it exit the process. */
+  onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
+    reportRoomException(this, error, methodName)
   }
 
   onDispose() {

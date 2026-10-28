@@ -18,7 +18,7 @@ import asyncio
 import hashlib
 import secrets
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import structlog
@@ -85,6 +85,36 @@ class MCPAuthResult:
     org: Organization
     user: User | None = None
     token_id: uuid.UUID | None = None
+    # Plain copies of the ORM ids, taken while the request session is
+    # healthy. A handler whose flush fails rolls the session back and
+    # expires ``org`` and ``user``; reading ``org.id`` after that raises,
+    # so the audit write on the error path must use these instead.
+    org_id: uuid.UUID = field(init=False)
+    user_id: uuid.UUID | None = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Snapshot the org and user ids at authentication time."""
+        object.__setattr__(self, "org_id", self.org.id)
+        object.__setattr__(self, "user_id", self.user.id if self.user else None)
+
+
+async def token_owner_still_allowed(
+    db: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID
+) -> bool:
+    """Whether a per-user token's owner may still use MCP.
+
+    The owner must be active, a member of the token's org, and hold
+    engineering access — the checks :func:`verify_mcp_token` makes on every
+    call. Long-lived streams re-run them on each heartbeat, so deactivating,
+    removing or re-roling the owner cuts an open stream too, even when the
+    token row itself survived.
+    """
+    user = await UserRepository(db).get_by_id(user_id)
+    if user is None or not user.is_active:
+        return False
+    if not await UserRepository(db).is_member_of_org(user_id, org_id):
+        return False
+    return await member_has_permission(db, user_id, org_id, WORKSPACE_ENGINEERING)
 
 
 def create_internal_mcp_token(org_id: uuid.UUID) -> str:

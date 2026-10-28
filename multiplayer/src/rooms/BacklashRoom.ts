@@ -1,7 +1,8 @@
 // Copyright 2025-2026 Arun Rajkumar
 // Licensed under the Apache License, Version 2.0
 
-import { Client, Room } from "colyseus"
+import { Client, Room, type RoomException, type RoomMethodName } from "colyseus"
+import { reportRoomException } from "./roomExceptions"
 import { ArraySchema } from "@colyseus/schema"
 import {
   BACKLASH_LOBBY_MS,
@@ -18,7 +19,10 @@ import {
   isBacklashEncouragement,
   isBacklashLivePhase,
 } from "../../../shared/minigames/backlashSocial"
-import { postBacklashResults, verifyUserToken } from "../bridge/BackendClient"
+import { postBacklashResults } from "../bridge/BackendClient"
+import type { JoinIdentity } from "../auth/verifyJoin"
+import { authenticateJoin, requireRoomIdentity } from "../auth/roomAuth"
+import { requireRoomCreateTicket } from "../bridge/RoomCreateTickets"
 import {
   fireBacklashDispose,
   fireBacklashPhase,
@@ -43,6 +47,11 @@ interface BacklashRoomOptions {
   viewer?: boolean
 }
 
+/** A verified join, seated as a player (host or invitee) or as a viewer. */
+interface BacklashJoin extends JoinIdentity {
+  viewer: boolean
+}
+
 interface MovePayload {
   from?: unknown
   to?: unknown
@@ -63,6 +72,9 @@ function replaceArraySchema<T>(target: ArraySchema<T>, values: readonly T[]): vo
 export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
   maxClients = 2 + BACKLASH_MAX_VIEWERS
 
+  /** Verify every join before matchmaking reserves a seat (see auth/roomAuth). */
+  static onAuth = authenticateJoin
+
   private readonly engine = new BacklashEngine()
   private readonly postedMatches = new Set<string>()
   private matchSequence = 0
@@ -74,7 +86,10 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
   private readonly viewerSessions = new Map<string, Set<string>>()
 
   onCreate(rawOptions: unknown): void {
-    const options = (rawOptions ?? {}) as BacklashRoomOptions
+    // Only OrgBacklashHandler, for a verified host, opens matches and sends
+    // the invite (see RoomCreateTickets).
+    requireRoomCreateTicket("backlash", rawOptions)
+    const options = rawOptions as BacklashRoomOptions
     const state = new BacklashRoomState()
     state.orgId = options.orgId ?? ""
     state.hostUserId = options.hostUserId ?? ""
@@ -95,34 +110,12 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
     }, BACKLASH_LOBBY_MS)
   }
 
-  async onAuth(_client: Client, options: BacklashRoomOptions): Promise<BacklashRoomOptions> {
-    if (!options.token) {
-      if (process.env.NODE_ENV === "production") throw new Error("auth token required")
-      return this.validateJoin(options)
-    }
-    const verified = await verifyUserToken(options.token, this.state.orgId)
-    if (!verified.valid || !verified.user_id || !verified.org_id) {
-      throw new Error(verified.reason ?? "invalid auth token")
-    }
-    if (verified.org_id !== this.state.orgId) throw new Error("token org mismatch")
-    const verifiedName = verified.name?.trim()
-    const requestedName = options.name?.trim()
-    return this.validateJoin({
-      ...options,
-      userId: verified.user_id,
-      name: verifiedName || requestedName || "Player",
-    })
-  }
-
-  onJoin(
-    client: Client,
-    options: BacklashRoomOptions,
-    authenticated?: BacklashRoomOptions,
-  ): void {
-    const identity = authenticated ?? options
-    const userId = identity.userId!
-    const name = (identity.name?.trim() || "Viewer").slice(0, 120)
-    const viewer = identity.viewer === true
+  /** Seat a join verified for this room's org as a player or a viewer (see validateJoin). */
+  onJoin(client: Client, _options: BacklashRoomOptions, auth?: JoinIdentity): void {
+    const { userId, name: verifiedName, viewer } = this.validateJoin(
+      requireRoomIdentity(auth, this.state.orgId),
+    )
+    const name = verifiedName.slice(0, 120)
     client.userData = { userId, name, viewer }
     if (viewer) {
       const sessions = this.viewerSessions.get(userId) ?? new Set<string>()
@@ -188,6 +181,11 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
     }
   }
 
+  /** Report a throwing handler or timer instead of letting it exit the process. */
+  onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
+    reportRoomException(this, error, methodName)
+  }
+
   onDispose(): void {
     this.timerGeneration += 1
     this.viewerSessions.clear()
@@ -199,13 +197,13 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
     this.handleInviteDeclined(userId)
   }
 
-  private validateJoin(options: BacklashRoomOptions): BacklashRoomOptions {
-    const userId = options.userId ?? ""
-    if (!userId) throw new Error("authenticated user required")
+  /** The host and the invitee play; anyone else in the org may only watch a live match. */
+  private validateJoin(identity: JoinIdentity): BacklashJoin {
+    const { userId } = identity
     const participant = userId === this.state.hostUserId || userId === this.state.invitedUserId
-    if (participant) return { ...options, userId, viewer: false }
+    if (participant) return { ...identity, viewer: false }
     if (this.state.phase === "lobby") throw new Error("Backlash match is not live yet")
-    return { ...options, userId, viewer: true }
+    return { ...identity, viewer: true }
   }
 
   private assignInitialColors(): void {

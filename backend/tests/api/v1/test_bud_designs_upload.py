@@ -16,9 +16,9 @@
 
 Covers the ``POST /buds/{id}/designs/upload`` multipart path that lets a
 browser attach a self-contained wireframe HTML file directly, bypassing
-the inline-content write that times out on large designs — plus the
-shared ``_assert_repo_in_org`` cross-tenant guard it uses in common with
-``generate_designs``. Follows the direct-handler pattern of this directory
+the inline-content write that times out on large designs — plus how it
+and ``generate_designs`` turn the design repository's cross-tenant refusal
+into a 404. Follows the direct-handler pattern of this directory
 (see ``conftest.py``): route functions are invoked with mocked
 repos/session, so these assert the handler's own guards and its contract
 with the repo + timeline layers, not the DB.
@@ -36,6 +36,7 @@ from fastapi import HTTPException, UploadFile
 
 from app.api.v1 import bud_designs
 from app.models.bud import BUDDesignStatus, BUDStatus
+from app.repositories.bud import DesignTargetNotInOrgError
 from app.schemas.bud_design import DesignGenerateRequest
 
 
@@ -136,25 +137,25 @@ async def test_upload_foreign_repo_id_returns_404(
     fake_user: SimpleNamespace,
     fake_db: MagicMock,
 ) -> None:
-    """A repo_id outside the caller's org resolves to None → 404, no write."""
+    """The repository refuses a repo_id outside the caller's org → 404, no event."""
     bud = _make_bud(BUDStatus.DESIGN)
-    design_repo, _ = _patch_repos(monkeypatch, bud, uuid.uuid4())
-    # Org-scoped lookup returns None for a repo the caller can't see.
-    tracked_repo = MagicMock(get_by_id=AsyncMock(return_value=None))
-    monkeypatch.setattr(bud_designs, "TrackedRepoRepository", MagicMock(return_value=tracked_repo))
+    design_repo, record_event = _patch_repos(monkeypatch, bud, uuid.uuid4())
+    foreign_repo = uuid.uuid4()
+    design_repo.upsert.side_effect = DesignTargetNotInOrgError("repo", foreign_repo)
 
     with pytest.raises(HTTPException) as excinfo:
         await bud_designs.upload_design(
             bud_id=bud.id,
-            file=_html_upload(b"<html></html>"),
-            repo_id=uuid.uuid4(),
+            file=_html_upload(b"<html><body>x</body></html>"),
+            repo_id=foreign_repo,
             notes=None,
             current_user=fake_user,
             db=fake_db,
         )
 
     assert excinfo.value.status_code == 404
-    design_repo.upsert.assert_not_awaited()
+    assert excinfo.value.detail == "Repository not found"
+    record_event.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -163,27 +164,31 @@ async def test_generate_designs_foreign_repo_id_returns_404(
     fake_user: SimpleNamespace,
     fake_db: MagicMock,
 ) -> None:
-    """generate_designs rejects a foreign repo_id up front — no rows created.
+    """generate_designs turns a foreign repo_id into a 404 — no job enqueued.
 
-    Shares the ``_assert_repo_in_org`` guard with the upload path; the check
-    runs before any ``upsert`` so a crafted repo_ids list can't seed design
-    rows against another tenant's repository.
+    The repository refuses the repo before writing a row, and the 404 is
+    raised before any job is created, so a crafted repo_ids list can't seed
+    design rows or design runs against another tenant's repository.
     """
     bud = _make_bud(BUDStatus.DESIGN)
     design_repo, _ = _patch_repos(monkeypatch, bud, uuid.uuid4())
-    tracked_repo = MagicMock(get_by_id=AsyncMock(return_value=None))
-    monkeypatch.setattr(bud_designs, "TrackedRepoRepository", MagicMock(return_value=tracked_repo))
+    foreign_repo = uuid.uuid4()
+    design_repo.upsert.side_effect = DesignTargetNotInOrgError("repo", foreign_repo)
+    monkeypatch.setattr(bud_designs, "_assert_design_system_available", AsyncMock())
+    create_job = MagicMock()
+    monkeypatch.setattr(bud_designs, "create_job", create_job)
 
     with pytest.raises(HTTPException) as excinfo:
         await bud_designs.generate_designs(
             bud_id=bud.id,
-            body=DesignGenerateRequest(repo_ids=[uuid.uuid4()]),
+            body=DesignGenerateRequest(repo_ids=[foreign_repo]),
             current_user=fake_user,
             db=fake_db,
         )
 
     assert excinfo.value.status_code == 404
-    design_repo.upsert.assert_not_awaited()
+    assert excinfo.value.detail == "Repository not found"
+    create_job.assert_not_called()
 
 
 @pytest.mark.asyncio

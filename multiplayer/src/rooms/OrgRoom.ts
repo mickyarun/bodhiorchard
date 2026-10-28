@@ -34,7 +34,8 @@
  *   "bridge:dev_activity" → dev activity event forwarded from backend
  *   "bridge:agent_activity" → agent activity event forwarded from backend
  */
-import { Room, Client } from "colyseus"
+import { Room, Client, type RoomException, type RoomMethodName } from "colyseus"
+import { reportRoomException } from "./roomExceptions"
 import { OrgRoomState } from "../schema/OrgRoomState"
 import { MemberState } from "../schema/MemberState"
 import {
@@ -52,14 +53,15 @@ import {
 } from "../sim/DevActivitySim"
 import { AgentActivitySim, parseAgentActivityEvent } from "../sim/AgentActivitySim"
 import { InferredPresenceSim, buildPresenceConfig } from "../sim/InferredPresenceSim"
-import {
-  fetchOrgSnapshot,
-  verifyUserToken,
-  type OrgSnapshotResponse,
-} from "../bridge/BackendClient"
-import { registerOrgRoom, unregisterOrgRoom } from "../bridge/BridgeEndpoint"
+import { fetchOrgSnapshot, type OrgSnapshotResponse } from "../bridge/BackendClient"
+import type { JoinCredentials, JoinIdentity } from "../auth/verifyJoin"
+import { authenticateJoin, requireRoomIdentity } from "../auth/roomAuth"
+import { safeError, safeLog } from "../bridge/logSanitize"
+import { unregisterOrgRoom } from "../bridge/BridgeEndpoint"
+import { isUuid } from "../bridge/uuid"
 import { installRaceCreateHandler } from "./OrgRaceHandler"
 import { installBacklashCreateHandler } from "./OrgBacklashHandler"
+import { claimOrgRoomSlot } from "./orgRoomSlot"
 
 // Server simulation tick rate — 20Hz matches Colyseus default state sync cadence
 const SIM_TICK_MS = 50
@@ -84,11 +86,8 @@ interface OrgRoomCreateOptions {
   orgId?: string
 }
 
-interface OrgRoomJoinOptions {
-  userId: string
-  name: string
+interface OrgRoomJoinOptions extends JoinCredentials {
   characterModel?: string
-  token?: string
 }
 
 interface MoveMessage {
@@ -131,6 +130,9 @@ interface VehicleMountMessage {
 
 export class OrgRoom extends Room<{ state: OrgRoomState }> {
   maxClients = 100
+
+  /** Verify every join before matchmaking reserves a seat (see auth/roomAuth). */
+  static onAuth = authenticateJoin
 
   // Repo tree positions from snapshot — used by DevActivitySim
   repoPositions = new Map<string, { x: number; z: number }>()
@@ -187,9 +189,13 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   private static readonly VALID_VEHICLES = ["horse"]
 
   async onCreate(options: OrgRoomCreateOptions) {
+    // Only a well-formed org id may key the bridge registry or reach the
+    // snapshot URL.
+    const orgId = options.orgId
+    if (!isUuid(orgId)) throw new Error("OrgRoom.onCreate: orgId must be a UUID")
     this.setState(new OrgRoomState())
-    this.state.orgId = options.orgId ?? ""
-    console.log(`[OrgRoom] Created org=${this.state.orgId}`)
+    this.state.orgId = orgId
+    console.log(`[OrgRoom] Created org=${safeLog(this.state.orgId)}`)
 
     this.onMessage("move", (client, data: MoveMessage) => this.handleMove(client, data))
     this.onMessage("takeover_start", (client, data: TakeoverMessage) => this.handleTakeoverStart(client, data))
@@ -273,8 +279,16 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       }
     }, INFERRED_PRESENCE_TICK_MS)
 
+    // Claim the org's bridge slot last, so nothing after it can throw and
+    // leave the slot held by a room that never opened. A second room for an
+    // org that already has one (a direct `create`, or a `joinOrCreate` that
+    // found the open room full) is refused rather than taking the bridge
+    // from the open room (see orgRoomSlot). Colyseus still disposes a
+    // refused room, which clears its timers.
+    claimOrgRoomSlot(orgId, this)
+
     // Kick off snapshot load and expose a promise so onJoin can wait for it.
-    // onCreate MUST NOT throw — the room stays usable (empty state) on failure.
+    // A failed load must not throw: the room stays usable with empty state.
     this.snapshotReady = this.loadInitialSnapshot()
   }
 
@@ -284,17 +298,19 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
    * and resolves cleanly so onJoin can `await` it without risk of rejection.
    */
   private async loadInitialSnapshot(): Promise<void> {
-    if (!this.state.orgId) return
-    registerOrgRoom(this.state.orgId, this)
     try {
       const snapshot = await fetchOrgSnapshot(this.state.orgId)
       if (snapshot) {
         this.loadSnapshot(snapshot)
       } else {
-        console.warn(`[OrgRoom] No snapshot available for org=${this.state.orgId}`)
+        console.warn(`[OrgRoom] No snapshot available for org=${safeLog(this.state.orgId)}`)
       }
     } catch (err) {
-      console.error(`[OrgRoom] Snapshot load failed for org=${this.state.orgId}:`, err)
+      console.error(
+        "[OrgRoom] Snapshot load failed for org=%s: %s",
+        safeLog(this.state.orgId),
+        safeError(err),
+      )
     }
   }
 
@@ -316,85 +332,49 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       if (!snapshot) {
         console.warn(
           `[OrgRoom] presence-config refresh got null snapshot for ` +
-            `org=${this.state.orgId} — keeping existing config`,
+            `org=${safeLog(this.state.orgId)} — keeping existing config`,
         )
         return
       }
       this.inferredSim.setConfig(buildPresenceConfig(snapshot.presenceSettings))
     } catch (err) {
       console.warn(
-        `[OrgRoom] presence-config refresh failed for org=${this.state.orgId}:`,
-        err,
+        "[OrgRoom] presence-config refresh failed for org=%s: %s",
+        safeLog(this.state.orgId),
+        safeError(err),
       )
     }
   }
 
-  /**
-   * Verify the client's JWT against the backend before allowing them to join.
-   * This is the ONLY point where client-supplied `userId` / `name` are trusted;
-   * everything downstream uses the values returned from this verification.
-   *
-   * In development (`NODE_ENV !== "production"`), if no token is supplied the
-   * room accepts the client-supplied identity as-is — local dev tooling and
-   * unit tests don't go through login. In production, a missing/invalid token
-   * rejects the join.
-   */
-  async onAuth(_client: Client, options: OrgRoomJoinOptions): Promise<OrgRoomJoinOptions> {
-    const orgId = this.state.orgId || ""
-    if (!options.token) {
-      if (process.env.NODE_ENV === "production") {
-        throw new Error("auth token required")
-      }
-      console.warn(`[OrgRoom] dev-mode join without token org=${orgId} userId=${options.userId}`)
-      return options
-    }
-    const result = await verifyUserToken(options.token, orgId)
-    if (!result.valid) {
-      const reason = result.reason ?? "token_invalid"
-      console.warn(
-        `[OrgRoom] auth failed org=${orgId} userId=${options.userId} reason=${reason}`,
-      )
-      if (reason === "backend_unreachable") {
-        throw new Error("auth backend unreachable — is the Python server running?")
-      }
-      if (reason === "backend_http_error") {
-        throw new Error("auth backend rejected request — check bridge secret and endpoint URL")
-      }
-      throw new Error("invalid auth token — JWT may be expired, try refreshing the page")
-    }
-    // The token's org claim must match the room's org — prevents cross-org spying.
-    if (orgId && result.org_id && result.org_id !== orgId) {
-      throw new Error("token org mismatch")
-    }
-    // Authoritative values from the verified token REPLACE client-supplied claims.
-    return {
-      ...options,
-      userId: result.user_id ?? options.userId,
-      name: result.name ?? options.name,
-    }
-  }
-
-  async onJoin(client: Client, options: OrgRoomJoinOptions) {
+  async onJoin(client: Client, options: OrgRoomJoinOptions, auth?: JoinIdentity) {
+    // Colyseus passes the raw client join options as `options` and the value
+    // the static onAuth returned as `auth`: the token's user, in the org the
+    // client named. Only `auth` carries the verified identity, and only if
+    // that org is this room's; client-supplied `userId` / `name` are ignored.
+    const identity = requireRoomIdentity(auth, this.state.orgId)
     // Wait for the initial snapshot before deciding if the joining user is
     // a known member — prevents a race where the first client races against
     // onCreate's async fetch and sees an empty members map.
     await this.snapshotReady
-    console.log(`[OrgRoom] ${options.name ?? "Unknown"} (${client.sessionId}) joined org=${this.state.orgId}`)
+    console.log(
+      `[OrgRoom] ${safeLog(identity.name)} (${client.sessionId}) ` +
+        `joined org=${safeLog(this.state.orgId)}`,
+    )
     // Per-client identity is tracked via client.userData so we can attribute
     // moves/takeovers to the correct memberId later. These values come from
     // onAuth, which verified them against a JWT.
     client.userData = {
-      userId: options.userId,
-      name: options.name,
-      characterModel: options.characterModel ?? "",
+      userId: identity.userId,
+      name: identity.name,
+      characterModel: typeof options.characterModel === "string" ? options.characterModel : "",
     }
     // Users not present in this.state.members at join time indicate a snapshot
     // mismatch — the backend's `/internal/colyseus/org-snapshot` endpoint is
     // responsible for returning every active org member. If you see this
     // warning, check `_collect_org_members` in backend/app/api/v1/internal_colyseus.py.
-    if (options.userId && !this.state.members.has(options.userId)) {
+    if (identity.userId && !this.state.members.has(identity.userId)) {
       console.warn(
-        `[OrgRoom] joining user ${options.userId} not in snapshot — ` +
+        `[OrgRoom] joining user ${safeLog(identity.userId)} not in snapshot — ` +
         `snapshot endpoint may be filtering members`,
       )
     }
@@ -402,7 +382,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
 
   onLeave(client: Client) {
     const name = (client.userData as { name?: string } | undefined)?.name ?? client.sessionId
-    console.log(`[OrgRoom] ${name} left org=${this.state.orgId}`)
+    console.log(`[OrgRoom] ${safeLog(name)} left org=${safeLog(this.state.orgId)}`)
 
     // If this client was controlling a member via takeover, release the
     // takeover lock AND start a walk-home so the character doesn't strand
@@ -444,14 +424,23 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     )
     this.devSim.walkHome(member, home.x, home.y, home.z, home.yaw, home.sitting, home.locationContext)
     console.log(
-      `[OrgRoom] ${name} disconnect (${wasInInterior ? "in-interior" : "takeover"}) → walking home to ${home.locationContext}`,
+      `[OrgRoom] ${safeLog(name)} disconnect (${wasInInterior ? "in-interior" : "takeover"}) → walking home to ${home.locationContext}`,
     )
   }
 
+  /** Report a throwing handler or timer instead of letting it exit the process. */
+  onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
+    reportRoomException(this, error, methodName)
+  }
+
   onDispose() {
-    console.log(`[OrgRoom] Disposed org=${this.state.orgId}`)
-    if (this.state.orgId) {
-      unregisterOrgRoom(this.state.orgId)
+    // A room refused in onCreate is still disposed, possibly before it had
+    // any state; a throw here would skip the timer cleanup Colyseus runs
+    // after this hook.
+    const orgId = this.state?.orgId
+    console.log(`[OrgRoom] Disposed org=${safeLog(orgId)}`)
+    if (orgId) {
+      unregisterOrgRoom(orgId, this)
     }
   }
 
@@ -465,7 +454,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     if (type === "dev_activity") {
       const event = parseDevActivityEvent(data)
       if (!event) {
-        console.warn(`[OrgRoom] Malformed dev_activity payload org=${this.state.orgId}`)
+        console.warn(`[OrgRoom] Malformed dev_activity payload org=${safeLog(this.state.orgId)}`)
         return
       }
       this.devSim.handleEvent(this.state.members, event)
@@ -480,7 +469,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     if (type === "agent_activity") {
       const event = parseAgentActivityEvent(data)
       if (!event) {
-        console.warn(`[OrgRoom] Malformed agent_activity payload org=${this.state.orgId}`)
+        console.warn(`[OrgRoom] Malformed agent_activity payload org=${safeLog(this.state.orgId)}`)
         return
       }
       this.agentSim.handleEvent(this.state.agents, event)
@@ -489,13 +478,13 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     if (type === "member_presence") {
       const event = parseMemberPresenceEvent(data)
       if (!event) {
-        console.warn(`[OrgRoom] Malformed member_presence payload org=${this.state.orgId}`)
+        console.warn(`[OrgRoom] Malformed member_presence payload org=${safeLog(this.state.orgId)}`)
         return
       }
       this.applyPresenceChange(event.user_id, event.presence)
       return
     }
-    console.log(`[OrgRoom] Bridge event type=${type} (unhandled) org=${this.state.orgId}`)
+    console.log(`[OrgRoom] Bridge event type=${safeLog(type)} (unhandled) org=${safeLog(this.state.orgId)}`)
   }
 
   // ─── Snapshot loading ────────────────────────
@@ -566,7 +555,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     const currentScale = getActiveScale()
     if (currentScale.orchardRadius !== desiredScale.orchardRadius) {
       console.warn(
-        `[OrgRoom] default-key scale clobber org=${this.state.orgId} ` +
+        `[OrgRoom] default-key scale clobber org=${safeLog(this.state.orgId)} ` +
         `currentR=${currentScale.orchardRadius} desiredR=${desiredScale.orchardRadius} ` +
         `— another OrgRoom likely raced this snapshot load. Phase 3 fix needed for multi-org-per-process.`,
       )
@@ -616,7 +605,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       this.state.members.set(m.user_id, member)
     })
 
-    console.log(`[OrgRoom] Snapshot loaded org=${this.state.orgId} members=${sorted.length}`)
+    console.log(`[OrgRoom] Snapshot loaded org=${safeLog(this.state.orgId)} members=${sorted.length}`)
   }
 
   // ─── Placement helpers ───────────────────────
@@ -780,14 +769,14 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     member.locationContext = home.locationContext
     this.devSim.walkHome(member, home.x, home.y, home.z, home.yaw, home.sitting, home.locationContext)
     console.log(
-      `[OrgRoom] ${member.name} presence → ${newPresence}, walking to ${home.locationContext}`,
+      `[OrgRoom] ${safeLog(member.name)} presence → ${safeLog(newPresence)}, walking to ${home.locationContext}`,
     )
   }
 
   // ─── Message handlers ────────────────────────
 
   private handleMove(client: Client, data: MoveMessage): void {
-    if (!this.validateMove(data)) return
+    if (!isPayloadObject(data) || !this.validateMove(data)) return
 
     // Rate limit per-client to prevent a single malicious connection from
     // flooding the room's state sync broadcast. `lastMoveAt` lives on
@@ -817,6 +806,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   // ─── Vehicle mount/dismount ────────────────────
 
   private handleMountVehicle(client: Client, data: VehicleMountMessage): void {
+    if (!isPayloadObject(data)) return
     const member = this.resolveTakeoverMember(client)
     if (!member) return
     if (!OrgRoom.VALID_VEHICLES.includes(data.vehicleId)) return
@@ -830,6 +820,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   }
 
   private handleUpgradeHouse(client: Client, data: { tier: number }): void {
+    if (!isPayloadObject(data)) return
     const userId = (client.userData as { userId?: string } | undefined)?.userId
     if (!userId) return
     const member = this.state.members.get(userId)
@@ -855,6 +846,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   }
 
   private handleTakeoverStart(client: Client, data: TakeoverMessage): void {
+    if (!isPayloadObject(data)) return
     const clientUserId = (client.userData as { userId?: string } | undefined)?.userId
     if (!clientUserId) return
     // Users can only take control of their own character
@@ -869,10 +861,11 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     // seeing a ghost of the owner at their desk while the owner is WASD-ing).
     member.locationContext = "garden"
     member.takeoverSessionId = client.sessionId
-    console.log(`[OrgRoom] ${member.name} takeover START by ${client.sessionId}`)
+    console.log(`[OrgRoom] ${safeLog(member.name)} takeover START by ${client.sessionId}`)
   }
 
   private handleTakeoverEnd(client: Client, data: TakeoverMessage): void {
+    if (!isPayloadObject(data)) return
     const member = this.state.members.get(data.userId)
     if (!member) return
     if (member.takeoverSessionId !== client.sessionId) return
@@ -895,7 +888,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       member.animState = "idle"
       member.locationContext = data.location
       console.log(
-        `[OrgRoom] ${member.name} takeover END → entering ${data.location} (avatar hidden)`,
+        `[OrgRoom] ${safeLog(member.name)} takeover END → entering ${data.location} (avatar hidden)`,
       )
       return
     }
@@ -911,7 +904,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     )
     this.devSim.walkHome(member, home.x, home.y, home.z, home.yaw, home.sitting, home.locationContext)
     console.log(
-      `[OrgRoom] ${member.name} takeover END → walking home to ${home.locationContext}`,
+      `[OrgRoom] ${safeLog(member.name)} takeover END → walking home to ${home.locationContext}`,
     )
   }
 
@@ -925,6 +918,19 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     if (!OrgRoom.VALID_ANIMS.includes(data.animState)) return false
     return true
   }
+}
+
+// ─── Client payload guard ──────────────────────
+
+/**
+ * Client messages are decoded msgpack, so a payload can be `undefined`
+ * (`room.send("move")`) or `null`. Handlers read fields off it, and a
+ * TypeError thrown inside an onMessage handler escapes the WebSocket
+ * listener and terminates the whole process, so every handler that reads
+ * the payload checks this first.
+ */
+function isPayloadObject(data: unknown): data is object {
+  return typeof data === "object" && data !== null
 }
 
 // ─── Bridge event validators ───────────────────
