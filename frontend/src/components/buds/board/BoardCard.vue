@@ -63,13 +63,21 @@
       >
         Restore
       </v-btn>
-      <span
+      <AppMonogram
+        v-if="bud.assignee_name"
         class="board-card__avatar"
-        :class="{ 'board-card__avatar--empty': !bud.assignee_name }"
-        :title="bud.assignee_name || 'Unassigned'"
+        :name="bud.assignee_name"
+        :size="24"
+        :title="bud.assignee_name"
+        :label="`Assigned to ${bud.assignee_name}`"
+      />
+      <span
+        v-else
+        class="board-card__avatar board-card__avatar--empty"
+        title="Unassigned"
         role="img"
-        :aria-label="bud.assignee_name ? `Assigned to ${bud.assignee_name}` : 'Unassigned'"
-      >{{ bud.assignee_name ? initialsOf(bud.assignee_name) : '' }}</span>
+        aria-label="Unassigned"
+      />
     </div>
   </article>
 </template>
@@ -77,8 +85,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import BudPriorityChip from '@/components/buds/BudPriorityChip.vue'
+import AppMonogram from '@/components/common/AppMonogram.vue'
 import { budRef, type BUDListItem } from '@/types'
-import { initialsOf } from '@/utils/avatar'
 import { budAge, cardStatusLines } from '@/utils/budBoard'
 import { formatDate } from '@/utils/date'
 
@@ -199,20 +207,12 @@ const lines = computed(() => cardStatusLines(props.bud, props.now))
 }
 .board-card__avatar {
   margin-left: auto;
+}
+.board-card__avatar--empty {
   width: 24px;
   height: 24px;
   flex-shrink: 0;
   border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--color-accent-text);
-  background: var(--color-accent-soft);
-}
-.board-card__avatar--empty {
-  background: transparent;
   border: 1px dashed rgb(var(--v-theme-on-surface-variant));
 }
 </style>

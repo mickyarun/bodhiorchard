@@ -22,9 +22,7 @@
     <p v-if="out.error.value" class="out__empty">{{ out.error.value }}</p>
     <ul v-else-if="out.rows.value.length" class="out">
       <li v-for="row in out.rows.value" :key="row.id" class="out__row">
-        <v-avatar size="30" color="brand" variant="tonal" class="out__avatar" aria-hidden="true">
-          {{ initialsOf(row.name) }}
-        </v-avatar>
+        <AppMonogram :name="row.name" :size="30" tone="brand" />
         <span class="out__text">
           <span class="out__name">{{ row.name }}</span>
           <span class="out__when">{{ formatDayRange(row.start, row.end) }}</span>
@@ -40,9 +38,9 @@
 </template>
 
 <script setup lang="ts">
+import AppMonogram from '@/components/common/AppMonogram.vue'
 import AppPanel from '@/components/common/AppPanel.vue'
 import { useOutSoon } from '@/composables/useOutSoon'
-import { initialsOf } from '@/utils/avatar'
 import { formatDayRange } from '@/utils/leaveDates'
 
 const WINDOW_DAYS = 7
@@ -62,10 +60,6 @@ const out = useOutSoon(WINDOW_DAYS, LIMIT)
   align-items: center;
   gap: 10px;
   padding: 8px 0;
-}
-.out__avatar {
-  font-size: 11px;
-  font-weight: 600;
 }
 .out__text {
   display: flex;

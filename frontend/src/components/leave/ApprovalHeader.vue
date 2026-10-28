@@ -18,7 +18,7 @@
      they asked for in three tiles, and their reason when they gave one. -->
 <template>
   <div class="head">
-    <span class="head__avatar" aria-hidden="true">{{ initialsOf(request.user.name) }}</span>
+    <AppMonogram :name="request.user.name" :size="48" tone="brand" />
     <div class="head__who">
       <h2 :id="headingId" class="head__name" tabindex="-1">{{ request.user.name }}</h2>
       <span v-if="role" class="head__role">{{ role }}</span>
@@ -36,9 +36,9 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import AppMonogram from '@/components/common/AppMonogram.vue'
 import LeaveStatusChip from '@/components/leave/LeaveStatusChip.vue'
 import type { ApprovalItem } from '@/types/leave'
-import { initialsOf } from '@/utils/avatar'
 import { requestLength, requestTypeLabel, ROUTE_TAGS } from '@/utils/leave'
 import { formatDayRange } from '@/utils/leaveDates'
 
@@ -55,19 +55,6 @@ const length = computed(() => requestLength(request.value))
   align-items: center;
   flex-wrap: wrap;
   gap: 8px 14px;
-}
-.head__avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: 16px;
-  font-weight: 600;
-  background: rgba(var(--v-theme-brand), 0.14);
-  color: rgb(var(--v-theme-brand));
 }
 .head__who {
   display: flex;

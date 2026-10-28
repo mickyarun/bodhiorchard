@@ -26,7 +26,7 @@
     :aria-current="!controls && selected ? 'true' : undefined"
     @click="emit('select')"
   >
-    <span class="queue-item__avatar" aria-hidden="true">{{ initialsOf(request.user.name) }}</span>
+    <AppMonogram :name="request.user.name" :size="34" tone="brand" />
     <span class="queue-item__text">
       <span class="queue-item__top">
         <span class="queue-item__name">{{ request.user.name }}</span>
@@ -44,10 +44,10 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import AppMonogram from '@/components/common/AppMonogram.vue'
 import LeaveStatusChip from '@/components/leave/LeaveStatusChip.vue'
 import type { ApprovalItem } from '@/types/leave'
 import { timestampAgo } from '@/utils/approvalFacts'
-import { initialsOf } from '@/utils/avatar'
 import { lopLabel, requestLength, requestTypeLabel } from '@/utils/leave'
 import { formatDayRange } from '@/utils/leaveDates'
 
@@ -96,19 +96,6 @@ const length = computed(() => requestLength(request.value))
 .queue-item--on:hover {
   background: rgba(var(--v-theme-primary), 0.06);
   box-shadow: inset 0 0 0 1px rgb(var(--v-theme-primary));
-}
-.queue-item__avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: 12px;
-  font-weight: 600;
-  background: rgba(var(--v-theme-brand), 0.14);
-  color: rgb(var(--v-theme-brand));
 }
 .queue-item__text {
   display: flex;

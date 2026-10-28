@@ -37,11 +37,15 @@ export function resolveAvatarUrl(
   return `${new URL(apiBase).origin}${avatarUrl}`
 }
 
-/** Up to two initials for the monogram fallback, e.g. "Ada Lovelace" → "AL". */
+/**
+ * Up to two initials for the monogram fallback, e.g. "Ada Lovelace" → "AL".
+ * A trailing ellipsis (shortened ids like "38ca3fde…") is not part of the name.
+ */
 export function initialsOf(name: string): string {
   return (
     name
-      .split(' ')
+      .replace(/…$/, '')
+      .split(/\s+/)
       .filter(Boolean)
       .map(part => part[0])
       .join('')

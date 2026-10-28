@@ -49,4 +49,10 @@ describe('initialsOf', () => {
     expect(initialsOf('  sid  ')).toBe('S')
     expect(initialsOf('')).toBe('?')
   })
+
+  it('ignores a trailing ellipsis and any whitespace', () => {
+    expect(initialsOf('38ca3fde…')).toBe('3')
+    expect(initialsOf('…')).toBe('?')
+    expect(initialsOf('Alice\tKim')).toBe('AK')
+  })
 })

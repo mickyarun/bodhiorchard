@@ -41,7 +41,7 @@
           :disabled="isCapped(m.id)"
           @click="toggle(m.id)"
         >
-          <span class="member-picker__avatar">{{ initials(m.name) }}</span>
+          <span class="member-picker__avatar">{{ initialsOf(m.name) }}</span>
           <span class="member-picker__text">
             <span class="member-picker__name">{{ m.name }}</span>
             <span class="member-picker__email">{{ m.email }}</span>
@@ -60,7 +60,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { initials } from './initials'
+import { initialsOf } from '@/utils/avatar'
 
 export interface MemberPickerEntry {
   id: string
