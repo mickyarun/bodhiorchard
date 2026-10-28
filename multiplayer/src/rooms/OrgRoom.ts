@@ -189,16 +189,10 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   private static readonly VALID_VEHICLES = ["horse"]
 
   async onCreate(options: OrgRoomCreateOptions) {
-    // Validate and claim the org before anything else runs, so a refused room
-    // never starts a timer. Only a well-formed org id may key the bridge
-    // registry or reach the snapshot URL. onCreate runs before onAuth, so a
-    // second room for an org that already has one (a client calling `create`
-    // directly) is refused rather than taking the bridge from the open room.
+    // Only a well-formed org id may key the bridge registry or reach the
+    // snapshot URL.
     const orgId = options.orgId
     if (!isUuid(orgId)) throw new Error("OrgRoom.onCreate: orgId must be a UUID")
-    if (!registerOrgRoom(orgId, this)) {
-      throw new Error("OrgRoom.onCreate: this org already has an open room")
-    }
     this.setState(new OrgRoomState())
     this.state.orgId = orgId
     console.log(`[OrgRoom] Created org=${safeLog(this.state.orgId)}`)
@@ -284,6 +278,16 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
         void this.refreshPresenceConfig()
       }
     }, INFERRED_PRESENCE_TICK_MS)
+
+    // Claim the org's bridge slot last, so nothing after it can throw and
+    // leave the slot held by a room that never opened. onCreate runs before
+    // onAuth, so a second room for an org that already has one (a client
+    // calling `create` directly) is refused rather than taking the bridge
+    // from the open room. Colyseus still disposes a refused room, which
+    // clears its timers.
+    if (!registerOrgRoom(orgId, this)) {
+      throw new Error("OrgRoom.onCreate: this org already has an open room")
+    }
 
     // Kick off snapshot load and expose a promise so onJoin can wait for it.
     // A failed load must not throw: the room stays usable with empty state.
@@ -464,9 +468,13 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   }
 
   onDispose() {
-    console.log(`[OrgRoom] Disposed org=${safeLog(this.state.orgId)}`)
-    if (this.state.orgId) {
-      unregisterOrgRoom(this.state.orgId, this)
+    // A room refused in onCreate is still disposed, possibly before it had
+    // any state; a throw here would skip the timer cleanup Colyseus runs
+    // after this hook.
+    const orgId = this.state?.orgId
+    console.log(`[OrgRoom] Disposed org=${safeLog(orgId)}`)
+    if (orgId) {
+      unregisterOrgRoom(orgId, this)
     }
   }
 

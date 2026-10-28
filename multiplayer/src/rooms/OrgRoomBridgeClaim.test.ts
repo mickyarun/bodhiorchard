@@ -23,7 +23,6 @@
 import type { Request, Response } from "express"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { handleBridgePublish } from "../bridge/BridgeEndpoint"
-import { OrgRoomState } from "../schema/OrgRoomState"
 import { OrgRoom } from "./OrgRoom"
 
 const ORG_ID = "0b4f4f53-58a4-4c55-9a0e-6f1c2b7d9e10"
@@ -87,28 +86,59 @@ describe("a second org room for the same org", () => {
     expect(received).toHaveBeenCalledTimes(1)
   })
 
-  it("starts no simulation timer when refused", async () => {
-    await openRoom(ORG_ID)
-    const impostor = new OrgRoom()
-
-    await expect(impostor.onCreate({ orgId: ORG_ID })).rejects.toThrow()
-
-    expect((impostor as unknown as { _simulationInterval?: unknown })._simulationInterval)
-      .toBeUndefined()
-  })
-
   it("cannot evict the open room when it is disposed", async () => {
     const real = await openRoom(ORG_ID)
     const received = vi.spyOn(real, "handleBridgeEvent")
     const impostor = new OrgRoom()
+    openRooms.push(impostor)
     await expect(impostor.onCreate({ orgId: ORG_ID })).rejects.toThrow()
 
-    // Even a room that reached dispose with the victim's org id in its state
-    // must not release a slot it never held.
-    impostor.setState(new OrgRoomState())
-    impostor.state.orgId = ORG_ID
+    // The refused room carries the victim's org id in its state, but must
+    // not release a slot it never held.
     impostor.onDispose()
 
+    expect(publish(ORG_ID)).toBe(true)
+    expect(received).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("a refused org room", () => {
+  /**
+   * Run the refused create the way the matchmaker does (`__init` first, which
+   * starts the patch interval and the seat-reservation auto-dispose), then let
+   * Colyseus dispose the empty room.
+   */
+  async function refuseAndDispose(orgId: string | undefined): Promise<void> {
+    const room = new OrgRoom()
+    room.seatReservationTimeout = 1
+    ;(room as unknown as { __init(): void }).__init()
+    await expect(room.onCreate({ orgId })).rejects.toThrow()
+    const events = (room as unknown as { _events: { once(e: string, cb: () => void): void } })
+      ._events
+    const disposed = new Promise<void>((resolve) => events.once("disconnect", resolve))
+    await vi.advanceTimersByTimeAsync(2_000)
+    await disposed
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it.each([
+    ["as a duplicate", ORG_ID],
+    ["for a non-UUID org id", "org-a"],
+  ])("is disposed %s with its timers cleared and the open room kept", async (_label, orgId) => {
+    const real = await openRoom(ORG_ID)
+    const received = vi.spyOn(real, "handleBridgeEvent")
+    const timersBefore = vi.getTimerCount()
+
+    await refuseAndDispose(orgId)
+
+    expect(vi.getTimerCount()).toBe(timersBefore)
     expect(publish(ORG_ID)).toBe(true)
     expect(received).toHaveBeenCalledTimes(1)
   })
