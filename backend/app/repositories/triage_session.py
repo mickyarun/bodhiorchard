@@ -35,6 +35,18 @@ class TriageSessionRepository(BaseRepository[TriageSession]):
         """
         super().__init__(TriageSession, db, org_id=org_id)
 
+    async def get_by_id_for_update(self, session_id: uuid.UUID) -> TriageSession | None:
+        """Load a session and lock its row until the transaction ends.
+
+        Approve and reject decide a session exactly once; the lock makes a
+        second, concurrent decision wait and then see the first one's outcome.
+        """
+        stmt = self._scoped(
+            select(TriageSession).where(TriageSession.id == session_id)
+        ).with_for_update()
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_by_thread(self, channel: str, thread_ts: str) -> TriageSession | None:
         """Find a triage session by its Slack thread.
 
@@ -91,6 +103,24 @@ class TriageSessionRepository(BaseRepository[TriageSession]):
                 TriageSession.summary_msg_ts == summary_msg_ts,
             )
         )
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_summary_msg_for_update(
+        self, channel: str, summary_msg_ts: str
+    ) -> TriageSession | None:
+        """Find a session by its summary message and lock the row until commit.
+
+        Approval reactions decide a session exactly once; the lock makes a
+        second, concurrent reaction (or a UI decision) wait and then see the
+        first one's outcome.
+        """
+        stmt = self._scoped(
+            select(TriageSession).where(
+                TriageSession.slack_channel == channel,
+                TriageSession.summary_msg_ts == summary_msg_ts,
+            )
+        ).with_for_update()
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 

@@ -22,6 +22,7 @@ export interface RaceLeaderboardRow {
   distanceM: number
   finishTimeMs: number | null
   finishedAt: string
+  avatarUrl?: string | null
 }
 
 interface RaceLeaderboardResponse {

@@ -67,6 +67,7 @@
         v-if="bud.assignee_name"
         class="board-card__avatar"
         :name="bud.assignee_name"
+        :src="bud.assignee_avatar_url"
         :size="24"
         :title="bud.assignee_name"
         :label="`Assigned to ${bud.assignee_name}`"

@@ -21,15 +21,21 @@
        <AppConfirmDialog v-model="open" title="Close this bug?" body="…" action="Close bug" @confirm="close" />
 
      It stays open while ``busy``; the parent closes it once the action
-     has succeeded. -->
+     has succeeded. It opens with focus on Cancel, the safe choice. -->
 <template>
-  <v-dialog :model-value="modelValue" max-width="460" :persistent="busy" @update:model-value="emit('update:modelValue', $event)">
+  <v-dialog
+    :model-value="modelValue"
+    max-width="460"
+    :persistent="busy"
+    @update:model-value="emit('update:modelValue', $event)"
+    @after-enter="cancel?.$el.focus()"
+  >
     <v-card color="surface" class="app-confirm">
       <h2 class="app-confirm__title">{{ title }}</h2>
       <p class="app-confirm__body"><slot name="body">{{ body }}</slot></p>
       <slot />
       <div class="app-confirm__actions">
-        <v-btn variant="text" :disabled="busy" @click="emit('update:modelValue', false)">Cancel</v-btn>
+        <v-btn ref="cancel" variant="text" :disabled="busy" @click="emit('update:modelValue', false)">Cancel</v-btn>
         <v-btn color="primary" variant="flat" :loading="busy" @click="emit('confirm')">{{ action }}</v-btn>
       </div>
     </v-card>
@@ -37,11 +43,14 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
+
 withDefaults(defineProps<{ modelValue: boolean; title: string; body?: string; action: string; busy?: boolean }>(), {
   body: '',
   busy: false,
 })
 const emit = defineEmits<{ 'update:modelValue': [open: boolean]; confirm: [] }>()
+const cancel = ref<{ $el: HTMLElement } | null>(null)
 </script>
 
 <style scoped>

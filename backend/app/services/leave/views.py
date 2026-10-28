@@ -29,7 +29,8 @@ from app.models.leave_request import LeaveRequest, LeaveStatus
 from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.policy_holiday import PolicyHolidayRepository
 from app.repositories.user import UserRepository
-from app.schemas.leave import LeaveRequestRead, LeaveTypeBrief, PersonRef
+from app.schemas.leave import LeaveRequestRead, LeaveTypeBrief
+from app.services.leave.people import person_ref
 from app.services.leave.type_privacy import shown
 
 
@@ -58,7 +59,7 @@ async def request_reads(
     when ``sees_restricted`` (see :mod:`app.services.leave.type_privacy`).
     """
     people = {r.user_id for r in requests} | {r.decided_by for r in requests if r.decided_by}
-    names = await UserRepository(db).get_names_by_ids(people)
+    cards = await UserRepository(db).get_people_by_ids(people)
     types = await LeaveTypeRepository(db, org_id=org_id).by_ids(
         {r.leave_type_id for r in requests if r.leave_type_id}
     )
@@ -75,7 +76,7 @@ async def request_reads(
         out.append(
             LeaveRequestRead(
                 id=r.id,
-                user=PersonRef(user_id=r.user_id, name=names.get(r.user_id, "Unknown")),
+                user=person_ref(r.user_id, cards, "Unknown"),
                 kind=r.kind,
                 leave_type=LeaveTypeBrief(
                     id=leave_type.id,
@@ -94,9 +95,7 @@ async def request_reads(
                 reason=r.reason if private else None,
                 status=r.status,
                 approval_mode=r.approval_mode,
-                decided_by=PersonRef(user_id=r.decided_by, name=names.get(r.decided_by, "Unknown"))
-                if r.decided_by
-                else None,
+                decided_by=person_ref(r.decided_by, cards, "Unknown") if r.decided_by else None,
                 decided_at=r.decided_at,
                 decision_note=r.decision_note if private else None,
                 created_at=r.created_at,

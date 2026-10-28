@@ -14,9 +14,11 @@
  * limitations under the License.
  -->
 
-<!-- A person's initials on a tonal wash. Decorative by default: the name is
-     usually written beside it, so it stays out of the accessibility tree.
-     Pass ``label`` when it stands alone and must be announced.
+<!-- A person's photo, or their initials on a tonal wash. Decorative by
+     default: the name is usually written beside it, so it stays out of the
+     accessibility tree. Pass ``label`` when it stands alone and must be
+     announced. ``src`` is the stored ``avatar_url``; a missing or broken
+     photo (a Slack link can rot) falls back to the initials.
      ``square`` gives the rounded-square shape used for message authors;
      ``tone="brand"`` uses the indigo brand wash instead of the accent blue. -->
 <template>
@@ -27,22 +29,41 @@
     :role="label ? 'img' : undefined"
     :aria-label="label"
     :aria-hidden="label ? undefined : 'true'"
-  >{{ initialsOf(name || '?') }}</span>
+  >
+    <img
+      v-if="photo && !failed"
+      :src="photo"
+      alt=""
+      class="app-monogram__photo"
+      referrerpolicy="no-referrer"
+      @error="failed = true"
+    />
+    <template v-else>{{ initialsOf(name || '?') }}</template>
+  </span>
 </template>
 
 <script setup lang="ts">
-import { initialsOf } from '@/utils/avatar'
+import { computed, ref, watch } from 'vue'
+import { initialsOf, resolveAvatarUrl } from '@/utils/avatar'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     name: string | null | undefined
+    src?: string | null
     size?: number
     square?: boolean
     tone?: 'accent' | 'brand'
     label?: string
   }>(),
-  { size: 32, square: false, tone: 'accent', label: undefined },
+  { src: null, size: 32, square: false, tone: 'accent', label: undefined },
 )
+
+const photo = computed(() => resolveAvatarUrl(props.src))
+const failed = ref(false)
+// A new URL (a replaced photo) deserves a fresh attempt.
+watch(photo, () => {
+  failed.value = false
+})
 </script>
 
 <style scoped>
@@ -54,10 +75,17 @@ withDefaults(
   align-items: center;
   justify-content: center;
   border-radius: 999px;
+  overflow: hidden;
   font-size: max(10px, calc(var(--size) * 0.34));
   font-weight: 600;
   color: var(--color-accent-text);
   background: var(--color-accent-soft);
+}
+.app-monogram__photo {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
 }
 .app-monogram--square {
   border-radius: 8px;
