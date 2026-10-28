@@ -58,6 +58,9 @@ export function usePermissions() {
   const canManageCelebrations = computed(() =>
     hasAnyPermission('employees:manage', 'org:edit_settings'),
   )
+  // "Import photos from Slack": HR or admins, as the backend's
+  // import_slack_photos route in api/v1/employee_avatars.py allows.
+  const canImportSlackPhotos = canManageCelebrations
   const canControlCelebrationChannel = computed(() => hasPermission('org:edit_settings'))
   // Leave: approving anyone's requests (HR), and configuring policies,
   // types, holidays and balances.
@@ -127,6 +130,7 @@ export function usePermissions() {
     canInviteMembers,
     canSeeEmployeeDocuments,
     canManageCelebrations,
+    canImportSlackPhotos,
     canControlCelebrationChannel,
     canApproveLeave,
     canConfigureLeave,
