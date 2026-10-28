@@ -32,6 +32,7 @@ from app.models.bug import Bug, BugStatus, BugType
 from app.models.developer_xp import RewardEvent, RewardType
 from app.services.bug_testing_gate import check_bug_threshold
 from app.services.code_review_sp import award_code_review_sp
+from app.services.sp_rules import SP_DEV_REVIEW_GIVEN
 from tests.integration.bud_lifecycle_reads import load_bud, timeline
 from tests.integration.bud_lifecycle_support import (
     Factory,
@@ -39,6 +40,9 @@ from tests.integration.bud_lifecycle_support import (
     add_member,
     new_org,
     stub_externals,
+)
+from tests.integration.bud_lifecycle_support import (
+    app_database_blocked as app_database_blocked,
 )
 
 pytestmark = pytest.mark.integration
@@ -177,5 +181,5 @@ async def test_review_sp_pays_valid_non_self_reviewers_once(
     assert await _award() == 0
     ledger = await _review_sp(pg_session_factory, org)
     assert list(ledger) == [f"sp_review:12:{good}"]
-    assert ledger[f"sp_review:12:{good}"] > 0
+    assert ledger[f"sp_review:12:{good}"] == SP_DEV_REVIEW_GIVEN
     assert str(stamp) not in "".join(ledger)

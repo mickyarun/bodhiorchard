@@ -44,6 +44,9 @@ from tests.integration.bud_lifecycle_support import (
     new_org,
     stub_externals,
 )
+from tests.integration.bud_lifecycle_support import (
+    app_database_blocked as app_database_blocked,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -159,5 +162,5 @@ async def test_cap_keeps_newest_edits_and_ignores_reverts(
     assert len(real) == MAX_VERSIONS_PER_PHASE
     assert [r.version_no for r in real] == list(range(3, edits + 1))
     assert [r.version_no for r in reverts] == [edits + 1]
-    # v22 holds the title as it was before the 22nd edit.
+    # The newest version (``edits``) holds the title as it was before the last edit.
     assert (await load_bud(pg_session_factory, bud_id)).title == f"t{edits - 1}"

@@ -17,8 +17,7 @@
 The assignee gets the 50 XP ``bud_completed`` award once; every other
 commit / PR contributor gets 25 XP once; prod and then closed (the
 auto-close path's shape) never pays twice; the XP aggregate always
-matches the audit events. Closing never starts a repo scan and never
-moves the linked feature.
+matches the audit events. Closing never starts a repo scan.
 """
 
 from __future__ import annotations
@@ -30,13 +29,14 @@ import pytest
 from httpx import AsyncClient
 
 from app.models.bud import BUDStatus
-from app.models.feature import Feature
 from app.models.scan import Scan
 from app.models.webhook_log import WebhookLog
+from app.services import bud_closure
 from tests.integration.bud_lifecycle_reads import (
     count_rows,
     xp_events,
     xp_ledger,
+    xp_owner,
 )
 from tests.integration.bud_lifecycle_support import (
     Factory,
@@ -46,6 +46,9 @@ from tests.integration.bud_lifecycle_support import (
     as_user,
     new_org,
     stub_externals,
+)
+from tests.integration.bud_lifecycle_support import (
+    app_database_blocked as app_database_blocked,
 )
 
 pytestmark = pytest.mark.integration
@@ -88,6 +91,7 @@ async def test_close_pays_assignee_and_contributors_exactly_once(
 
     assert (first.status_code, second.status_code) == (200, 400)
     assert after_first[f"bud:{BUD_NUMBER}"] == 50
+    assert await xp_owner(pg_session_factory, org, f"bud:{BUD_NUMBER}") == lead
     assert after_first[f"bud_contrib:{BUD_NUMBER}:{helper}"] == 25
     # The assignee is paid through ``bud_completed`` only, never as a contributor.
     assert f"bud_contrib:{BUD_NUMBER}:{lead}" not in after_first
@@ -111,6 +115,7 @@ async def test_prod_then_closed_does_not_pay_twice(
 
     assert (to_prod.status_code, to_closed.status_code) == (200, 200)
     assert at_prod[f"bud:{BUD_NUMBER}"] == 50
+    assert await xp_owner(pg_session_factory, org, f"bud:{BUD_NUMBER}") == lead
     assert at_prod[f"bud_contrib:{BUD_NUMBER}:{helper}"] == 25
     assert await xp_events(pg_session_factory, org) == at_prod
     total, from_events = await xp_ledger(pg_session_factory, org, helper)
@@ -136,42 +141,25 @@ async def test_close_without_assignee_pays_only_contributors(
     assert await xp_events(pg_session_factory, org) == {f"bud_contrib:{BUD_NUMBER}:{dev}": 25}
 
 
-async def test_close_starts_no_repo_scan_and_leaves_the_feature_alone(
-    client: AsyncClient, pg_session_factory: Factory
-) -> None:
-    """Scans belong to the PR-merge webhook; closing reaches none of its entry points."""
-    org, pm, _lead, _helper, bud_id = await _shipped_bud(pg_session_factory)
-    async with pg_session_factory() as db:
-        feature = Feature(
-            org_id=org,
-            feature_title="Feature: retry",
-            description="d",
-            capabilities={"capabilities": []},
-            cluster_names=[],
-            tags=[],
-            cluster_signature=f"bud:BUD-{BUD_NUMBER:03d}",
-            source="bud",
-            source_ref=f"BUD-{BUD_NUMBER:03d}",
-            feature_status="in_progress",
-        )
-        db.add(feature)
-        await db.commit()
-        feature_id = feature.id
+async def test_close_starts_no_repo_scan(client: AsyncClient, pg_session_factory: Factory) -> None:
+    """Scans belong to the PR-merge webhook: closing leaves no scan or delivery behind.
 
-    with stub_externals() as ext:
+    The scan entry points open their own app-database sessions, which the
+    autouse ``app_database_blocked`` guard would also catch and fail on.
+    """
+    org, pm, _lead, _helper, bud_id = await _shipped_bud(pg_session_factory)
+
+    with stub_externals():
         res = await client.patch(
             f"/api/v1/buds/{bud_id}", json={"status": "closed"}, headers=as_user(pm, org)
         )
 
     assert res.status_code == 200
-    for scan_entry in ext.scans:
-        scan_entry.assert_not_awaited()
     assert await count_rows(pg_session_factory, Scan, org) == 0
     assert await count_rows(pg_session_factory, WebhookLog, org) == 0
-    async with pg_session_factory() as db:
-        stored = await db.get(Feature, feature_id)
-        assert stored is not None
-        assert (stored.is_active, stored.feature_status) == (True, "in_progress")
+    # The closure module does not even import a scan trigger.
+    for entry_point in ("start_scan", "publish_pr_merge_delivery", "trigger_scan"):
+        assert not hasattr(bud_closure, entry_point)
 
 
 @pytest.mark.parametrize(("opted_in", "expected_calls"), [(True, 1), (False, 0)])

@@ -37,6 +37,9 @@ from tests.integration.bud_lifecycle_support import (
     as_user,
     new_org,
 )
+from tests.integration.bud_lifecycle_support import (
+    app_database_blocked as app_database_blocked,
+)
 
 pytestmark = pytest.mark.integration
 

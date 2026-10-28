@@ -15,11 +15,20 @@
 """Shared helpers for the BUD lifecycle integration tests.
 
 Every helper writes on fresh uuids (a new org per test) because the
-Postgres container is shared across the whole session. ``stub_externals``
-replaces every outbound dependency the BUD routes can reach — the ONNX
-embedding model, model-backed judges / tie-breaks, the background
-estimator (which opens its own session on the app's real database URL)
-and the repo-scan entry points — so no test ever leaves the container.
+Postgres container is shared across the whole session.
+
+Two layers keep the tests inside the container:
+
+* ``stub_externals`` replaces the outbound dependencies the BUD routes
+  reach on purpose: the ONNX embedding model, every model call (at the
+  provider choke point and at the importer sites that would otherwise
+  open their own session first), and the background estimators, which
+  open sessions on the app's own database URL.
+* ``app_database_blocked`` is the fail-closed backstop. Test modules
+  import it (``import ... as ...``), so it runs autouse: any attempt to
+  connect through ``app.database.engine`` (the real ``DATABASE_URL``) is
+  refused and recorded, and the test fails at teardown even when the
+  code under test swallowed the error.
 """
 
 from __future__ import annotations
@@ -29,11 +38,14 @@ from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.security import create_access_token
+from app.database import engine as app_engine
 from app.models.bud import BUDDocument, BUDStatus
 from app.models.dev_activity import DevActivityLog
 from app.models.organization import Organization
@@ -46,9 +58,11 @@ Factory = async_sessionmaker[AsyncSession]
 # Dimension of ``bud_documents.embedding`` (Vector(384)).
 EMBEDDING_DIM = 384
 
-# Every module that imports ``run_agent_for_org_id`` on a path a BUD
-# route can reach. Each is patched to raise so the caller's own
-# deterministic fallback runs instead of a model call.
+_NO_MODEL = "no model in tests"
+
+# Importers of ``run_agent_for_org_id`` on paths a BUD route can reach.
+# Patched to raise before the function opens its own app-database
+# session to look the org up; the caller's deterministic fallback runs.
 _MODEL_CALL_SITES = (
     "app.services.sp_attribution.run_agent_for_org_id",
     "app.services.smart_assignment.run_agent_for_org_id",
@@ -56,12 +70,23 @@ _MODEL_CALL_SITES = (
     "app.services._tech_planner_patch_llm.run_agent_for_org_id",
 )
 
-# Repo-scan entry points. Closing a BUD must never reach any of them.
-_SCAN_ENTRY_POINTS = (
-    "app.services.scan.pr_merge_update.start_scan",
-    "app.services.scan_kickoff.start_scan",
-    "app.services.scan.rescan_enqueue.publish_pr_merge_delivery",
-)
+
+@pytest.fixture(autouse=True)
+def app_database_blocked() -> Iterator[list[str]]:
+    """Refuse and record every connection attempt on the app's own engine."""
+    attempts: list[str] = []
+
+    def _refuse(*_args: object) -> None:
+        attempts.append("connect")
+        raise RuntimeError("test tried to connect to the app database")
+
+    sync_engine = app_engine.sync_engine
+    event.listen(sync_engine, "do_connect", _refuse)
+    try:
+        yield attempts
+    finally:
+        event.remove(sync_engine, "do_connect", _refuse)
+    assert attempts == [], "code under test opened a session on the app database"
 
 
 @dataclass
@@ -70,7 +95,7 @@ class Externals:
 
     embed: AsyncMock
     bg_estimate: AsyncMock
-    scans: list[AsyncMock]
+    dev_estimate: MagicMock
 
 
 @contextmanager
@@ -81,13 +106,19 @@ def stub_externals(embedding: list[float] | None = None) -> Iterator[Externals]:
         embed = stack.enter_context(
             patch.object(embedding_service, "embed", new=AsyncMock(return_value=vector))
         )
-        for target in _MODEL_CALL_SITES:
-            stack.enter_context(
-                patch(target, new=AsyncMock(side_effect=RuntimeError("no model in tests")))
+        stack.enter_context(
+            patch(
+                "app.services.ai_runner.provider_for",
+                new=MagicMock(side_effect=RuntimeError(_NO_MODEL)),
             )
+        )
+        for target in _MODEL_CALL_SITES:
+            stack.enter_context(patch(target, new=AsyncMock(side_effect=RuntimeError(_NO_MODEL))))
         bg_estimate = stack.enter_context(patch("app.api.v1.bud._bg_estimate", new=AsyncMock()))
-        scans = [stack.enter_context(patch(t, new=AsyncMock())) for t in _SCAN_ENTRY_POINTS]
-        yield Externals(embed=embed, bg_estimate=bg_estimate, scans=scans)
+        dev_estimate = stack.enter_context(
+            patch("app.services.bud_development._schedule_estimation_after_commit")
+        )
+        yield Externals(embed=embed, bg_estimate=bg_estimate, dev_estimate=dev_estimate)
 
 
 def as_user(user_id: uuid.UUID, org_id: uuid.UUID) -> dict[str, str]:

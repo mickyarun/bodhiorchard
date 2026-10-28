@@ -41,43 +41,52 @@ from tests.integration.bud_lifecycle_support import (
     new_org,
     stub_externals,
 )
+from tests.integration.bud_lifecycle_support import (
+    app_database_blocked as app_database_blocked,
+)
 
 pytestmark = pytest.mark.integration
 
 
-async def _bud_with_pr(factory: Factory, pr_state: PRState | None) -> tuple[uuid.UUID, uuid.UUID]:
-    """Org + a code_review BUD on one impacted repo with a PR in ``pr_state``."""
+async def _bud_with_pr(
+    factory: Factory, *pr_states: PRState | None
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """Org + a code_review BUD with one impacted repo per ``pr_states`` entry.
+
+    Each repo gets a PR in that state, or no PR for ``None``.
+    """
     org = await new_org(factory)
+    impacted: list[dict[str, str]] = []
     async with factory() as db:
-        repo = TrackedRepository(org_id=org, path=f"/repos/{uuid.uuid4().hex}", name="api")
-        db.add(repo)
+        repos = [
+            TrackedRepository(org_id=org, path=f"/repos/{uuid.uuid4().hex}", name=f"repo{i}")
+            for i in range(len(pr_states))
+        ]
+        db.add_all(repos)
         await db.commit()
-        repo_id = repo.id
-    bud_id = await add_bud(
-        factory,
-        org,
-        status=BUDStatus.CODE_REVIEW,
-        impacted_repos=[{"repo_id": str(repo_id), "repo_name": "api"}],
-    )
-    if pr_state is not None:
-        async with factory() as db:
+        impacted = [{"repo_id": str(r.id), "repo_name": r.name} for r in repos]
+    bud_id = await add_bud(factory, org, status=BUDStatus.CODE_REVIEW, impacted_repos=impacted)
+    async with factory() as db:
+        for number, (repo, state) in enumerate(zip(repos, pr_states, strict=True), start=1):
+            if state is None:
+                continue
             db.add(
                 PullRequest(
                     org_id=org,
                     bud_id=bud_id,
-                    repo_id=repo_id,
-                    github_pr_number=7,
+                    repo_id=repo.id,
+                    github_pr_number=number,
                     github_pr_id=int(uuid.uuid4().int % 10**12),
-                    github_repo_full_name="acme/api",
+                    github_repo_full_name=f"acme/{repo.name}",
                     title="BUD-001 change",
-                    html_url="https://example.invalid/pr/7",
+                    html_url=f"https://example.invalid/pr/{number}",
                     head_branch="bud-001/change",
                     base_branch="main",
                     author_github_login="dev",
-                    state=pr_state,
+                    state=state,
                 )
             )
-            await db.commit()
+        await db.commit()
     return org, bud_id
 
 
@@ -121,6 +130,33 @@ async def test_bypassing_the_merge_gate_needs_a_reason(
     assert await _advance(client, pg_session_factory, org, bud_id, **extra) == 400
     assert (await load_bud(pg_session_factory, bud_id)).status is BUDStatus.CODE_REVIEW
     assert await timeline(pg_session_factory, bud_id, "status_change") == []
+
+
+async def test_one_merged_repo_is_not_enough(
+    client: AsyncClient, pg_session_factory: Factory
+) -> None:
+    """Two impacted repos, one merged and one still open: still a bypass."""
+    org, bud_id = await _bud_with_pr(pg_session_factory, PRState.MERGED, PRState.OPEN)
+
+    assert await _advance(client, pg_session_factory, org, bud_id) == 400
+    assert (
+        await _advance(
+            client, pg_session_factory, org, bud_id, status_override_reason="hotfix merged by hand"
+        )
+        == 200
+    )
+    [override] = await timeline(pg_session_factory, bud_id, "status_override")
+    assert override["reason"] == "hotfix merged by hand"
+
+
+async def test_every_repo_merged_needs_no_reason(
+    client: AsyncClient, pg_session_factory: Factory
+) -> None:
+    """Two impacted repos, both merged: the same as the webhook auto-advance."""
+    org, bud_id = await _bud_with_pr(pg_session_factory, PRState.MERGED, PRState.MERGED)
+
+    assert await _advance(client, pg_session_factory, org, bud_id) == 200
+    assert await timeline(pg_session_factory, bud_id, "status_override") == []
 
 
 async def test_bypass_reason_is_trimmed_and_recorded(

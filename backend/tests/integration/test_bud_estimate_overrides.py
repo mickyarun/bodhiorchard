@@ -22,6 +22,7 @@ deadline only for the BUD's own phase, and is org-scoped.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, time, timedelta
 
 import pytest
 from httpx import AsyncClient
@@ -35,10 +36,15 @@ from tests.integration.bud_lifecycle_support import (
     as_user,
     new_org,
 )
+from tests.integration.bud_lifecycle_support import (
+    app_database_blocked as app_database_blocked,
+)
 
 pytestmark = pytest.mark.integration
 
-WHEN = "2031-03-14T00:00:00+00:00"
+# A whole day comfortably in the future, relative to the run date.
+TARGET_DAY = (datetime.now(UTC) + timedelta(days=400)).date()
+WHEN = datetime.combine(TARGET_DAY, time(), tzinfo=UTC).isoformat()
 
 
 async def _setup(
@@ -69,7 +75,7 @@ async def test_override_is_visible_everywhere(
     assert res.status_code == 200
     assert (res.json()["source"], res.json()["override_reason"]) == ("override", "Vendor delay")
     [phase] = [p for p in estimates.json()["phases"] if p["phase"] == "development"]
-    assert phase["estimated_completion"].startswith("2031-03-14")
+    assert phase["estimated_completion"].startswith(TARGET_DAY.isoformat())
     assert phase["confidence"] == 1.0
     assert [h["trigger"] for h in history.json()] == ["manual"]
     [event] = await timeline(pg_session_factory, bud_id, "estimate_overridden")
@@ -80,7 +86,7 @@ async def test_override_is_visible_everywhere(
     )
     bud = await load_bud(pg_session_factory, bud_id)
     assert bud.current_phase_deadline is not None
-    assert bud.current_phase_deadline.date().isoformat() == "2031-03-14"
+    assert bud.current_phase_deadline.date() == TARGET_DAY
 
 
 async def test_overriding_another_phase_leaves_the_current_deadline(

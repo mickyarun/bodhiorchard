@@ -90,3 +90,16 @@ async def xp_ledger(factory: Factory, org_id: uuid.UUID, user_id: uuid.UUID) -> 
             )
         )
         return int(total or 0), sum(round(float(a)) for a in events)
+
+
+async def xp_owner(factory: Factory, org_id: uuid.UUID, source_ref: str) -> uuid.UUID | None:
+    """The user an XP award with ``source_ref`` was paid to, if any."""
+    async with factory() as db:
+        owner: uuid.UUID | None = await db.scalar(
+            select(RewardEvent.user_id).where(
+                RewardEvent.org_id == org_id,
+                RewardEvent.type == RewardType.XP,
+                RewardEvent.source_ref == source_ref,
+            )
+        )
+        return owner
