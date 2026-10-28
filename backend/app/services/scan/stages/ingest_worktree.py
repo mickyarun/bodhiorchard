@@ -31,13 +31,13 @@ indexer → empty file list → ``"no source files found in repo"``.
 from __future__ import annotations
 
 import re
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
 
 from app.config import settings
+from app.core.paths import is_strictly_under, rmtree_strictly_under
 from app.services.git_operations import run_git
 from app.services.scan.stages._origin_auth import (
     build_app_https_url_for_origin,
@@ -129,6 +129,12 @@ async def ensure_scan_test_worktree(
     parent.mkdir(parents=True, exist_ok=True)
     wt_path = parent / main_branch.replace("/", "-")
     wt_str = str(wt_path)
+    # Branch names are validated on the way in, but rows stored before
+    # that (or written some other way) still reach here. A name like
+    # ``..`` would make the worktree path the shared parent of every
+    # repo's worktrees, so refuse anything that isn't strictly inside.
+    if not is_strictly_under(wt_path, parent):
+        raise RuntimeError(f"scan worktree for branch {main_branch!r} escapes {parent}")
 
     await run_git(["worktree", "prune"], cwd=repo_path)
     # If a worktree on ``main_branch`` is still registered at a path
@@ -145,7 +151,8 @@ async def ensure_scan_test_worktree(
     # add`` below rebuilds it cleanly against the current ``repo_path``.
     if wt_path.exists() and not await _worktree_is_healthy(wt_str):
         logger.info("scan_ingest_rebuilding_dangling_worktree", path=wt_str, repo=repo_path)
-        shutil.rmtree(wt_path, ignore_errors=True)
+        if not rmtree_strictly_under(wt_path, parent):
+            raise RuntimeError(f"refusing to delete {wt_str}: not inside {parent}")
         await run_git(["worktree", "prune"], cwd=repo_path)
 
     if not wt_path.exists():

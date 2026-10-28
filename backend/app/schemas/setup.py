@@ -16,6 +16,7 @@
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
+from app.schemas.git_ref import BranchName
 from app.schemas.repo_install import BulkOnboardItem
 
 
@@ -40,8 +41,8 @@ class SetupRepo(BaseModel):
     model_config = {"populate_by_name": True}
 
     path: str
-    main_branch: str | None = Field(None, alias="mainBranch")
-    develop_branch: str | None = Field(None, alias="developBranch")
+    main_branch: BranchName | None = Field(None, alias="mainBranch")
+    develop_branch: BranchName | None = Field(None, alias="developBranch")
 
 
 class SetupSourceCode(BaseModel):
