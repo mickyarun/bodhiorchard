@@ -650,6 +650,20 @@ class UserRepository(BaseRepository[User]):
         )
         return result.scalar_one_or_none() is not None
 
+    async def member_ids_of_org(
+        self, user_ids: Collection[uuid.UUID], org_id: uuid.UUID
+    ) -> set[uuid.UUID]:
+        """Which of ``user_ids`` have an OrgToUser membership in the org (one query)."""
+        if not user_ids:
+            return set()
+        result = await self._db.execute(
+            select(OrgToUser.user_id).where(
+                OrgToUser.org_id == org_id,
+                OrgToUser.user_id.in_(user_ids),
+            )
+        )
+        return set(result.scalars().all())
+
     async def list_active_members_with_xp(
         self, org_id: uuid.UUID
     ) -> list[tuple[User, DeveloperXP | None]]:
