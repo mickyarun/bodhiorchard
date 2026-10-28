@@ -24,7 +24,9 @@
  *   onJoin:   start the engine + (for timed games) the 20Hz sim loop.
  *   finish:   POST the server-computed score via the bridge, relay the outcome.
  */
-import { Room, Client } from "colyseus"
+import { Room, Client, type RoomException, type RoomMethodName } from "colyseus"
+import { reportRoomException } from "./roomExceptions"
+import type { Delayed } from "colyseus"
 import { MinigameRoomState } from "../schema/MinigameRoomState"
 import type { MinigameEngine, MinigameHost } from "./minigame/MinigameEngine"
 import { FireflyEngine } from "./minigame/FireflyEngine"
@@ -51,7 +53,7 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
   maxClients = 1
 
   private engine: MinigameEngine | null = null
-  private simHandle: NodeJS.Timeout | null = null
+  private simHandle: Delayed | null = null
   private posted = false
   private userName = ""
 
@@ -97,10 +99,26 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
     this.engine = engine
     engine.start(this)
     if (engine.tick) {
-      this.simHandle = setInterval(() => {
+      // Room clock: guarded by onUncaughtException and cleared on dispose.
+      this.simHandle = this.clock.setInterval(() => {
         if (this.state.phase === "playing") engine.tick?.(this, Date.now())
       }, SIM_TICK_MS)
     }
+  }
+
+  /** Report a throwing handler or timer instead of letting it exit the process. */
+  onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
+    reportRoomException(this, error, methodName)
+    // The engine tick is the only interval: one that threw will throw on
+    // every tick, so end the game unrecorded instead of logging it at 20Hz.
+    if (methodName === "setInterval") this.abandonBrokenGame()
+  }
+
+  private abandonBrokenGame(): void {
+    this.stopSim()
+    this.state.phase = "finished"
+    this.posted = true
+    this.broadcast("mg_result", { recorded: false, game: this.state.game, score: 0 })
   }
 
   onDispose(): void {
@@ -165,7 +183,7 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
 
   private stopSim(): void {
     if (this.simHandle) {
-      clearInterval(this.simHandle)
+      this.simHandle.clear()
       this.simHandle = null
     }
   }
