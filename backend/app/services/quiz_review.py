@@ -78,9 +78,12 @@ async def edit_question(
 
     # Re-run the per-type content check so a bad hand-edit can't be saved.
     validate_question_content(question.question_type, question.payload, question.answer_key)
-    reject_answer_giveaway(
-        question.question_type, question.prompt, question.payload, question.answer_key
-    )
+    # Only an edit to what players see (or to the answer) can create a giveaway;
+    # fixing the explanation of an older question must not trip the check.
+    if edit.prompt is not None or edit.payload is not None or edit.answer_key is not None:
+        reject_answer_giveaway(
+            question.question_type, question.prompt, question.payload, question.answer_key
+        )
     await db.flush()
     return question
 

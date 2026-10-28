@@ -17,25 +17,50 @@
 While a quiz is open players see the prompt and the payload (MCQ choices, the
 scrambled letters, the fill-blank hint); only ``answer_key`` is withheld. A
 question that repeats its answer in what players see is a giveaway. Pure: no
-DB, no I/O. Run on every generated draft and on every admin edit, next to
-``validate_question_content``.
+DB, no I/O. Run on every generated draft and on admin edits that touch the
+prompt, payload or answer, next to ``validate_question_content``.
 
-Matching is on whole words after ``normalize_text`` folding, so an answer of
-"Go" is not found inside "going".
+Matching is on whole words, so an answer of "Go" is not found inside "going".
+In the prompt, which is prose, only a mention written as a name counts (not
+all lowercase): "Redis backs the queue" gives "Redis" away, while "lets
+players answer one quiz question a day" does not give away a feature called
+"Quiz". The short fill-blank hint is checked case-insensitively. Aliases
+shorter than three letters or that are common words are ignored, and
+true/false or numeric choice sets are never flagged.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app.models.quiz_question import QuizQuestionType
 from app.services.quiz_content import normalize_text
 
+_MIN_ALIAS_LENGTH = 3
+_STOP_WORDS = frozenset(
+    {"and", "are", "for", "from", "not", "one", "our", "the", "this", "that", "with", "you"}
+)
+_BOOLEAN_WORDS = frozenset({"true", "false", "yes", "no"})
 
-def _shows(text: str, phrase: str) -> bool:
-    """True when ``phrase`` appears in ``text`` as whole words (case/punctuation-folded)."""
-    needle = normalize_text(phrase)
-    return bool(needle) and f" {needle} " in f" {normalize_text(text)} "
+
+def _occurrences(text: str, phrase: str) -> list[str]:
+    """Every whole-word occurrence of ``phrase`` in ``text``, as written there."""
+    words = normalize_text(phrase).split()
+    if not words:
+        return []
+    pattern = r"(?<![^\W_])" + r"[\W_]+".join(re.escape(w) for w in words) + r"(?![^\W_])"
+    return re.findall(pattern, text, flags=re.IGNORECASE)
+
+
+def _mentions(text: str, phrase: str) -> bool:
+    """``phrase`` appears in ``text`` as whole words, in any case."""
+    return bool(_occurrences(text, phrase))
+
+
+def _names(prose: str, phrase: str) -> bool:
+    """``phrase`` appears in ``prose`` written as a name (not all lowercase)."""
+    return any(found != found.lower() for found in _occurrences(prose, phrase))
 
 
 def _letters(value: str) -> str:
@@ -43,29 +68,44 @@ def _letters(value: str) -> str:
     return normalize_text(value).replace(" ", "")
 
 
+def _is_plain_choice_set(choices: list[str]) -> bool:
+    """True/false, yes/no or all-numeric choices: their words occur in any prompt."""
+    folded = [normalize_text(c) for c in choices]
+    return all(c in _BOOLEAN_WORDS for c in folded) or all(
+        c.replace(" ", "").isdigit() for c in folded
+    )
+
+
 def _mcq_giveaway(prompt: str, payload: dict[str, Any], answer_key: dict[str, Any]) -> bool:
-    """The prompt names the correct choice and no other choice."""
+    """The prompt names the correct choice and mentions no other choice."""
     choices = [str(c) for c in payload.get("choices") or []]
     index = answer_key.get("correct_index")
     if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(choices):
         return False
+    if _is_plain_choice_set(choices):
+        return False
     others = choices[:index] + choices[index + 1 :]
-    return _shows(prompt, choices[index]) and not any(_shows(prompt, c) for c in others)
+    return _names(prompt, choices[index]) and not any(_mentions(prompt, c) for c in others)
 
 
 def _scramble_giveaway(prompt: str, payload: dict[str, Any], answer_key: dict[str, Any]) -> bool:
     """The letters are not actually scrambled, or the prompt names the answer."""
     answer = str(answer_key.get("answer", ""))
     scrambled = str(payload.get("scrambled", ""))
-    return _letters(scrambled) == _letters(answer) or _shows(prompt, answer)
+    return _letters(scrambled) == _letters(answer) or _names(prompt, answer)
+
+
+def _usable_alias(alias: str) -> bool:
+    folded = normalize_text(alias)
+    return len(folded.replace(" ", "")) >= _MIN_ALIAS_LENGTH and folded not in _STOP_WORDS
 
 
 def _fill_blank_giveaway(prompt: str, payload: dict[str, Any], answer_key: dict[str, Any]) -> bool:
-    """The prompt or the hint contains the answer or one of its aliases."""
+    """The prompt names, or the hint mentions, the answer or a meaningful alias."""
     accepted = [str(answer_key.get("answer", ""))]
-    accepted += [str(a) for a in answer_key.get("aliases", []) or []]
+    accepted += [str(a) for a in answer_key.get("aliases", []) or [] if _usable_alias(str(a))]
     hint = str(payload.get("hint", ""))
-    return any(_shows(prompt, a) or _shows(hint, a) for a in accepted)
+    return any(_names(prompt, a) or _mentions(hint, a) for a in accepted)
 
 
 def reject_answer_giveaway(
