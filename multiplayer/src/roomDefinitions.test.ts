@@ -121,17 +121,3 @@ describe("join checks for every registered room", () => {
     },
   )
 })
-
-describe("join checks for every registered room", () => {
-  // Colyseus runs the static onAuth inside the matchmaker, before it creates
-  // a room or reserves a seat; an instance onAuth would run only at
-  // WebSocket connect, after the seat is held (see auth/roomAuth.ts).
-  it.each(Object.entries(roomDefinitions))(
-    "%s verifies the join before matchmaking and has no instance onAuth",
-    (_name, handler) => {
-      const klass = handler.klass as unknown as typeof Room
-      expect(klass.onAuth).toBe(authenticateJoin)
-      expect(klass.prototype.onAuth).toBe(Room.prototype.onAuth)
-    },
-  )
-})
