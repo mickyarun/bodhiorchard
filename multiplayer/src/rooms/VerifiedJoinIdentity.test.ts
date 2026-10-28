@@ -14,18 +14,22 @@
 
 /**
  * Colyseus calls `onJoin(client, rawOptions, authResult)`: the second argument
- * is whatever the client sent, the third is what `onAuth` returned after
- * verifying the JWT. A room that reads identity from the raw options lets any
- * signed-in member act as a colleague. These tests replay the real sequence
- * (onAuth with a token, then onJoin with the same raw options).
+ * is whatever the client sent, the third is what the static `onAuth` returned
+ * after verifying the JWT. A room that reads identity from the raw options
+ * lets any signed-in member act as a colleague. These tests replay the real
+ * sequence (the static onAuth with a token, then onJoin with the same raw
+ * options).
  */
-import type { Client } from "colyseus"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { authenticateJoin } from "../auth/roomAuth"
 import { TOKENLESS_JOIN_FLAG } from "../auth/verifyJoin"
 import { OrgRoomState } from "../schema/OrgRoomState"
+import { fakeClient, joinRoom } from "../testing/join"
 import { MinigameRoom } from "./MinigameRoom"
 import { OrgRoom } from "./OrgRoom"
 
+const ORG_A = "1f6b2c4d-8e9a-4b1c-9d2e-3f4a5b6c7d8e"
+const ORG_B = "2a7c3d5e-9f0b-4c2d-8e3f-4a5b6c7d8e9f"
 const fetchMock = vi.fn()
 
 function verifiedAs(userId: string, orgId: string, name: string): void {
@@ -43,10 +47,6 @@ function orgRoom(orgId: string): OrgRoom {
   return room
 }
 
-function fakeClient(): Client {
-  return { sessionId: "s1", userData: undefined, send: vi.fn() } as unknown as Client
-}
-
 beforeEach(() => {
   fetchMock.mockReset()
   vi.stubGlobal("fetch", fetchMock)
@@ -62,37 +62,32 @@ afterEach(() => {
 
 describe("OrgRoom join identity", () => {
   it("binds the client to the verified user, not the user it claimed", async () => {
-    verifiedAs("alice", "org-a", "Alice")
-    const room = orgRoom("org-a")
+    verifiedAs("alice", ORG_A, "Alice")
+    const room = orgRoom(ORG_A)
     const client = fakeClient()
-    const raw = { userId: "bob", name: "Bob", token: "alice-jwt" }
 
-    const auth = await room.onAuth(client, raw)
-    await room.onJoin(client, raw, auth)
+    await joinRoom(room, client, { orgId: ORG_A, userId: "bob", name: "Bob", token: "alice-jwt" })
 
     expect(client.userData).toMatchObject({ userId: "alice", name: "Alice" })
     room.clock.clear()
   })
+
   it("refuses a tokenless join in development unless the operator opted in", async () => {
     vi.stubEnv("NODE_ENV", "development")
-    const room = orgRoom("org-a")
 
-    await expect(room.onAuth(fakeClient(), { userId: "bob", name: "Bob" })).rejects.toThrow(
-      "auth token required",
-    )
+    await expect(
+      authenticateJoin(undefined, { orgId: ORG_A, userId: "bob", name: "Bob" }),
+    ).rejects.toThrow("auth token required")
     expect(fetchMock).not.toHaveBeenCalled()
-    room.clock.clear()
   })
 
   it("binds an opted-in tokenless join to a namespaced dev identity", async () => {
     vi.stubEnv("NODE_ENV", "development")
     vi.stubEnv(TOKENLESS_JOIN_FLAG, "1")
-    const room = orgRoom("org-a")
+    const room = orgRoom(ORG_A)
     const client = fakeClient()
-    const raw = { userId: "bob", name: "Bob", orgId: "org-a" }
 
-    const auth = await room.onAuth(client, raw)
-    await room.onJoin(client, raw, auth)
+    await joinRoom(room, client, { userId: "bob", name: "Bob", orgId: ORG_A })
 
     expect(client.userData).toMatchObject({ userId: "dev:bob", name: "Bob" })
     expect(fetchMock).not.toHaveBeenCalled()
@@ -100,27 +95,37 @@ describe("OrgRoom join identity", () => {
   })
 
   it("refuses every join to a room created without an org", async () => {
-    verifiedAs("alice", "org-a", "Alice")
+    verifiedAs("alice", ORG_A, "Alice")
     const room = orgRoom("")
 
-    await expect(room.onAuth(fakeClient(), { token: "alice-jwt" })).rejects.toThrow(
-      "room has no org",
-    )
+    await expect(
+      joinRoom(room, fakeClient(), { orgId: ORG_A, token: "alice-jwt" }),
+    ).rejects.toThrow("join org is not this room's org")
     room.clock.clear()
   })
 
   it("refuses a token from another org", async () => {
-    verifiedAs("alice", "org-b", "Alice")
-    const room = orgRoom("org-a")
+    verifiedAs("alice", ORG_B, "Alice")
 
     await expect(
-      room.onAuth(fakeClient(), { token: "alice-jwt", orgId: "org-a" }),
+      authenticateJoin(undefined, { token: "alice-jwt", orgId: ORG_A }),
     ).rejects.toThrow("token org mismatch")
+  })
+
+  it("refuses a member verified in their own org who lands in another org's room", async () => {
+    verifiedAs("mallory", ORG_B, "Mallory")
+    const room = orgRoom(ORG_A)
+    const client = fakeClient()
+
+    await expect(
+      joinRoom(room, client, { orgId: ORG_B, token: "mallory-jwt" }),
+    ).rejects.toThrow("join org is not this room's org")
+    expect(client.userData).toBeUndefined()
     room.clock.clear()
   })
 
   it("refuses an onJoin that did not pass onAuth", async () => {
-    const room = orgRoom("org-a")
+    const room = orgRoom(ORG_A)
 
     await expect(room.onJoin(fakeClient(), { userId: "bob" })).rejects.toThrow(
       "join was not verified",
@@ -131,16 +136,14 @@ describe("OrgRoom join identity", () => {
 
 describe("MinigameRoom join identity", () => {
   it("records the score for the verified player, not the claimed one", async () => {
-    verifiedAs("alice", "org-a", "Alice")
+    verifiedAs("alice", ORG_A, "Alice")
     const room = new MinigameRoom()
     room.roomId = "mg-identity"
     room.onCreate({ game: "fishing" })
     const broadcast = vi.spyOn(room, "broadcast").mockImplementation(() => room as never)
-    const client = fakeClient()
-    const raw = { game: "fishing", userId: "bob", name: "Bob", orgId: "org-a", token: "alice-jwt" }
+    const raw = { game: "fishing", userId: "bob", name: "Bob", orgId: ORG_A, token: "alice-jwt" }
 
-    const auth = await room.onAuth(client, raw)
-    room.onJoin(client, raw, auth)
+    await joinRoom(room, fakeClient(), raw)
     room.finish()
     await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith("mg_result", expect.anything()))
 
@@ -148,7 +151,7 @@ describe("MinigameRoom join identity", () => {
     expect(JSON.parse(String((post?.[1] as RequestInit).body))).toMatchObject({
       userId: "alice",
       userName: "Alice",
-      orgId: "org-a",
+      orgId: ORG_A,
     })
     expect(room.state.userId).toBe("alice")
     room.onDispose()
@@ -156,17 +159,13 @@ describe("MinigameRoom join identity", () => {
   })
 
   it("refuses a play whose claimed org is not the token's org", async () => {
-    verifiedAs("alice", "org-a", "Alice")
-    const room = new MinigameRoom()
-    room.onCreate({ game: "fishing" })
+    verifiedAs("alice", ORG_A, "Alice")
 
     await expect(
-      room.onAuth(fakeClient(), { game: "fishing", orgId: "org-b", token: "alice-jwt" }),
+      authenticateJoin(undefined, { orgId: ORG_B, token: "alice-jwt" }),
     ).rejects.toThrow("token org mismatch")
     await expect(
-      room.onAuth(fakeClient(), { game: "fishing", token: "alice-jwt" }),
-    ).rejects.toThrow("room has no org")
-    room.onDispose()
-    room.clock.clear()
+      authenticateJoin(undefined, { token: "alice-jwt" }),
+    ).rejects.toThrow("join must name its org")
   })
 })

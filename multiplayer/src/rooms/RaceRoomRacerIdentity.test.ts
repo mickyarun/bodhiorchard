@@ -96,6 +96,18 @@ describe("join authentication", () => {
     )
   })
 
+  it("keeps a member of another org who names their own org out of this race", async () => {
+    // joinById picks the room by id, so the org the static check verified
+    // is the client's own; the race refuses it in onJoin.
+    const otherOrg = "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d"
+    fetchMock.mockResolvedValue(Response.json({ valid: true, user_id: "eve", org_id: otherOrg }))
+
+    await expect(connect("s-x", { orgId: otherOrg, token: "jwt" })).rejects.toThrow(
+      "join org is not this room's org",
+    )
+    expect(room.state.racers.size).toBe(0)
+  })
+
   it("rejects a backend answer that names no org instead of skipping the org check", async () => {
     fetchMock.mockResolvedValue(Response.json({ valid: true, user_id: "eve", name: "Eve" }))
     await expect(connect("s-x", { token: "jwt" })).rejects.toThrow("named no user or org")

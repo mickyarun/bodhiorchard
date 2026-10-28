@@ -20,7 +20,8 @@
  * engine (`FireflyEngine` / `FishingEngine` / `PollenEngine`) owns the rules.
  * Lifecycle:
  *   onCreate: pick the engine from `options.game`, thin state, message handler.
- *   onAuth:   verify the JWT (trust boundary) → authoritative userId/orgId.
+ *   onAuth:   static, before matchmaking: verify the JWT for the org the
+ *             client names (trust boundary) → authoritative userId/orgId.
  *   onJoin:   start the engine + (for timed games) the 20Hz sim loop.
  *   finish:   POST the server-computed score via the bridge, relay the outcome.
  */
@@ -35,10 +36,11 @@ import { PollenEngine } from "./minigame/PollenEngine"
 import { postMinigameResults } from "../bridge/BackendClient"
 import {
   requireJoinIdentity,
-  verifyJoin,
   type JoinCredentials,
   type JoinIdentity,
 } from "../auth/verifyJoin"
+import { authenticateJoin } from "../auth/roomAuth"
+import { safeError, safeLog } from "../bridge/logSanitize"
 
 const SIM_TICK_MS = 50
 /** Reap an abandoned room (player left a game open) after this long. */
@@ -51,6 +53,13 @@ interface JoinOptions extends JoinCredentials {
 
 export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements MinigameHost {
   maxClients = 1
+
+  /**
+   * Verify every join before matchmaking creates the room (see auth/roomAuth).
+   * A play room belongs to the org its creator names; the token must be for
+   * exactly that org, and the score is posted for the token's user.
+   */
+  static onAuth = authenticateJoin
 
   private engine: MinigameEngine | null = null
   private simHandle: Delayed | null = null
@@ -69,22 +78,17 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
     this.clock.setTimeout(() => this.endGame(), MAX_GAME_MS)
   }
 
-  /**
-   * A play room belongs to the org its creator names; the token must be for
-   * exactly that org, and the score is posted for the token's user.
-   */
-  async onAuth(_client: Client, options: JoinOptions): Promise<JoinIdentity> {
-    return verifyJoin(options, typeof options.orgId === "string" ? options.orgId : "")
-  }
-
   onJoin(client: Client, _options: JoinOptions, auth?: JoinIdentity): void {
     if (!this.state.game) {
       client.send("mg_error", { reason: "unknown_game" })
       this.disconnect()
       return
     }
-    // `options` are the raw client join options; `auth` is what onAuth
-    // returned from the verified token. The score is posted for this identity.
+    // `options` are the raw client join options; `auth` is what the static
+    // onAuth returned from the verified token. The score is posted for this
+    // identity. Unlike the other rooms there is no room org to compare it
+    // with: a play room has one seat (`maxClients = 1`) and takes its org
+    // from the one verified player, so `requireRoomIdentity` does not apply.
     const identity = requireJoinIdentity(auth)
     this.state.userId = identity.userId
     this.state.orgId = identity.orgId
@@ -175,7 +179,11 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
       game: this.state.game,
       score,
     }).catch((err: unknown) => {
-      console.error(`[MinigameRoom ${this.roomId}] postMinigameResults failed:`, err)
+      console.error(
+        "[MinigameRoom %s] postMinigameResults failed: %s",
+        safeLog(this.roomId),
+        safeError(err),
+      )
       return null
     })
     this.broadcast("mg_result", result ?? { recorded: false, game: this.state.game, score })

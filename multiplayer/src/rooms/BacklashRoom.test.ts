@@ -13,7 +13,11 @@ import {
   registerBacklashSummaryHooks,
 } from "../bridge/BacklashRegistry"
 import { BacklashPlayerState, BacklashRoomState } from "../schema/BacklashRoomState"
+import { fakeClient, joinRoom } from "../testing/join"
 import { BacklashRoom } from "./BacklashRoom"
+
+const ORG = "6e1a7b9c-3d4f-4a6b-8c7d-8e9f0a1b2c3d"
+const OTHER_ORG = "7f2b8c0d-4e5a-4b7c-9d8e-9f0a1b2c3d4e"
 
 const rooms: BacklashRoom[] = []
 const fetchMock = vi.fn()
@@ -26,8 +30,8 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-/** Make the backend verify every token as `userId` in org-1. */
-function verifiedAs(userId: string, orgId = "org-1"): void {
+/** Make the backend verify every token as `userId` in `orgId`. */
+function verifiedAs(userId: string, orgId = ORG): void {
   vi.stubGlobal("fetch", fetchMock)
   vi.spyOn(console, "warn").mockImplementation(() => undefined)
   fetchMock.mockImplementation(async () =>
@@ -35,9 +39,9 @@ function verifiedAs(userId: string, orgId = "org-1"): void {
   )
 }
 
-/** The verified identity onAuth hands onJoin for a viewer. */
+/** The verified identity the static onAuth hands onJoin. */
 function viewerAuth(userId = "viewer", name = "Sam") {
-  return { userId, name, orgId: "org-1", viewer: true }
+  return { userId, name, orgId: ORG }
 }
 
 describe("BacklashRoom turn timeout", () => {
@@ -78,40 +82,41 @@ describe("BacklashRoom turn timeout", () => {
 describe("BacklashRoom spectators", () => {
   it("accepts participants in the lobby but viewers only after play starts", async () => {
     const room = createRoom("spectator-auth-test")
-    room.state.orgId = "org-1"
     room.state.hostUserId = "host"
     room.state.invitedUserId = "invitee"
+    const host = fakeClient("host-session")
+    const early = fakeClient("early-viewer")
+    const viewer = fakeClient("viewer-session")
 
     verifiedAs("host")
-    await expect(room.onAuth({} as Client, { token: "jwt" })).resolves.toMatchObject({
-      userId: "host",
-      viewer: false,
-    })
+    await joinRoom(room, host, { orgId: ORG, token: "jwt" })
+    expect(host.userData).toMatchObject({ userId: "host", viewer: false })
     verifiedAs("viewer")
-    await expect(room.onAuth({} as Client, { token: "jwt" })).rejects.toThrow(
+    await expect(joinRoom(room, early, { orgId: ORG, token: "jwt" })).rejects.toThrow(
       "not live yet",
     )
 
     room.state.phase = "playing"
-    await expect(room.onAuth({} as Client, { token: "jwt" })).resolves.toMatchObject({
-      userId: "viewer",
-      viewer: true,
-    })
+    await joinRoom(room, viewer, { orgId: ORG, token: "jwt" })
+    expect(viewer.userData).toMatchObject({ userId: "viewer", viewer: true })
   })
 
-  it("refuses a tokenless join and a token from another org", async () => {
+  it("refuses a tokenless join and a member of another org", async () => {
     const room = createRoom("spectator-org-test")
-    room.state.orgId = "org-1"
     room.state.hostUserId = "host"
     room.state.phase = "playing"
-    verifiedAs("host", "org-2")
+    verifiedAs("host", OTHER_ORG)
 
-    await expect(room.onAuth({} as Client, { userId: "host" })).rejects.toThrow(
+    await expect(joinRoom(room, fakeClient(), { orgId: ORG, userId: "host" })).rejects.toThrow(
       "auth token required",
     )
-    await expect(room.onAuth({} as Client, { token: "jwt" })).rejects.toThrow(
+    await expect(joinRoom(room, fakeClient(), { orgId: ORG, token: "jwt" })).rejects.toThrow(
       "token org mismatch",
     )
+    await expect(
+      joinRoom(room, fakeClient(), { orgId: OTHER_ORG, token: "jwt" }),
+    ).rejects.toThrow("join org is not this room's org")
+    expect(room.state.players.size + room.state.viewers.size).toBe(0)
   })
 
   it("refuses an onJoin that did not pass onAuth", () => {
@@ -125,6 +130,7 @@ describe("BacklashRoom spectators", () => {
 
   it("tracks viewers without adding them to the player map", () => {
     const room = createRoom("spectator-join-test")
+    room.state.phase = "playing"
     const client = { sessionId: "viewer-session", userData: null } as unknown as Client
 
     room.onJoin(client, {}, viewerAuth())
@@ -140,16 +146,14 @@ describe("BacklashRoom spectators", () => {
 
   it("uses the authenticated identity instead of untrusted join options", async () => {
     const room = createRoom("spectator-auth-handoff-test")
-    room.state.orgId = "org-1"
     room.state.hostUserId = "host"
     room.state.invitedUserId = "invitee"
     room.state.phase = "playing"
     const client = { sessionId: "viewer-session", userData: null } as unknown as Client
-    const untrustedOptions = { userId: "host", name: "Spoofed host", token: "jwt" }
+    const untrustedOptions = { orgId: ORG, userId: "host", name: "Spoofed host", token: "jwt" }
     verifiedAs("viewer")
-    const authenticated = await room.onAuth(client, untrustedOptions)
 
-    room.onJoin(client, untrustedOptions, authenticated)
+    await joinRoom(room, client, untrustedOptions)
 
     expect(room.state.players.has("host")).toBe(false)
     expect(room.state.viewerCount).toBe(1)
@@ -158,6 +162,7 @@ describe("BacklashRoom spectators", () => {
 
   it("counts one watcher per user across multiple sessions", async () => {
     const room = createRoom("spectator-deduplication-test")
+    room.state.phase = "playing"
     const firstClient = {
       sessionId: "viewer-session-1",
       userData: null,
@@ -184,6 +189,7 @@ describe("BacklashRoom spectators", () => {
 
   it("removes a viewer immediately after a consented leave", async () => {
     const room = createRoom("spectator-leave-test")
+    room.state.phase = "playing"
     const client = { sessionId: "viewer-session", userData: null } as unknown as Client
     const onViewers = vi.fn()
     registerBacklashSummaryHooks(room.roomId, {
@@ -240,6 +246,7 @@ function createRoom(roomId: string): BacklashRoom {
   rooms.push(room)
   room.roomId = roomId
   room.setState(new BacklashRoomState())
+  room.state.orgId = ORG
   return room
 }
 

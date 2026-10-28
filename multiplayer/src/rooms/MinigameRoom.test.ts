@@ -20,9 +20,11 @@ import type { Client } from "colyseus"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MinigameRoom } from "./MinigameRoom"
 
+const ORG = "7e2a8b0c-4d5f-4a7b-8c8d-9e0f1a2b3c4d"
+const OTHER_ORG = "8f3b9c1d-5e6a-4b8c-9d9e-0f1a2b3c4d5e"
 const fetchMock = vi.fn()
-/** The verified identity onAuth hands to onJoin. */
-const ANA = { userId: "u1", orgId: "org-a", name: "Ana" }
+/** The verified identity the static onAuth hands to onJoin. */
+const ANA = { userId: "u1", orgId: ORG, name: "Ana" }
 let room: MinigameRoom
 let broadcast: ReturnType<typeof vi.spyOn>
 
@@ -66,45 +68,45 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe("MinigameRoom.onAuth", () => {
+describe("MinigameRoom.onAuth (static, before matchmaking)", () => {
   it("rejects a tokenless join in production", async () => {
     vi.stubEnv("NODE_ENV", "production")
     room = createRoom("fishing")
-    await expect(room.onAuth(fakeClient(), { userId: "u1", orgId: "org-a" })).rejects.toThrow(
+    await expect(MinigameRoom.onAuth(undefined, { userId: "u1", orgId: ORG })).rejects.toThrow(
       "auth token required",
     )
   })
 
   it("rejects a token whose org differs from the claimed org", async () => {
     fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ valid: true, user_id: "u1", org_id: "org-b" })),
+      new Response(JSON.stringify({ valid: true, user_id: "u1", org_id: OTHER_ORG })),
     )
     room = createRoom("fishing")
     await expect(
-      room.onAuth(fakeClient(), { userId: "u1", orgId: "org-a", token: "jwt" }),
+      MinigameRoom.onAuth(undefined, { userId: "u1", orgId: ORG, token: "jwt" }),
     ).rejects.toThrow("token org mismatch")
   })
 
   it("takes user and org from the verified token", async () => {
     fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ valid: true, user_id: "u1", org_id: "org-a", name: "Ana" })),
+      new Response(JSON.stringify({ valid: true, user_id: "u1", org_id: ORG, name: "Ana" })),
     )
     room = createRoom("fishing")
-    const auth = await room.onAuth(fakeClient(), {
+    const auth = await MinigameRoom.onAuth(undefined, {
       userId: "spoof",
       name: "Spoof",
-      orgId: "org-a",
+      orgId: ORG,
       token: "jwt",
       game: "fishing",
     })
-    expect(auth).toEqual({ userId: "u1", orgId: "org-a", name: "Ana" })
+    expect(auth).toEqual({ userId: "u1", orgId: ORG, name: "Ana" })
   })
 
   it("rejects an invalid token", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ valid: false })))
     room = createRoom("fishing")
     await expect(
-      room.onAuth(fakeClient(), { orgId: "org-a", token: "bad" }),
+      MinigameRoom.onAuth(undefined, { orgId: ORG, token: "bad" }),
     ).rejects.toThrow(/invalid auth/)
   })
 })
@@ -113,7 +115,7 @@ describe("MinigameRoom game lifecycle", () => {
   it("refuses an unknown game and closes the room", () => {
     room = createRoom("chess")
     const client = fakeClient()
-    room.onJoin(client, { userId: "u1", orgId: "org-a" })
+    room.onJoin(client, { userId: "u1", orgId: ORG })
     expect(room.state.game).toBe("")
     expect(client.send).toHaveBeenCalledWith("mg_error", { reason: "unknown_game" })
     expect(room.disconnect).toHaveBeenCalled()
@@ -151,7 +153,7 @@ describe("MinigameRoom game lifecycle", () => {
     expect(bodies).toEqual([
       {
         sessionId: "mg-room-1",
-        orgId: "org-a",
+        orgId: ORG,
         userId: "u1",
         userName: "Ana",
         game: "fishing",
@@ -163,7 +165,7 @@ describe("MinigameRoom game lifecycle", () => {
 
   it("refuses a join that skipped verification and posts nothing", async () => {
     room = createRoom("fishing")
-    expect(() => room.onJoin(fakeClient(), { userId: "u1", orgId: "org-a" })).toThrow(
+    expect(() => room.onJoin(fakeClient(), { userId: "u1", orgId: ORG })).toThrow(
       "join was not verified",
     )
     room.finish()

@@ -223,6 +223,7 @@ async function connect(roomId: string): Promise<void> {
     await fresh.joinById(roomId, {
       userId: authStore.user.id,
       name: authStore.user.name,
+      orgId: authStore.user.org_id,
       characterModel: authStore.user.character_model ?? '',
       token: authStore.token ?? '',
     })

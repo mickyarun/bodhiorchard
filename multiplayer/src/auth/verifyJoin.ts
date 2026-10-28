@@ -13,11 +13,12 @@
 // limitations under the License.
 
 /**
- * The one join check every room's `onAuth` goes through.
+ * The one join check every room goes through, before matchmaking, by way of
+ * the static `onAuth` hook in `roomAuth.ts`.
  *
  * A join is accepted only when the client's JWT verifies against the backend
  * (`/internal/colyseus/verify-token`), the backend names both the user and
- * the org, and that org is exactly the room's org. The identity a room acts
+ * the org, and that org is exactly the org asked for. The identity a room acts
  * on (user id, display name, org) is taken from the backend's answer alone;
  * whatever the client put in its join options is ignored.
  *
@@ -27,6 +28,7 @@
  * `dev:<claimed userId>`, so it can never act as a real member, and it must
  * name the room's org exactly, so its claims cannot reach another org's room.
  */
+import { ErrorCode, ServerError } from "colyseus"
 import { verifyUserToken, type TokenVerification } from "../bridge/BackendClient"
 import { safeLog } from "../bridge/logSanitize"
 
@@ -58,16 +60,16 @@ export async function verifyJoin(
   options: JoinCredentials | undefined,
   roomOrgId: string,
 ): Promise<JoinIdentity> {
-  if (!roomOrgId) throw refuse("room has no org", roomOrgId)
+  if (!roomOrgId) throw refuseJoin("room has no org", roomOrgId)
   const token = nonEmpty(options?.token)
   if (!token) return tokenlessIdentity(options, roomOrgId)
 
   const result = await verifyUserToken(token, roomOrgId)
-  if (!result.valid) throw refuse(refusalMessage(result.reason), roomOrgId)
+  if (!result.valid) throw refuseJoin(refusalMessage(result.reason), roomOrgId)
   const userId = nonEmpty(result.user_id)
   const orgId = nonEmpty(result.org_id)
-  if (!userId || !orgId) throw refuse("token verification named no user or org", roomOrgId)
-  if (orgId !== roomOrgId) throw refuse("token org mismatch", roomOrgId)
+  if (!userId || !orgId) throw refuseJoin("token verification named no user or org", roomOrgId)
+  if (orgId !== roomOrgId) throw refuseJoin("token org mismatch", roomOrgId)
   return { userId, name: nonEmpty(result.name) || userId, orgId }
 }
 
@@ -86,11 +88,11 @@ function tokenlessIdentity(
   options: JoinCredentials | undefined,
   roomOrgId: string,
 ): JoinIdentity {
-  if (!tokenlessJoinAllowed()) throw refuse("auth token required", roomOrgId)
+  if (!tokenlessJoinAllowed()) throw refuseJoin("auth token required", roomOrgId)
   const claimedUser = nonEmpty(options?.userId)
-  if (!claimedUser) throw refuse("tokenless join needs a userId", roomOrgId)
+  if (!claimedUser) throw refuseJoin("tokenless join needs a userId", roomOrgId)
   if (nonEmpty(options?.orgId) !== roomOrgId) {
-    throw refuse("tokenless join org mismatch", roomOrgId)
+    throw refuseJoin("tokenless join org mismatch", roomOrgId)
   }
   const userId = `${TOKENLESS_USER_PREFIX}${claimedUser}`
   console.warn(
@@ -99,10 +101,13 @@ function tokenlessIdentity(
   return { userId, name: nonEmpty(options?.name) || userId, orgId: roomOrgId }
 }
 
-/** Log a refused join (the reason is server-chosen text) and build its error. */
-function refuse(reason: string, roomOrgId: string): Error {
+/**
+ * Log a refused join and build the error Colyseus sends the client. `reason`
+ * is server-chosen text; the org may come from the client, so it is escaped.
+ */
+export function refuseJoin(reason: string, roomOrgId: string): ServerError {
   console.warn(`[verifyJoin] join refused org=${safeLog(roomOrgId)} reason=${reason}`)
-  return new Error(reason)
+  return new ServerError(ErrorCode.AUTH_FAILED, reason)
 }
 
 function refusalMessage(reason: TokenVerification["reason"]): string {

@@ -20,7 +20,9 @@ import {
   isBacklashLivePhase,
 } from "../../../shared/minigames/backlashSocial"
 import { postBacklashResults } from "../bridge/BackendClient"
-import { verifyJoin, type JoinIdentity } from "../auth/verifyJoin"
+import type { JoinIdentity } from "../auth/verifyJoin"
+import { authenticateJoin, requireRoomIdentity } from "../auth/roomAuth"
+import { requireRoomCreateTicket } from "../bridge/RoomCreateTickets"
 import {
   fireBacklashDispose,
   fireBacklashPhase,
@@ -70,6 +72,9 @@ function replaceArraySchema<T>(target: ArraySchema<T>, values: readonly T[]): vo
 export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
   maxClients = 2 + BACKLASH_MAX_VIEWERS
 
+  /** Verify every join before matchmaking reserves a seat (see auth/roomAuth). */
+  static onAuth = authenticateJoin
+
   private readonly engine = new BacklashEngine()
   private readonly postedMatches = new Set<string>()
   private matchSequence = 0
@@ -81,7 +86,10 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
   private readonly viewerSessions = new Map<string, Set<string>>()
 
   onCreate(rawOptions: unknown): void {
-    const options = (rawOptions ?? {}) as BacklashRoomOptions
+    // Only OrgBacklashHandler, for a verified host, opens matches and sends
+    // the invite (see RoomCreateTickets).
+    requireRoomCreateTicket("backlash", rawOptions)
+    const options = rawOptions as BacklashRoomOptions
     const state = new BacklashRoomState()
     state.orgId = options.orgId ?? ""
     state.hostUserId = options.hostUserId ?? ""
@@ -102,16 +110,12 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
     }, BACKLASH_LOBBY_MS)
   }
 
-  /** Verify the token for this room's org, then seat it (see validateJoin). */
-  async onAuth(_client: Client, options: BacklashRoomOptions): Promise<BacklashJoin> {
-    return this.validateJoin(await verifyJoin(options, this.state.orgId))
-  }
-
-  onJoin(client: Client, _options: BacklashRoomOptions, authenticated?: BacklashJoin): void {
-    if (!authenticated?.userId) throw new Error("join was not verified")
-    const userId = authenticated.userId
-    const name = authenticated.name.slice(0, 120)
-    const viewer = authenticated.viewer
+  /** Seat a join verified for this room's org as a player or a viewer (see validateJoin). */
+  onJoin(client: Client, _options: BacklashRoomOptions, auth?: JoinIdentity): void {
+    const { userId, name: verifiedName, viewer } = this.validateJoin(
+      requireRoomIdentity(auth, this.state.orgId),
+    )
+    const name = verifiedName.slice(0, 120)
     client.userData = { userId, name, viewer }
     if (viewer) {
       const sessions = this.viewerSessions.get(userId) ?? new Set<string>()

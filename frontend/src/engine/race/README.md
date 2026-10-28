@@ -11,7 +11,7 @@ import { RaceEngine } from '@/engine/race'
 import { RaceRoomClient } from '@/multiplayer/RaceRoomClient'
 
 const client = new RaceRoomClient()
-await client.joinById(roomId, { userId, name, characterModel, token })
+await client.joinById(roomId, { userId, name, orgId, characterModel, token })
 
 const engine = new RaceEngine()
 await engine.init(container, {

@@ -14,17 +14,18 @@
 
 /**
  * Test harness for RaceRoom. Rooms are created the way OrgRaceHandler does
- * (with a create ticket), clients join the way Colyseus runs a join (onAuth,
- * then onJoin with its result), and messages go through the room's
- * registered handlers. The fake backend verifies the token `jwt-<userId>` as
- * that user in `RACE_ORG`, named `<userId> (verified)`.
+ * (with a create ticket), clients join the way Colyseus runs a join (the
+ * static onAuth, then onJoin with its result), and messages go through the
+ * room's registered handlers. The fake backend verifies the token
+ * `jwt-<userId>` as that user in `RACE_ORG`, named `<userId> (verified)`.
  */
 import type { Client } from "colyseus"
-import { vi, type Mock } from "vitest"
-import { issueRaceCreateTicket } from "../bridge/RaceCreateTickets"
+import type { Mock } from "vitest"
+import { issueRoomCreateTicket } from "../bridge/RoomCreateTickets"
 import { RaceRoom } from "../rooms/RaceRoom"
+import { fakeClient, joinRoom } from "./join"
 
-export const RACE_ORG = "org-a"
+export const RACE_ORG = "5d0c8a51-2f3e-4b6a-9c1d-7e8f9a0b1c2d"
 
 /** The display name the fake backend gives `userId`. */
 export function verifiedName(userId: string): string {
@@ -51,7 +52,7 @@ export function createRaceRoom(options: Record<string, unknown> = {}): RaceRoom 
   const room = new RaceRoom()
   room.roomId = "race-test"
   room.onCreate({
-    createTicket: issueRaceCreateTicket(),
+    createTicket: issueRoomCreateTicket("race"),
     orgId: RACE_ORG,
     hostUserId: "host",
     hostName: "Host",
@@ -70,15 +71,17 @@ export function send(room: RaceRoom, client: Client, type: string, payload?: unk
   events.emit(type, client, payload)
 }
 
-/** Join the room with these raw options: onAuth, then onJoin with its result. */
+/**
+ * Join the room with these raw options (naming the race's org unless they
+ * say otherwise, as the frontend does): the static onAuth, then onJoin.
+ */
 export async function connect(
   room: RaceRoom,
   sessionId: string,
   options: Record<string, string>,
 ): Promise<Client> {
-  const client = { sessionId, userData: undefined, send: vi.fn() } as unknown as Client
-  const auth = await room.onAuth(client, options)
-  room.onJoin(client, options, auth)
+  const client = fakeClient(sessionId)
+  await joinRoom(room, client, { orgId: RACE_ORG, ...options })
   room.clients.push(client)
   return client
 }

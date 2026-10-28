@@ -16,8 +16,9 @@
  * Matchmaking for the shared rooms. The option names are the ones the
  * frontend sends (`ColyseusClient`, `OrgRoomClient`).
  */
-import { LocalDriver } from "colyseus"
+import { LocalDriver, Room } from "colyseus"
 import { describe, expect, it } from "vitest"
+import { authenticateJoin } from "./auth/roomAuth"
 import { roomDefinitions } from "./roomDefinitions"
 import { createListing, findOpenRoom } from "./testing/matchmaking"
 
@@ -55,8 +56,8 @@ describe("shared room matchmaking", () => {
   })
 
   // The filter routes, it does not guard: a key the client leaves out matches
-  // any value. That is why every shared room re-checks the token's org in
-  // onAuth (see rooms/SharedRoomAuth.test.ts for the join that follows).
+  // any value. That is why every join must name its org and is verified for
+  // it before matchmaking (see rooms/PreMatchmakingAuth.test.ts).
   it.each(["org", "coffeebar", "cafeteria"] as const)(
     "matches a %s join that leaves out orgId to whichever org's room is open",
     async (name) => {
@@ -89,6 +90,20 @@ describe("shared room matchmaking", () => {
     "leaves per-match %s rooms unfiltered (they are joined by id)",
     (name) => {
       expect(roomDefinitions[name].getFilterOptions({ orgId: "org-a", userId: "u1" })).toEqual({})
+    },
+  )
+})
+
+describe("join checks for every registered room", () => {
+  // Colyseus runs the static onAuth inside the matchmaker, before it creates
+  // a room or reserves a seat; an instance onAuth would run only at
+  // WebSocket connect, after the seat is held (see auth/roomAuth.ts).
+  it.each(Object.entries(roomDefinitions))(
+    "%s verifies the join before matchmaking and has no instance onAuth",
+    (_name, handler) => {
+      const klass = handler.klass as unknown as typeof Room
+      expect(klass.onAuth).toBe(authenticateJoin)
+      expect(klass.prototype.onAuth).toBe(Room.prototype.onAuth)
     },
   )
 })
