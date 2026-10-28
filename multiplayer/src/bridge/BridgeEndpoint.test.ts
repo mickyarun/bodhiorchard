@@ -72,6 +72,9 @@ beforeEach(() => {
 
 afterEach(() => {
   unregisterOrgRoom("org-a")
+  unregisterOrgRoom("org-b")
+  fireRaceDispose("race-1")
+  unregisterBacklashDeclineHandler("bl-1")
   vi.restoreAllMocks()
 })
 
@@ -128,13 +131,16 @@ describe("envelope validation", () => {
 describe("org-scoped delivery", () => {
   it("delivers the event to the registered room for that org only", () => {
     const a = fakeOrgRoom()
+    const b = fakeOrgRoom()
     registerOrgRoom("org-a", a.room)
+    registerOrgRoom("org-b", b.room)
     const data = { user_id: "u1", presence: "on_break" }
 
     const res = authed({ orgId: "org-a", type: "member_presence", data })
 
     expect(res).toEqual({ statusCode: 200, body: { delivered: true } })
     expect(a.handleBridgeEvent).toHaveBeenCalledWith("member_presence", data)
+    expect(b.handleBridgeEvent).not.toHaveBeenCalled()
   })
 
   it("reports delivered=false when no room is live for the org", () => {
@@ -185,7 +191,6 @@ describe("room-scoped delivery", () => {
 
     expect(res).toEqual({ statusCode: 200, body: { delivered: true } })
     expect(onInviteeDeclined).toHaveBeenCalledWith("u2")
-    fireRaceDispose("race-1")
   })
 
   it("rejects a race decline without a userId", () => {
@@ -206,7 +211,6 @@ describe("room-scoped delivery", () => {
     expect(hit).toEqual({ statusCode: 200, body: { delivered: true } })
     expect(miss).toEqual({ statusCode: 200, body: { delivered: false } })
     expect(decline).toHaveBeenCalledTimes(1)
-    unregisterBacklashDeclineHandler("bl-1")
   })
 
   it("rejects a backlash decline without a userId", () => {

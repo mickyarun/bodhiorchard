@@ -36,10 +36,17 @@ function client(sessionId: string): Client {
   return { sessionId, userData: undefined, send: vi.fn() } as unknown as Client
 }
 
+/** A client whose join already bound it to `userId`, then asked for a racer slot. */
 function join(sessionId: string, userId: string): Client {
-  const c = client(sessionId)
+  const c = { sessionId, userData: { userId, name: userId }, send: vi.fn() } as unknown as Client
   h.handleJoin(c, { userId, name: userId })
   return c
+}
+
+function fireTimer(delayMs: number): void {
+  const timer = room.clock.delayed.find((d) => d.time === delayMs)
+  expect(timer, `timer for ${delayMs}ms`).toBeDefined()
+  timer?.tick(delayMs)
 }
 
 function invitePosts(): string[] {
@@ -141,12 +148,11 @@ describe("host-only controls", () => {
     const many = Array.from({ length: MAX_RACERS + 5 }, (_, i) => `new-${i}`)
     h.handleAddInvitees(host, { userIds: ["guest", "host", "", 7, ...many] })
 
-    const invited = [...room.state.invitedUserIds]
-    expect(new Set(invited).size).toBe(invited.length)
-    expect(invited.length + 1).toBeLessThanOrEqual(MAX_RACERS)
-    expect(invited).toContain("guest")
-    await vi.waitFor(() => expect(invitePosts()).toHaveLength(invited.length - 1))
-    expect(invitePosts()).not.toContain("guest")
+    // host + guest already hold two of the MAX_RACERS seats.
+    const added = many.slice(0, MAX_RACERS - 2)
+    expect([...room.state.invitedUserIds]).toEqual(["guest", ...added])
+    await vi.waitFor(() => expect(invitePosts()).toHaveLength(added.length))
+    expect(invitePosts().sort()).toEqual([...added].sort())
   })
 
   it("rejects invite changes from a non-host", () => {
@@ -176,8 +182,7 @@ describe("invite declines and lobby expiry", () => {
   })
 
   it("expires an abandoned lobby after LOBBY_MAX_MS", () => {
-    const expiry = room.clock.delayed.find((d) => d.time === LOBBY_MAX_MS)
-    expiry?.tick(LOBBY_MAX_MS)
+    fireTimer(LOBBY_MAX_MS)
     expect(room.autoDispose).toBe(true)
     expect(room.disconnect).toHaveBeenCalled()
   })
@@ -186,7 +191,7 @@ describe("invite declines and lobby expiry", () => {
     const host = join("s-host", "host")
     join("s-guest", "guest")
     h.handleStart(host)
-    room.clock.delayed.find((d) => d.time === LOBBY_MAX_MS)?.tick(LOBBY_MAX_MS)
+    fireTimer(LOBBY_MAX_MS)
     expect(room.disconnect).not.toHaveBeenCalled()
   })
 })

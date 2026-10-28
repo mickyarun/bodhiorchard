@@ -51,6 +51,7 @@ import { updateCommand } from "./update.js";
 import { CONFIG_VERSION, PROJECT_NAME, readConfig, writeConfig, type ProjectConfig } from "../lib/config.js";
 import { composeFilePath, envFilePath, materialize } from "../lib/project.js";
 import { generateSecrets } from "../lib/secrets.js";
+import { parseSecretsFromEnv } from "../lib/env.js";
 
 const CONFIG: ProjectConfig = {
   version: CONFIG_VERSION,
@@ -172,13 +173,29 @@ describe("glideship reset", () => {
 
 describe("glideship update", () => {
   it("pins a new tag into config and .env, then pulls and restarts", async () => {
+    const secretsBefore = parseSecretsFromEnv(await fs.readFile(envFilePath(dir), "utf8"));
     await updateCommand(dir, { tag: "1.3.0" });
     expect((await readConfig(dir)).imageTag).toBe("1.3.0");
-    expect(await fs.readFile(envFilePath(dir), "utf8")).toContain("IMAGE_TAG=1.3.0\n");
+    const env = await fs.readFile(envFilePath(dir), "utf8");
+    expect(env).toContain("IMAGE_TAG=1.3.0\n");
+    expect(parseSecretsFromEnv(env)).toEqual(secretsBefore);
     expect(composeArgs()).toEqual([
       ["-p", "bodhiorchard", "pull"],
       ["-p", "bodhiorchard", "up", "-d"],
     ]);
+  });
+
+  it("refuses to update an install whose .env is missing, before pulling", async () => {
+    await fs.remove(envFilePath(dir));
+    await expect(updateCommand(dir, {})).rejects.toThrow(/Missing \.env/);
+    expect(mocks.compose).not.toHaveBeenCalled();
+  });
+
+  it("refuses to update an install whose .env lost a secret, before pulling", async () => {
+    await fs.writeFile(envFilePath(dir), "IMAGE_TAG=1.2.0\nSECRET_KEY=only-one\n");
+    await expect(updateCommand(dir, { tag: "1.3.0" })).rejects.toThrow(/Restore it from backup/);
+    expect(mocks.compose).not.toHaveBeenCalled();
+    expect(await fs.readFile(envFilePath(dir), "utf8")).toBe("IMAGE_TAG=1.2.0\nSECRET_KEY=only-one\n");
   });
 
   it("does not restart when the pull fails", async () => {

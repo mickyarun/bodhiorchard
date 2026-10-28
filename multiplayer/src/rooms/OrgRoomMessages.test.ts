@@ -151,8 +151,10 @@ describe("move", () => {
   ])("rejects a move with %s", (_label, payload) => {
     const alice = client("s-alice", "alice")
     h.handleTakeoverStart(alice, { userId: "alice" })
+    const m = member("alice")
+    const before = { x: m.x, y: m.y, z: m.z, yaw: m.yaw, animState: m.animState }
     h.handleMove(alice, payload)
-    expect(member("alice").x).not.toBe(3)
+    expect({ x: m.x, y: m.y, z: m.z, yaw: m.yaw, animState: m.animState }).toEqual(before)
   })
 
   it("drops moves that arrive faster than the 25ms floor", () => {

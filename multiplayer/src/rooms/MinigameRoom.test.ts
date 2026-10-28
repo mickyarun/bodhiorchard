@@ -39,6 +39,10 @@ function createRoom(game: unknown): MinigameRoom {
   return r
 }
 
+function sendInput(data: unknown): void {
+  ;(room as unknown as { handleInput(c: Client, d: unknown): void }).handleInput(fakeClient(), data)
+}
+
 function postedBodies(path: string): Array<Record<string, unknown>> {
   return fetchMock.mock.calls
     .filter(([url]) => String(url).endsWith(path))
@@ -177,15 +181,23 @@ describe("MinigameRoom game lifecycle", () => {
     )
   })
 
-  it("ignores inputs once the game is finished", () => {
+  it("scores a hook while the game is playing", () => {
+    room = createRoom("fishing")
+    room.onJoin(fakeClient(), { userId: "", orgId: "" })
+    sendInput({ type: "hook", payload: {} })
+    expect(broadcast).toHaveBeenCalledWith("fishing_result", expect.anything())
+  })
+
+  it("ignores a hook once the game is finished", () => {
     room = createRoom("fishing")
     room.onJoin(fakeClient(), { userId: "", orgId: "" })
     room.finish()
     const scoreAtFinish = room.state.score
-    ;(room as unknown as { handleInput(c: Client, d: unknown): void }).handleInput(
-      fakeClient(),
-      { type: "reel", payload: {} },
-    )
+    broadcast.mockClear()
+
+    sendInput({ type: "hook", payload: {} })
+
+    expect(broadcast).not.toHaveBeenCalledWith("fishing_result", expect.anything())
     expect(room.state.score).toBe(scoreAtFinish)
   })
 })

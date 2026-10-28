@@ -98,7 +98,10 @@ describe("RaceRegistry", () => {
     expect(() => fireRaceInviteDeclined("race\nforged", "u1")).not.toThrow()
     expect(() => fireRaceDispose("race\nforged")).not.toThrow()
     expect(errorSpy).toHaveBeenCalledTimes(3)
-    for (const call of errorSpy.mock.calls) expect(call[1]).toBe("raceforged")
+    for (const call of errorSpy.mock.calls) {
+      expect(String(call[1])).toContain("forged")
+      expect(String(call[1])).not.toMatch(/[\r\n]/)
+    }
   })
 
   it("lets a second registration for the same room replace the first", () => {

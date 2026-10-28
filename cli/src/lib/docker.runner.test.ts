@@ -80,12 +80,18 @@ describe("docker()", () => {
 
 describe("compose() with the v2 plugin", () => {
   it("prefixes `docker compose`, runs in the project dir and caches the probe", async () => {
+    // The resolved prefix is module state shared by every test in this file,
+    // so the probe count is asserted relative to the first call: whichever
+    // test runs first pays for one probe, and no later call probes again.
+    const probeCount = (): number =>
+      spawnMock.mock.calls.filter(([, args]) => args.join(" ") === "compose version").length;
     const dir = "/tmp/glideship-install";
     await compose(dir, ["-p", "bodhiorchard", "ps"]);
+    const probesAfterFirst = probeCount();
     await compose(dir, ["-p", "bodhiorchard", "down"], { inherit: true });
 
-    const probes = spawnMock.mock.calls.filter(([, args]) => args.join(" ") === "compose version");
-    expect(probes).toHaveLength(1);
+    expect(probesAfterFirst).toBeLessThanOrEqual(1);
+    expect(probeCount()).toBe(probesAfterFirst);
     const runs = spawnMock.mock.calls.filter(([, args]) => args[0] === "compose" && args[1] === "-p");
     expect(runs.map(([cmd, args]) => [cmd, ...args])).toEqual([
       ["docker", "compose", "-p", "bodhiorchard", "ps"],
