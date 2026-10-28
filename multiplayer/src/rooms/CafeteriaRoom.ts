@@ -34,7 +34,8 @@
  * `onActiveChanged`). Cafeteria V1 is player-only; OrgRoom does not
  * enqueue simulated diners. Add the bridge when NPC diners are needed.
  */
-import { Room, Client } from "colyseus"
+import { Room, Client, type RoomException, type RoomMethodName } from "colyseus"
+import { reportRoomException } from "./roomExceptions"
 import { PlayerState } from "../schema/PlayerState"
 import { CafeteriaState } from "../schema/CafeteriaState"
 import {
@@ -166,6 +167,11 @@ export class CafeteriaRoom extends Room<{ state: CafeteriaState }> {
     }
     this.state.players.delete(client.sessionId)
     this.lastMoveMs.delete(client.sessionId)
+  }
+
+  /** Report a throwing handler or timer instead of letting it exit the process. */
+  onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
+    reportRoomException(this, error, methodName)
   }
 
   onDispose() {
