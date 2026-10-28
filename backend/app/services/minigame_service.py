@@ -62,6 +62,22 @@ BACKLASH_GAME_KEY = "backlash"
 BACKLASH_GAME_NAME = "Backlash"
 
 
+def validate_play(game: str, score: int) -> GameSpec:
+    """Return the game's spec, or raise if the game or the score is not valid.
+
+    The per-game ``max_score`` is the only score ceiling: callers check a
+    play here before storing anything about it.
+    """
+    spec = GAMES.get(game)
+    if spec is None:
+        raise MinigameValidationError(f"unknown game: {game}")
+    if not 0 <= score <= spec.max_score:
+        raise MinigameValidationError(
+            f"score out of range 0..{spec.max_score} for {game!r}: {score}"
+        )
+    return spec
+
+
 async def submit_score(
     db: AsyncSession,
     *,
@@ -76,13 +92,7 @@ async def submit_score(
     but the per-game ``max_score`` is still enforced as defense-in-depth — a
     buggy or compromised bridge can't post a score the game can't produce.
     """
-    spec = GAMES.get(game)
-    if spec is None:
-        raise MinigameValidationError(f"unknown game: {game}")
-    if not 0 <= score <= spec.max_score:
-        raise MinigameValidationError(
-            f"score out of range 0..{spec.max_score} for {game!r}: {score}"
-        )
+    validate_play(game, score)
 
     repo = MinigameRepository(db, org_id=org_id)
     today = datetime.now(UTC).date()

@@ -33,7 +33,10 @@ class MinigameResultsBody(BaseModel):
     user_id: uuid.UUID = Field(alias="userId")
     user_name: str = Field(alias="userName", default="", max_length=200)
     game: str = Field(min_length=1, max_length=64)
-    score: int = Field(ge=0, le=1000)
+    # The ceiling is per game (``minigame_service.GAMES``) and checked by the
+    # endpoint before anything is stored; a flat cap here rejected real
+    # Fishing and Pollen Pop scores above it.
+    score: int = Field(ge=0)
 
     model_config = {"populate_by_name": True}
 
