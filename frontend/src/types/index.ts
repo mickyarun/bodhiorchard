@@ -994,6 +994,7 @@ export interface ChatMessageRead {
 }
 
 // ── Notification Types ──────────────────────────────────────────
+// Mirrors NotificationType in backend/app/models/notification.py.
 export type NotificationType =
   | 'job_completed'
   | 'job_failed'
@@ -1002,8 +1003,15 @@ export type NotificationType =
   | 'approval_rejected'
   | 'developer_assigned'
   | 'reassignment_done'
+  | 'testing_ready'
+  | 'pr_opened'
+  | 'pr_merged'
+  | 'all_prs_merged'
   | 'race_invite'
   | 'minigame_invite'
+  | 'leave_requested'
+  | 'leave_decided'
+  | 'employee_record_changed'
 
 /**
  * Structured payload attached to a race-invite notification.
