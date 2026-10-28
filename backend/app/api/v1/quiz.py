@@ -202,7 +202,16 @@ async def get_daily_leaderboard(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[QuizDailyEntry]:
-    """Per-quiz ranking by points then speed."""
+    """Per-quiz ranking by points then speed — only once the quiz is revealed.
+
+    Each row carries ``is_correct`` and points, so while the window is open it
+    would tell a player whether their answer (or a colleague's) was right.
+    """
+    pair = await QuizRepository(db, org_id=current_user.org_id).get_with_question(quiz_id)
+    if pair is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Quiz not found")
+    if datetime.now(UTC) < pair[0].reveal_at:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "The quiz has not been revealed yet")
     rows = await QuizAnswerRepository(db, org_id=current_user.org_id).daily_leaderboard(
         quiz_id=quiz_id, limit=limit
     )
