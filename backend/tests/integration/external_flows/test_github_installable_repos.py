@@ -37,6 +37,7 @@ pytestmark = pytest.mark.integration
 async def test_installable_repos_page_through_and_mark_the_tracked_one(
     client: AsyncClient, app_sessions: Factory, gh: FakeGitHub, git_repo: LocalGitRepo
 ) -> None:
+    gh.max_page_size = 2  # three repos, two pages
     for name in ("shop-api", "billing", "web"):
         gh.add_repo(f"acme/{name}")
     org = await seed_org(app_sessions, github=gh)
@@ -137,6 +138,7 @@ async def test_a_rate_limited_repo_listing_is_not_swallowed(
 async def test_branches_of_an_installable_repo_follow_pagination(
     client: AsyncClient, app_sessions: Factory, gh: FakeGitHub
 ) -> None:
+    gh.max_page_size = 2  # three branches, two pages
     gh.add_repo("acme/shop-api", "main", "develop", "release/uat")
     org = await seed_org(app_sessions, github=gh)
 
