@@ -46,6 +46,7 @@ const entries = computed<BoardEntry[]>(() =>
   (store.leaderboards[props.game] ?? []).map(row => ({
     key: row.user_id,
     name: row.user_name,
+    avatarUrl: row.avatar_url,
     figure: row.best_score.toLocaleString('en-US'),
     note: isOrgAdmin.value ? `${row.plays} ${row.plays === 1 ? 'play' : 'plays'}` : undefined,
     isMe: row.user_id === authStore.user?.id,

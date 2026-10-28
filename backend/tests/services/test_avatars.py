@@ -16,12 +16,18 @@
 
 import contextlib
 import io
+import uuid
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from PIL import Image
 
+from app.repositories import user as user_repo
+from app.services import avatars, slack_client
 from app.services.avatars import (
     AvatarImageError,
+    adopt_slack_photo,
     avatar_storage_path,
     new_avatar_key,
     normalise_avatar_image,
@@ -274,3 +280,68 @@ async def test_slack_import_skips_members_shared_with_another_org(
     assert (result.updated, result.skipped_shared) == (1, 1)
     assert solo.avatar_url == "https://a.slack-edge.com/1.png"
     assert shared.avatar_url is None
+
+
+class TestAdoptSlackPhoto:
+    """The one rule every Slack photo import follows: an upload always wins."""
+
+    NEW = "https://a.slack-edge.com/new.png"
+
+    @staticmethod
+    def _user(url: str | None = None, stored: str | None = None) -> Any:
+        return SimpleNamespace(avatar_url=url, avatar_storage_path=stored)
+
+    def test_fills_an_empty_photo(self) -> None:
+        user = self._user()
+        assert adopt_slack_photo(user, self.NEW) is True
+        assert user.avatar_url == self.NEW
+
+    @pytest.mark.parametrize("overwrite", [False, True])
+    def test_never_replaces_an_upload(self, overwrite: bool) -> None:
+        user = self._user("/api/v1/employees/avatars/abc", stored="org/avatars/abc.jpg")
+        assert adopt_slack_photo(user, self.NEW, overwrite=overwrite) is False
+        assert user.avatar_url == "/api/v1/employees/avatars/abc"
+
+    def test_keeps_an_older_slack_photo_unless_asked(self) -> None:
+        user = self._user("https://a.slack-edge.com/old.png")
+        assert adopt_slack_photo(user, self.NEW) is False
+        assert adopt_slack_photo(user, self.NEW, overwrite=True) is True
+        assert user.avatar_url == self.NEW
+
+
+async def test_slack_import_with_overwrite_still_keeps_uploads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uploaded = SimpleNamespace(
+        id=uuid.uuid4(),
+        slack_id="U1",
+        avatar_url="/api/v1/employees/avatars/abc",
+        avatar_storage_path="org/avatars/abc.jpg",
+    )
+
+    async def _users(token: str) -> list[dict[str, object]]:
+        profile = {"is_custom_image": True, "image_512": "https://a.slack-edge.com/1.png"}
+        return [{"id": "U1", "profile": profile}]
+
+    class _Repo:
+        def __init__(self, db: object, org_id: object = None) -> None:
+            pass
+
+        async def list_by_org(self, org_id: object) -> list[SimpleNamespace]:
+            return [uploaded]
+
+    async def _shared(db: object, ids: object) -> set[object]:
+        return set()
+
+    class _Db:
+        async def flush(self) -> None:
+            return None
+
+    monkeypatch.setattr(slack_client, "users_list", _users)
+    monkeypatch.setattr(user_repo, "UserRepository", _Repo)
+    monkeypatch.setattr(avatars, "shared_member_ids", _shared)
+    result = await avatars.sync_slack_photos(  # type: ignore[arg-type]
+        _Db(), org_id=uuid.uuid4(), bot_token="t", overwrite=True
+    )
+    assert (result.updated, result.skipped_has_photo) == (0, 1)
+    assert uploaded.avatar_url == "/api/v1/employees/avatars/abc"
