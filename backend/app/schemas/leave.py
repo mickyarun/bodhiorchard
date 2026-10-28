@@ -49,10 +49,11 @@ class HolidayRead(BaseModel):
 
 
 class PersonRef(BaseModel):
-    """A member by id and name."""
+    """A member by id and name, with their stored photo where the list shows one."""
 
     user_id: uuid.UUID
     name: str
+    avatar_url: str | None = None
 
 
 # A request can't cross a leave year, so nothing valid is longer than this.

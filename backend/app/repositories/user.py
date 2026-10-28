@@ -16,6 +16,7 @@
 
 import uuid
 from collections.abc import Collection
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import Select, and_, case, false, func, null, or_, select, true
@@ -108,6 +109,14 @@ def _role_from_name(name: str | None) -> UserRole | None:
         return UserRole(name)
     except ValueError:
         return None
+
+
+@dataclass(frozen=True, slots=True)
+class PersonCard:
+    """What a people list shows for someone: their name and stored photo."""
+
+    name: str
+    avatar_url: str | None
 
 
 class UserRepository(BaseRepository[User]):
@@ -298,6 +307,24 @@ class UserRepository(BaseRepository[User]):
         if len(rows) != 1:
             return None
         return (rows[0][0], _role_from_name(rows[0][1]))
+
+    async def get_active_by_slack_id_with_role(
+        self, org_id: uuid.UUID, slack_id: str
+    ) -> tuple[User, UserRole | None] | None:
+        """Like :meth:`get_by_slack_id_with_role`, for a member allowed to act.
+
+        This is the lookup for authorising a Slack action (an approval
+        reaction, a button click): the member must clear the same bar as
+        signing in, so a deactivated account, or one still waiting to
+        replace a temporary password, matches nobody. The role is the
+        member's role in ``org_id`` only, never one held in another org.
+        The ambiguity rule runs first, so an inactive duplicate of a Slack
+        id still makes the active one ambiguous rather than picking it.
+        """
+        found = await self.get_by_slack_id_with_role(org_id, slack_id)
+        if found is None or not found[0].is_active or found[0].must_change_password:
+            return None
+        return found
 
     async def list_in_org_by_ids_with_role(
         self, org_id: uuid.UUID, user_ids: list[uuid.UUID]
@@ -650,6 +677,20 @@ class UserRepository(BaseRepository[User]):
         )
         return result.scalar_one_or_none() is not None
 
+    async def member_ids_of_org(
+        self, user_ids: Collection[uuid.UUID], org_id: uuid.UUID
+    ) -> set[uuid.UUID]:
+        """Which of ``user_ids`` have an OrgToUser membership in the org (one query)."""
+        if not user_ids:
+            return set()
+        result = await self._db.execute(
+            select(OrgToUser.user_id).where(
+                OrgToUser.org_id == org_id,
+                OrgToUser.user_id.in_(user_ids),
+            )
+        )
+        return set(result.scalars().all())
+
     async def list_active_members_with_xp(
         self, org_id: uuid.UUID
     ) -> list[tuple[User, DeveloperXP | None]]:
@@ -719,20 +760,22 @@ class UserRepository(BaseRepository[User]):
         )
         return result.scalar_one_or_none()
 
-    async def get_slack_id_to_name(self, org_id: uuid.UUID, slack_ids: set[str]) -> dict[str, str]:
-        """Map Slack user IDs to Glideship user display names within an org.
+    async def get_people_by_slack_ids(
+        self, org_id: uuid.UUID, slack_ids: set[str]
+    ) -> dict[str, PersonCard]:
+        """Map Slack user IDs to Glideship members' names and photos within an org.
 
         Args:
             org_id: Organization UUID for membership scoping.
             slack_ids: Set of Slack user IDs to resolve.
 
         Returns:
-            Dict of slack_id → user.name (only entries with both fields).
+            Dict of slack_id → :class:`PersonCard` (only entries with both fields).
         """
         if not slack_ids:
             return {}
         stmt = (
-            select(User.slack_id, User.name)
+            select(User.slack_id, User.name, User.avatar_url)
             .join(OrgToUser, OrgToUser.user_id == User.id)
             .where(
                 OrgToUser.org_id == org_id,
@@ -740,7 +783,11 @@ class UserRepository(BaseRepository[User]):
             )
         )
         result = await self._db.execute(stmt)
-        return {row.slack_id: row.name for row in result.all() if row.slack_id and row.name}
+        return {
+            row.slack_id: PersonCard(row.name, row.avatar_url)
+            for row in result.all()
+            if row.slack_id and row.name
+        }
 
     async def list_member_ids_with_permission(
         self, org_id: uuid.UUID, permission: str
@@ -774,6 +821,22 @@ class UserRepository(BaseRepository[User]):
             return {}
         result = await self._db.execute(select(User.id, User.name).where(User.id.in_(user_ids)))
         return {row.id: row.name for row in result.all()}
+
+    async def get_people_by_ids(self, user_ids: set[uuid.UUID]) -> dict[uuid.UUID, PersonCard]:
+        """Batch-fetch names and stored photos by IDs, for lists that show both.
+
+        Args:
+            user_ids: Set of user UUIDs to look up.
+
+        Returns:
+            Dict mapping user_id to a :class:`PersonCard`.
+        """
+        if not user_ids:
+            return {}
+        result = await self._db.execute(
+            select(User.id, User.name, User.avatar_url).where(User.id.in_(user_ids))
+        )
+        return {row.id: PersonCard(row.name, row.avatar_url) for row in result.all()}
 
     async def list_by_org(self, org_id: uuid.UUID) -> list[User]:
         """List all users in a given organization.

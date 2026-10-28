@@ -1039,6 +1039,8 @@ export class GardenEngine {
             userId: this.currentUser.id,
             name: this.currentUser.name,
             characterModel: this.currentUser.characterModel,
+            orgId: this.connectedOrgId ?? '',
+            token: this.currentUser.token ?? '',
           } : null
           if (import.meta.env.DEV) console.debug('[GardenEngine] Entering house as visitor:', visitor)
           await this.interior!.enter(house, visitor)
@@ -1193,6 +1195,7 @@ export class GardenEngine {
             name: visitorName,
             characterModel: visitorCharacterModel,
             orgId,
+            token: this.currentUser?.token ?? '',
           })
           this.sceneState = 'coffeebar'
         })
@@ -1340,6 +1343,7 @@ export class GardenEngine {
             name: visitorName,
             characterModel: visitorCharacterModel,
             orgId,
+            token: this.currentUser?.token ?? '',
           })
           this.sceneState = 'cafeteria'
         })

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 /**
- * Shared org member directory ({ id, name, email }).
+ * Shared org member directory ({ id, name, email, avatar_url }).
  *
  * The `/v1/members/directory` endpoint is a light, permission-free roster
  * of every org member — unlike the live OrgRoom presence (connected
@@ -34,6 +34,7 @@ export interface DirectoryEntry {
   id: string
   name: string
   email: string
+  avatar_url?: string | null
 }
 
 // Module-scoped so every component instance reads the same roster and a
@@ -84,6 +85,15 @@ function nameFor(userId: string): string {
   return userId.length > 12 ? `${userId.slice(0, 8)}…` : userId
 }
 
+/**
+ * The stored photo for a user id, or null (not loaded yet, not a member,
+ * or no photo) so the monogram shows initials.
+ */
+function photoFor(userId: string): string | null {
+  void entries.value.length
+  return byId.get(userId)?.avatar_url ?? null
+}
+
 export function useMemberDirectory() {
-  return { entries, loading, ensureLoaded, nameFor }
+  return { entries, loading, ensureLoaded, nameFor, photoFor }
 }

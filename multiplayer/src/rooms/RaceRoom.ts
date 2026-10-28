@@ -28,7 +28,9 @@
  * The lobby/invite flows have pushed it past its original 300-line cap;
  * extracting them into a lobby handler is the tracked follow-up refactor.
  */
-import { Room, Client } from "colyseus"
+import { Room, Client, type RoomException, type RoomMethodName } from "colyseus"
+import { reportRoomException } from "./roomExceptions"
+import type { Delayed } from "colyseus"
 import {
   CANCEL_FLUSH_GRACE_MS,
   COUNTDOWN_MS,
@@ -63,8 +65,11 @@ import {
   type RaceCreateOptions,
 } from "./RaceRoomHelpers"
 import { driveBots } from "./RaceBotDriver"
+import { raceIdentityFrom, raceIdentityOf, type RaceJoinOptions } from "./RaceRoomAuth"
 import { postRaceInvite, postRaceResults } from "../bridge/BackendClient"
 import { fireRaceDispose, fireRacePhase } from "../bridge/RaceRegistry"
+import { consumeRaceCreateTicket } from "../bridge/RaceCreateTickets"
+import { verifyJoin, type JoinIdentity } from "../auth/verifyJoin"
 
 const SIM_TICK_MS = TICK_MS
 
@@ -75,11 +80,14 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
   private physicsRacers: Racer[] = []
   /** Subset of physicsRacers driven by RaceBotDriver (dev mode only). */
   private botRacers: Racer[] = []
-  private simHandle: NodeJS.Timeout | null = null
+  private simHandle: Delayed | null = null
   /** Wall-clock at which running phase began (used to compute elapsedMs). */
   private runningStartedAtMs = 0
 
   onCreate(rawOptions: unknown): void {
+    // Only OrgRaceHandler, for a verified host, opens races (see RaceCreateTickets).
+    const ticket = (rawOptions as { createTicket?: unknown } | null)?.createTicket
+    if (!consumeRaceCreateTicket(ticket)) throw new Error("race rooms are created by the server")
     const options = assertRaceCreateOptions(rawOptions, ALLOWED_DISTANCES_M)
     this.seedState(options)
     this.seedBots(options.botCount)
@@ -93,18 +101,48 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     this.clock.setTimeout(() => this.expireLobbyIfStillWaiting(), LOBBY_MAX_MS)
   }
 
-  onJoin(client: Client, options: { userId: string; name: string; characterModel?: string }): void {
-    console.log(`[RaceRoom ${this.roomId}] ${options.name} (${client.sessionId}) joined`)
+  /** Verify the join token for this race's org; its user becomes the racer identity. */
+  async onAuth(_client: Client, options: RaceJoinOptions): Promise<JoinIdentity> {
+    return verifyJoin(options, this.state.orgId)
+  }
+
+  onJoin(client: Client, options: RaceJoinOptions, auth?: JoinIdentity): void {
+    // `options` are the raw client join options; `auth` is what onAuth
+    // returned. Racing, host actions and inputs all key off this identity.
+    const identity = raceIdentityFrom(auth, options)
+    // Invites quote the host's name, so it is the verified one, not the
+    // name the room was created with.
+    if (identity.userId === this.state.hostUserId) this.state.hostName = identity.name
+    client.userData = identity
+    console.log(
+      `[RaceRoom ${this.roomId}] ${identity?.name ?? "anonymous"} (${client.sessionId}) joined`,
+    )
   }
 
   onLeave(client: Client): void {
-    // Lobby leavers drop out of the racer roster; mid-race leavers keep their
-    // slot but get `connected=false` so the client HUD can show ghost status.
-    for (const racer of this.state.racers.values()) {
-      if (racer.userId && this.clients.find((c) => c.sessionId === client.sessionId) === undefined) {
-        if (racer.connected) racer.connected = false
-      }
-    }
+    // The leaver keeps their slot but gets `connected=false` so the client
+    // HUD can show ghost status. Only their own racer is touched, and only
+    // when no other open session (a second tab) is still joined as them.
+    const userId = racerUserId(client)
+    if (!userId) return
+    const stillJoined = this.clients.some(
+      (c) => c.sessionId !== client.sessionId && racerUserId(c) === userId,
+    )
+    const racer = this.state.racers.get(userId)
+    if (racer && !stillJoined) racer.connected = false
+  }
+
+  /** Report a throwing handler or timer instead of letting it exit the process. */
+  onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
+    reportRoomException(this, error, methodName)
+    // The sim tick is the only interval: one that threw will throw on every
+    // tick, so end the race instead of logging the same failure at 20Hz.
+    if (methodName === "setInterval") this.abandonBrokenRace()
+  }
+
+  private abandonBrokenRace(): void {
+    this.stopSim()
+    this.setPhase("finished")
   }
 
   onDispose(): void {
@@ -181,31 +219,50 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
   }
 
   private registerHandlers(): void {
-    this.onMessage("race_join", (client, data: unknown) => this.handleJoin(client, data))
+    this.onMessage("race_join", (client) => this.handleJoin(client))
     this.onMessage("race_start", (client) => this.handleStart(client))
     this.onMessage("race_cancel", (client) => this.handleCancel(client))
     this.onMessage("race_add_invitees", (client, data: unknown) =>
       this.handleAddInvitees(client, data),
     )
-    this.onMessage("race_move", (_client, data: unknown) => this.handleMove(data))
-    this.onMessage("race_sprint_tap", (_client, data: unknown) => this.handleSprintTap(data))
-    this.onMessage("race_jump", (_client, data: unknown) => this.handleJump(data))
+    this.onMessage("race_move", (client, data: unknown) => this.handleMove(client, data))
+    this.onMessage("race_sprint_tap", (client, data: unknown) =>
+      this.handleSprintTap(client, data),
+    )
+    this.onMessage("race_jump", (client, data: unknown) => this.handleJump(client, data))
   }
 
   // ─── message handlers ────────────────────
 
-  private handleJoin(
-    client: Client,
-    raw: unknown,
-  ): void {
+  /**
+   * Seat the client as a racer. The racer is always the identity the client
+   * joined with; the race_join payload is not consulted, so one naming
+   * another user changes nothing.
+   */
+  private handleJoin(client: Client): void {
+    const identity = raceIdentityOf(client)
+    if (!identity) return
+    // Same user again (second tab, page refresh, in any phase): re-bind to
+    // the existing racer. A second physics entry would duplicate their
+    // placing and the results POST would carry two rows for one user.
+    const existing = this.state.racers.get(identity.userId)
+    if (existing) {
+      existing.connected = true
+      return
+    }
     if (this.state.phase !== "lobby") return
+    if (!this.mayRace(identity.userId)) return
     if (this.state.racers.size >= MAX_RACERS) return
-    const r = buildRacerState(raw, this.state.racers.size)
+    const r = buildRacerState(identity, this.state.racers.size)
     if (!r) return
     r.connected = true
     this.state.racers.set(r.userId, r)
     this.physicsRacers.push(makeRacer(r.userId))
-    client.userData = { userId: r.userId }
+  }
+
+  /** Only the host and the users they invited take a lane; anyone else watches. */
+  private mayRace(userId: string): boolean {
+    return userId === this.state.hostUserId || this.state.invitedUserIds.includes(userId)
   }
 
   /**
@@ -307,25 +364,25 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     this.clock.setTimeout(() => this.beginRunning(), COUNTDOWN_MS)
   }
 
-  private handleMove(raw: unknown): void {
+  private handleMove(client: Client, raw: unknown): void {
     const parsed = parseMove(raw)
-    if (!parsed) return
+    if (!parsed || parsed.userId !== racerUserId(client)) return
     const physicsRacer = this.physicsRacers.find((r) => r.id === parsed.userId)
     if (!physicsRacer) return
     setMoving(physicsRacer, parsed.isMoving)
   }
 
-  private handleSprintTap(raw: unknown): void {
+  private handleSprintTap(client: Client, raw: unknown): void {
     const userId = parseUserIdOnly(raw)
-    if (!userId) return
+    if (!userId || userId !== racerUserId(client)) return
     const physicsRacer = this.physicsRacers.find((r) => r.id === userId)
     if (!physicsRacer) return
     triggerSprintTap(physicsRacer, this.state.runningElapsedMs)
   }
 
-  private handleJump(raw: unknown): void {
+  private handleJump(client: Client, raw: unknown): void {
     const userId = parseUserIdOnly(raw)
-    if (!userId) return
+    if (!userId || userId !== racerUserId(client)) return
     const physicsRacer = this.physicsRacers.find((r) => r.id === userId)
     if (!physicsRacer) return
     triggerJump(physicsRacer, this.state.runningElapsedMs)
@@ -337,7 +394,8 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     this.setPhase("running")
     this.state.runningElapsedMs = 0
     this.runningStartedAtMs = Date.now()
-    this.simHandle = setInterval(() => this.simStep(), SIM_TICK_MS)
+    // Room clock: guarded by onUncaughtException and cleared on dispose.
+    this.simHandle = this.clock.setInterval(() => this.simStep(), SIM_TICK_MS)
   }
 
   /**
@@ -467,10 +525,18 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
 
   private stopSim(): void {
     if (this.simHandle) {
-      clearInterval(this.simHandle)
+      this.simHandle.clear()
       this.simHandle = null
     }
   }
+}
+
+/**
+ * The user a client joined the room as, or null if it has no identity.
+ * Inputs naming any other racer are dropped: a client drives only itself.
+ */
+function racerUserId(client: Client): string | null {
+  return raceIdentityOf(client)?.userId ?? null
 }
 
 // Keep this export for RaceRoomState references in tests; avoids a test

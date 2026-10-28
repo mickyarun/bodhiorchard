@@ -170,6 +170,7 @@ class SkillProfileRead(BaseModel):
     user_id: uuid.UUID | None = Field(None, alias="userId")
     user_name: str = Field(alias="userName")
     email: str
+    avatar_url: str | None = Field(None, alias="avatarUrl")
     modules: list[ModuleSkill] = []
 
     model_config = {"populate_by_name": True}

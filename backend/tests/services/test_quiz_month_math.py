@@ -22,6 +22,7 @@ import pytest
 from app.services.quiz_schedule_math import (
     current_month_key,
     month_bounds,
+    month_settles_at,
     next_quiz_at,
     previous_month_key,
 )
@@ -98,3 +99,20 @@ class TestNextQuizAt:
             active_weekdays=[0, 4],
         )
         assert nxt == datetime(2026, 6, 19, 14, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("zone", "window_minutes", "expected"),
+    [
+        # Honolulu is UTC-10: its June ends at 10:00 UTC on 1 July, plus 8h.
+        ("Pacific/Honolulu", 480, datetime(2026, 7, 1, 18, 0, tzinfo=UTC)),
+        # Kolkata is UTC+5:30: its June ends at 18:30 UTC on 30 June, plus 1h.
+        ("Asia/Kolkata", 60, datetime(2026, 6, 30, 19, 30, tzinfo=UTC)),
+        ("UTC", 1440, datetime(2026, 7, 2, 0, 0, tzinfo=UTC)),
+    ],
+)
+def test_month_settles_once_its_last_local_quiz_can_have_closed(
+    zone: str, window_minutes: int, expected: datetime
+) -> None:
+    settles = month_settles_at("2026-06", zone=ZoneInfo(zone), window_minutes=window_minutes)
+    assert settles == expected

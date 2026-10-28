@@ -20,7 +20,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.core.paths import NO_NUL_PATTERN
 from app.models.quiz_question import QuizDifficulty, QuizQuestionType
+from app.schemas.git_ref import BranchName
 
 
 def validate_optional_timezone(value: str | None) -> str | None:
@@ -584,11 +586,15 @@ class RepoInfo(BaseModel):
 
 
 class RepoBranchUpdate(BaseModel):
-    """Request to update a repository's branch mapping."""
+    """Request to update a repository's branch mapping.
 
-    main_branch: str | None = Field(None, alias="mainBranch")
-    develop_branch: str | None = Field(None, alias="developBranch")
-    uat_branch: str | None = Field(None, alias="uatBranch")
+    An empty ``uat_branch`` clears the UAT mapping; every other value
+    must be a valid branch name.
+    """
+
+    main_branch: BranchName | None = Field(None, alias="mainBranch")
+    develop_branch: BranchName | None = Field(None, alias="developBranch")
+    uat_branch: BranchName | Literal[""] | None = Field(None, alias="uatBranch")
 
     model_config = {"populate_by_name": True}
 
@@ -617,7 +623,7 @@ class LocalRepoBranches(BaseModel):
 class AddRepoRequest(BaseModel):
     """Request to add a repository path."""
 
-    path: str
+    path: str = Field(..., pattern=NO_NUL_PATTERN)
 
 
 class RepoStatusRequest(BaseModel):

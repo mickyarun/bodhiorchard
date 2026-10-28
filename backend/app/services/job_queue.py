@@ -357,6 +357,12 @@ def find_active_job(job_type: str, match_payload: dict[str, Any]) -> JobStatusRe
 # ── Worker loop + lifecycle ────────────────────────────────────────
 
 
+def _cancelled_before_start(job_id: str) -> bool:
+    """True when ``job_id`` was cancelled while it was still queued."""
+    entry = _job_store.get(job_id)
+    return entry is not None and entry.status.state == JobState.CANCELLED
+
+
 async def _worker(
     job_type: str,
     queue: asyncio.Queue[tuple[str, dict[str, Any]]],
@@ -370,6 +376,11 @@ async def _worker(
     while True:
         job_id, payload = await queue.get()
         try:
+            if _cancelled_before_start(job_id):
+                # cancel_job already made this job terminal while it waited
+                # in the queue; running it now would undo the cancel.
+                logger.info("job_worker_skipped_cancelled", job_id=job_id, job_type=job_type)
+                continue
             update_job(job_id, state=JobState.RUNNING, status_message="Starting...")
             # Wrap the handler in an explicit Task so cancel_job can
             # interrupt it cleanly. Without this wrapping, cancelling

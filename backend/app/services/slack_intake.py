@@ -216,7 +216,7 @@ async def handle_pm_approval(
         approved: True if approved (✅), False if rejected (❌).
     """
     repo = TriageSessionRepository(db, org_id=org.id)
-    session = await repo.get_by_summary_msg(channel, message_ts)
+    session = await repo.get_by_summary_msg_for_update(channel, message_ts)
 
     if session is None:
         return  # Not a triage summary message
@@ -240,7 +240,7 @@ async def handle_pm_approval(
         return  # Session not in approval state
 
     # Verify the approver is a PM or org owner
-    pair = await UserRepository(db).get_by_slack_id_with_role(org.id, approver_slack_id)
+    pair = await UserRepository(db).get_active_by_slack_id_with_role(org.id, approver_slack_id)
     approver = pair[0] if pair else None
     approver_role_val = pair[1] if pair else None
 

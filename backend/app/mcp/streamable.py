@@ -389,7 +389,7 @@ async def remote_mcp_post(
         emit_audit(
             request=request,
             auth=auth,
-            org_id=auth.org.id,
+            org_id=auth.org_id,
             token_id=auth.token_id,
             tool_name="<parse_error>",
             transport="sse",
@@ -436,7 +436,7 @@ async def remote_mcp_post(
         emit_audit(
             request=request,
             auth=auth,
-            org_id=auth.org.id,
+            org_id=auth.org_id,
             token_id=auth.token_id,
             tool_name=audit_tool,
             transport="sse",
@@ -454,7 +454,7 @@ async def remote_mcp_post(
         emit_audit(
             request=request,
             auth=auth,
-            org_id=auth.org.id,
+            org_id=auth.org_id,
             token_id=auth.token_id,
             tool_name=audit_tool,
             transport="sse",
@@ -467,19 +467,27 @@ async def remote_mcp_post(
         emit_audit(
             request=request,
             auth=auth,
-            org_id=auth.org.id,
+            org_id=auth.org_id,
             token_id=auth.token_id,
             tool_name=audit_tool,
             transport="sse",
             params=audit_params,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+        # The error is answered as a JSON-RPC envelope, not raised, so the
+        # session dependency would go on to commit a transaction the failed
+        # handler left aborted. Roll it back so the envelope reaches the
+        # client; the audit row above is already scheduled either way.
+        try:
+            await db.rollback()
+        except Exception:
+            logger.exception("mcp_remote_rollback_failed", method=method)
         return JSONResponse(_rpc_error(req_id, _INTERNAL_ERROR, "Internal error"), status_code=500)
 
     emit_audit(
         request=request,
         auth=auth,
-        org_id=auth.org.id,
+        org_id=auth.org_id,
         token_id=auth.token_id,
         tool_name=audit_tool,
         transport="sse",

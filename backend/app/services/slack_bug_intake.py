@@ -25,7 +25,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bud import BUDDocument
-from app.models.bug import Bug
+from app.models.bug import Bug, BugSeverity
 from app.models.organization import Organization
 from app.models.triage_session import TriageSession, TriageStatus
 from app.models.user import UserRole
@@ -41,6 +41,21 @@ logger = structlog.get_logger(__name__)
 
 # Roles allowed to approve bug reports (same as BUD triage)
 _PM_ROLES = {UserRole.PM, UserRole.ORG_OWNER, UserRole.ADMIN}
+
+
+def _severity_from_triage(raw: object) -> BugSeverity:
+    """The bug severity the triage agent reported, or medium when it isn't one.
+
+    The agent is asked for ``low|medium|high|critical`` but may answer in
+    another case or with something else entirely; anything that isn't a
+    known severity falls back to medium instead of failing the insert.
+    """
+    value = str(raw or "").strip().lower()
+    known = {severity.value for severity in BugSeverity}
+    if value in known:
+        return BugSeverity(value)
+    logger.warning("bug_triage_severity_defaulted", reported=repr(raw)[:50])
+    return BugSeverity.MEDIUM
 
 
 async def start_bug_triage(
@@ -118,24 +133,15 @@ async def handle_bug_approval(
     embedding, and auto-links to the closest BUD.
     """
     repo = TriageSessionRepository(db, org_id=org.id)
-    session = await repo.get_by_summary_msg(channel, message_ts)
+    session = await repo.get_by_summary_msg_for_update(channel, message_ts)
     if not session or session.session_type != "bug":
         return
     if session.status != TriageStatus.AWAITING_PM:
         return
 
-    if not approved:
-        session.status = TriageStatus.REJECTED
-        await slack_client.chat_post_message(
-            bot_token,
-            channel,
-            "❌ Bug report discarded.",
-            thread_ts=session.thread_ts,
-        )
-        return
-
-    # Resolve approver + verify PM/admin role
-    row = await UserRepository(db).get_by_slack_id_with_role(org.id, approver_slack_id)
+    # Resolve the reactor and verify the PM/admin role before either
+    # decision: discarding a report is as much a decision as filing it.
+    row = await UserRepository(db).get_active_by_slack_id_with_role(org.id, approver_slack_id)
     if not row:
         await slack_client.chat_post_message(
             bot_token,
@@ -150,7 +156,17 @@ async def handle_bug_approval(
         await slack_client.chat_post_message(
             bot_token,
             channel,
-            "⚠️ Only PMs and admins can approve bug reports.",
+            "⚠️ Only PMs and admins can approve or discard bug reports.",
+            thread_ts=session.thread_ts,
+        )
+        return
+
+    if not approved:
+        session.status = TriageStatus.REJECTED
+        await slack_client.chat_post_message(
+            bot_token,
+            channel,
+            "❌ Bug report discarded.",
             thread_ts=session.thread_ts,
         )
         return
@@ -163,7 +179,7 @@ async def handle_bug_approval(
         bug_number=await BugRepository(db, org_id=org.id).next_bug_number(),
         title=ctx.get("title", session.feature_name or "Untitled bug"),
         description=ctx.get("description", session.original_text),
-        severity=ctx.get("severity", "medium"),
+        severity=_severity_from_triage(ctx.get("severity")),
         module=ctx.get("module"),
         reporter_id=approver.id,
     )

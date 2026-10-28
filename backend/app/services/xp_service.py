@@ -111,16 +111,13 @@ async def award_xp(
 
     # Get or create aggregate row (locked for update)
     row = await xp_repo.get_or_create(user_id)
-    old_level = row.level
 
-    # Aggregate is an integer column — round once on increment, keep the
-    # precise fractional amount on the audit row.
-    row.total_xp += round(effective_xp)
-    new_level, new_name = compute_level(row.total_xp)
-    row.level = new_level
-    row.level_name = new_name
-
-    # Record audit event — SAVEPOINT scopes the IntegrityError so it doesn't
+    # Record the audit event BEFORE touching the aggregate. The dedup check
+    # above runs before the row lock, so two concurrent awards with the same
+    # source_ref can both pass it; the unique index then rejects the loser
+    # here, and the total must not have moved yet (``begin_nested`` flushes
+    # pending changes outside the savepoint, so a rollback would not undo an
+    # earlier increment). The SAVEPOINT scopes the IntegrityError so it doesn't
     # roll back the caller's uncommitted work (DevActivityLog, PullRequest, etc.)
     try:
         async with db.begin_nested():
@@ -137,6 +134,14 @@ async def award_xp(
     except IntegrityError:
         logger.debug("xp_dedup_integrity", source_ref=source_ref)
         return None
+
+    old_level = row.level
+    # Aggregate is an integer column — round once on increment, keep the
+    # precise fractional amount on the audit row.
+    row.total_xp += round(effective_xp)
+    new_level, new_name = compute_level(row.total_xp)
+    row.level = new_level
+    row.level_name = new_name
 
     level_changed = new_level != old_level
     result = XPAwardResult(
@@ -289,7 +294,8 @@ async def award_quality_bonus(
 ) -> int:
     """Award quality bonus XP based on BUD effectiveness metrics.
 
-    Returns the XP awarded (0-30).
+    XP only: the quality skill points are awarded at close by
+    ``dev_quality_sp``. Returns the XP awarded (0-30).
     """
     from sqlalchemy import select
 
@@ -332,23 +338,9 @@ async def award_quality_bonus(
         metadata={"effectiveness_score": score},
     )
 
-    # SP bonus for high-quality work (score > 80)
-    if score > 80:
-        try:
-            from app.services.sp_rules import SP_DEV_QUALITY_HIGH
-            from app.services.sp_service import award_sp
-
-            await award_sp(
-                db,
-                user_id=user_id,
-                org_id=org_id,
-                amount=SP_DEV_QUALITY_HIGH,
-                source="sp_quality",
-                source_ref=f"sp_quality:{user_id}:{bud_id}",
-            )
-        except Exception:
-            logger.warning("sp_award_failed_quality", exc_info=True)
-
+    # The quality SP is paid once, at close, by
+    # ``dev_quality_sp.award_quality_and_threshold_sp`` to every developer who
+    # did the work. Paying it here as well gave the assignee the bonus twice.
     return bonus_xp
 
 

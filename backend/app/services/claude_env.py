@@ -64,6 +64,57 @@ _MANAGED_CRED_VARS = frozenset(
 )
 
 
+# For each credential var the app has touched: what the app last left there
+# (the injected value, or ``None`` after clearing it) and what the host had
+# there before the app's first touch. Host mode preserves a host- or
+# compose-supplied credential; with this it can also tell that credential
+# apart from one the app injected for a mode the org has since left, and bring
+# back a host value an earlier mode had to clear or overwrite. Without it,
+# switching api_key → host kept running on the old key until a restart.
+_app_left: dict[str, str | None] = {}
+_host_value: dict[str, str | None] = {}
+
+
+def _touch(var: str) -> None:
+    """Record the host's value of ``var`` before the app changes it."""
+    current = os.environ.get(var)
+    if var not in _app_left or _app_left[var] != current:
+        # First touch, or the env changed since the app's last write: what is
+        # there now belongs to the host.
+        _host_value[var] = current
+
+
+def _inject(var: str, value: str) -> None:
+    """Set ``var`` to an app-managed credential."""
+    _touch(var)
+    os.environ[var] = value
+    _app_left[var] = value
+
+
+def _clear(var: str) -> None:
+    """Remove ``var`` for the active mode, remembering a host value it hid."""
+    _touch(var)
+    os.environ.pop(var, None)
+    _app_left[var] = None
+
+
+def _withdraw(var: str) -> None:
+    """Undo the app's changes to ``var``: put the host's value back.
+
+    A value someone else set after the app's last write is left alone.
+    """
+    if var not in _app_left:
+        return
+    left = _app_left.pop(var)
+    host = _host_value.pop(var, None)
+    if os.environ.get(var) != left:
+        return
+    if host is None:
+        os.environ.pop(var, None)
+    else:
+        os.environ[var] = host
+
+
 def _provider_of(org: Organization) -> AIProvider:
     """The org's selected provider, defaulting to Claude."""
     return org.ai_provider or AIProvider.claude
@@ -112,9 +163,9 @@ def apply_claude_auth_to_env(org: Organization) -> None:
             # Never log any portion of the secret — even a prefix is a partial
             # credential that shouldn't reach log aggregators.
             for var in spec.env_vars:
-                os.environ[var] = decrypted
+                _inject(var, decrypted)
             for var in _MANAGED_CRED_VARS - set(spec.env_vars):
-                os.environ.pop(var, None)
+                _clear(var)
             logger.info(
                 "ai_env_credential_applied",
                 org_id=str(org.id),
@@ -125,10 +176,13 @@ def apply_claude_auth_to_env(org: Organization) -> None:
 
     # host mode (or a credentialed mode with an empty/corrupt secret): clear
     # app-managed vars the host doesn't own for this provider, but preserve
-    # host/compose-supplied credentials (e.g. Claude's ANTHROPIC_API_KEY).
+    # host/compose-supplied credentials (e.g. Claude's ANTHROPIC_API_KEY) —
+    # but not a value the app injected there itself for an earlier mode.
     preserve = _host_preserved_vars(provider)
     for var in _MANAGED_CRED_VARS - preserve:
-        os.environ.pop(var, None)
+        _clear(var)
+    for var in _MANAGED_CRED_VARS & preserve:
+        _withdraw(var)
     logger.info(
         "ai_env_host_mode",
         org_id=str(org.id),

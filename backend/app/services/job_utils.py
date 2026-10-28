@@ -29,8 +29,9 @@ from typing import Any
 
 import structlog
 
+from app.schemas.jobs import JobState
 from app.services.claude_runner import ProgressCallback
-from app.services.job_queue import update_job
+from app.services.job_queue import get_job, update_job
 
 logger = structlog.get_logger(__name__)
 
@@ -115,8 +116,18 @@ def make_progress_callback(
     (e.g. "Generating wireframe HTML..." for design jobs).
     """
     pending: list[asyncio.Handle] = []
+    last_message: list[str] = []
 
     def _emit_heartbeat() -> None:
+        # Nothing tells this callback that the run ended, so the timer can
+        # fire after the handler moved on ("Saving results...") or after the
+        # job finished. Only replace the message this callback itself set,
+        # and only while the job is still running.
+        job = get_job(job_id)
+        if job is None or job.state != JobState.RUNNING:
+            return
+        if not last_message or job.status_message != last_message[-1]:
+            return
         update_job(job_id, status_message=generating_message)
 
     def _on_tool_use(tool_name: str, tool_input: dict[str, Any]) -> None:
@@ -128,6 +139,7 @@ def make_progress_callback(
 
         msg = _format_tool_progress(tool_name, tool_input)
         update_job(job_id, status_message=msg)
+        last_message[:] = [msg]
 
         # Schedule the heartbeat. Skip silently if we're somehow called
         # outside an event loop — the callback still works, it just won't

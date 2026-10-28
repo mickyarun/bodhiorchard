@@ -50,7 +50,7 @@ from app.models.bud import BUDDesignStatus, BUDDocument, BUDStatus
 from app.models.bud_feature_link import BUDFeatureLinkSource
 from app.models.bud_version import BUDEditSource, BUDVersion
 from app.repositories import bud_version as bud_version_repo
-from app.repositories.bud import BUDDesignRepository
+from app.repositories.bud import BUDDesignRepository, DesignTargetNotInOrgError
 from app.repositories.bud_version import SNAPSHOT_FIELDS
 from app.services.agent_result_handlers import persist_linked_features_from_markdown
 from app.services.bud_timeline import record_event
@@ -200,12 +200,23 @@ async def _restore_design_html_if_present(
             )
             return False
     design_repo = BUDDesignRepository(db, org_id=bud.org_id)
-    await design_repo.upsert(
-        bud.id,
-        repo_id,
-        design_html=prior_html,
-        status=BUDDesignStatus.READY,
-    )
+    try:
+        await design_repo.upsert(
+            bud.id,
+            repo_id,
+            design_html=prior_html,
+            status=BUDDesignStatus.READY,
+        )
+    except DesignTargetNotInOrgError:
+        # A snapshot naming a repo outside the BUD's org can only come from
+        # a write made before the design upsert checked org scope. Skip the
+        # design restore rather than write onto another org's repo.
+        logger.warning(
+            "bud_revert_design_repo_not_in_org",
+            bud_id=str(bud.id),
+            repo_id=str(repo_id),
+        )
+        return False
     return True
 
 

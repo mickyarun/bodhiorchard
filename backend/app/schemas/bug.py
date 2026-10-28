@@ -38,8 +38,8 @@ class BugCreate(BaseModel):
     description: str | None = Field(None, max_length=10000)
     severity: BugSeverityValue = "medium"
     module: str | None = Field(None, max_length=255)
-    bud_id: str | None = Field(None, alias="budId")
-    feature_id: str | None = Field(None, alias="featureId")
+    bud_id: uuid.UUID | None = Field(None, alias="budId")
+    feature_id: uuid.UUID | None = Field(None, alias="featureId")
     bug_type: BugTypeValue | None = Field(None, alias="bugType")
 
     model_config = {"populate_by_name": True}
@@ -67,11 +67,11 @@ class BugUpdate(BaseModel):
     description: str | None = Field(None, max_length=10000)
     status: BugStatusValue | None = None
     severity: BugSeverityValue | None = None
-    assignee_id: str | None = Field(None, alias="assigneeId")
+    assignee_id: uuid.UUID | None = Field(None, alias="assigneeId")
     module: str | None = Field(None, max_length=255)
     linked_pr: str | None = Field(None, alias="linkedPr", max_length=500)
-    bud_id: str | None = Field(None, alias="budId")
-    feature_id: str | None = Field(None, alias="featureId")
+    bud_id: uuid.UUID | None = Field(None, alias="budId")
+    feature_id: uuid.UUID | None = Field(None, alias="featureId")
 
     model_config = {"populate_by_name": True}
 
@@ -190,6 +190,7 @@ class BugCommentRead(BaseModel):
     bug_id: str = Field(alias="bugId")
     author_id: str = Field(alias="authorId")
     author_name: str | None = Field(None, alias="authorName")
+    author_avatar_url: str | None = Field(None, alias="authorAvatarUrl")
     body: str
     edited_at: datetime | None = Field(None, alias="editedAt")
     deleted_at: datetime | None = Field(None, alias="deletedAt")

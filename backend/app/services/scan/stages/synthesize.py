@@ -273,8 +273,8 @@ async def run(
         # call can all leave us here with exit 0 + zero tool calls
         # captured. Without this guard, the pre-scan soft-delete +
         # zero reconcile inserts/revives/updates = wholesale feature
-        # loss for the repo. Raising flows up to ``_run_one`` which
-        # reactivates this repo's soft-deleted slice.
+        # loss for the repo. Raising fails the run before synthesis
+        # completes, so the fanout reactivates this repo's soft-deleted slice.
         persisted = (
             int(reconcile_summary.get("reconcile_inserted", 0))
             + int(reconcile_summary.get("reconcile_updated", 0))

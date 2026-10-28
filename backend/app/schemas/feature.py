@@ -155,6 +155,7 @@ class RepoContributorRead(BaseModel):
     actor_name: str = Field(alias="actorName")
     commit_count: int = Field(alias="commitCount")
     files_changed: int = Field(alias="filesChanged")
+    avatar_url: str | None = Field(default=None, alias="avatarUrl")
 
     model_config = _BASE_CONFIG
 

@@ -37,11 +37,15 @@ from fastapi.routing import APIRoute, APIRouter, APIWebSocketRoute
 
 @dataclass(frozen=True)
 class ServedRoute:
-    """One route as served: full path, its endpoint's module, its dependencies."""
+    """One route as served: full path, its endpoint's module, its dependencies.
+
+    ``methods`` is empty for a websocket route.
+    """
 
     path: str
     module: str
     dependant: Dependant
+    methods: frozenset[str] = frozenset()
 
 
 def served_routes(router: APIRouter) -> list[ServedRoute]:
@@ -52,7 +56,8 @@ def served_routes(router: APIRouter) -> list[ServedRoute]:
 def _walk(entries: list[Any]) -> Iterator[ServedRoute]:
     for entry in entries:
         if isinstance(entry, APIRoute | APIWebSocketRoute):
-            yield ServedRoute(entry.path, entry.endpoint.__module__, entry.dependant)
+            methods = frozenset(getattr(entry, "methods", None) or ())
+            yield ServedRoute(entry.path, entry.endpoint.__module__, entry.dependant, methods)
         elif hasattr(entry, "effective_candidates"):  # an included router (FastAPI 0.15x)
             yield from _walk_included(entry)
 
@@ -63,7 +68,8 @@ def _walk_included(included: Any) -> Iterator[ServedRoute]:
             yield from _walk_included(candidate)
         elif getattr(candidate, "dependant", None) is not None:
             module = candidate.endpoint.__module__
-            yield ServedRoute(candidate.path, module, candidate.dependant)
+            methods = frozenset(getattr(candidate, "methods", None) or ())
+            yield ServedRoute(candidate.path, module, candidate.dependant, methods)
 
 
 def depends_on(route: ServedRoute, matches: Callable[[Any], bool]) -> bool:

@@ -268,7 +268,10 @@ class ClaudeConnectionTest(BaseModel):
     thinking: bool | None = None
 
 
-@router.post("/claude/test")
+@router.post(
+    "/claude/test",
+    dependencies=[Depends(require_permissions("integrations:configure"))],
+)
 async def test_claude_settings(
     body: ClaudeConnectionTest | None = None,
     current_user: User = Depends(get_current_user),

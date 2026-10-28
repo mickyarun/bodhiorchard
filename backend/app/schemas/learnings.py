@@ -62,6 +62,7 @@ class TopContributorRead(BaseModel):
 
     user_id: str
     name: str
+    avatar_url: str | None = None
     buds_shipped_30d: int
     total_commits_30d: int
     total_prs_merged_30d: int
