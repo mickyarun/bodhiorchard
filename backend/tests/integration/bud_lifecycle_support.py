@@ -110,14 +110,20 @@ async def new_org(factory: Factory, config: dict[str, Any] | None = None) -> uui
 
 
 async def add_member(
-    factory: Factory, org_id: uuid.UUID, name: str, role: str | None = "pm"
+    factory: Factory,
+    org_id: uuid.UUID,
+    name: str,
+    role: str | None = "pm",
+    *,
+    github: str | None = None,
 ) -> uuid.UUID:
-    """Add a user to ``org_id`` holding the named system role (seeded by ``client``)."""
+    """Add a user to ``org_id`` holding the named system role."""
     async with factory() as db:
         user = User(
             email=f"{name}-{uuid.uuid4().hex[:8]}@example.com",
             name=name,
             password_hash="x",
+            github_username=github,
         )
         db.add(user)
         await db.flush()
