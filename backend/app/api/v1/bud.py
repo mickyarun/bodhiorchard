@@ -624,6 +624,13 @@ async def update_bud(
 ) -> BUDRead:
     """Update a BUD (title, status, requirements, tech spec, test plan, metadata)."""
     bud_repo = BUDRepository(db, org_id=current_user.org_id)
+    # Row lock before the read: the guards below (terminal status, pending
+    # QA cases) read-then-write, so two PATCHes on one BUD must not
+    # interleave. Without it two concurrent closes both pass the closed
+    # guard and both run the close side effects. The second request now
+    # waits here and then reads the first one's committed row.
+    if not await bud_repo.lock_for_edit(bud_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
     bud = await bud_repo.get_by_id(bud_id)
     if bud is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")

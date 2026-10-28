@@ -15,7 +15,7 @@
  -->
 
 <template>
-  <v-app>
+  <v-app :style="{ '--app-topbar-height': `${TOP_BAR_HEIGHT}px` }">
     <!-- Phones get a top bar; the sidebar opens over the page from its
          menu button instead of taking a third of the screen. -->
     <MobileTopBar v-if="compact" v-model:drawer="overlayOpen" />
@@ -37,8 +37,6 @@
       <SidebarHead v-if="!compact" :collapsed="collapsed" />
 
       <v-list density="compact" nav class="px-2">
-        <!-- Phones have the bell in the top bar. -->
-        <NotificationBell v-if="!compact && authStore.user?.id" :user-id="authStore.user.id" variant="nav" />
         <EngineeringNav v-if="canAccessEngineering" :rail="collapsed" />
         <PeopleNav :rail="collapsed" :show-heading="canAccessEngineering" />
       </v-list>
@@ -56,12 +54,14 @@
           <SettingsNav />
         </v-list>
 
-        <UserMenu :rail="collapsed" />
-
         <v-divider />
         <SidebarFoot :rail="rail" :can-rail="!compact" @toggle-rail="toggleRail" />
       </template>
     </v-navigation-drawer>
+
+    <!-- Notifications and the account menu, top right. After the drawer,
+         so the bar starts beside the sidebar rather than above it. -->
+    <DesktopTopBar v-if="!compact" />
 
     <!-- Main content -->
     <v-main class="app-main">
@@ -90,13 +90,13 @@ import { onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import EngineeringNav from '@/components/layout/EngineeringNav.vue'
 import EngineeringOverlays from '@/components/layout/EngineeringOverlays.vue'
+import DesktopTopBar from '@/components/layout/DesktopTopBar.vue'
 import MobileTopBar from '@/components/layout/MobileTopBar.vue'
-import NotificationBell from '@/components/common/NotificationBell.vue'
 import PeopleNav from '@/components/layout/PeopleNav.vue'
 import SettingsNav from '@/components/layout/SettingsNav.vue'
 import SidebarFoot from '@/components/layout/SidebarFoot.vue'
 import SidebarHead from '@/components/layout/SidebarHead.vue'
-import UserMenu from '@/components/layout/UserMenu.vue'
+import { TOP_BAR_HEIGHT } from '@/constants/layout'
 import { useAppDrawer } from '@/composables/useAppDrawer'
 import { usePermissions } from '@/composables/usePermissions'
 import { useNavigationProgress } from '@/composables/useNavigationProgress'
@@ -183,11 +183,15 @@ onMounted(() => {
 .app-scroll {
   height: 100%;
   overflow-y: auto;
+  /* The containing block for absolutely positioned content (screen-reader
+     labels, overlays), so none of it can stretch the page past the
+     window and add a second scrollbar. */
+  position: relative;
 }
 
-/* Pin the bar to the top of the main content area, above scrolled
-   content, without participating in layout flow (so it never shifts the
-   page as it appears/disappears). */
+/* Pin the bar to the very top of the window (over the top bar and the
+   sidebar), above scrolled content, without taking part in layout, so it
+   never shifts the page as it appears or disappears. */
 .route-progress {
   position: absolute;
   top: 0;

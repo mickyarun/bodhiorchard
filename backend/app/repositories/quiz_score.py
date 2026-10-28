@@ -91,6 +91,7 @@ class MonthlyLeaderboardRow:
     total_points: int
     correct_count: int
     total_time_ms: int
+    avatar_url: str | None = None
 
 
 class QuizScoreRepository:
@@ -157,6 +158,7 @@ class QuizScoreRepository:
             select(
                 QuizScore.user_id,
                 User.name,
+                User.avatar_url,
                 QuizScore.total_points,
                 QuizScore.correct_count,
                 QuizScore.total_time_ms,
@@ -181,6 +183,7 @@ class QuizScoreRepository:
                 total_points=r.total_points,
                 correct_count=r.correct_count,
                 total_time_ms=r.total_time_ms,
+                avatar_url=r.avatar_url,
             )
             for r in result.all()
         ]

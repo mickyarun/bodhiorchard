@@ -209,7 +209,8 @@ function onDecline(): void {
 .invite {
   position: fixed;
   right: 24px;
-  top: 24px;
+  /* Below the top bar, so the bell and account menu stay reachable. */
+  top: calc(var(--app-topbar-height, 0px) + 12px);
   z-index: 2000;
   display: grid;
   grid-template-columns: 6px auto 1fr;

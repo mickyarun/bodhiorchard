@@ -223,6 +223,7 @@ async def get_me(
         slack_id=current_user.slack_id,
         github_username=current_user.github_username,
         character_model=current_user.character_model,
+        avatar_url=current_user.avatar_url,
         created_at=current_user.created_at,
         updated_at=current_user.updated_at,
     )

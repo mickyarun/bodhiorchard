@@ -15,7 +15,7 @@
 /**
  * Shared state + actions for yield-offer accept / reject / reassign.
  *
- * The trigger UI (rows inside NotificationBell) and the confirmation
+ * The trigger UI (rows inside NotificationTray) and the confirmation
  * modals (YieldOfferDialogs, mounted layout-wide) need the same
  * pendingX / busy state. Module-level refs let both consumers read and
  * mutate one instance without going through Pinia — the alternative

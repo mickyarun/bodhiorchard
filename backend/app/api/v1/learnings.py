@@ -180,6 +180,7 @@ def _build_top_contributors(
         TopContributorRead(
             user_id=str(user.id),
             name=user.name or user.email,
+            avatar_url=user.avatar_url,
             buds_shipped_30d=buds,
             total_commits_30d=commits,
             total_prs_merged_30d=prs,
