@@ -98,11 +98,6 @@ async def test_projects_are_listed_from_the_connected_site(
     ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a revoked Jira token makes GET /jira/projects raise (500), "
-    "fixed by branch fix/jira-projects-upstream-errors",
-)
 async def test_a_token_revoked_after_connecting_is_explained_not_a_server_error(
     client: AsyncClient, app_sessions: Factory, fake_jira: FakeJira
 ) -> None:

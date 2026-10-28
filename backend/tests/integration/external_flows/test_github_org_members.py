@@ -66,11 +66,6 @@ async def test_members_come_back_with_profiles_and_the_already_added_flag(
     assert requests_to(gh, "/orgs/acme/members")[0].url.params["per_page"] == "100"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the roster reads one page of 100 and never follows Link, "
-    "fixed by branch fix/github-org-members-pagination",
-)
 async def test_a_roster_past_one_page_comes_back_whole(
     client: AsyncClient, app_sessions: Factory, gh: FakeGitHub, http_router: FakeHttpRouter
 ) -> None:

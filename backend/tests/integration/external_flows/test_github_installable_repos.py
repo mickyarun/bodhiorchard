@@ -122,11 +122,6 @@ async def test_a_failed_token_exchange_lists_no_repos_and_never_lists_with_a_bad
     assert requests_to(gh, "/installation/repositories") == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a rate-limited repo listing escapes the picker as a 500, "
-    "fixed by branch fix/installable-repos-upstream-errors",
-)
 async def test_a_rate_limited_repo_listing_is_explained_not_a_server_error(
     client: AsyncClient, app_sessions: Factory, gh: FakeGitHub
 ) -> None:
