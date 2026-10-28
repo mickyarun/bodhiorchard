@@ -35,11 +35,23 @@ export function reportRoomException(
   // client already receives; logging it as a crash would be noise.
   if (methodName === "onAuth") return
   console.error(
-    "[%s %s] uncaught error in %s: %s",
+    "[%s %s] uncaught error in %s: %s %s",
     room.constructor.name,
     safeLog(room.roomId),
     methodName,
     safeLog(error.message),
-    error,
+    safeLog(originalStack(error)),
   )
+}
+
+/**
+ * Stack of the error the handler actually threw. Colyseus wraps it in a
+ * RoomException whose own stack only points at the wrapper, and whose other
+ * fields carry the client and the raw message payload, so the exception
+ * object itself is never logged.
+ */
+function originalStack(error: RoomException): string | undefined {
+  const { cause } = error as { cause?: unknown }
+  const thrown = cause instanceof Error ? cause : error
+  return thrown.stack ?? thrown.message
 }
