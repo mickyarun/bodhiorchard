@@ -53,11 +53,13 @@ async def connect_slack(factory: Factory, org: uuid.UUID, slack_ids: dict[uuid.U
     return team
 
 
-def signed(payload: dict[str, Any], *, age_seconds: int = 0) -> tuple[bytes, dict[str, str]]:
-    """Form body and headers signed with the workspace secret, ``age_seconds`` ago."""
+def signed(
+    payload: dict[str, Any], *, secret: str = SECRET, timestamp: int | None = None
+) -> tuple[bytes, dict[str, str]]:
+    """Form body and headers signed with ``secret`` at ``timestamp`` (default: now)."""
     body = urlencode({"payload": json.dumps(payload)}).encode()
-    ts = str(int(time.time()) - age_seconds)
-    digest = hmac.new(SECRET.encode(), f"v0:{ts}:{body.decode()}".encode(), hashlib.sha256)
+    ts = str(int(time.time()) if timestamp is None else timestamp)
+    digest = hmac.new(secret.encode(), f"v0:{ts}:{body.decode()}".encode(), hashlib.sha256)
     headers = {
         "X-Slack-Request-Timestamp": ts,
         "X-Slack-Signature": "v0=" + digest.hexdigest(),

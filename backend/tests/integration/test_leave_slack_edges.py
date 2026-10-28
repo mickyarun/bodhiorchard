@@ -19,16 +19,21 @@ Slack's API and background senders are stubbed; today is frozen.
 
 from __future__ import annotations
 
+import inspect
 import uuid
 from datetime import date
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient
 
 from app.models.leave_request import LeaveStatus
+from app.services import slack_verify
 from app.services.leave import notify, slack_actions, slack_prompts
 from app.services.leave.lifecycle import submit
+from app.services.slack_interactive import post_ephemeral
+from app.services.slack_verify import MAX_AGE_SECONDS
 from tests.integration.leave_edge_support import deactivate, freeze_today, stored
 from tests.integration.leave_slack_support import (
     URL,
@@ -41,12 +46,18 @@ from tests.integration.leave_support import Factory, leave_body, report_to, setu
 
 pytestmark = pytest.mark.integration
 TODAY, DAY = date(2030, 6, 3), date(2030, 6, 11)
+# The signature check's clock, pinned so the age of a click is exact.
+NOW = 1_900_000_000
+
+
+@pytest.fixture(autouse=True)
+def _frozen(monkeypatch: pytest.MonkeyPatch) -> None:
+    freeze_today(monkeypatch, TODAY)
 
 
 @pytest.fixture
 def ephemeral(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     """Stub every outbound Slack call; returns the ephemeral-reply mock."""
-    freeze_today(monkeypatch, TODAY)
     reply = AsyncMock(return_value="")
     monkeypatch.setattr(slack_actions, "post_ephemeral", reply)
     monkeypatch.setattr(slack_actions, "open_view", AsyncMock(return_value=""))
@@ -68,23 +79,40 @@ async def _pending(
 
 
 def _replied(reply: AsyncMock) -> str:
-    """The text of the one ephemeral reply."""
+    """The text of the one ephemeral reply, found by parameter name."""
     reply.assert_awaited_once()
-    return str(reply.await_args.args[3]) if reply.await_args else ""
+    assert reply.await_args is not None
+    args, kwargs = reply.await_args.args, reply.await_args.kwargs
+    return str(inspect.signature(post_ephemeral).bind(*args, **kwargs).arguments["text"])
 
 
-async def test_a_replayed_click_is_refused(
-    client: AsyncClient, pg_session_factory: Factory, ephemeral: AsyncMock
+@pytest.mark.parametrize(
+    ("offset", "status", "outcome"),
+    [
+        (-MAX_AGE_SECONDS + 1, 200, LeaveStatus.APPROVED),  # 299 seconds old
+        (-MAX_AGE_SECONDS, 200, LeaveStatus.APPROVED),  # exactly at the limit
+        (-MAX_AGE_SECONDS - 1, 401, LeaveStatus.PENDING),  # 301 seconds old
+        (MAX_AGE_SECONDS + 1, 401, LeaveStatus.PENDING),  # 301 seconds in the future
+    ],
+)
+async def test_a_signed_click_counts_only_within_five_minutes_of_now(
+    client: AsyncClient,
+    pg_session_factory: Factory,
+    ephemeral: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    offset: int,
+    status: int,
+    outcome: LeaveStatus,
 ) -> None:
+    monkeypatch.setattr(slack_verify, "time", SimpleNamespace(time=lambda: float(NOW)))
     org, (emp, mgr), casual = await setup_org(pg_session_factory, "Emp", "Mgr")
     await report_to(pg_session_factory, org, emp, mgr)
     team = await connect_slack(pg_session_factory, org, {mgr: "UMGR"})
     request_id = await _pending(pg_session_factory, org, emp, casual)
     payload = click(team, "UMGR", "leave_approve", str(request_id))
-    # Correctly signed, but ten minutes old.
-    body, headers = signed(payload, age_seconds=600)
-    assert (await client.post(URL, content=body, headers=headers)).status_code == 401
-    assert (await stored(pg_session_factory, request_id)).status == LeaveStatus.PENDING
+    body, headers = signed(payload, timestamp=NOW + offset)
+    assert (await client.post(URL, content=body, headers=headers)).status_code == status
+    assert (await stored(pg_session_factory, request_id)).status == outcome
 
 
 async def test_another_workspace_cannot_reach_this_orgs_request(
