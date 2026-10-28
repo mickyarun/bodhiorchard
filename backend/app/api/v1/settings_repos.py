@@ -154,11 +154,15 @@ async def add_repo(
             within = False  # unrelated roots / different drives
         if within:
             break
-    if not within or in_clone_root(candidate):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Path is outside the directories repositories can be added from.",
-        )
+    outside = HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Path is outside the directories repositories can be added from.",
+    )
+    if not within:
+        raise outside
+    # Separate from the barrier above so CodeQL still recognises it.
+    if in_clone_root(candidate):
+        raise outside
     repo_path = Path(candidate)
     if not repo_path.exists():
         raise HTTPException(

@@ -71,9 +71,12 @@ async def browse_directories(
             within = False  # unrelated roots / different drives
         if within:
             break
+    if not within:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_OUTSIDE_ROOTS)
     # Another org's clones must not be listable either (host installs keep
-    # the clone root under home).
-    if not within or in_clone_root(candidate):
+    # the clone root under home). A separate raise: the plain `if not
+    # within` above is what CodeQL recognises as the path barrier.
+    if in_clone_root(candidate):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_OUTSIDE_ROOTS)
     target = Path(candidate)
 
@@ -126,7 +129,9 @@ async def get_local_repo_branches(
             within = False  # unrelated roots / different drives
         if within:
             break
-    if not within or in_clone_root(candidate):
+    if not within:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_OUTSIDE_ROOTS)
+    if in_clone_root(candidate):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_OUTSIDE_ROOTS)
     repo_path = Path(candidate)
     if not repo_path.exists() or not (repo_path / ".git").exists():
