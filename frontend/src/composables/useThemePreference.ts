@@ -63,10 +63,13 @@ export function resolveInitialThemeName(): string {
  * dark); setting it persists and applies. While the preference is 'system'
  * the active theme tracks the OS colour-scheme live.
  */
+// One preference for the whole app, so every control that shows it (the
+// sidebar switch, the user menu) agrees.
+const preference = ref<ThemePreference>(readStoredPreference())
+
 export function useThemePreference() {
   const theme = useTheme()
 
-  const preference = ref<ThemePreference>(readStoredPreference())
   const isDark = computed(() => theme.global.name.value === THEME_DARK)
 
   function setPreference(pref: ThemePreference): void {
@@ -89,5 +92,10 @@ export function useThemePreference() {
     onScopeDispose(() => mq.removeEventListener?.('change', onSystemChange))
   }
 
-  return { preference, isDark, setPreference }
+  /** Flip between light and dark, leaving "follow the system" behind. */
+  function toggle(): void {
+    setPreference(isDark.value ? 'light' : 'dark')
+  }
+
+  return { preference, isDark, setPreference, toggle }
 }

@@ -30,6 +30,7 @@
         size="default"
         density="comfortable"
         class="notification-bell-btn"
+        :aria-label="totalUnread > 0 ? `Notifications, ${totalUnread} unread` : 'Notifications'"
       >
         <v-badge
           :content="totalUnread"

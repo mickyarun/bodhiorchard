@@ -29,32 +29,16 @@
       color="surface"
       :width="248"
       rail-width="68"
-      :expand-on-hover="!compact && !notificationMenuOpen"
+      :expand-on-hover="!compact"
       class="app-sidebar"
       @update:model-value="overlayOpen = $event"
+      @update:rail="onRailHover"
     >
-      <div
-        v-if="!compact"
-        class="pa-4 pb-2 d-flex align-center"
-        :class="rail ? 'justify-center' : 'justify-space-between'"
-      >
-        <BrandLogo :size="28" :show-text="!rail" />
-        <!-- v-show (not v-if) so the menu stays mounted even when the
-             drawer briefly collapses to rail — moving the mouse to a
-             dropdown item shouldn't unmount its trigger. The drawer
-             also disables ``expand-on-hover`` while the menu is open
-             (see ``notificationMenuOpen`` above) so the user can
-             actually reach the dropdown without it dismissing. -->
-        <NotificationBell
-          v-show="!rail && authStore.user?.id"
-          :user-id="authStore.user?.id || ''"
-          @update:menu-open="notificationMenuOpen = $event"
-        />
-      </div>
+      <SidebarHead v-if="!compact" :collapsed="collapsed" />
 
       <v-list density="compact" nav class="px-2">
-        <EngineeringNav v-if="canAccessEngineering" :rail="rail" />
-        <PeopleNav :rail="rail" :show-heading="canAccessEngineering" />
+        <EngineeringNav v-if="canAccessEngineering" :rail="collapsed" />
+        <PeopleNav :rail="collapsed" :show-heading="canAccessEngineering" />
       </v-list>
 
       <template #append>
@@ -70,24 +54,10 @@
           <SettingsNav />
         </v-list>
 
-        <UserMenu :rail="rail" />
+        <UserMenu :rail="collapsed" />
 
-        <!-- Collapse / expand toggle — sticky bottom of the drawer. -->
-        <v-divider v-if="!compact" />
-        <div
-          v-if="!compact"
-          class="d-flex pa-1"
-          :class="rail ? 'justify-center' : 'justify-end pe-2'"
-        >
-          <v-btn
-            :icon="rail ? 'mdi-chevron-right' : 'mdi-chevron-left'"
-            variant="text"
-            size="small"
-            density="comfortable"
-            :title="rail ? 'Expand sidebar' : 'Collapse sidebar'"
-            @click="toggleRail"
-          />
-        </div>
+        <v-divider />
+        <SidebarFoot :collapsed="collapsed" :rail="rail" :can-rail="!compact" @toggle-rail="toggleRail" />
       </template>
     </v-navigation-drawer>
 
@@ -114,15 +84,15 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
-import BrandLogo from '@/components/common/BrandLogo.vue'
-import NotificationBell from '@/components/common/NotificationBell.vue'
 import EngineeringNav from '@/components/layout/EngineeringNav.vue'
 import EngineeringOverlays from '@/components/layout/EngineeringOverlays.vue'
 import MobileTopBar from '@/components/layout/MobileTopBar.vue'
 import PeopleNav from '@/components/layout/PeopleNav.vue'
 import SettingsNav from '@/components/layout/SettingsNav.vue'
+import SidebarFoot from '@/components/layout/SidebarFoot.vue'
+import SidebarHead from '@/components/layout/SidebarHead.vue'
 import UserMenu from '@/components/layout/UserMenu.vue'
 import { useAppDrawer } from '@/composables/useAppDrawer'
 import { usePermissions } from '@/composables/usePermissions'
@@ -134,16 +104,10 @@ const { canAccessEngineering, canManageMembers } = usePermissions()
 // Driven by the router guards — true while any route navigation resolves.
 const { navigating } = useNavigationProgress()
 
-// Rail on wide screens (`expand-on-hover` still peeks the labels), an
-// overlay opened from the top bar on phones and small tablets.
-const { compact, rail, overlayOpen, toggleRail } = useAppDrawer()
-
-// While the notification bell's dropdown is open, freeze the drawer's
-// auto-collapse behaviour. Without this, moving the mouse off the
-// drawer to click a dropdown item collapses the drawer (rail mode),
-// which unmounts the bell trigger and dismisses the menu before the
-// click lands.
-const notificationMenuOpen = ref(false)
+// Rail on wide screens (hovering expands it over the page), an overlay
+// opened from the top bar on phones and small tablets. `collapsed` is the
+// rail as drawn: everything inside lays out from it.
+const { compact, rail, collapsed, overlayOpen, toggleRail, onRailHover } = useAppDrawer()
 
 onMounted(() => {
   if (authStore.isAuthenticated && !authStore.user) {
@@ -155,12 +119,6 @@ onMounted(() => {
 <style scoped>
 .app-sidebar {
   border-right: 1px solid rgb(var(--v-theme-rule)) !important;
-}
-
-/* Hairline under the logo / notification header. */
-.app-sidebar :deep(.v-navigation-drawer__content) > .pa-4 {
-  border-bottom: 1px solid rgb(var(--v-theme-rule));
-  margin-bottom: 4px;
 }
 
 /* Nav rhythm: quiet by default; the active item is a soft blue wash with
