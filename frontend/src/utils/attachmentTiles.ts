@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/** Tile rows and the limits hint for BugAttachments.vue. */
+/** Tile rows and the limits hint for the bug attachment strip. */
 import type { BugAttachment, BugAttachmentLimits } from '@/types'
 
 /** One tile in the attachment strip, staged (``file``) or stored (``fetchPath``). */

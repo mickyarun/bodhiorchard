@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { BugAttachment } from '@/types'
-import { attachmentHint, stagedTiles, storedTiles } from './bugAttachments.util'
+import { attachmentHint, stagedTiles, storedTiles } from './attachmentTiles'
 
 describe('stagedTiles', () => {
   it('keys picked files by position, name and modified time', () => {

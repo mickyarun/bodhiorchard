@@ -13,14 +13,14 @@
 // limitations under the License.
 
 import { computed, ref, watch } from 'vue'
+import { useBugAttachments } from '@/composables/useBugAttachments'
+import { acceptAttribute, attachmentRejectionReason } from '@/utils/attachments'
 import {
   type AttachmentTileRow,
   attachmentHint,
   stagedTiles,
   storedTiles,
-} from '@/components/bugs/bugAttachments.util'
-import { useBugAttachments } from '@/composables/useBugAttachments'
-import { acceptAttribute, attachmentRejectionReason } from '@/utils/attachments'
+} from '@/utils/attachmentTiles'
 
 /** Where the strip's files live: a stored bug, or files staged by the parent. */
 export interface AttachmentStripSource {
