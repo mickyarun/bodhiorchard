@@ -26,6 +26,9 @@
 import type { Room, RoomException, RoomMethodName } from "colyseus"
 import { safeLog } from "../bridge/logSanitize"
 
+/** Stack lines kept in a report; safeLog caps each line, not the whole stack. */
+const MAX_STACK_LINES = 15
+
 export function reportRoomException(
   room: Room,
   error: RoomException,
@@ -40,18 +43,25 @@ export function reportRoomException(
     safeLog(room.roomId),
     methodName,
     safeLog(error.message),
-    safeLog(originalStack(error)),
+    sanitisedStack(error),
   )
 }
 
 /**
- * Stack of the error the handler actually threw. Colyseus wraps it in a
- * RoomException whose own stack only points at the wrapper, and whose other
- * fields carry the client and the raw message payload, so the exception
- * object itself is never logged.
+ * Stack of the error the handler actually threw, as one log-safe line.
+ * Colyseus wraps it in a RoomException whose own stack only points at the
+ * wrapper, and whose other fields carry the client and the raw message
+ * payload, so the exception object itself is never logged. Each frame is
+ * sanitised on its own so the per-value length cap does not cut the stack
+ * down to its first few frames.
  */
-function originalStack(error: RoomException): string | undefined {
+function sanitisedStack(error: RoomException): string {
   const { cause } = error as { cause?: unknown }
   const thrown = cause instanceof Error ? cause : error
-  return thrown.stack ?? thrown.message
+  const stack = thrown.stack ?? thrown.message
+  return stack
+    .split("\n")
+    .slice(0, MAX_STACK_LINES)
+    .map((line) => safeLog(line.trim()))
+    .join(" | ")
 }

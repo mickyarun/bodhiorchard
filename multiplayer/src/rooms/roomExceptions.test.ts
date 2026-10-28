@@ -58,6 +58,21 @@ describe("reportRoomException", () => {
     expect(args.at(-1)).toContain("at handleMove (OrgRoom.ts:1:1)")
   })
 
+  it("keeps the deeper frames of a long stack", () => {
+    const thrown = new Error("boom")
+    const frames = Array.from(
+      { length: 12 },
+      (_, i) => `    at frame${i} (/app/multiplayer/src/rooms/SomeLongRoomFileName.ts:${i}:1)`,
+    )
+    thrown.stack = ["Error: boom", ...frames].join("\n")
+
+    reportRoomException(fakeRoom(), wrapped(thrown, undefined), "onMessage")
+
+    const stack = (errorSpy.mock.calls[0] as unknown[]).at(-1) as string
+    expect(stack).toContain("at frame11 (")
+    expect(stack).not.toMatch(LINE_BREAKS)
+  })
+
   it("does not log a rejected join", () => {
     reportRoomException(fakeRoom(), wrapped(new Error("bad token"), undefined), "onAuth")
 

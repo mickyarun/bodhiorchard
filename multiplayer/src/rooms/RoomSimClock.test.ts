@@ -93,6 +93,19 @@ describe("RaceRoom simulation loop", () => {
     room.clock.clear()
   })
 
+  it("ends the race after one report when the sim tick keeps throwing", () => {
+    const room = runningRace()
+    vi.spyOn(room as unknown as { simStep(): void }, "simStep").mockImplementation(() => {
+      throw new Error("tick bug")
+    })
+
+    for (let i = 0; i < 5; i++) tickRoomClock(room)
+
+    expectReportedTimerError()
+    expect(room.state.phase).toBe("finished")
+    room.clock.clear()
+  })
+
   it("stops ticking once the room clock is cleared on dispose", () => {
     vi.useFakeTimers()
     const room = runningRace()
@@ -138,6 +151,25 @@ describe("MinigameRoom simulation loop", () => {
     expect(() => tickRoomClock(room)).not.toThrow()
 
     expectReportedTimerError()
+    room.clock.clear()
+  })
+
+  it("ends the game unrecorded after one report when the tick keeps throwing", () => {
+    const room = playingPollenPop()
+    const engine = (room as unknown as { engine: { tick(): void } }).engine
+    vi.spyOn(engine, "tick").mockImplementation(() => {
+      throw new Error("tick bug")
+    })
+    const broadcast = vi.spyOn(room, "broadcast").mockImplementation(() => undefined)
+
+    for (let i = 0; i < 5; i++) tickRoomClock(room)
+
+    expectReportedTimerError()
+    expect(room.state.phase).toBe("finished")
+    expect(broadcast).toHaveBeenCalledWith(
+      "mg_result",
+      expect.objectContaining({ recorded: false }),
+    )
     room.clock.clear()
   })
 })

@@ -112,6 +112,14 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
   /** Report a throwing handler or timer instead of letting it exit the process. */
   onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
     reportRoomException(this, error, methodName)
+    // The sim tick is the only interval: one that threw will throw on every
+    // tick, so end the race instead of logging the same failure at 20Hz.
+    if (methodName === "setInterval") this.abandonBrokenRace()
+  }
+
+  private abandonBrokenRace(): void {
+    this.stopSim()
+    this.setPhase("finished")
   }
 
   onDispose(): void {

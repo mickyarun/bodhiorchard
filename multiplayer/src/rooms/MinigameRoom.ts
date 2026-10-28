@@ -124,6 +124,16 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
   /** Report a throwing handler or timer instead of letting it exit the process. */
   onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
     reportRoomException(this, error, methodName)
+    // The engine tick is the only interval: one that threw will throw on
+    // every tick, so end the game unrecorded instead of logging it at 20Hz.
+    if (methodName === "setInterval") this.abandonBrokenGame()
+  }
+
+  private abandonBrokenGame(): void {
+    this.stopSim()
+    this.state.phase = "finished"
+    this.posted = true
+    this.broadcast("mg_result", { recorded: false, game: this.state.game, score: 0 })
   }
 
   onDispose(): void {
