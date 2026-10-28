@@ -60,8 +60,10 @@ export function useBudDetailLoader(hooks: BudLoaderHooks) {
     const stale = () => seq !== loadSeq
     channel.disconnect()
     hooks.startNewSession()
-    const tabParam = route.query.tab as string | undefined
-    if (tabParam && VALID_BUD_TABS.has(tabParam)) hooks.activeTab.value = tabParam
+    // A ?tab= the page doesn't know counts as none, so the BUD opens on its stage tab.
+    const query = route.query.tab as string | undefined
+    const tabParam = query && VALID_BUD_TABS.has(query) ? query : undefined
+    if (tabParam) hooks.activeTab.value = tabParam
     await budStore.fetchBUD(id)
     if (stale()) return
     const bud = hooks.bud.value

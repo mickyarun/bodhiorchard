@@ -34,6 +34,7 @@ class TriageSessionRead(BaseModel):
     requester_slack_id: str
     requester_name: str | None = None
     requester_display_name: str | None = None
+    requester_avatar_url: str | None = None
     original_text: str | None = None
     status: str
     priority: str | None = None

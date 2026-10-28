@@ -62,8 +62,11 @@ def _make_bud(status: BUDStatus) -> SimpleNamespace:
 
 
 def _patch_bud_repo(monkeypatch: pytest.MonkeyPatch, bud: SimpleNamespace) -> None:
-    """Make ``BUDRepository(...).get_by_id(...)`` return ``bud``."""
-    repo = MagicMock(get_by_id=AsyncMock(return_value=bud))
+    """Make ``BUDRepository(...)`` lock and return ``bud``."""
+    repo = MagicMock(
+        get_by_id=AsyncMock(return_value=bud),
+        lock_for_edit=AsyncMock(return_value=True),
+    )
     monkeypatch.setattr(bud_handlers, "BUDRepository", MagicMock(return_value=repo))
 
 
