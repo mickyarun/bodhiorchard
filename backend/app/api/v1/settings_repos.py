@@ -164,12 +164,13 @@ async def add_repo(
     if in_clone_root(candidate):
         raise outside
     repo_path = Path(candidate)
-    if not repo_path.exists():
+    # os.path, not Path: a name too long for the filesystem reads as missing.
+    if not os.path.exists(repo_path):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Path does not exist: {body.path}",
         )
-    if not (repo_path / ".git").exists():
+    if not os.path.exists(repo_path / ".git"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Path is not a git repository: {body.path}",
