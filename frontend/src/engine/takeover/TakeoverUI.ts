@@ -374,7 +374,7 @@ function makeActionChip(opts: ActionChipOpts): HTMLButtonElement {
 
 /**
  * Pull initials out of a display name for the target avatar chip.
- * Inline rather than importing from `components/race/initials` so the
+ * Inline rather than importing from `utils/avatar` so the
  * engine layer stays independent of the Vue-layer helpers.
  */
 function initialsFor(name: string): string {

@@ -67,7 +67,7 @@
         :class="['results__row', { 'results__row--dnf': !row.finished }]"
       >
         <span class="results__place">{{ row.finished ? row.place : 'DNF' }}</span>
-        <span class="results__avatar">{{ initialsOf(row.racerId) }}</span>
+        <span class="results__avatar">{{ initialsOf(nameOf(row.racerId)) }}</span>
         <span class="results__name">{{ nameOf(row.racerId) }}</span>
         <span class="results__time">
           {{ row.finished ? formatRaceTime(row.finishTimeMs) : `${row.distanceM.toFixed(1)}m` }}
@@ -95,7 +95,7 @@ import { parseCharacterModel, type CharacterConfig } from '@/engine/characters/C
 import CharacterPreview from '@/components/character/CharacterPreview.vue'
 import RaceThemeBackdrop from '@/components/race/RaceThemeBackdrop.vue'
 import CheckerFlagIcon from '@/components/race/CheckerFlagIcon.vue'
-import { initials } from '@/components/race/initials'
+import { initialsOf } from '@/utils/avatar'
 import RaceLeaderboardSection from './RaceLeaderboardSection.vue'
 
 const props = defineProps<{
@@ -132,10 +132,6 @@ const configByUserId = computed(() => {
 
 function nameOf(userId: string): string {
   return nameByUserId.value.get(userId) ?? userId
-}
-
-function initialsOf(userId: string): string {
-  return initials(nameOf(userId))
 }
 
 function configOf(userId: string): CharacterConfig {

@@ -53,7 +53,7 @@
             <span class="text-body-2 font-weight-medium">v{{ v.version_no }}</span>
           </div>
           <div class="text-caption text-medium-emphasis mt-1">
-            {{ relativeTime(v.edited_at) }}
+            {{ relativeTime(v.edited_at, new Date()) }}
           </div>
           <div v-if="v.reason" class="text-caption text-medium-emphasis mt-1 diff-rail__reason">
             {{ v.reason }}
@@ -68,7 +68,7 @@
             <template v-if="selectedVersion">
               Comparing
               <strong>v{{ selectedVersion.version_no }}</strong>
-              ({{ relativeTime(selectedVersion.edited_at) }})
+              ({{ relativeTime(selectedVersion.edited_at, new Date()) }})
               → <strong>current</strong>
             </template>
             <template v-else>
@@ -165,6 +165,7 @@ import { computed, ref, watch } from 'vue'
 import api from '@/services/api'
 import AppSideSheet from '@/components/common/AppSideSheet.vue'
 import type { BUDDesign } from '@/types'
+import { relativeTime } from '@/utils/date'
 
 interface BUDVersionSummary {
   id: string
@@ -273,29 +274,6 @@ function sourceColor(source: BUDVersionSummary['source']): string {
     case 'revert':
       return 'warning'
   }
-}
-
-const RELATIVE_THRESHOLDS = [
-  { limit: 60, divisor: 1, unit: 'sec' },
-  { limit: 3_600, divisor: 60, unit: 'min' },
-  { limit: 86_400, divisor: 3_600, unit: 'hr' },
-  { limit: 604_800, divisor: 86_400, unit: 'd' },
-]
-
-function relativeTime(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime()
-  const seconds = Math.max(0, Math.floor(ms / 1000))
-  for (const { limit, divisor, unit } of RELATIVE_THRESHOLDS) {
-    if (seconds < limit) {
-      const n = Math.max(1, Math.floor(seconds / divisor))
-      return `${n} ${unit} ago`
-    }
-  }
-  return new Date(iso).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
 }
 
 // Stringify the snapshot field for line-by-line diff. JSON arrays

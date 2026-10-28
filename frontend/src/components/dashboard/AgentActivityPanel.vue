@@ -26,7 +26,7 @@
         <span class="activity__text">
           <span class="activity__line"><strong>{{ event.agent_name }}</strong> {{ event.action }}</span>
           <span class="activity__meta">
-            {{ event.timestamp ? timeAgo(event.timestamp) : 'Now' }}
+            {{ event.timestamp ? relativeTime(event.timestamp, new Date(), SHORT_AGO) : 'Now' }}
             <template v-if="event.bud_number"> · {{ budRef(event.bud_number) }} {{ event.bud_title }}</template>
           </span>
         </span>
@@ -41,7 +41,7 @@ import { computed } from 'vue'
 import AppPanel from '@/components/common/AppPanel.vue'
 import { budRef } from '@/types'
 import type { AgentActivityItem } from '@/types/dashboard'
-import { timeAgo } from '@/utils/dev-activity-helpers'
+import { SHORT_AGO, relativeTime } from '@/utils/date'
 
 type Tone = 'working' | 'done' | 'failed'
 

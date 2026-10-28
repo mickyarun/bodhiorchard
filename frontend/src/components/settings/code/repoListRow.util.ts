@@ -42,29 +42,3 @@ export const STATUS_PRESENTATION: Record<
   running: { label: 'Running…', color: 'primary', icon: 'mdi-progress-clock' },
   queued: { label: 'Queued', color: 'grey', icon: 'mdi-timer-sand' },
 }
-
-const RELATIVE_DIVISIONS: { amount: number, unit: Intl.RelativeTimeFormatUnit }[] = [
-  { amount: 60, unit: 'second' },
-  { amount: 60, unit: 'minute' },
-  { amount: 24, unit: 'hour' },
-  { amount: 7, unit: 'day' },
-  { amount: 4.34524, unit: 'week' },
-  { amount: 12, unit: 'month' },
-  { amount: Number.POSITIVE_INFINITY, unit: 'year' },
-]
-
-const REL_FORMATTER = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
-
-/** Render an ISO timestamp as e.g. "2 hours ago" without pulling in a
- *  date library. Walks bounded divisions through Intl.RelativeTimeFormat
- *  which ships with every modern browser. */
-export function formatRelative(iso: string): string {
-  const ms = Date.parse(iso)
-  if (Number.isNaN(ms)) return ''
-  let duration = (ms - Date.now()) / 1000
-  for (const { amount, unit } of RELATIVE_DIVISIONS) {
-    if (Math.abs(duration) < amount) return REL_FORMATTER.format(Math.round(duration), unit)
-    duration /= amount
-  }
-  return ''
-}

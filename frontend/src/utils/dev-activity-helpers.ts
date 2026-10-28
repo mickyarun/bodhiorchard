@@ -17,27 +17,9 @@
  *
  * Used by both BUDDevelopmentPanel.vue and BUDQATestingActivity.vue.
  * Extracted from BUDDevelopmentPanel.vue so the testing tab doesn't have
- * to duplicate the file-icon / time-format logic — keeping them in sync
+ * to duplicate the file-icon logic — keeping them in sync
  * by hand was already creating drift risk before the testing tab existed.
  */
-
-/**
- * Render a relative-time string for an ISO date (e.g. "5m ago", "2h ago").
- *
- * Uses the same thresholds the dev panel had inlined: minute / hour / day,
- * then falls back to a fixed "Nd ago" label. Not localised — the dev tab
- * never localised it either, and consistency between tabs matters more
- * than i18n correctness for an internal devtool surface.
- */
-export function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
-}
 
 /**
  * Parse the comma-separated `files_changed` string from a commit row

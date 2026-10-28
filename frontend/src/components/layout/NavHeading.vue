@@ -15,10 +15,11 @@
  -->
 
 <!-- Group title inside the sidebar. In rail mode there is no room for a
-     label, so the group is separated by a hairline instead. -->
+     label, so the group is separated by a hairline instead, in a block of
+     the same height: the items below stay put when a rail opens. -->
 <template>
   <v-list-subheader v-if="!rail" class="nav-heading">{{ label }}</v-list-subheader>
-  <v-divider v-else class="my-2" />
+  <div v-else class="nav-heading nav-heading--rail" aria-hidden="true"><v-divider /></div>
 </template>
 
 <script setup lang="ts">
@@ -32,7 +33,13 @@ defineProps<{ label: string; rail: boolean }>()
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;
   color: rgb(var(--v-theme-muted));
-  min-height: 28px;
+  height: 32px;
+  min-height: 32px;
   margin-top: 12px;
+}
+.nav-heading--rail {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
 }
 </style>

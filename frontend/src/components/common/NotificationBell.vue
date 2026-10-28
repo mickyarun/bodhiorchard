@@ -17,19 +17,43 @@
 <template>
   <v-menu
     v-model="menuOpen"
-    location="top start"
+    :location="variant === 'nav' ? 'bottom start' : 'top start'"
     :close-on-content-click="false"
     max-width="420"
     min-width="360"
   >
     <template #activator="{ props: menuProps }">
+      <!-- In the sidebar it is a nav row: the same place whether the rail
+           is collapsed or open, and its left edge never moves, so the
+           open menu stays put when the rail collapses under it. -->
+      <v-list-item
+        v-if="variant === 'nav'"
+        v-bind="menuProps"
+        title="Notifications"
+        rounded="lg"
+        :aria-label="bellLabel"
+      >
+        <template #prepend>
+          <v-badge
+            :content="totalUnread"
+            :model-value="totalUnread > 0"
+            color="error"
+            offset-x="-2"
+            offset-y="-2"
+          >
+            <v-icon icon="mdi-bell-outline" />
+          </v-badge>
+        </template>
+      </v-list-item>
       <v-btn
+        v-else
         v-bind="menuProps"
         icon
         variant="text"
         size="default"
         density="comfortable"
         class="notification-bell-btn"
+        :aria-label="bellLabel"
       >
         <v-badge
           :content="totalUnread"
@@ -159,7 +183,7 @@
               {{ notif.message }}
             </v-list-item-subtitle>
             <v-list-item-subtitle class="text-caption text-medium-emphasis mt-1">
-              {{ relativeTime(notif.createdAt) }}
+              {{ relativeTime(notif.createdAt, new Date(), SHORT_AGO) }}
             </v-list-item-subtitle>
 
             <template #append>
@@ -263,14 +287,13 @@ import { useMembersStore } from '@/stores/members'
 import { usePermissions } from '@/composables/usePermissions'
 import type { AppNotification, BacklashInviteMeta, RaceInviteMeta, YieldOffer } from '@/types'
 import { isInviteUnexpired } from '@/utils/inviteExpiry'
+import { SHORT_AGO, relativeTime } from '@/utils/date'
 
-const props = defineProps<{ userId: string }>()
-
-// Parent (AppLayout) listens to this to freeze the sidebar's
-// expand-on-hover collapse while the dropdown is open — otherwise
-// moving the mouse to click a dropdown item collapses the drawer
-// and unmounts this button before the click lands.
-const emit = defineEmits<(e: 'update:menu-open', value: boolean) => void>()
+const props = withDefaults(defineProps<{
+  userId: string
+  /** ``icon`` for a top bar; ``nav`` for a row in the sidebar list. */
+  variant?: 'icon' | 'nav'
+}>(), { variant: 'icon' })
 
 const store = useNotificationStore()
 const yieldStore = useYieldOfferStore()
@@ -278,7 +301,6 @@ const membersStore = useMembersStore()
 const { hasPermission, canAccessEngineering } = usePermissions()
 const router = useRouter()
 const menuOpen = ref(false)
-watch(menuOpen, value => emit('update:menu-open', value))
 
 const isAdmin = computed(() => hasPermission('team:manage'))
 // Reactive scope: read .value at fetch time, NOT at setup. Otherwise
@@ -292,6 +314,9 @@ const yieldScope = computed<'me' | 'org'>(() => (isAdmin.value ? 'org' : 'me'))
 // "just another notification type" keeps the chrome compact and the
 // muscle memory consistent.
 const totalUnread = computed(() => store.unreadCount + yieldStore.items.length)
+const bellLabel = computed(() =>
+  totalUnread.value > 0 ? `Notifications, ${totalUnread.value} unread` : 'Notifications',
+)
 
 // Reject / reassign dialogs are mounted layout-wide in YieldOfferDialogs;
 // the shared composable owns the in-flight `busy` flag so the row buttons
@@ -420,19 +445,6 @@ function notifColor(type: string): string {
   }
 }
 
-function relativeTime(isoString: string): string {
-  const now = Date.now()
-  const then = new Date(isoString).getTime()
-  const diffSec = Math.floor((now - then) / 1000)
-
-  if (diffSec < 60) return 'just now'
-  const diffMin = Math.floor(diffSec / 60)
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}h ago`
-  const diffDay = Math.floor(diffHr / 24)
-  return `${diffDay}d ago`
-}
 </script>
 
 <style scoped>
