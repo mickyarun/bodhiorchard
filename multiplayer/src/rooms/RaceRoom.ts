@@ -28,7 +28,9 @@
  * The lobby/invite flows have pushed it past its original 300-line cap;
  * extracting them into a lobby handler is the tracked follow-up refactor.
  */
-import { Room, Client } from "colyseus"
+import { Room, Client, type RoomException, type RoomMethodName } from "colyseus"
+import { reportRoomException } from "./roomExceptions"
+import type { Delayed } from "colyseus"
 import {
   CANCEL_FLUSH_GRACE_MS,
   COUNTDOWN_MS,
@@ -75,7 +77,7 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
   private physicsRacers: Racer[] = []
   /** Subset of physicsRacers driven by RaceBotDriver (dev mode only). */
   private botRacers: Racer[] = []
-  private simHandle: NodeJS.Timeout | null = null
+  private simHandle: Delayed | null = null
   /** Wall-clock at which running phase began (used to compute elapsedMs). */
   private runningStartedAtMs = 0
 
@@ -105,6 +107,19 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
         if (racer.connected) racer.connected = false
       }
     }
+  }
+
+  /** Report a throwing handler or timer instead of letting it exit the process. */
+  onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
+    reportRoomException(this, error, methodName)
+    // The sim tick is the only interval: one that threw will throw on every
+    // tick, so end the race instead of logging the same failure at 20Hz.
+    if (methodName === "setInterval") this.abandonBrokenRace()
+  }
+
+  private abandonBrokenRace(): void {
+    this.stopSim()
+    this.setPhase("finished")
   }
 
   onDispose(): void {
@@ -337,7 +352,8 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     this.setPhase("running")
     this.state.runningElapsedMs = 0
     this.runningStartedAtMs = Date.now()
-    this.simHandle = setInterval(() => this.simStep(), SIM_TICK_MS)
+    // Room clock: guarded by onUncaughtException and cleared on dispose.
+    this.simHandle = this.clock.setInterval(() => this.simStep(), SIM_TICK_MS)
   }
 
   /**
@@ -467,7 +483,7 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
 
   private stopSim(): void {
     if (this.simHandle) {
-      clearInterval(this.simHandle)
+      this.simHandle.clear()
       this.simHandle = null
     }
   }
