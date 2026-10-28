@@ -18,10 +18,10 @@
   <v-card class="dev-detail-panel" elevation="8" rounded="lg">
     <!-- Header -->
     <div class="d-flex align-center px-4 pt-3 pb-1">
-      <v-avatar size="32" :color="info.isAgent ? 'blue-lighten-4' : 'purple-lighten-4'" class="mr-2">
-        <v-img v-if="member?.avatar_url" :src="member.avatar_url" />
-        <v-icon v-else :icon="info.isAgent ? 'mdi-robot' : 'mdi-account'" size="20" />
+      <v-avatar v-if="info.isAgent" size="32" color="blue-lighten-4" class="mr-2">
+        <v-icon icon="mdi-robot" size="20" />
       </v-avatar>
+      <AppMonogram v-else class="mr-2" :name="info.name" :src="member?.avatar_url" :size="32" />
       <div class="flex-grow-1 overflow-hidden">
         <div class="text-subtitle-1 font-weight-bold text-truncate">
           {{ info.name }}
@@ -165,6 +165,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import AppMonogram from '@/components/common/AppMonogram.vue'
 import type { CharacterInfo } from './types'
 
 const props = defineProps<{

@@ -21,6 +21,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MinigameRoom } from "./MinigameRoom"
 
 const fetchMock = vi.fn()
+/** The verified identity onAuth hands to onJoin. */
+const ANA = { userId: "u1", orgId: "org-a", name: "Ana" }
 let room: MinigameRoom
 let broadcast: ReturnType<typeof vi.spyOn>
 
@@ -68,7 +70,7 @@ describe("MinigameRoom.onAuth", () => {
   it("rejects a tokenless join in production", async () => {
     vi.stubEnv("NODE_ENV", "production")
     room = createRoom("fishing")
-    await expect(room.onAuth(fakeClient(), { userId: "u1" })).rejects.toThrow(
+    await expect(room.onAuth(fakeClient(), { userId: "u1", orgId: "org-a" })).rejects.toThrow(
       "auth token required",
     )
   })
@@ -91,16 +93,19 @@ describe("MinigameRoom.onAuth", () => {
     const auth = await room.onAuth(fakeClient(), {
       userId: "spoof",
       name: "Spoof",
+      orgId: "org-a",
       token: "jwt",
       game: "fishing",
     })
-    expect(auth).toMatchObject({ userId: "u1", orgId: "org-a", name: "Ana" })
+    expect(auth).toEqual({ userId: "u1", orgId: "org-a", name: "Ana" })
   })
 
   it("rejects an invalid token", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ valid: false })))
     room = createRoom("fishing")
-    await expect(room.onAuth(fakeClient(), { token: "bad" })).rejects.toThrow(/invalid auth/)
+    await expect(
+      room.onAuth(fakeClient(), { orgId: "org-a", token: "bad" }),
+    ).rejects.toThrow(/invalid auth/)
   })
 })
 
@@ -116,7 +121,7 @@ describe("MinigameRoom game lifecycle", () => {
 
   it("ignores malformed inputs without throwing", () => {
     room = createRoom("fishing")
-    room.onJoin(fakeClient(), { userId: "u1", orgId: "org-a" })
+    room.onJoin(fakeClient(), {}, ANA)
     const input = (data: unknown): void =>
       (room as unknown as { handleInput(c: Client, d: unknown): void }).handleInput(
         fakeClient(),
@@ -136,7 +141,7 @@ describe("MinigameRoom game lifecycle", () => {
       new Response(JSON.stringify({ recorded: true, game: "fishing", score: 0, best_score: 0 })),
     )
     room = createRoom("fishing")
-    room.onJoin(fakeClient(), { userId: "u1", orgId: "org-a", name: "Ana" })
+    room.onJoin(fakeClient(), {}, ANA)
 
     room.finish()
     room.finish()
@@ -156,9 +161,11 @@ describe("MinigameRoom game lifecycle", () => {
     expect(room.state.phase).toBe("finished")
   })
 
-  it("does not post when the player identity is unknown", async () => {
+  it("refuses a join that skipped verification and posts nothing", async () => {
     room = createRoom("fishing")
-    room.onJoin(fakeClient(), {})
+    expect(() => room.onJoin(fakeClient(), { userId: "u1", orgId: "org-a" })).toThrow(
+      "join was not verified",
+    )
     room.finish()
     await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith("mg_result", expect.anything()))
     expect(fetchMock).not.toHaveBeenCalled()
@@ -172,7 +179,7 @@ describe("MinigameRoom game lifecycle", () => {
   it("tells the player the score was not recorded when the backend fails", async () => {
     fetchMock.mockResolvedValue(new Response("nope", { status: 500 }))
     room = createRoom("fishing")
-    room.onJoin(fakeClient(), { userId: "u1", orgId: "org-a" })
+    room.onJoin(fakeClient(), {}, ANA)
     room.finish()
     await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith("mg_result", expect.anything()))
     expect(broadcast).toHaveBeenCalledWith(
@@ -183,14 +190,14 @@ describe("MinigameRoom game lifecycle", () => {
 
   it("scores a hook while the game is playing", () => {
     room = createRoom("fishing")
-    room.onJoin(fakeClient(), { userId: "", orgId: "" })
+    room.onJoin(fakeClient(), {}, ANA)
     sendInput({ type: "hook", payload: {} })
     expect(broadcast).toHaveBeenCalledWith("fishing_result", expect.anything())
   })
 
   it("ignores a hook once the game is finished", () => {
     room = createRoom("fishing")
-    room.onJoin(fakeClient(), { userId: "", orgId: "" })
+    room.onJoin(fakeClient(), {}, ANA)
     room.finish()
     const scoreAtFinish = room.state.score
     broadcast.mockClear()

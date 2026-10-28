@@ -62,7 +62,9 @@ const server = defineServer({
     pingMaxRetries: 3,
   }),
 
-  devMode: process.env.NODE_ENV !== "production",
+  // Colyseus dev mode restores rooms across restarts from cached state. It is
+  // off unless explicitly asked for, never inferred from a missing NODE_ENV.
+  devMode: process.env.MULTIPLAYER_DEV_MODE === "1",
 
   express: (app) => {
     // JSON body parser for /internal/* routes

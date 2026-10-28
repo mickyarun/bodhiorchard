@@ -57,6 +57,7 @@ from app.repositories.bud_timeline import BUDTimelineRepository
 from app.repositories.bug import BugRepository
 from app.repositories.feature_learning import FeatureLearningRepository
 from app.repositories.organization import OrganizationRepository
+from app.repositories.user import UserRepository
 from app.schemas.bud import (
     BUDAgentTaskRead,
     BUDCreate,
@@ -103,6 +104,7 @@ from app.services.bud_learning_alias_resolver import resolve_aliased_contributor
 from app.services.bud_metrics import compute_and_persist as compute_bud_metrics
 from app.services.bud_timeline import record_event
 from app.services.job_queue import JOB_BUD_AGENT, create_job
+from app.services.org_members import assert_new_assignee_in_org
 
 logger = structlog.get_logger(__name__)
 
@@ -652,6 +654,9 @@ async def update_bud(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="priority cannot be null; omit the field to leave it unchanged",
         )
+    await assert_new_assignee_in_org(
+        db, current_user.org_id, update_data.get("assignee_id"), bud.assignee_id
+    )
 
     # Capture the pre-edit snapshot AS A DICT here, before any of the
     # auto_generate_phases / assignee / status mutations below. The
@@ -2089,14 +2094,9 @@ async def get_dev_activity(
 
     eff = calculate_effectiveness(activities, agent_tasks)
 
-    # Build commit reads with user_name resolved
+    # Build commit reads with each member's name (and photo, for contributors)
     commit_user_ids = {c.user_id for c in commits if c.user_id}
-    user_names: dict[uuid.UUID, str] = {}
-    if commit_user_ids:
-        from app.repositories.user import UserRepository
-
-        user_repo = UserRepository(db)
-        user_names = await user_repo.get_names_by_ids(commit_user_ids)
+    people = await UserRepository(db).get_people_by_ids(commit_user_ids)
 
     # Batch-resolve repo_id → path in a single query
     from app.repositories.tracked_repository import TrackedRepoRepository
@@ -2117,7 +2117,7 @@ async def get_dev_activity(
             author_name=c.actor_name,
             author_email=(c.metadata_ or {}).get("author_email"),
             user_id=c.user_id,
-            user_name=user_names.get(c.user_id) if c.user_id else None,
+            user_name=people[c.user_id].name if c.user_id in people else None,
             created_at=c.created_at,
         )
         for c in commits
@@ -2128,9 +2128,11 @@ async def get_dev_activity(
     for cr in commit_reads:
         key = str(cr.user_id) if cr.user_id else (cr.author_email or "unknown")
         if key not in contrib_map:
+            member = people.get(cr.user_id) if cr.user_id else None
             contrib_map[key] = ContributorRead(
                 user_id=str(cr.user_id) if cr.user_id else None,
                 user_name=cr.user_name,
+                avatar_url=member.avatar_url if member else None,
                 author_name=cr.author_name,
                 author_email=cr.author_email,
             )

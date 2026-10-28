@@ -41,6 +41,17 @@ describe('MemberPicker', () => {
     expect(rows[1].text()).toContain('Bob')
   })
 
+  it('shows a member\'s photo when they have one', () => {
+    const photo = '/api/v1/employees/avatars/0123456789abcdef0123456789abcdef'
+    const wrapper = mount(MemberPicker, {
+      global: { stubs: VUETIFY_STUBS },
+      props: { members: [{ ...ALICE, avatar_url: photo }, BOB], modelValue: [], maxSelection: 2 },
+    })
+    const rows = wrapper.findAll('.member-picker__item')
+    expect(rows[0].find('img').attributes('src')).toBe(photo)
+    expect(rows[1].find('img').exists()).toBe(false)
+  })
+
   it('emits update:modelValue with the selected id on click', async () => {
     const wrapper = mount(MemberPicker, {
       global: { stubs: VUETIFY_STUBS },

@@ -17,7 +17,10 @@
 Enforces the fairness rules: one attempt per user (idempotent), submissions
 only while the window is open, and — critically — the result NEVER reveals
 correctness while the quiz is open, so the answer can't be learned by probing.
-SQL stays in the repositories; this module only orchestrates them.
+For the same reason the monthly totals are not touched here: the answer's
+points reach the monthly board only when the quiz is revealed
+(:mod:`app.services.quiz_reveal`). SQL stays in the repositories; this module
+only orchestrates them.
 """
 
 from __future__ import annotations
@@ -32,7 +35,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.quiz import QuizStatus
 from app.repositories.quiz import QuizRepository
 from app.repositories.quiz_answer import QuizAnswerRepository
-from app.repositories.quiz_score import QuizScoreRepository
 from app.services.quiz_constants import score_for_answer
 from app.services.quiz_grading import grade
 
@@ -68,12 +70,14 @@ async def submit_answer(
 ) -> SubmitResult:
     """Record one user's answer to the active quiz.
 
-    Idempotent on re-submit; rejects once the window has closed; updates the
-    monthly aggregate (points + streaks) but never touches XP. Returns only
-    whether the answer was accepted — correctness is withheld until reveal.
+    Idempotent on re-submit; rejects once the window has closed; stores the
+    graded answer but leaves the monthly aggregate (points + streaks) to the
+    reveal, and never touches XP. Returns only whether the answer was
+    accepted — correctness is withheld until reveal.
     """
-    quiz_repo = QuizRepository(db, org_id=org_id)
-    pair = await quiz_repo.get_with_question(quiz_id)
+    # The share lock holds off the reveal flip until this submit commits, so
+    # an answer accepted while the quiz is open is always in the reveal fold.
+    pair = await QuizRepository(db, org_id=org_id).get_with_question(quiz_id, share_lock=True)
     if pair is None:
         raise QuizNotFoundError("Quiz not found")
     quiz, question = pair
@@ -106,21 +110,4 @@ async def submit_answer(
     if not created:
         # Lost a race to another in-flight submit — treat as already answered.
         return SubmitResult(accepted=True, already_answered=True)
-
-    prev = await quiz_repo.previous_quiz_with_question(quiz.quiz_date)
-    prev_quiz_date = prev[0].quiz_date if prev else None
-    score_repo = QuizScoreRepository(db, org_id=org_id)
-    await score_repo.record(
-        user_id=user_id,
-        # Points are attributed to the quiz's own month, not "now" — so an
-        # answer submitted just after a month boundary still counts toward the
-        # month the quiz opened in. The leaderboard's ?month= selects it.
-        period_month=quiz.quiz_date.strftime("%Y-%m"),
-        quiz_date=quiz.quiz_date,
-        prev_quiz_date=prev_quiz_date,
-        is_correct=is_correct,
-        points=points,
-        latency_ms=latency_ms,
-        new_quiz_participation=True,
-    )
     return SubmitResult(accepted=True, already_answered=False)

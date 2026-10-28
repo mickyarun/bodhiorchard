@@ -42,10 +42,13 @@ from app.models.bud import BUDDesignStatus, BUDDocument, BUDPriority, BUDStatus
 from app.models.bud_feature_link import BUDFeatureLinkSource
 from app.models.bud_version import BUDEditSource
 from app.repositories import bud_version as bud_version_repo
-from app.repositories.bud import BUDDesignRepository, BUDRepository
+from app.repositories.bud import (
+    BUDDesignRepository,
+    BUDRepository,
+    DesignTargetNotInOrgError,
+)
 from app.repositories.bud_feature_link import BUDFeatureLinkRepository
 from app.repositories.bud_version import build_snapshot
-from app.repositories.tracked_repository import TrackedRepoRepository
 from app.services.bud_edit_policy import FIELD_OWNING_STATUS
 from app.services.embedding_service import embedding_service
 from app.services.feature_lifecycle import create_planned_feature
@@ -323,9 +326,11 @@ async def _apply_design_content(
 
     Each design lives on a specific repo's wireframe row so the
     History tab + UI tab labels match the repo names the design
-    agent would have produced. ``repo_id`` is required by the caller
-    (validated against the token's org), and the snapshot remembers
-    it so revert can write back to the same row.
+    agent would have produced. ``repo_id`` is required by the caller.
+    The upsert raises ``DesignTargetNotInOrgError`` for a repo outside the
+    token's org, and runs before the snapshot is stored so a refused write
+    leaves no history row. The snapshot remembers the repo so revert can
+    write back to the same row.
     """
     design_repo = BUDDesignRepository(db, org_id=auth.org.id)
     rows = await design_repo.list_for_bud(bud.id)
@@ -338,6 +343,12 @@ async def _apply_design_content(
     # blindly upserting against the BUD-level (None) slot.
     snapshot["__design_repo_id"] = str(repo_id)
 
+    design = await design_repo.upsert(
+        bud.id,
+        repo_id,
+        design_html=sanitize_design_html(content),
+        status=BUDDesignStatus.READY,
+    )
     await bud_version_repo.commit_snapshot(
         db,
         bud_id=bud.id,
@@ -346,14 +357,6 @@ async def _apply_design_content(
         source=BUDEditSource.MCP,
         edited_by=auth.user.id if auth.user else None,
         mcp_token_id=auth.token_id,
-    )
-
-    safe_html = sanitize_design_html(content)
-    design = await design_repo.upsert(
-        bud.id,
-        repo_id,
-        design_html=safe_html,
-        status=BUDDesignStatus.READY,
     )
     await db.flush()
     return {
@@ -562,17 +565,15 @@ async def handle_update_bud(
             except ValueError:
                 return _err("bad_repo_id", "repo_id must be a UUID.")
 
-            repo_repo = TrackedRepoRepository(db, org_id=auth.org.id)
-            repo_row = await repo_repo.get_by_id(repo_id)
-            if repo_row is None:
+            try:
+                result = await _apply_design_content(db, auth, bud, content, repo_id)
+            except DesignTargetNotInOrgError:
                 return _err(
                     "repo_not_found",
                     f"No tracked repo with id {repo_id} in this org. "
                     "Call list_design_systems again — the id may be stale "
                     "or from a different tenant.",
                 )
-
-            result = await _apply_design_content(db, auth, bud, content, repo_id)
         else:
             field = _STATUS_TO_OWNING_FIELD[bud.status]
             result = await _apply_markdown_content(db, auth, bud, field, content)

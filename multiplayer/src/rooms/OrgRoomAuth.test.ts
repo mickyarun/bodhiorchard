@@ -18,6 +18,7 @@
  */
 import type { Client } from "colyseus"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { TOKENLESS_JOIN_FLAG } from "../auth/verifyJoin"
 import { OrgRoomState } from "../schema/OrgRoomState"
 import { OrgRoom } from "./OrgRoom"
 
@@ -56,10 +57,23 @@ describe("OrgRoom.onAuth without a token", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it("accepts the client-supplied identity in development", async () => {
+  it("rejects the join in development unless tokenless joins are opted in", async () => {
     vi.stubEnv("NODE_ENV", "development")
-    const options = { userId: "u1", name: "Ana" }
-    await expect(roomFor("org-a").onAuth(CLIENT, options)).resolves.toEqual(options)
+    await expect(
+      roomFor("org-a").onAuth(CLIENT, { userId: "u1", name: "Ana", orgId: "org-a" }),
+    ).rejects.toThrow("auth token required")
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("gives an opted-in development join a namespaced identity", async () => {
+    vi.stubEnv("NODE_ENV", "development")
+    vi.stubEnv(TOKENLESS_JOIN_FLAG, "1")
+    const options = { userId: "u1", name: "Ana", orgId: "org-a" }
+    await expect(roomFor("org-a").onAuth(CLIENT, options)).resolves.toEqual({
+      userId: "dev:u1",
+      name: "Ana",
+      orgId: "org-a",
+    })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -94,11 +108,7 @@ describe("OrgRoom.onAuth with a token", () => {
       token: "jwt",
     })
 
-    expect(result).toMatchObject({
-      userId: "real-user",
-      name: "Real Name",
-      characterModel: "kaykit:mage",
-    })
+    expect(result).toEqual({ userId: "real-user", name: "Real Name", orgId: "org-a" })
   })
 
   it("rejects a token issued for another org", async () => {

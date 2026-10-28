@@ -30,6 +30,8 @@ from tests.integration.quiz_support import (
     WRONG,
     add_quiz,
     close_quiz,
+    reveal_pass,
+    use_test_db,
 )
 
 pytestmark = pytest.mark.integration
@@ -136,9 +138,10 @@ async def test_another_orgs_quiz_cannot_be_seen_answered_or_revealed(
 
 
 async def test_a_correct_answer_earns_quiz_points_not_xp(
-    client: AsyncClient, pg_session_factory: Factory
+    client: AsyncClient, pg_session_factory: Factory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """After the window, the monthly board and recap count the answer; no XP or SP."""
+    """After the reveal, the monthly board and recap count the answer; no XP or SP."""
+    use_test_db(monkeypatch, pg_session_factory)
     org, (dev,) = await make_org(pg_session_factory, "Dev")
     headers = as_user(dev, org)
     quiz_id = await add_quiz(pg_session_factory, org)
@@ -150,6 +153,8 @@ async def test_a_correct_answer_earns_quiz_points_not_xp(
     recap = await client.get(f"{QUIZ}/recap", params={"month": month}, headers=headers)
     assert recap.json()["items"] == []
     await close_quiz(pg_session_factory, quiz_id)
+    # Points reach the monthly board at the scheduler's reveal pass, not at submit.
+    await reveal_pass(org)
     assert await org_reward_count(pg_session_factory, org) == (0, 0)
     async with pg_session_factory() as db:
         answer = (

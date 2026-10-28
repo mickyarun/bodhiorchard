@@ -40,6 +40,13 @@ describe("renderComposeFile — bundled infra", () => {
     expect(doc.services.backend.extra_hosts).toBeUndefined();
   });
 
+  it("runs the multiplayer server in production mode", () => {
+    expect(doc.services.multiplayer.environment.NODE_ENV).toBe("production");
+    expect(doc.services.multiplayer.environment).not.toHaveProperty(
+      "MULTIPLAYER_ALLOW_TOKENLESS_JOIN",
+    );
+  });
+
   it("passes every secret through from .env, the HR keyring included", () => {
     const env = doc.services.backend.environment;
     for (const name of ["SECRET_KEY", "ENCRYPTION_KEY", "COLYSEUS_BRIDGE_SECRET", "HR_ENCRYPTION_KEYS"]) {

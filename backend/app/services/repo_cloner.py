@@ -39,7 +39,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote, urlparse
@@ -47,6 +46,7 @@ from urllib.parse import quote, urlparse
 import structlog
 
 from app.config import settings
+from app.core.paths import is_strictly_under, rmtree_strictly_under
 from app.services.ssh_keys import ssh_env
 
 logger = structlog.get_logger(__name__)
@@ -63,8 +63,17 @@ def _clone_root() -> Path:
 
 # Conservative GitHub repo-slug shape: letters, digits, hyphens, underscores,
 # dots. Everything we match here becomes a directory name under the clone
-# root, so the pattern also rejects path traversal.
-_SAFE_SEG = re.compile(r"^[A-Za-z0-9._-]+$")
+# root, so the pattern also rejects path traversal — including a segment
+# made only of dots, which is ``.`` or ``..`` once joined to a path.
+# Anchored with ``\A``/``\Z`` (a ``$`` anchor lets a trailing newline
+# through) and checked with ``fullmatch`` in :func:`_safe_segments`.
+_SAFE_SEG = re.compile(r"\A(?!\.+\Z)[A-Za-z0-9._-]+\Z")
+
+
+def _safe_segments(*segments: str) -> bool:
+    """True iff every segment is safe to use as one clone-path component."""
+    return all(_SAFE_SEG.fullmatch(seg) for seg in segments)
+
 
 # Matches an HTTPS-with-credentials URL in any form git might echo back,
 # including truncated output. Used to scrub tokens from error messages
@@ -195,7 +204,7 @@ async def clone_or_update(
             ),
         )
     owner, repo = parsed
-    if not _SAFE_SEG.match(owner) or not _SAFE_SEG.match(repo) or not _SAFE_SEG.match(org_slug):
+    if not _safe_segments(owner, repo, org_slug):
         return CloneResult(success=False, error="Invalid characters in owner, repo, or org slug.")
 
     dest = clone_root / org_slug / repo
@@ -261,7 +270,7 @@ async def clone_or_update(
             # failed clone — avoid nuking a pre-existing directory we
             # didn't own (symlink, leftover from another process, etc.).
             if dest.exists() and (dest / ".git").exists():
-                shutil.rmtree(dest, ignore_errors=True)
+                _remove_clone_tree(dest, dest.parent)
             logger.warning("repo_clone_failed", rc=rc, stderr=stderr[:300])
             return CloneResult(success=False, error=_sanitize(stderr, pat))
 
@@ -284,13 +293,14 @@ def purge_org_clones(org_slug: str) -> int:
 
     Returns the number of repo directories removed.
     """
-    if not _SAFE_SEG.match(org_slug):
+    if not _safe_segments(org_slug):
         raise ValueError(f"Invalid org slug: {org_slug!r}")
     org_dir = _clone_root() / org_slug
     if not org_dir.exists():
         return 0
     removed = sum(1 for entry in org_dir.iterdir() if entry.is_dir())
-    shutil.rmtree(org_dir, ignore_errors=True)
+    if not _remove_clone_tree(org_dir, _clone_root()):
+        return 0
     logger.info("repo_clones_purged_init", org_slug=org_slug, removed=removed)
     return removed
 
@@ -312,7 +322,7 @@ def purge_repo_clones(org_slug: str, repo_names: list[str]) -> int:
 
     Returns the number of repo directories actually removed.
     """
-    if not _SAFE_SEG.match(org_slug):
+    if not _safe_segments(org_slug):
         raise ValueError(f"Invalid org slug: {org_slug!r}")
     org_dir = _clone_root() / org_slug
     if not org_dir.exists():
@@ -320,11 +330,10 @@ def purge_repo_clones(org_slug: str, repo_names: list[str]) -> int:
 
     removed = 0
     for name in repo_names:
-        if not _SAFE_SEG.match(name):
+        if not _safe_segments(name):
             raise ValueError(f"Invalid repo name: {name!r}")
         target = org_dir / name
-        if target.exists():
-            shutil.rmtree(target, ignore_errors=True)
+        if target.exists() and _remove_clone_tree(target, org_dir):
             removed += 1
     logger.info(
         "repo_clones_purged",
@@ -333,6 +342,21 @@ def purge_repo_clones(org_slug: str, repo_names: list[str]) -> int:
         removed=removed,
     )
     return removed
+
+
+def _remove_clone_tree(target: Path, parent: Path) -> bool:
+    """Delete ``target`` only if it resolves strictly inside ``parent`` and the clone root.
+
+    The segment checks already keep names like ``..`` out; this is the
+    last line before ``rmtree``. Both sides are resolved, so a symlinked
+    org folder pointing elsewhere, or any future caller that skips the
+    segment checks, can't take ``parent``, the clone root or anything
+    outside it. Returns whether the tree was removed.
+    """
+    if is_strictly_under(target, parent) and rmtree_strictly_under(target, _clone_root()):
+        return True
+    logger.warning("repo_clone_rmtree_refused", target=str(target), parent=str(parent))
+    return False
 
 
 def _sanitize(msg: str, pat: str | None) -> str:

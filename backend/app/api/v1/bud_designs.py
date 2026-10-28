@@ -25,9 +25,12 @@ from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.bud import BUDDesign, BUDDesignStatus
 from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
 from app.models.user import User
-from app.repositories.bud import BUDDesignRepository, BUDRepository
+from app.repositories.bud import (
+    BUDDesignRepository,
+    BUDRepository,
+    DesignTargetNotInOrgError,
+)
 from app.repositories.design_system import DesignSystemRefRepository
-from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.bud_design import BUDDesignRead, DesignGenerateRequest, DesignHtmlUpdate
 from app.schemas.jobs import DesignAgentJobPayload
 from app.services.agent_task_cancel import (
@@ -50,18 +53,28 @@ router = APIRouter()
 MAX_DESIGN_UPLOAD_BYTES = 5 * 1024 * 1024
 
 
-async def _assert_repo_in_org(db: AsyncSession, org_id: uuid.UUID, repo_id: uuid.UUID) -> None:
-    """Raise 404 unless ``repo_id`` is a tracked repo in ``org_id``.
+async def _upsert_design(
+    design_repo: BUDDesignRepository,
+    bud_id: uuid.UUID,
+    repo_id: uuid.UUID | None,
+    *,
+    design_status: BUDDesignStatus,
+    design_html: str | None = None,
+    notes: str | None = None,
+) -> BUDDesign:
+    """Upsert a design row, turning a foreign BUD or repo into a 404.
 
-    ``bud_designs.repo_id`` FKs ``tracked_repositories.id`` with no
-    composite org constraint, so a crafted request could otherwise attach a
-    design row to another tenant's repo — and leak its name back via the
-    ``list_with_repo_names`` join. The org-scoped ``get_by_id`` returns None
-    for a foreign or missing repo, which we translate into a 404.
+    The repository refuses a BUD or repo outside the caller's org before it
+    writes anything; a 404 keeps another tenant's ids indistinguishable from
+    ids that don't exist.
     """
-    repo = await TrackedRepoRepository(db, org_id=org_id).get_by_id(repo_id)
-    if repo is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found")
+    try:
+        return await design_repo.upsert(
+            bud_id, repo_id, design_html=design_html, status=design_status, notes=notes
+        )
+    except DesignTargetNotInOrgError as exc:
+        detail = "Repository not found" if exc.kind == "repo" else "BUD not found"
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail) from exc
 
 
 async def _assert_design_system_available(
@@ -153,21 +166,14 @@ async def generate_designs(
     design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
     repo_ids: list[uuid.UUID | None] = list(body.repo_ids) if body.repo_ids else [None]
 
-    # Reject any foreign/unknown repo before creating rows or enqueuing jobs,
-    # so a crafted repo_ids list can't seed design rows against another
-    # tenant's repositories.
-    for rid in repo_ids:
-        if rid is not None:
-            await _assert_repo_in_org(db, current_user.org_id, rid)
-
     await _assert_design_system_available(db, current_user.org_id, repo_ids)
 
+    # A foreign/unknown repo id raises 404 from the upsert before any job is
+    # enqueued, and the request transaction rolls back the rows already made.
     designs: list[BUDDesign] = []
     for rid in repo_ids:
-        design = await design_repo.upsert(
-            bud_id=bud.id,
-            repo_id=rid,
-            status=BUDDesignStatus.PENDING,
+        design = await _upsert_design(
+            design_repo, bud.id, rid, design_status=BUDDesignStatus.PENDING
         )
         designs.append(design)
     await db.flush()
@@ -339,11 +345,6 @@ async def upload_design(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BUD not found")
     assert_design_editable(bud)
 
-    # Reject a repo_id that isn't in the caller's org before writing, so a
-    # crafted form can't attach a design row to another tenant's repository.
-    if repo_id is not None:
-        await _assert_repo_in_org(db, current_user.org_id, repo_id)
-
     filename = file.filename or ""
     is_html = filename.lower().endswith((".html", ".htm")) or (file.content_type or "").startswith(
         "text/html"
@@ -374,11 +375,13 @@ async def upload_design(
         )
 
     design_repo = BUDDesignRepository(db, org_id=current_user.org_id)
-    design = await design_repo.upsert(
+    # A repo_id outside the caller's org is refused with 404 before writing.
+    design = await _upsert_design(
+        design_repo,
         bud_id,
         repo_id,
+        design_status=BUDDesignStatus.READY,
         design_html=sanitize_design_html(html),
-        status=BUDDesignStatus.READY,
         notes=notes,
     )
     await record_event(
