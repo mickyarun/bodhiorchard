@@ -93,15 +93,18 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
     }
   }
 
-  onJoin(client: Client, options: JoinOptions): void {
+  onJoin(client: Client, options: JoinOptions, auth?: JoinOptions): void {
     if (!this.state.game) {
       client.send("mg_error", { reason: "unknown_game" })
       this.disconnect()
       return
     }
-    this.state.userId = options.userId ?? ""
-    this.state.orgId = options.orgId ?? ""
-    this.userName = options.name ?? ""
+    // `options` are the raw client join options; `auth` is what onAuth
+    // returned from the verified token. The score is posted for this identity.
+    const identity = auth ?? options
+    this.state.userId = identity.userId ?? ""
+    this.state.orgId = identity.orgId ?? ""
+    this.userName = identity.name ?? ""
     client.userData = { userId: this.state.userId }
 
     const engine = makeEngine(this.state.game)

@@ -57,6 +57,7 @@ import {
   verifyUserToken,
   type OrgSnapshotResponse,
 } from "../bridge/BackendClient"
+import { safeLog } from "../bridge/logSanitize"
 import { registerOrgRoom, unregisterOrgRoom } from "../bridge/BridgeEndpoint"
 import { installRaceCreateHandler } from "./OrgRaceHandler"
 import { installBacklashCreateHandler } from "./OrgBacklashHandler"
@@ -374,27 +375,33 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     }
   }
 
-  async onJoin(client: Client, options: OrgRoomJoinOptions) {
+  async onJoin(client: Client, options: OrgRoomJoinOptions, auth?: OrgRoomJoinOptions) {
     // Wait for the initial snapshot before deciding if the joining user is
     // a known member — prevents a race where the first client races against
     // onCreate's async fetch and sees an empty members map.
     await this.snapshotReady
-    console.log(`[OrgRoom] ${options.name ?? "Unknown"} (${client.sessionId}) joined org=${this.state.orgId}`)
+    // Colyseus passes the raw client join options as `options` and the value
+    // returned by onAuth as `auth`. Only `auth` carries the verified identity.
+    const identity = auth ?? options
+    console.log(
+      `[OrgRoom] ${safeLog(identity.name ?? "Unknown")} (${client.sessionId}) ` +
+        `joined org=${safeLog(this.state.orgId)}`,
+    )
     // Per-client identity is tracked via client.userData so we can attribute
     // moves/takeovers to the correct memberId later. These values come from
     // onAuth, which verified them against a JWT.
     client.userData = {
-      userId: options.userId,
-      name: options.name,
-      characterModel: options.characterModel ?? "",
+      userId: identity.userId,
+      name: identity.name,
+      characterModel: identity.characterModel ?? "",
     }
     // Users not present in this.state.members at join time indicate a snapshot
     // mismatch — the backend's `/internal/colyseus/org-snapshot` endpoint is
     // responsible for returning every active org member. If you see this
     // warning, check `_collect_org_members` in backend/app/api/v1/internal_colyseus.py.
-    if (options.userId && !this.state.members.has(options.userId)) {
+    if (identity.userId && !this.state.members.has(identity.userId)) {
       console.warn(
-        `[OrgRoom] joining user ${options.userId} not in snapshot — ` +
+        `[OrgRoom] joining user ${safeLog(identity.userId)} not in snapshot — ` +
         `snapshot endpoint may be filtering members`,
       )
     }
