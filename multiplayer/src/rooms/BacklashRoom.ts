@@ -1,7 +1,8 @@
 // Copyright 2025-2026 Arun Rajkumar
 // Licensed under the Apache License, Version 2.0
 
-import { Client, Room } from "colyseus"
+import { Client, Room, type RoomException, type RoomMethodName } from "colyseus"
+import { reportRoomException } from "./roomExceptions"
 import { ArraySchema } from "@colyseus/schema"
 import {
   BACKLASH_LOBBY_MS,
@@ -174,6 +175,11 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
         }
       }
     }
+  }
+
+  /** Report a throwing handler or timer instead of letting it exit the process. */
+  onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
+    reportRoomException(this, error, methodName)
   }
 
   onDispose(): void {

@@ -34,7 +34,8 @@
  *   "bridge:dev_activity" → dev activity event forwarded from backend
  *   "bridge:agent_activity" → agent activity event forwarded from backend
  */
-import { Room, Client } from "colyseus"
+import { Room, Client, type RoomException, type RoomMethodName } from "colyseus"
+import { reportRoomException } from "./roomExceptions"
 import { OrgRoomState } from "../schema/OrgRoomState"
 import { MemberState } from "../schema/MemberState"
 import {
@@ -419,6 +420,11 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     )
   }
 
+  /** Report a throwing handler or timer instead of letting it exit the process. */
+  onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
+    reportRoomException(this, error, methodName)
+  }
+
   onDispose() {
     console.log(`[OrgRoom] Disposed org=${safeLog(this.state.orgId)}`)
     if (this.state.orgId) {
@@ -758,7 +764,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   // ─── Message handlers ────────────────────────
 
   private handleMove(client: Client, data: MoveMessage): void {
-    if (!this.validateMove(data)) return
+    if (!isPayloadObject(data) || !this.validateMove(data)) return
 
     // Rate limit per-client to prevent a single malicious connection from
     // flooding the room's state sync broadcast. `lastMoveAt` lives on
@@ -788,6 +794,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   // ─── Vehicle mount/dismount ────────────────────
 
   private handleMountVehicle(client: Client, data: VehicleMountMessage): void {
+    if (!isPayloadObject(data)) return
     const member = this.resolveTakeoverMember(client)
     if (!member) return
     if (!OrgRoom.VALID_VEHICLES.includes(data.vehicleId)) return
@@ -801,6 +808,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   }
 
   private handleUpgradeHouse(client: Client, data: { tier: number }): void {
+    if (!isPayloadObject(data)) return
     const userId = (client.userData as { userId?: string } | undefined)?.userId
     if (!userId) return
     const member = this.state.members.get(userId)
@@ -826,6 +834,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   }
 
   private handleTakeoverStart(client: Client, data: TakeoverMessage): void {
+    if (!isPayloadObject(data)) return
     const clientUserId = (client.userData as { userId?: string } | undefined)?.userId
     if (!clientUserId) return
     // Users can only take control of their own character
@@ -844,6 +853,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   }
 
   private handleTakeoverEnd(client: Client, data: TakeoverMessage): void {
+    if (!isPayloadObject(data)) return
     const member = this.state.members.get(data.userId)
     if (!member) return
     if (member.takeoverSessionId !== client.sessionId) return
@@ -896,6 +906,19 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     if (!OrgRoom.VALID_ANIMS.includes(data.animState)) return false
     return true
   }
+}
+
+// ─── Client payload guard ──────────────────────
+
+/**
+ * Client messages are decoded msgpack, so a payload can be `undefined`
+ * (`room.send("move")`) or `null`. Handlers read fields off it, and a
+ * TypeError thrown inside an onMessage handler escapes the WebSocket
+ * listener and terminates the whole process, so every handler that reads
+ * the payload checks this first.
+ */
+function isPayloadObject(data: unknown): data is object {
+  return typeof data === "object" && data !== null
 }
 
 // ─── Bridge event validators ───────────────────
