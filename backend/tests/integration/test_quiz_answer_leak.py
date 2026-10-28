@@ -23,7 +23,14 @@ from sqlalchemy import select
 from app.models.quiz_answer import QuizAnswer
 from tests.integration.gamification_support import make_org, org_reward_count
 from tests.integration.leave_support import Factory, as_user, give_role
-from tests.integration.quiz_support import CHOICES, CORRECT, EXPLANATION, WRONG, add_quiz
+from tests.integration.quiz_support import (
+    CHOICES,
+    CORRECT,
+    EXPLANATION,
+    WRONG,
+    add_quiz,
+    close_quiz,
+)
 
 pytestmark = pytest.mark.integration
 QUIZ = "/api/v1/quiz"
@@ -131,25 +138,29 @@ async def test_another_orgs_quiz_cannot_be_seen_answered_or_revealed(
 async def test_a_correct_answer_earns_quiz_points_not_xp(
     client: AsyncClient, pg_session_factory: Factory
 ) -> None:
-    """The monthly quiz board counts the answer; XP and SP stay untouched."""
+    """After the window, the monthly board and recap count the answer; no XP or SP."""
     org, (dev,) = await make_org(pg_session_factory, "Dev")
+    headers = as_user(dev, org)
     quiz_id = await add_quiz(pg_session_factory, org)
-    active = await client.get(f"{QUIZ}/active", headers=as_user(dev, org))
+    active = await client.get(f"{QUIZ}/active", headers=headers)
     # Points belong to the month of the quiz's date, not of the answer.
     month = active.json()["quizDate"][:7]
-    await client.post(
-        f"{QUIZ}/{quiz_id}/answers", json={"response": CORRECT}, headers=as_user(dev, org)
-    )
+    await client.post(f"{QUIZ}/{quiz_id}/answers", json={"response": CORRECT}, headers=headers)
+    # While open, the recap (closed quizzes only) does not list it.
+    recap = await client.get(f"{QUIZ}/recap", params={"month": month}, headers=headers)
+    assert recap.json()["items"] == []
+    await close_quiz(pg_session_factory, quiz_id)
     assert await org_reward_count(pg_session_factory, org) == (0, 0)
     async with pg_session_factory() as db:
         answer = (
             await db.execute(select(QuizAnswer).where(QuizAnswer.org_id == org))
         ).scalar_one()
-    board = await client.get(
-        f"{QUIZ}/leaderboard", params={"month": month}, headers=as_user(dev, org)
-    )
+    board = await client.get(f"{QUIZ}/leaderboard", params={"month": month}, headers=headers)
     assert [(e["userId"], e["correctCount"]) for e in board.json()] == [(str(dev), 1)]
     assert board.json()[0]["totalPoints"] == answer.points_awarded > 0
+    recap = await client.get(f"{QUIZ}/recap", params={"month": month}, headers=headers)
+    (item,) = recap.json()["items"]
+    assert (item["correctAnswer"], item["youCorrect"]) == (CHOICES[1], True)
 
 
 async def test_the_review_queue_with_answers_is_for_quiz_masters_only(

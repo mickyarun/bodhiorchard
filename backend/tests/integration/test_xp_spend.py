@@ -16,14 +16,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import pytest
 from httpx import AsyncClient
 
 from app.services.sp_service import award_sp
-from tests.integration.gamification_support import make_org, xp_row
-from tests.integration.leave_support import Factory, as_user
+from tests.integration.gamification_support import join_org, make_org, xp_row
+from tests.integration.leave_support import Factory, as_user, give_role
 
 pytestmark = pytest.mark.integration
 VEHICLE = "/api/v1/xp/unlock-vehicle"
@@ -96,12 +97,30 @@ async def test_the_house_goes_up_one_tier_at_a_time(
 async def test_spending_in_one_org_uses_that_orgs_balance(
     client: AsyncClient, pg_session_factory: Factory
 ) -> None:
-    """Skill points earned elsewhere cannot buy anything here."""
+    """Skill points earned in another org cannot buy anything here, nor are they spent."""
     org, (dev,) = await make_org(pg_session_factory, "Dev")
     rich_org, _ = await make_org(pg_session_factory)
+    await join_org(pg_session_factory, rich_org, dev)
     await _fund(pg_session_factory, rich_org, dev, 500)
     response = await client.post(VEHICLE, json={"vehicle_id": "horse"}, headers=as_user(dev, org))
-    assert response.status_code == 400
+    assert response.status_code == 400 and "Insufficient" in response.json()["detail"]
+    assert await _sp(pg_session_factory, rich_org, dev) == 500
+
+
+async def test_two_simultaneous_purchases_spend_once(
+    client: AsyncClient, pg_session_factory: Factory
+) -> None:
+    """A double-click buys the vehicle once: one success, one conflict, one charge."""
+    org, (dev,) = await make_org(pg_session_factory, "Dev")
+    await _fund(pg_session_factory, org, dev, 60)
+    headers = as_user(dev, org)
+    responses = await asyncio.gather(
+        *(client.post(VEHICLE, json={"vehicle_id": "horse"}, headers=headers) for _ in range(2))
+    )
+    assert sorted(r.status_code for r in responses) == [200, 409]
+    row = await xp_row(pg_session_factory, org, dev)
+    assert row is not None and row.vehicle_unlocks == ["horse"]
+    assert float(row.skill_points) == 10
 
 
 async def test_greeting_a_colleague_pays_once_per_pair(
@@ -125,3 +144,16 @@ async def test_greeting_needs_a_target(client: AsyncClient, pg_session_factory: 
     response = await client.post(GREET, json={}, headers=as_user(dev, org))
     assert response.status_code == 400
     assert await xp_row(pg_session_factory, org, dev) is None
+
+
+async def test_greeting_needs_engineering_access(
+    client: AsyncClient, pg_session_factory: Factory
+) -> None:
+    """A member without the engineering workspace (sales) cannot claim the bonus."""
+    org, (seller, colleague) = await make_org(pg_session_factory, "Seller", "Colleague")
+    await give_role(pg_session_factory, org, seller, "sales")
+    response = await client.post(
+        GREET, json={"target_user_id": str(colleague)}, headers=as_user(seller, org)
+    )
+    assert response.status_code == 403
+    assert await xp_row(pg_session_factory, org, seller) is None

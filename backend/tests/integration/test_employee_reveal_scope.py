@@ -20,7 +20,6 @@ reporting manager, HR of another org, bad field names and cleared values.
 
 from __future__ import annotations
 
-import base64
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -28,67 +27,33 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
-from pydantic import SecretStr
 from sqlalchemy import func, select
 
-from app.config import settings
-from app.core import hr_crypto
 from app.models.employee_audit_event import EmployeeAuditEvent
 from app.models.notification import Notification, NotificationType
-from app.services.employees import documents, record_alerts
-from app.services.file_storage import FileStorage
 from tests.integration.gamification_support import join_org
-from tests.integration.leave_support import Factory, as_user, give_role, report_to, setup_org
+from tests.integration.hr_support import PEOPLE as BASE
+from tests.integration.hr_support import configure_hr_storage, seed_employee
+from tests.integration.leave_support import Factory, as_user, give_role, setup_org
 
 pytestmark = pytest.mark.integration
-BASE = "/api/v1/employees"
-PDF = b"%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\n%%EOF"
 Seeded = tuple[uuid.UUID, dict[str, uuid.UUID]]
-
-
-@pytest.fixture
-def hr_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> FileStorage:
-    """A configured HR key, and document storage in a temp folder."""
-    # The same key as test_employee_sensitive.py: its rotation test re-keys
-    # every row in the shared database, these included.
-    key = base64.b64encode(b"k" * 32).decode()
-    monkeypatch.setattr(settings.hr_crypto, "hr_encryption_keys", SecretStr(f"test:{key}"))
-    hr_crypto._configured_keyring.cache_clear()
-    storage = FileStorage()
-    storage.local_dir = tmp_path
-    monkeypatch.setattr(documents, "get_file_storage", lambda: storage)
-    monkeypatch.setattr(record_alerts, "spawn", lambda job: job.close())
-    return storage
 
 
 @pytest_asyncio.fixture
 async def seeded(
-    client: AsyncClient, pg_session_factory: Factory, hr_key: FileStorage
+    client: AsyncClient,
+    pg_session_factory: Factory,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> AsyncIterator[Seeded]:
-    """An employee with a saved PAN and one document, HR, and their manager.
-
-    HR deletes the document afterwards: the key-rotation test re-keys every
-    document in the shared database and cannot reach this test's storage.
-    """
-    factory = pg_session_factory
-    org, (emp, hr, mgr), _ = await setup_org(factory, "Emp", "Hr", "Mgr")
-    await give_role(factory, org, hr, "hr")
-    await give_role(factory, org, mgr, "manager")
-    await report_to(factory, org, emp, mgr)
-    saved = await client.put(
-        f"{BASE}/{emp}/sensitive", json={"pan": "ABCDE1234F"}, headers=as_user(hr, org)
+    """The seeded employee record; HR deletes its document afterwards."""
+    configure_hr_storage(monkeypatch, tmp_path)
+    org, people = await seed_employee(client, pg_session_factory)
+    yield org, people
+    removed = await client.delete(
+        f"{BASE}/documents/{people['doc']}", headers=as_user(people["hr"], org)
     )
-    assert saved.status_code == 200, saved.text
-    uploaded = await client.post(
-        f"{BASE}/{emp}/documents",
-        data={"doc_type": "id_proof"},
-        files={"file": ("pan.pdf", PDF, "application/pdf")},
-        headers=as_user(hr, org),
-    )
-    assert uploaded.status_code == 201, uploaded.text
-    doc = uuid.UUID(uploaded.json()["id"])
-    yield org, {"emp": emp, "hr": hr, "mgr": mgr, "doc": doc}
-    removed = await client.delete(f"{BASE}/documents/{doc}", headers=as_user(hr, org))
     assert removed.status_code == 204
 
 

@@ -22,14 +22,17 @@ XP and skill points are checked to be exactly what they were before.
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 import pytest
 from httpx import AsyncClient
 
+from app.services import minigame_service
 from app.services.xp_service import award_xp
 from tests.integration.gamification_support import (
     bridge,
     events,
+    freeze_today,
     make_org,
     org_reward_count,
     xp_row,
@@ -67,6 +70,8 @@ async def test_a_minigame_play_records_a_score_and_no_xp(
     client: AsyncClient, pg_session_factory: Factory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The play shows up in the game's status; the XP ledger is unchanged."""
+    # Recording and the status read must agree on "today".
+    freeze_today(monkeypatch, minigame_service, date(2026, 6, 15))
     headers = bridge(monkeypatch)
     org, (player,) = await make_org(pg_session_factory, "Player")
     await _seed_xp(pg_session_factory, org, player)

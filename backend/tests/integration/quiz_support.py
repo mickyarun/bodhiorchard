@@ -70,3 +70,12 @@ async def add_quiz(
         db.add(quiz)
         await db.commit()
         return quiz.id
+
+
+async def close_quiz(factory: Factory, quiz_id: uuid.UUID) -> None:
+    """Move a quiz's reveal time into the past, as if its window had ended."""
+    async with factory() as db:
+        quiz = await db.get(Quiz, quiz_id)
+        assert quiz is not None
+        quiz.reveal_at = datetime.now(UTC) - timedelta(minutes=5)
+        await db.commit()

@@ -21,6 +21,7 @@ session database without seeing each other's points.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, date, datetime, tzinfo
 from typing import Any
 
 import pytest
@@ -101,6 +102,17 @@ def capture_publish(monkeypatch: pytest.MonkeyPatch, module: Any) -> list[tuple[
     sent: list[tuple[str, Any]] = []
     monkeypatch.setattr(module, "publish", lambda topic, payload: sent.append((topic, payload)))
     return sent
+
+
+def freeze_today(monkeypatch: pytest.MonkeyPatch, module: Any, day: date) -> None:
+    """Make ``module``'s ``datetime.now`` return noon UTC on ``day``."""
+
+    class _Fixed(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> _Fixed:
+            return cls(day.year, day.month, day.day, 12, tzinfo=UTC)
+
+    monkeypatch.setattr(module, "datetime", _Fixed)
 
 
 def bridge(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
