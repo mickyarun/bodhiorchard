@@ -21,6 +21,7 @@
  */
 import type { Client } from "colyseus"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { TOKENLESS_JOIN_FLAG } from "../auth/verifyJoin"
 import { OrgRoomState } from "../schema/OrgRoomState"
 import { MinigameRoom } from "./MinigameRoom"
 import { OrgRoom } from "./OrgRoom"
@@ -33,6 +34,13 @@ function verifiedAs(userId: string, orgId: string, name: string): void {
       ? Response.json({ valid: true, user_id: userId, org_id: orgId, name })
       : Response.json({ recorded: true }),
   )
+}
+
+function orgRoom(orgId: string): OrgRoom {
+  const room = new OrgRoom()
+  room.setState(new OrgRoomState())
+  room.state.orgId = orgId
+  return room
 }
 
 function fakeClient(): Client {
@@ -55,9 +63,7 @@ afterEach(() => {
 describe("OrgRoom join identity", () => {
   it("binds the client to the verified user, not the user it claimed", async () => {
     verifiedAs("alice", "org-a", "Alice")
-    const room = new OrgRoom()
-    room.setState(new OrgRoomState())
-    room.state.orgId = "org-a"
+    const room = orgRoom("org-a")
     const client = fakeClient()
     const raw = { userId: "bob", name: "Bob", token: "alice-jwt" }
 
@@ -67,19 +73,58 @@ describe("OrgRoom join identity", () => {
     expect(client.userData).toMatchObject({ userId: "alice", name: "Alice" })
     room.clock.clear()
   })
-  it("binds the claimed user for a tokenless join in development", async () => {
+  it("refuses a tokenless join in development unless the operator opted in", async () => {
     vi.stubEnv("NODE_ENV", "development")
-    const room = new OrgRoom()
-    room.setState(new OrgRoomState())
-    room.state.orgId = "org-a"
+    const room = orgRoom("org-a")
+
+    await expect(room.onAuth(fakeClient(), { userId: "bob", name: "Bob" })).rejects.toThrow(
+      "auth token required",
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
+    room.clock.clear()
+  })
+
+  it("binds an opted-in tokenless join to a namespaced dev identity", async () => {
+    vi.stubEnv("NODE_ENV", "development")
+    vi.stubEnv(TOKENLESS_JOIN_FLAG, "1")
+    const room = orgRoom("org-a")
     const client = fakeClient()
-    const raw = { userId: "bob", name: "Bob" }
+    const raw = { userId: "bob", name: "Bob", orgId: "org-a" }
 
     const auth = await room.onAuth(client, raw)
     await room.onJoin(client, raw, auth)
 
-    expect(client.userData).toMatchObject({ userId: "bob", name: "Bob" })
+    expect(client.userData).toMatchObject({ userId: "dev:bob", name: "Bob" })
     expect(fetchMock).not.toHaveBeenCalled()
+    room.clock.clear()
+  })
+
+  it("refuses every join to a room created without an org", async () => {
+    verifiedAs("alice", "org-a", "Alice")
+    const room = orgRoom("")
+
+    await expect(room.onAuth(fakeClient(), { token: "alice-jwt" })).rejects.toThrow(
+      "room has no org",
+    )
+    room.clock.clear()
+  })
+
+  it("refuses a token from another org", async () => {
+    verifiedAs("alice", "org-b", "Alice")
+    const room = orgRoom("org-a")
+
+    await expect(
+      room.onAuth(fakeClient(), { token: "alice-jwt", orgId: "org-a" }),
+    ).rejects.toThrow("token org mismatch")
+    room.clock.clear()
+  })
+
+  it("refuses an onJoin that did not pass onAuth", async () => {
+    const room = orgRoom("org-a")
+
+    await expect(room.onJoin(fakeClient(), { userId: "bob" })).rejects.toThrow(
+      "join was not verified",
+    )
     room.clock.clear()
   })
 })
@@ -106,6 +151,21 @@ describe("MinigameRoom join identity", () => {
       orgId: "org-a",
     })
     expect(room.state.userId).toBe("alice")
+    room.onDispose()
+    room.clock.clear()
+  })
+
+  it("refuses a play whose claimed org is not the token's org", async () => {
+    verifiedAs("alice", "org-a", "Alice")
+    const room = new MinigameRoom()
+    room.onCreate({ game: "fishing" })
+
+    await expect(
+      room.onAuth(fakeClient(), { game: "fishing", orgId: "org-b", token: "alice-jwt" }),
+    ).rejects.toThrow("token org mismatch")
+    await expect(
+      room.onAuth(fakeClient(), { game: "fishing", token: "alice-jwt" }),
+    ).rejects.toThrow("room has no org")
     room.onDispose()
     room.clock.clear()
   })

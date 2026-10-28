@@ -30,19 +30,21 @@ import type { MinigameEngine, MinigameHost } from "./minigame/MinigameEngine"
 import { FireflyEngine } from "./minigame/FireflyEngine"
 import { FishingEngine } from "./minigame/FishingEngine"
 import { PollenEngine } from "./minigame/PollenEngine"
-import { postMinigameResults, verifyUserToken } from "../bridge/BackendClient"
+import { postMinigameResults } from "../bridge/BackendClient"
+import {
+  requireJoinIdentity,
+  verifyJoin,
+  type JoinCredentials,
+  type JoinIdentity,
+} from "../auth/verifyJoin"
 
 const SIM_TICK_MS = 50
 /** Reap an abandoned room (player left a game open) after this long. */
 const MAX_GAME_MS = 5 * 60 * 1000
 const GAMES = new Set(["firefly", "fishing", "pollen_pop"])
 
-interface JoinOptions {
+interface JoinOptions extends JoinCredentials {
   game?: string
-  userId?: string
-  name?: string
-  orgId?: string
-  token?: string
 }
 
 export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements MinigameHost {
@@ -65,35 +67,15 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
     this.clock.setTimeout(() => this.endGame(), MAX_GAME_MS)
   }
 
-  async onAuth(_client: Client, options: JoinOptions): Promise<JoinOptions> {
-    const claimedOrg = options.orgId ?? ""
-    if (!options.token) {
-      if (process.env.NODE_ENV === "production") throw new Error("auth token required")
-      console.warn(`[MinigameRoom] dev-mode join without token userId=${options.userId}`)
-      return options
-    }
-    const result = await verifyUserToken(options.token, claimedOrg)
-    if (!result.valid) {
-      const reason = result.reason ?? "token_invalid"
-      if (reason === "backend_unreachable") throw new Error("auth backend unreachable")
-      if (reason === "backend_http_error") throw new Error("auth backend rejected request")
-      throw new Error("invalid auth token — JWT may be expired, try refreshing the page")
-    }
-    // If the client claimed an org, it must match the token's — defence in depth
-    // (the returned orgId is the token's regardless, but reject a mismatched claim).
-    if (claimedOrg && result.org_id && result.org_id !== claimedOrg) {
-      throw new Error("token org mismatch")
-    }
-    // Authoritative identity from the verified token replaces client claims.
-    return {
-      ...options,
-      userId: result.user_id ?? options.userId,
-      name: result.name ?? options.name,
-      orgId: result.org_id ?? claimedOrg,
-    }
+  /**
+   * A play room belongs to the org its creator names; the token must be for
+   * exactly that org, and the score is posted for the token's user.
+   */
+  async onAuth(_client: Client, options: JoinOptions): Promise<JoinIdentity> {
+    return verifyJoin(options, typeof options.orgId === "string" ? options.orgId : "")
   }
 
-  onJoin(client: Client, options: JoinOptions, auth?: JoinOptions): void {
+  onJoin(client: Client, _options: JoinOptions, auth?: JoinIdentity): void {
     if (!this.state.game) {
       client.send("mg_error", { reason: "unknown_game" })
       this.disconnect()
@@ -101,10 +83,10 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
     }
     // `options` are the raw client join options; `auth` is what onAuth
     // returned from the verified token. The score is posted for this identity.
-    const identity = auth ?? options
-    this.state.userId = identity.userId ?? ""
-    this.state.orgId = identity.orgId ?? ""
-    this.userName = identity.name ?? ""
+    const identity = requireJoinIdentity(auth)
+    this.state.userId = identity.userId
+    this.state.orgId = identity.orgId
+    this.userName = identity.name
     client.userData = { userId: this.state.userId }
 
     const engine = makeEngine(this.state.game)
