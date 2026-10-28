@@ -21,21 +21,27 @@ from datetime import date
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 
+from app.models.leave_ledger import LeaveLedgerEntry, LedgerEntryType
 from app.models.leave_request import LeaveStatus
+from app.models.policy_holiday import PolicyHoliday
 from app.models.user import OrgToUser
-from tests.integration.leave_edge_support import freeze_today, stored
+from app.services.leave.policies import ensure_default_policy
+from tests.integration.leave_edge_support import freeze_today, quiet_notifications, stored
 from tests.integration.leave_support import Factory, as_user, give_role, report_to, setup_org
 
 pytestmark = pytest.mark.integration
 LEAVE = "/api/v1/leave"
 TODAY = date(2030, 6, 3)  # a Monday
 DAY = "2030-06-11"
+HOLIDAY = {"date": DAY, "name": "Not yours"}
 
 
 @pytest.fixture(autouse=True)
 def _frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     freeze_today(monkeypatch, TODAY)
+    quiet_notifications(monkeypatch)
 
 
 def _body(type_id: uuid.UUID) -> dict[str, str]:
@@ -50,6 +56,11 @@ async def _submit(client: AsyncClient, org: uuid.UUID, user: uuid.UUID, type_id:
     return str(response.json()["id"])
 
 
+async def _policy_of(factory: Factory, org: uuid.UUID) -> uuid.UUID:
+    async with factory() as db:
+        return (await ensure_default_policy(db, org)).id
+
+
 async def _join(factory: Factory, user: uuid.UUID, org: uuid.UUID) -> None:
     """Make ``user`` a plain member of a second org too."""
     async with factory() as db:
@@ -57,20 +68,34 @@ async def _join(factory: Factory, user: uuid.UUID, org: uuid.UUID) -> None:
         await db.commit()
 
 
-async def test_hr_of_another_org_cannot_decide_or_cancel(
+async def test_hr_of_another_org_cannot_touch_this_orgs_leave_balances_or_holidays(
     client: AsyncClient, pg_session_factory: Factory
 ) -> None:
+    """Full HR rights in their own org, none here: a plain stranger is covered elsewhere."""
     org, (emp, mgr), casual = await setup_org(pg_session_factory, "Emp", "Mgr")
     other, (outsider,), _ = await setup_org(pg_session_factory, "OutsideHr")
     await give_role(pg_session_factory, other, outsider, "hr")
     await report_to(pg_session_factory, org, emp, mgr)
     request_id = await _submit(client, org, emp, casual)
     headers = as_user(outsider, other)
-    for action, body in (("approve", {}), ("reject", {"note": "No"}), ("cancel", None)):
-        url = f"{LEAVE}/requests/{request_id}/{action}"
-        response = await client.post(url, json=body, headers=headers)
-        assert response.status_code == 404, (action, response.text)
+    calls = (
+        (f"requests/{request_id}/approve", {}),
+        (f"requests/{request_id}/reject", {"note": "No"}),
+        (
+            f"balances/{emp}/adjust",
+            {"leave_type_id": str(casual), "days": "5", "note": "Bonus", "leave_year": 2030},
+        ),
+        (f"policies/{await _policy_of(pg_session_factory, org)}/holidays", HOLIDAY),
+    )
+    for path, body in calls:
+        response = await client.post(f"{LEAVE}/{path}", json=body, headers=headers)
+        assert response.status_code == 404, (path, response.text)
     assert (await stored(pg_session_factory, uuid.UUID(request_id))).status == LeaveStatus.PENDING
+    async with pg_session_factory() as db:
+        ledger = await db.scalars(select(LeaveLedgerEntry).where(LeaveLedgerEntry.user_id == emp))
+        assert [e.entry_type for e in ledger] == [LedgerEntryType.ALLOCATION]
+        holidays = await db.scalars(select(PolicyHoliday).where(PolicyHoliday.org_id == org))
+        assert list(holidays) == []
 
 
 async def test_hr_rights_in_one_org_do_not_follow_the_user_into_another(

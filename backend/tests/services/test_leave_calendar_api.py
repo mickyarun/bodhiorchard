@@ -99,3 +99,26 @@ async def test_errors_carry_googles_message_or_the_start_of_the_body() -> None:
     with pytest.raises(CalendarApiError) as broken:
         await calendar_api.tagged_event_ids("tok", "abc")
     assert broken.value.status == 502 and broken.value.detail == "x" * 200
+
+
+@respx.mock
+async def test_a_failed_create_raises_and_never_falls_through_to_an_update() -> None:
+    respx.post(EVENTS).mock(
+        return_value=httpx.Response(400, json={"error": {"message": "Bad event type"}})
+    )
+    update = respx.put(f"{EVENTS}/boabc").mock(return_value=httpx.Response(200, json={}))
+    with pytest.raises(CalendarApiError) as refused:
+        await calendar_api.put_event("tok", "boabc", {}, exists=False)
+    assert (refused.value.status, refused.value.detail) == (400, "Bad event type")
+    assert not update.called
+
+
+@respx.mock
+async def test_a_clash_followed_by_a_failed_update_raises() -> None:
+    create = respx.post(EVENTS).mock(return_value=httpx.Response(409))
+    respx.put(f"{EVENTS}/boabc").mock(
+        return_value=httpx.Response(403, json={"error": {"message": "Forbidden"}})
+    )
+    with pytest.raises(CalendarApiError) as refused:
+        await calendar_api.put_event("tok", "boabc", {}, exists=False)
+    assert create.called and (refused.value.status, refused.value.detail) == (403, "Forbidden")
