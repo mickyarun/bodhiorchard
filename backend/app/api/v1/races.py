@@ -99,6 +99,7 @@ class LeaderboardRowOut(BaseModel):
     distance_m: int = Field(alias="distanceM")
     finish_time_ms: int | None = Field(alias="finishTimeMs")
     finished_at: datetime = Field(alias="finishedAt")
+    avatar_url: str | None = Field(default=None, alias="avatarUrl")
 
     model_config = {"populate_by_name": True}
 
@@ -191,6 +192,7 @@ async def get_race_leaderboard(
                 distance_m=r.distance_m,
                 finish_time_ms=r.finish_time_ms,
                 finished_at=r.finished_at,
+                avatar_url=r.avatar_url,
             )
             for r in rows
         ],

@@ -55,6 +55,22 @@ from app.api.v1._leave_errors import register_leave_errors
 from app.core.deps import get_db
 from app.services.permission_seeder import seed_permissions
 
+_INTEGRATION_DIR = Path(__file__).resolve().parent
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Mark every test under ``tests/integration/`` as ``integration``.
+
+    A module that forgets ``pytestmark = pytest.mark.integration`` would
+    otherwise run in the default (no Docker) pass and error while starting
+    the Postgres container, and be skipped by ``pytest -m integration``.
+    ``tryfirst`` puts the marker in place before ``-m`` deselects anything.
+    """
+    for item in items:
+        if _INTEGRATION_DIR in item.path.resolve().parents:
+            item.add_marker(pytest.mark.integration)
+
 
 @pytest.fixture(scope="session")
 def pg_container() -> Iterator[PostgresContainer]:

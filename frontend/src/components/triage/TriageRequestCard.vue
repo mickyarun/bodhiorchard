@@ -24,7 +24,7 @@
     <div class="triage-card__source">
       <span class="triage-card__eyebrow">From Slack · {{ session.slack_channel }}</span>
       <div class="triage-card__message">
-        <AppMonogram :name="requester" square />
+        <AppMonogram :name="requester" :src="session.requester_avatar_url" square />
         <div class="triage-card__message-body">
           <span class="triage-card__who">
             <strong>{{ requester }}</strong>
