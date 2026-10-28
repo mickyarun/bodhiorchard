@@ -78,7 +78,7 @@ npx glideship start     # start everything and open the setup wizard
 
 `init` writes this install's secrets, including the key that encrypts employee records (`HR_ENCRYPTION_KEYS`), to `bodhiorchard/.env`. Back that file up with your data: records encrypted with its key can't be read without it. Installs from before the key existed get one on their next `start` or `update`.
 
-Needs only **Docker (running)** and **Node.js 18+**. If Postgres (5432) or Redis (6379) — or an app port — is already in use, the installer detects it and asks whether to **remap to a free port** or **reuse the existing service**. When the stack is healthy it opens **http://localhost:3000/setup**; finish there (organization, admin account, AI provider, repositories). No keys are entered on the command line.
+Needs only **Docker (running)** and **Node.js 22+**. If Postgres (5432) or Redis (6379) — or an app port — is already in use, the installer detects it and asks whether to **remap to a free port** or **reuse the existing service**. When the stack is healthy it opens **http://localhost:3000/setup**; finish there (organization, admin account, AI provider, repositories). No keys are entered on the command line.
 
 Manage the stack with these commands (run from the install directory):
 
@@ -97,7 +97,7 @@ To stop everything when you're done, run `glideship stop` (your database and clo
 ### Prerequisites
 
 - **Full Docker**: Docker Desktop ≥ 4.20 (everything else is in containers)
-- **Hybrid**: Docker + Node.js 18+ + Python 3.12+ + a host-installed, already-logged-in [Claude Code CLI](https://code.claude.com/docs/en/setup)
+- **Hybrid**: Docker + Node.js 24+ + Python 3.12+ + a host-installed, already-logged-in [Claude Code CLI](https://code.claude.com/docs/en/setup)
 - Windows: use WSL2 for either mode
 - (Optional) Cloudflare account for tunnel — needed for Slack/GitHub webhooks
 
@@ -109,7 +109,7 @@ cd glideship
 docker compose up
 ```
 
-Open **http://localhost:3000**. Postgres, Redis, backend, multiplayer, and frontend all start together. Migrations run automatically on backend startup. First build takes ~5 min (the backend image installs git, Node.js 20, and the `@anthropic-ai/claude-code` npm package); subsequent runs are instant.
+Open **http://localhost:3000**. Postgres, Redis, backend, multiplayer, and frontend all start together. Migrations run automatically on backend startup. First build takes ~5 min (the backend image installs git, Node.js 24, and the `@anthropic-ai/claude-code` npm package); subsequent runs are instant.
 
 Once the UI is up:
 

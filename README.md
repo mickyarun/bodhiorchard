@@ -30,7 +30,7 @@
 
 ## Quick Start
 
-The fastest path — no clone, no build. Needs only **Docker (running)** and **Node.js 18+**:
+The fastest path — no clone, no build. Needs only **Docker (running)** and **Node.js 22+**:
 
 ```bash
 npx glideship init     # detect ports, generate secrets, pull prebuilt images

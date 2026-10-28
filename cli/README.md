@@ -7,7 +7,7 @@ API, the realtime server, and the web UI — then opens the setup wizard.
 ## Requirements
 
 - [Docker](https://docs.docker.com/get-docker/) (Desktop or Engine) running
-- Node.js 18+
+- Node.js 22+
 
 ## Quick start
 

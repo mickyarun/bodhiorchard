@@ -18,7 +18,8 @@ WORKDIR /app
 # Runtime system dependencies for Full Docker mode:
 #   - libpq5         : PostgreSQL client (asyncpg)
 #   - git            : clone/fetch target repos agents will analyze
-#   - nodejs (20.x)  : runs the agent provider CLIs
+#   - nodejs (24.x)  : runs the agent provider CLIs; pinned to an exact
+#                      patch release so a rebuild can't pick up a different one
 #   - agent CLIs     : claude-code / copilot / codex — invoked as subprocesses
 #                      by the backend. All three are baked in so an org can
 #                      select any provider (Settings → AI Config) without a
@@ -32,8 +33,8 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         libpq5 git openssh-client curl ca-certificates gnupg && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs && \
+    curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs=24.22.1-1nodesource1 && \
     npm install -g @anthropic-ai/claude-code@latest @github/copilot @openai/codex && \
     apt-get purge -y --auto-remove curl gnupg && \
     rm -rf /var/lib/apt/lists/* /root/.npm && \
