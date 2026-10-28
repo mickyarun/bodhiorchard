@@ -30,6 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1._github_upstream import explain_github_errors
 from app.api.v1._repo_info_builder import build_repo_info
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.repo_layer import RepoLayer
@@ -540,7 +541,8 @@ async def list_installable_repos(
         # Serialize to plain dicts so the cache layer can JSON-encode.
         return [r.model_dump(by_alias=False) for r in repos]
 
-    raw = await get_or_set_json(cache_key, ttl=INSTALLABLE_CACHE_TTL_SECONDS, loader=_load)
+    with explain_github_errors():
+        raw = await get_or_set_json(cache_key, ttl=INSTALLABLE_CACHE_TTL_SECONDS, loader=_load)
     repos = [InstallableRepo.model_validate(item) for item in raw]
     return InstallableListResponse(
         app_install_state=state,
@@ -577,14 +579,16 @@ async def list_installable_repo_branches(
         )
 
     full_name = f"{owner}/{repo}"
-    installable = await list_installation_repos(org, db)
+    with explain_github_errors():
+        installable = await list_installation_repos(org, db)
     if not any(item.full_name == full_name for item in installable):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository is not in the installation set.",
         )
 
-    branches = await list_remote_branches_via_api(org, full_name)
+    with explain_github_errors():
+        branches = await list_remote_branches_via_api(org, full_name)
     return InstallableRepoBranchList(branches=branches)
 
 
@@ -617,7 +621,8 @@ async def bulk_onboard_repos(
             detail="GitHub App installation is not ready.",
         )
 
-    installable = await list_installation_repos(org, db)
+    with explain_github_errors():
+        installable = await list_installation_repos(org, db)
     installable_names = {item.full_name for item in installable}
     unknown = [item.full_name for item in body.items if item.full_name not in installable_names]
     if unknown:

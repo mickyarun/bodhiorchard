@@ -109,17 +109,23 @@ async def test_reset_success_returns_silently(_patched: dict[str, Any]) -> None:
 def _worktree_run_git(monkeypatch: pytest.MonkeyPatch, *, healthy: bool, calls: list[list[str]]):
     """Stub ``run_git`` for ``ensure_scan_test_worktree`` on the worktree path.
 
-    ``rev-parse --is-inside-work-tree`` (the health probe) returns rc 0 when
-    ``healthy`` else rc 1. Everything else (branch probe on a non-main branch,
-    origin lookup, worktree list/add/prune) succeeds.
+    The ownership probes (``rev-parse --show-toplevel`` and
+    ``--git-common-dir``) report the worktree as its own top level sharing
+    the repo's git dir when ``healthy``, else fail there like a dangling
+    worktree does. Everything else (branch probe on a non-main
+    branch, origin lookup, worktree list/add/prune) succeeds.
     """
 
     async def _fake_run_git(args: list[str], cwd: str, **_kw: Any) -> tuple[str, str, int]:
         calls.append(list(args))
         if args[:2] == ["rev-parse", "--abbrev-ref"]:
             return ("feature-x", "", 0)  # not on main → worktree path taken
-        if args[:1] == ["rev-parse"] and "--is-inside-work-tree" in args:
-            return ("true", "", 0) if healthy else ("", "fatal: not a git repository", 1)
+        if args == ["rev-parse", "--show-toplevel"]:
+            return (cwd, "", 0) if healthy else ("", "fatal: not a git repository", 128)
+        if args == ["rev-parse", "--git-common-dir"]:
+            if cwd == "/tmp/fakerepo" or healthy:
+                return ("/tmp/fakerepo/.git", "", 0)
+            return ("", "fatal: not a git repository", 128)
         if args[:2] == ["remote", "get-url"]:
             return ("git@github.com:x/y.git", "", 0)
         return ("", "", 0)
@@ -143,7 +149,7 @@ async def test_dangling_worktree_is_rebuilt(
 
     calls: list[list[str]] = []
     _worktree_run_git(monkeypatch, healthy=False, calls=calls)
-    monkeypatch.setattr(mod, "_scan_worktree_parent", lambda _rp: parent)
+    monkeypatch.setattr(mod, "scan_worktree_parent", lambda _rp, **_kw: parent)
 
     result = await mod.ensure_scan_test_worktree("/tmp/fakerepo", "main", skip_fetch=True)
 
@@ -162,7 +168,7 @@ async def test_healthy_worktree_is_reused(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     calls: list[list[str]] = []
     _worktree_run_git(monkeypatch, healthy=True, calls=calls)
-    monkeypatch.setattr(mod, "_scan_worktree_parent", lambda _rp: parent)
+    monkeypatch.setattr(mod, "scan_worktree_parent", lambda _rp, **_kw: parent)
 
     result = await mod.ensure_scan_test_worktree("/tmp/fakerepo", "main", skip_fetch=True)
 

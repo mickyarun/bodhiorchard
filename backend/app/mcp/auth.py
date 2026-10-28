@@ -98,6 +98,25 @@ class MCPAuthResult:
         object.__setattr__(self, "user_id", self.user.id if self.user else None)
 
 
+async def token_owner_still_allowed(
+    db: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID
+) -> bool:
+    """Whether a per-user token's owner may still use MCP.
+
+    The owner must be active, a member of the token's org, and hold
+    engineering access — the checks :func:`verify_mcp_token` makes on every
+    call. Long-lived streams re-run them on each heartbeat, so deactivating,
+    removing or re-roling the owner cuts an open stream too, even when the
+    token row itself survived.
+    """
+    user = await UserRepository(db).get_by_id(user_id)
+    if user is None or not user.is_active:
+        return False
+    if not await UserRepository(db).is_member_of_org(user_id, org_id):
+        return False
+    return await member_has_permission(db, user_id, org_id, WORKSPACE_ENGINEERING)
+
+
 def create_internal_mcp_token(org_id: uuid.UUID) -> str:
     """Create a temporary MCP token for internal use (e.g. scan pipeline).
 

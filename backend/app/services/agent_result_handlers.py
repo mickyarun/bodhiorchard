@@ -84,6 +84,15 @@ _GIT_AUTH_FAILURE_RE = re.compile(
 )
 
 
+class UnusableAgentOutputError(ValueError):
+    """The agent finished but its output cannot replace the section it targets.
+
+    Raised by a result handler before it writes anything; the BUD agent
+    handler then fails the task with this message and the section keeps its
+    current content.
+    """
+
+
 def is_git_auth_failure(output: str) -> bool:
     """Return ``True`` if ``output`` contains a git/GitHub auth rejection.
 
@@ -323,13 +332,18 @@ async def handle_tech_arch_result(
     ``★ Insight`` blocks around the spec are dropped too, so the stored
     section starts at the spec's own ``# `` heading.
     """
+    # Extract impacted repos from the last JSON fence, then strip it
+    impacted_names, spec_body = _extract_impacted_repos_json(output)
+    spec_md = clean_agent_markdown(spec_body)
+    if not spec_md:
+        # An empty answer must not replace the spec the BUD already has.
+        raise UnusableAgentOutputError("The agent returned no tech spec; the current one is kept.")
+
     bud_repo = BUDRepository(db, org_id=org_id)
     bud = await bud_repo.get_by_id(bud_id)
     if bud:
         await _snapshot_agent_write(db, bud)
-        # Extract impacted repos from the last JSON fence, then strip it
-        impacted_names, spec_body = _extract_impacted_repos_json(output)
-        bud.tech_spec_md = clean_agent_markdown(spec_body)
+        bud.tech_spec_md = spec_md
 
         repo_repo = TrackedRepoRepository(db, org_id=org_id)
         repo_triples = await repo_repo.get_active_id_path_name()
@@ -479,20 +493,19 @@ async def handle_testing_result(
     from app.services.json_parser import parse_json_response
     from app.services.org_settings import get_qa_settings
 
-    default: dict[str, Any] = {
-        "automation_test_cases": [],
-        "manual_test_cases": [],
-        "test_execution_plan": "",
-    }
-
-    parsed_data = default
+    parsed: Any = None
     if output:
         try:
             parsed = parse_json_response(output)
-            if isinstance(parsed, dict):
-                parsed_data = _normalize_testing_output(parsed)
         except Exception:
             logger.warning("testing_output_parse_failed", bud_id=str(bud_id))
+    if not isinstance(parsed, dict):
+        # Storing empty case lists would wipe the cases already on the BUD,
+        # tester results and evidence included.
+        raise UnusableAgentOutputError(
+            "The agent's test cases could not be read; the current ones are kept."
+        )
+    parsed_data = _normalize_testing_output(parsed)
 
     # Single-point enforcement of the automation-off rule. Prompt tells the
     # agent what to do; this drops anything that slipped through.

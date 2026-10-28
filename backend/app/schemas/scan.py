@@ -138,6 +138,11 @@ class TestRun(BaseModel):
     started_at: datetime
     finished_at: datetime | None = None
     stages: list[StageResult] = Field(default_factory=list)
+    # Names of the stages that returned without raising, in order. The
+    # fanout reads it to tell a failure before synthesis (soft-deleted
+    # features must come back) from one after it (the reconciler already
+    # settled them).
+    completed_stages: list[str] = Field(default_factory=list)
     error: str | None = None
 
 

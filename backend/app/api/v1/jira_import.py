@@ -45,7 +45,7 @@ from app.schemas.jira_import import (
     JiraImportSessionRead,
 )
 from app.schemas.settings import JiraSettings
-from app.services.jira_client import JiraClient
+from app.services.jira_client import JiraApiError, JiraClient
 
 logger = structlog.get_logger(__name__)
 
@@ -66,8 +66,6 @@ async def connect_jira(
     db: AsyncSession = Depends(get_db),
 ) -> JiraConnectionStatus:
     """Save Jira credentials and test the connection."""
-    from app.services.jira_client import JiraApiError, JiraClient
-
     client = JiraClient(site_url=body.site_url, email=body.email, api_token=body.api_token)
 
     try:
@@ -134,9 +132,17 @@ async def list_jira_projects(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    """List accessible Jira projects."""
-    client = await _get_jira_client(db, current_user.org_id)
-    projects = await client.list_projects()
+    """List accessible Jira projects.
+
+    A Jira refusal (token revoked, site gone, rate limit outlasting the
+    client's retries) is answered with an actionable 4xx/502 instead of
+    escaping as an unhandled 500.
+    """
+    async with await _get_jira_client(db, current_user.org_id) as client:
+        try:
+            projects = await client.list_projects()
+        except JiraApiError as exc:
+            raise _jira_upstream_error(exc) from exc
     return [
         {
             "key": p.get("key"),
@@ -470,6 +476,20 @@ async def _get_jira_client(db: AsyncSession, org_id: uuid.UUID) -> JiraClient:
         site_url=settings.site_url,
         email=settings.email,
         api_token=settings.api_token,
+    )
+
+
+def _jira_upstream_error(exc: JiraApiError) -> HTTPException:
+    """Translate a failed Jira call into the HTTP error the settings UI can act on."""
+    logger.warning("jira_upstream_error", status=exc.status_code)
+    if exc.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN):
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Jira refused the saved credentials. Reconnect Jira in Settings.",
+        )
+    return HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="Jira did not answer the request. Try again in a moment.",
     )
 
 

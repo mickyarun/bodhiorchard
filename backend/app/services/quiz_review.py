@@ -32,12 +32,17 @@ from app.repositories.quiz_question import QuizQuestionRepository
 from app.repositories.quiz_topic_history import QuizTopicHistoryRepository
 from app.schemas.quiz import QuizReviewEdit
 from app.services.quiz_content import validate_question_content
+from app.services.quiz_giveaway import reject_answer_giveaway
 
 _TOPIC_LABEL_MAX = 255
 
 
 class QuizQuestionNotFoundError(Exception):
     """The pooled question does not exist for this org."""
+
+
+class QuizQuestionAlreadyUsedError(Exception):
+    """The question already ran as a quiz, so its content and status are final."""
 
 
 async def list_review_queue(
@@ -55,12 +60,22 @@ async def _require(repo: QuizQuestionRepository, question_id: uuid.UUID) -> Quiz
     return question
 
 
+async def _require_reviewable(
+    repo: QuizQuestionRepository, question_id: uuid.UUID
+) -> QuizQuestion:
+    """The question, unless it already ran: players answered it and saw its reveal."""
+    question = await _require(repo, question_id)
+    if question.status == QuizQuestionStatus.USED:
+        raise QuizQuestionAlreadyUsedError("This question already ran as a quiz")
+    return question
+
+
 async def edit_question(
     db: AsyncSession, *, org_id: uuid.UUID, question_id: uuid.UUID, edit: QuizReviewEdit
 ) -> QuizQuestion:
     """Apply an admin edit, re-validating content. Raises ValueError if invalid."""
     repo = QuizQuestionRepository(db, org_id=org_id)
-    question = await _require(repo, question_id)
+    question = await _require_reviewable(repo, question_id)
 
     if edit.prompt is not None:
         question.prompt = edit.prompt
@@ -77,6 +92,12 @@ async def edit_question(
 
     # Re-run the per-type content check so a bad hand-edit can't be saved.
     validate_question_content(question.question_type, question.payload, question.answer_key)
+    # Only an edit to what players see (or to the answer) can create a giveaway;
+    # fixing the explanation of an older question must not trip the check.
+    if edit.prompt is not None or edit.payload is not None or edit.answer_key is not None:
+        reject_answer_giveaway(
+            question.question_type, question.prompt, question.payload, question.answer_key
+        )
     await db.flush()
     return question
 
@@ -91,7 +112,7 @@ async def approve_question(
 ) -> QuizQuestion:
     """Approve a question and record its topic so future batches avoid it."""
     repo = QuizQuestionRepository(db, org_id=org_id)
-    question = await _require(repo, question_id)
+    question = await _require_reviewable(repo, question_id)
 
     await repo.set_status(
         question,
@@ -114,5 +135,5 @@ async def reject_question(
 ) -> QuizQuestion:
     """Reject a pooled question (it never goes live; its topic isn't burned)."""
     repo = QuizQuestionRepository(db, org_id=org_id)
-    question = await _require(repo, question_id)
+    question = await _require_reviewable(repo, question_id)
     return await repo.set_status(question, status=QuizQuestionStatus.REJECTED)

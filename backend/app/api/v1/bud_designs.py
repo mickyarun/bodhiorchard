@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_permissions
 from app.models.bud import BUDDesign, BUDDesignStatus
+from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
 from app.models.user import User
 from app.repositories.bud import (
     BUDDesignRepository,
@@ -120,6 +121,30 @@ async def list_designs(
     return await design_repo.list_with_repo_names(bud_id)
 
 
+async def _fail_unqueued_designs(
+    db: AsyncSession,
+    designs: list[BUDDesign],
+    queued: list[tuple[BUDDesign, str]],
+    task: BUDAgentTask | None,
+    exc: Exception,
+) -> None:
+    """Fail the design rows whose job never got queued (and a new task if none did)."""
+    queued_ids = {design.id for design, _ in queued}
+    for design in designs:
+        if design.id not in queued_ids:
+            design.status = BUDDesignStatus.FAILED
+    for design, job_id in queued:
+        design.job_id = job_id
+    if task is not None:
+        if queued:
+            task.job_id = queued[0][1]
+        else:
+            task.status = AgentTaskStatus.FAILED
+            task.error_message = f"Failed to enqueue design job: {exc}"
+    await db.commit()
+    logger.exception("design_generate_enqueue_failed", bud_id=str(designs[0].bud_id))
+
+
 @router.post(
     "/generate",
     status_code=status.HTTP_202_ACCEPTED,
@@ -145,12 +170,12 @@ async def generate_designs(
 
     # A foreign/unknown repo id raises 404 from the upsert before any job is
     # enqueued, and the request transaction rolls back the rows already made.
-    design_rows: list[tuple[uuid.UUID | None, str]] = []
+    designs: list[BUDDesign] = []
     for rid in repo_ids:
         design = await _upsert_design(
             design_repo, bud.id, rid, design_status=BUDDesignStatus.PENDING
         )
-        design_rows.append((rid, str(design.id)))
+        designs.append(design)
     await db.flush()
 
     # Resolve skill + create agent task BEFORE enqueuing jobs
@@ -160,7 +185,6 @@ async def generate_designs(
     # here, otherwise the design generation still runs the seeded designer.
     from app.agents.skill_mapping import resolve_skill_for_agent
     from app.models.bud import BUDStatus
-    from app.models.bud_agent_task import AgentTaskStatus, BUDAgentTask
     from app.repositories.agent_skill import AgentSkillRepository
     from app.repositories.bud_agent_task import BUDAgentTaskRepository
 
@@ -181,6 +205,7 @@ async def generate_designs(
     active = await task_repo.get_active_for_bud(bud_id)
     task_id_str: str | None = str(active.id) if active else None
 
+    new_task: BUDAgentTask | None = None
     if not active and designer_skill:
         task = BUDAgentTask(
             org_id=current_user.org_id,
@@ -194,54 +219,64 @@ async def generate_designs(
         db.add(task)
         await db.flush()
         task_id_str = str(task.id)
+        new_task = task
 
-    results = []
-    for rid, design_id in design_rows:
-        payload = DesignAgentJobPayload(
-            org_id=str(current_user.org_id),
-            bud_id=str(bud.id),
-            bud_number=bud.bud_number,
-            title=bud.title,
-            requirements_md=bud.requirements_md or "",
-            repo_id=str(rid) if rid else None,
-            design_id=design_id,
-            skill_id=skill_id_str,
-            task_id=task_id_str,
-        )
-        job = create_job(
-            JOB_DESIGN_AGENT,
-            payload=payload.model_dump(),
-            user_id=str(current_user.id),
-        )
-
-        design_obj = await design_repo.get_by_id(uuid.UUID(design_id))
-        if design_obj:
-            design_obj.job_id = job.job_id
-            design_obj.status = BUDDesignStatus.GENERATING
-
-        # Backfill job_id on the task (first job wins)
-        if task_id_str and not active:
-            active_task = await task_repo.get_by_id(uuid.UUID(task_id_str))
-            if active_task and not active_task.job_id:
-                active_task.job_id = job.job_id
-
-        results.append(
-            {
-                "designId": design_id,
-                "repoId": str(rid) if rid else None,
-                "jobId": job.job_id,
-            }
-        )
-        logger.info(
-            "design_job_created",
-            bud_id=str(bud.id),
-            repo_id=str(rid) if rid else None,
-            job_id=job.job_id,
-            design_id=design_id,
-        )
-
+    # Commit the rows a design job reads and writes BEFORE enqueueing. The
+    # worker runs in its own session at READ COMMITTED: it could not see an
+    # uncommitted task row, and a job that finished first would have its READY
+    # row and its task's terminal status overwritten by this request's
+    # GENERATING / RUNNING. After queueing only the job ids are written.
+    for design in designs:
+        design.status = BUDDesignStatus.GENERATING
     await db.commit()
-    return results
+
+    queued: list[tuple[BUDDesign, str]] = []
+    try:
+        for design in designs:
+            payload = DesignAgentJobPayload(
+                org_id=str(current_user.org_id),
+                bud_id=str(bud.id),
+                bud_number=bud.bud_number,
+                title=bud.title,
+                requirements_md=bud.requirements_md or "",
+                repo_id=str(design.repo_id) if design.repo_id else None,
+                design_id=str(design.id),
+                skill_id=skill_id_str,
+                task_id=task_id_str,
+            )
+            job = create_job(
+                JOB_DESIGN_AGENT,
+                payload=payload.model_dump(),
+                user_id=str(current_user.id),
+            )
+            queued.append((design, job.job_id))
+            logger.info(
+                "design_job_created",
+                bud_id=str(bud.id),
+                repo_id=str(design.repo_id) if design.repo_id else None,
+                job_id=job.job_id,
+                design_id=str(design.id),
+            )
+    except Exception as exc:
+        await _fail_unqueued_designs(db, designs, queued, new_task, exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Job queue unavailable; please retry",
+        ) from exc
+
+    for design, job_id in queued:
+        design.job_id = job_id
+    if new_task is not None and queued:
+        new_task.job_id = queued[0][1]
+    await db.commit()
+    return [
+        {
+            "designId": str(design.id),
+            "repoId": str(design.repo_id) if design.repo_id else None,
+            "jobId": job_id,
+        }
+        for design, job_id in queued
+    ]
 
 
 @router.put(

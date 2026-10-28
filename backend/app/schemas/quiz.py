@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.models.quiz_question import QuizDifficulty, QuizQuestionStatus, QuizQuestionType
 from app.services.quiz_content import validate_question_content
+from app.services.quiz_giveaway import reject_answer_giveaway
 
 
 class GeneratedQuestion(BaseModel):
@@ -47,8 +48,9 @@ class GeneratedQuestion(BaseModel):
 
     @model_validator(mode="after")
     def _check_content(self) -> GeneratedQuestion:
-        """Reject a question whose payload/answer_key don't match its type."""
+        """Reject a question that doesn't match its type or shows its own answer."""
         validate_question_content(self.question_type, self.payload, self.answer_key)
+        reject_answer_giveaway(self.question_type, self.prompt, self.payload, self.answer_key)
         return self
 
 

@@ -28,8 +28,10 @@ to ``TOOL_HANDLERS`` therefore cannot accidentally make it remote-callable;
 that requires explicit addition to ``REMOTE_TOOLS`` here.
 
 **SSE handling.** Desktop clients open a GET SSE stream alongside POSTs.
-We keep it alive with a heartbeat and re-verify the token on every beat;
-a revoked or expired token drops the stream so the client must re-auth.
+We keep it alive with a heartbeat and re-verify the token and its owner on
+every beat; a revoked or expired token, or an owner who was deactivated,
+removed from the org or lost engineering access, drops the stream so the
+client must re-auth.
 """
 
 import asyncio
@@ -48,7 +50,7 @@ from app.core.body_limit import BodyTooLargeError
 from app.core.deps import get_db
 from app.database import AsyncSessionLocal
 from app.mcp.audit import emit_audit
-from app.mcp.auth import MCPAuthResult, verify_mcp_token
+from app.mcp.auth import MCPAuthResult, token_owner_still_allowed, verify_mcp_token
 from app.mcp.handlers_prompts import CANONICAL_TASK_TYPES
 from app.mcp.rate_limit import enforce_rate_limit
 from app.repositories.user_mcp_token import UserMCPTokenRepository
@@ -511,8 +513,9 @@ async def remote_mcp_sse(
     """SSE keepalive stream for server-initiated messages.
 
     We do not push notifications today, so this only emits heartbeats and
-    serves to honour token revocation mid-flight: the per-heartbeat
-    re-auth via ``verify_mcp_token`` closes the stream on 401.
+    serves to honour token revocation mid-flight: each heartbeat re-checks
+    the token row and its owner (``token_owner_still_allowed``, the owner
+    checks ``verify_mcp_token`` makes) and closes the stream when either fails.
 
     No ``Depends(get_db)`` here on purpose — the request-scoped session
     would pin a connection from the pool for the entire stream lifetime
@@ -530,9 +533,14 @@ async def remote_mcp_sse(
             return True
         async with AsyncSessionLocal() as session:
             tok = await UserMCPTokenRepository(session).get_by_id(token_id)
-        if tok is None:
-            return False
-        return tok.expires_at is None or tok.expires_at > datetime.now(UTC)
+            if tok is None:
+                return False
+            if tok.expires_at is not None and tok.expires_at <= datetime.now(UTC):
+                return False
+            # A token row can outlive its owner's access (a missed revoke on
+            # deactivation, a membership or role change): re-check the owner
+            # the way every POST call is checked.
+            return await token_owner_still_allowed(session, tok.user_id, tok.org_id)
 
     async def _stream() -> AsyncIterator[bytes]:
         yield f": stream {stream_id} ready\n\n".encode()
