@@ -367,6 +367,17 @@ async def list_installation_repos(
     return repos
 
 
+async def list_all_pages(token: str, path: str) -> list[dict[str, Any]]:
+    """Every item of a top-level-array GitHub list endpoint, across all ``Link`` pages.
+
+    For list endpoints outside the repo picker (e.g. ``/orgs/{org}/members``)
+    that return a bare array. Raises ``HTTPStatusError`` on a 4xx/5xx page so
+    the caller can explain the failure.
+    """
+    async with AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as client:
+        return [item async for item in _paginated_get(client, token, path)]
+
+
 async def list_remote_branches_via_api(
     org: Organization,
     full_name: str,
