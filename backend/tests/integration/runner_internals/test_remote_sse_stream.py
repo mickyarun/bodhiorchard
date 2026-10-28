@@ -112,8 +112,8 @@ async def test_deactivating_the_member_over_http_closes_their_stream(
     strict=True,
     reason=(
         "the heartbeat re-checks only the token row, not the owner's account, so a "
-        "deactivated owner whose token survived keeps the stream; not fixed here "
-        "because app/mcp/streamable.py is held by open PR #410"
+        "deactivated owner whose token survived keeps the stream; fixed by branch "
+        "fix/sse-heartbeat-rechecks-owner"
     ),
 )
 async def test_owner_deactivated_without_revocation_loses_the_stream(

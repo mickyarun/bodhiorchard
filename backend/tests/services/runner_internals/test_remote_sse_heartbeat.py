@@ -66,10 +66,18 @@ class ScriptedTokens:
         return UserMCPToken(expires_at=None) if outcome == "valid" else None
 
 
+async def _owner_allowed(*args: object) -> bool:
+    """Stands in for the owner re-check: the owner keeps access."""
+    return True
+
+
 def _install(monkeypatch: pytest.MonkeyPatch, *outcomes: str) -> ScriptedTokens:
     tokens = ScriptedTokens(iter(outcomes))
     monkeypatch.setattr(streamable, "UserMCPTokenRepository", tokens.repository)
     monkeypatch.setattr(streamable, "_SSE_HEARTBEAT_SECONDS", 0)
+    # The token owner re-check (branch fix/sse-heartbeat-rechecks-owner) reads
+    # real rows; these tests script only the token row, so the owner passes.
+    monkeypatch.setattr(streamable, "token_owner_still_allowed", _owner_allowed, raising=False)
     return tokens
 
 
