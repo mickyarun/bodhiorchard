@@ -30,15 +30,18 @@ from app.models.base import BaseModel
 from app.models.bud import BUDDocument
 from app.models.bud_todo import BUDTodo
 from app.models.bug import Bug
+from app.models.bug_attachment import BugAttachment
 from app.models.bug_comment import BugComment
 from app.models.design_system import DesignSystemRef
+from app.models.employee_profile import EmployeeProfile
+from app.models.employee_reporting_manager import EmployeeReportingManager
 from app.models.feature import Feature
 from app.models.leave_request import LeaveRequest
 from app.models.notification import Notification
 from app.models.office_location import OfficeLocation
 from app.models.quiz_question import QuizQuestion
 from app.models.role import Role, RolePermission
-from app.models.team import Team, TeamMember
+from app.models.team import Team, TeamMember, TeamRepo
 from app.models.tracked_repository import TrackedRepository
 from app.models.user import OrgToUser, User
 from tests.integration.auth_tenancy_support import TenantRows
@@ -57,6 +60,7 @@ async def snapshot(factory: Factory, rows: TenantRows) -> dict[str, Any]:
         "bud": (BUDDocument, rows.bud),
         "bug": (Bug, rows.bug),
         "comment": (BugComment, rows.comment),
+        "attachment": (BugAttachment, rows.attachment),
         "feature": (Feature, rows.feature),
         "repo": (TrackedRepository, rows.repo),
         "design_system": (DesignSystemRef, rows.design_system),
@@ -76,6 +80,7 @@ async def snapshot(factory: Factory, rows: TenantRows) -> dict[str, Any]:
             "todos": select(func.count()).where(BUDTodo.bud_id == rows.bud),
             "comments": select(func.count()).where(BugComment.bug_id == rows.bug),
             "team_members": select(func.count()).where(TeamMember.team_id == rows.team),
+            "team_repos": select(func.count()).where(TeamRepo.team_id == rows.team),
             "role_permissions": select(func.count()).where(RolePermission.role_id == rows.role),
         }
         for name, stmt in counts.items():
@@ -84,9 +89,25 @@ async def snapshot(factory: Factory, rows: TenantRows) -> dict[str, Any]:
 
 
 async def member_state(factory: Factory, user: uuid.UUID, org: uuid.UUID) -> dict[str, Any]:
-    """A member's account row and their membership in ``org``."""
+    """A member's account row, membership, employee profile and managers in ``org``."""
     async with factory() as db:
         membership = await db.scalar(
             select(OrgToUser).where(OrgToUser.user_id == user, OrgToUser.org_id == org)
         )
-        return {"user": _columns(await db.get(User, user)), "membership": _columns(membership)}
+        profile = await db.scalar(
+            select(EmployeeProfile).where(
+                EmployeeProfile.user_id == user, EmployeeProfile.org_id == org
+            )
+        )
+        assert profile is not None
+        managers = await db.scalars(
+            select(EmployeeReportingManager.manager_user_id).where(
+                EmployeeReportingManager.profile_id == profile.id
+            )
+        )
+        return {
+            "user": _columns(await db.get(User, user)),
+            "membership": _columns(membership),
+            "profile": _columns(profile),
+            "managers": sorted(str(m) for m in managers),
+        }

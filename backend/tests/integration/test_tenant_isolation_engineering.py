@@ -24,15 +24,26 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import AsyncClient
 
+from app.api.v1 import bug_attachments
 from tests.integration.auth_tenancy_snapshot import snapshot
 from tests.integration.auth_tenancy_support import TenantRows, new_tenant, seed_rows
 from tests.integration.leave_support import Factory, as_user
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def _fake_storage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Attachment bytes live in object storage; the seeded rows point at a fake."""
+    storage = MagicMock(
+        download=AsyncMock(return_value=(b"trace", "text/plain")), delete=AsyncMock()
+    )
+    monkeypatch.setattr(bug_attachments, "get_file_storage", MagicMock(return_value=storage))
 
 
 def _probes(b: TenantRows) -> list[tuple[str, str, dict[str, Any] | None]]:
@@ -51,6 +62,8 @@ def _probes(b: TenantRows) -> list[tuple[str, str, dict[str, Any] | None]]:
         ("PATCH", f"/api/v1/bugs/{b.bug}/comments/{b.comment}", {"body": "Taken over"}),
         ("DELETE", f"/api/v1/bugs/{b.bug}/comments/{b.comment}", None),
         ("GET", f"/api/v1/bugs/{b.bug}/attachments", None),
+        ("GET", f"/api/v1/bugs/{b.bug}/attachments/{b.attachment}", None),
+        ("DELETE", f"/api/v1/bugs/{b.bug}/attachments/{b.attachment}", None),
         ("GET", f"/api/v1/features/{b.feature}", None),
         ("GET", f"/api/v1/design-systems/{b.design_system}", None),
         ("PUT", f"/api/v1/design-systems/{b.design_system}", {"custom_content": "Taken"}),
@@ -86,14 +99,21 @@ async def test_org_a_owner_cannot_touch_org_b_engineering_rows(
 async def test_org_b_owner_reaches_the_same_rows(
     client: AsyncClient, pg_session_factory: Factory
 ) -> None:
-    """Control: the probes are well-formed, so a 404 above really is scoping."""
+    """Control: every probe, writes included, succeeds in its own org.
+
+    Each probe gets a fresh org so a delete can't break the probes after it.
+    """
     b = await new_tenant(pg_session_factory)
-    rows = await seed_rows(pg_session_factory, b)
-    headers = as_user(b.owner, b.org)
-    reads = [p for p in _probes(rows) if p[0] == "GET"]
-    for _method, path, _body in reads:
-        response = await client.get(path, headers=headers)
-        assert response.status_code == 200, (path, response.text)
+    count = len(_probes(await seed_rows(pg_session_factory, b)))
+    failed = {}
+    for index in range(count):
+        tenant = await new_tenant(pg_session_factory)
+        method, path, body = _probes(await seed_rows(pg_session_factory, tenant))[index]
+        headers = as_user(tenant.owner, tenant.org)
+        response = await client.request(method, path, json=body, headers=headers)
+        if response.status_code >= 300:
+            failed[f"{method} {path}"] = (response.status_code, response.text[:200])
+    assert failed == {}
 
 
 def _listed(rows: TenantRows) -> dict[str, uuid.UUID]:

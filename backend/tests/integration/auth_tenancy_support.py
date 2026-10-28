@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import hash_password
 from app.models.bud import BUDDocument, BUDStatus, BUDTimelineEvent
 from app.models.bug import Bug
+from app.models.bug_attachment import BugAttachment
 from app.models.bug_comment import BugComment
 from app.models.design_system import DesignSystemRef
 from app.models.employee_profile import EmployeeProfile
@@ -74,6 +75,7 @@ class TenantRows:
     bud_number: int
     bug: uuid.UUID
     comment: uuid.UUID
+    attachment: uuid.UUID
     feature: uuid.UUID
     repo: uuid.UUID
     design_system: uuid.UUID
@@ -144,9 +146,7 @@ async def seed_rows(factory: Factory, tenant: Tenant) -> TenantRows:
         role = Role(name="Tenant custom", org_id=org, scope_type=RoleScopeType.CUSTOM)
         db.add_all([bud, repo, feature, team, office, role])
         await db.flush()
-        bug = Bug(
-            org_id=org, bug_number=1, title="Tenant bug", reporter_id=tenant.dev, bud_id=bud.id
-        )
+        bug = Bug(org_id=org, bug_number=1, title="Tenant bug", reporter_id=tenant.dev)
         design = DesignSystemRef(
             org_id=org, repo_id=repo.id, content="tokens", extracted_at=datetime.now(UTC)
         )
@@ -157,15 +157,23 @@ async def seed_rows(factory: Factory, tenant: Tenant) -> TenantRows:
             org_id=org,
             question_type=QuizQuestionType.MULTIPLE_CHOICE,
             prompt="Tenant question?",
-            payload={"options": ["a", "b"]},
-            answer_key={"index": 0},
+            payload={"choices": ["a", "b"]},
+            answer_key={"correct_index": 0},
             topic_hash=uuid.uuid4().hex,
         )
         event = BUDTimelineEvent(org_id=org, bud_id=bud.id, event_type="created")
         db.add_all([bug, design, notification, question, event])
         await db.flush()
         comment = BugComment(bug_id=bug.id, org_id=org, author_id=tenant.dev, body="Tenant note")
-        db.add(comment)
+        attachment = BugAttachment(
+            bug_id=bug.id,
+            org_id=org,
+            filename="trace.txt",
+            mime_type="text/plain",
+            size_bytes=5,
+            storage_path=f"bugs/{bug.id}/trace.txt",
+        )
+        db.add_all([comment, attachment])
         leave_request = await _pending_leave(db, org, tenant.dev)
         await db.commit()
         return TenantRows(
@@ -173,6 +181,7 @@ async def seed_rows(factory: Factory, tenant: Tenant) -> TenantRows:
             bud_number=bud.bud_number,
             bug=bug.id,
             comment=comment.id,
+            attachment=attachment.id,
             feature=feature.id,
             repo=repo.id,
             design_system=design.id,

@@ -122,17 +122,41 @@ async def test_nobody_but_the_owner_edits_the_role_they_hold(
         },
         headers=owner,
     )
+    assert made.status_code == 201, made.text
     role_id = made.json()["id"]
-    await client.patch(f"/api/v1/members/{t.dev}/role", json={"roleId": role_id}, headers=owner)
+    other = await client.post(
+        "/api/v1/roles",
+        json={
+            "name": "Viewer of team",
+            "base_role_id": await _sales_base(pg_session_factory),
+            "permission_ids": await _permission_ids(pg_session_factory, "team:view"),
+        },
+        headers=owner,
+    )
+    assert other.status_code == 201, other.text
+    given = await client.patch(
+        f"/api/v1/members/{t.dev}/role", json={"roleId": role_id}, headers=owner
+    )
+    assert given.status_code == 200, given.text
+    colleague, _ = await add_user(pg_session_factory, t.org, "sales")
+    dev = as_user(t.dev, t.org)
 
     own_edit = await client.put(
-        f"/api/v1/roles/{role_id}", json={"name": "Self-promoted"}, headers=as_user(t.dev, t.org)
+        f"/api/v1/roles/{role_id}", json={"name": "Self-promoted"}, headers=dev
     )
     assert own_edit.status_code == 403
     own_role = await client.patch(
-        f"/api/v1/members/{t.dev}/role", json={"roleId": role_id}, headers=as_user(t.dev, t.org)
+        f"/api/v1/members/{t.dev}/role", json={"roleId": role_id}, headers=dev
     )
     assert own_role.status_code == 403
+    # Control: the same member can edit and hand out a role they don't hold.
+    other_id = other.json()["id"]
+    edited = await client.put(f"/api/v1/roles/{other_id}", json={"name": "Renamed"}, headers=dev)
+    assert edited.status_code == 200, edited.text
+    handed = await client.patch(
+        f"/api/v1/members/{colleague}/role", json={"roleId": other_id}, headers=dev
+    )
+    assert handed.status_code == 200, handed.text
 
 
 async def test_a_role_admin_cannot_promote_anyone_to_owner(

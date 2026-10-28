@@ -142,6 +142,7 @@ async def test_refresh_is_refused_for_the_wrong_token_or_a_lost_member(
         await db.execute(update(User).where(User.id == t.owner).values(is_active=False))
         await db.commit()
     removed = await client.post(REFRESH, json={"refresh_token": dev["refresh_token"]})
+    assert removed.status_code == 401
     assert removed.json() == {"detail": "User is no longer a member of this organization"}
     deactivated = await client.post(REFRESH, json={"refresh_token": owner["refresh_token"]})
     assert deactivated.status_code == 401

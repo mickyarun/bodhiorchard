@@ -21,12 +21,13 @@ rows unchanged, otherwise org B's people or data get pulled into org A.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import pytest
 from httpx import AsyncClient
 
-from tests.integration.auth_tenancy_snapshot import snapshot
+from tests.integration.auth_tenancy_snapshot import member_state, snapshot
 from tests.integration.auth_tenancy_support import Tenant, TenantRows, new_tenant, seed_rows
 from tests.integration.leave_support import Factory, as_user
 
@@ -34,19 +35,20 @@ pytestmark = pytest.mark.integration
 
 
 def _writes(
-    a: Tenant, mine: TenantRows, b: Tenant, theirs: TenantRows
-) -> list[tuple[str, str, dict[str, Any]]]:
-    """(method, own-row path, body naming one of org B's ids)."""
+    a: Tenant, mine: TenantRows, user: uuid.UUID, rows: TenantRows
+) -> list[tuple[str, str, dict[str, Any], int]]:
+    """(method, own-row path, body naming ``user`` / ``rows``, status when foreign)."""
     return [
-        ("POST", f"/api/v1/teams/{mine.team}/members", {"user_id": str(b.dev)}),
-        ("POST", f"/api/v1/teams/{mine.team}/repos", {"repo_id": str(theirs.repo)}),
-        ("PATCH", f"/api/v1/bugs/{mine.bug}", {"budId": str(theirs.bud)}),
-        ("PATCH", f"/api/v1/bugs/{mine.bug}", {"featureId": str(theirs.feature)}),
-        ("PATCH", f"/api/v1/members/{a.dev}/role", {"roleId": str(theirs.role)}),
+        ("POST", f"/api/v1/teams/{mine.team}/members", {"user_id": str(user)}, 400),
+        ("POST", f"/api/v1/teams/{mine.team}/repos", {"repo_id": str(rows.repo)}, 400),
+        ("PATCH", f"/api/v1/bugs/{mine.bug}", {"budId": str(rows.bud)}, 404),
+        ("PATCH", f"/api/v1/bugs/{mine.bug}", {"featureId": str(rows.feature)}, 404),
+        ("PATCH", f"/api/v1/members/{a.dev}/role", {"roleId": str(rows.role)}, 404),
         (
             "PUT",
             f"/api/v1/employees/{a.dev}/managers",
-            {"managers": [{"user_id": str(b.dev), "is_primary": True}]},
+            {"managers": [{"user_id": str(user), "is_primary": True}]},
+            400,
         ),
     ]
 
@@ -59,15 +61,31 @@ async def test_own_rows_cannot_reference_another_orgs_rows(
     b = await new_tenant(pg_session_factory)
     theirs = await seed_rows(pg_session_factory, b)
     before = await snapshot(pg_session_factory, mine)
+    dev_before = await member_state(pg_session_factory, a.dev, a.org)
     headers = as_user(a.owner, a.org)
 
-    accepted = {}
-    for method, path, body in _writes(a, mine, b, theirs):
+    answers = {}
+    for method, path, body, expected in _writes(a, mine, b.dev, theirs):
         response = await client.request(method, path, json=body, headers=headers)
-        if response.status_code < 400:
-            accepted[f"{method} {path} {body}"] = response.status_code
-    assert accepted == {}
+        answers[f"{method} {path} {body}"] = (response.status_code, expected)
+    assert {k: v for k, v in answers.items() if v[0] != v[1]} == {}
     assert await snapshot(pg_session_factory, mine) == before
+    assert await member_state(pg_session_factory, a.dev, a.org) == dev_before
+
+
+async def test_the_same_writes_with_own_ids_succeed(
+    client: AsyncClient, pg_session_factory: Factory
+) -> None:
+    """Control: the bodies are well-formed, so the refusals above are scoping."""
+    a = await new_tenant(pg_session_factory)
+    mine = await seed_rows(pg_session_factory, a)
+    headers = as_user(a.owner, a.org)
+    for method, path, body, _foreign in _writes(a, mine, a.owner, mine):
+        response = await client.request(method, path, json=body, headers=headers)
+        assert response.status_code in (200, 201), (path, body, response.text)
+    after = await member_state(pg_session_factory, a.dev, a.org)
+    assert after["membership"]["role_id"] == mine.role
+    assert after["managers"] == [str(a.owner)]
 
 
 async def test_linking_another_orgs_feature_links_nothing(
