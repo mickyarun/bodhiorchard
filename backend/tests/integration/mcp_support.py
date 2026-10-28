@@ -81,6 +81,7 @@ def isolate_side_channels(monkeypatch: pytest.MonkeyPatch, factory: Factory) -> 
     """Keep audit writes, token touches, redis and embeddings inside the test."""
     monkeypatch.setattr(mcp_audit, "AsyncSessionLocal", factory)
     monkeypatch.setattr(mcp_auth, "AsyncSessionLocal", factory)
+    monkeypatch.setattr(mcp_auth, "_internal_tokens", {})
     monkeypatch.setattr(mcp_rate_limit, "get_redis", _no_redis)
     monkeypatch.setattr(embedding_service, "embed", _fixed_embedding)
 
