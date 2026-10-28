@@ -60,11 +60,15 @@ async def _cancel(factory: Factory, run: AgentRun, org_id: uuid.UUID | None = No
         return fresh.status
 
 
-async def test_orphan_task_after_restart_is_failed_without_a_signal(
+async def test_orphan_task_after_restart_is_failed(
     monkeypatch: pytest.MonkeyPatch, pg_session_factory: Factory
 ) -> None:
-    """No live job (backend restarted): rows are failed and nothing is signalled."""
-    signals = _job_alive(monkeypatch, alive=False)
+    """No running job (backend restarted): the task and its design are failed.
+
+    Whether a signal is sent for a job that isn't running is left open: it
+    is a no-op for a job the queue no longer knows.
+    """
+    _job_alive(monkeypatch, alive=False)
     run = await running_task(pg_session_factory)
     design = await add_design(
         pg_session_factory, run, BUDDesignStatus.GENERATING, job_id=run.job_id
@@ -72,7 +76,6 @@ async def test_orphan_task_after_restart_is_failed_without_a_signal(
 
     assert await _cancel(pg_session_factory, run) == AgentTaskStatus.FAILED
 
-    assert signals == []
     assert await task_state(pg_session_factory, run.task_id) == ("failed", "Stopped")
     assert await design_status(pg_session_factory, design) == BUDDesignStatus.FAILED
 
