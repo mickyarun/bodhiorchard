@@ -28,7 +28,8 @@
  * The lobby/invite flows have pushed it past its original 300-line cap;
  * extracting them into a lobby handler is the tracked follow-up refactor.
  */
-import { Room, Client } from "colyseus"
+import { Room, Client, type RoomException, type RoomMethodName } from "colyseus"
+import { reportRoomException } from "./roomExceptions"
 import {
   CANCEL_FLUSH_GRACE_MS,
   COUNTDOWN_MS,
@@ -105,6 +106,11 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
         if (racer.connected) racer.connected = false
       }
     }
+  }
+
+  /** Report a throwing handler or timer instead of letting it exit the process. */
+  onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
+    reportRoomException(this, error, methodName)
   }
 
   onDispose(): void {

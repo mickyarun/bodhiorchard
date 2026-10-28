@@ -24,7 +24,8 @@
  *   onJoin:   start the engine + (for timed games) the 20Hz sim loop.
  *   finish:   POST the server-computed score via the bridge, relay the outcome.
  */
-import { Room, Client } from "colyseus"
+import { Room, Client, type RoomException, type RoomMethodName } from "colyseus"
+import { reportRoomException } from "./roomExceptions"
 import { MinigameRoomState } from "../schema/MinigameRoomState"
 import type { MinigameEngine, MinigameHost } from "./minigame/MinigameEngine"
 import { FireflyEngine } from "./minigame/FireflyEngine"
@@ -116,6 +117,11 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
         if (this.state.phase === "playing") engine.tick?.(this, Date.now())
       }, SIM_TICK_MS)
     }
+  }
+
+  /** Report a throwing handler or timer instead of letting it exit the process. */
+  onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
+    reportRoomException(this, error, methodName)
   }
 
   onDispose(): void {

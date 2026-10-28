@@ -34,7 +34,8 @@
  *   enqueueNpc(npcUserId, drink)  — enqueue a simulated character
  *   onActiveChanged(listener)     — subscribe to active-phase transitions
  */
-import { Room, Client } from "colyseus"
+import { Room, Client, type RoomException, type RoomMethodName } from "colyseus"
+import { reportRoomException } from "./roomExceptions"
 import { PlayerState } from "../schema/PlayerState"
 import { CoffeeBarState, CoffeeAction } from "../schema/CoffeeBarState"
 import { isCoffeeDrink } from "../sim/CoffeeMenu"
@@ -174,6 +175,11 @@ export class CoffeeBarRoom extends Room<{ state: CoffeeBarState }> {
     }
     this.state.players.delete(client.sessionId)
     this.lastMoveMs.delete(client.sessionId)
+  }
+
+  /** Report a throwing handler or timer instead of letting it exit the process. */
+  onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
+    reportRoomException(this, error, methodName)
   }
 
   onDispose() {
