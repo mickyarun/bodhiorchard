@@ -111,7 +111,7 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     // Invites quote the host's name, so it is the verified one, not the
     // name the room was created with.
     if (identity.userId === this.state.hostUserId) this.state.hostName = identity.name
-    client.userData = identity ?? undefined
+    client.userData = identity
     console.log(
       `[RaceRoom ${this.roomId}] ${identity?.name ?? "anonymous"} (${client.sessionId}) joined`,
     )
