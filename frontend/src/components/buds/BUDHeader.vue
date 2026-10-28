@@ -66,9 +66,8 @@
           <BUDAssigneeMenu :assignee-id="bud.assignee_id" @change="emit('change-assignee', $event)">
             <template #activator="{ props: menuProps }">
               <button v-bind="menuProps" type="button" class="bud-header__assignee" :aria-label="assigneeLabel">
-                <span class="bud-header__avatar" :class="{ 'bud-header__avatar--empty': !bud.assignee_name }">
-                  {{ bud.assignee_name ? initialsOf(bud.assignee_name) : '' }}
-                </span>
+                <AppMonogram v-if="bud.assignee_name" :name="bud.assignee_name" :src="bud.assignee_avatar_url" :size="24" />
+                <span v-else class="bud-header__avatar-empty" />
                 {{ bud.assignee_name || 'Unassigned' }}
               </button>
             </template>
@@ -125,12 +124,12 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import AppMonogram from '@/components/common/AppMonogram.vue'
 import BUDAssigneeMenu from './detail/BUDAssigneeMenu.vue'
 import BUDMoreMenu from './detail/BUDMoreMenu.vue'
 import BUDPriorityMenu from './detail/BUDPriorityMenu.vue'
 import { BUD_STATUS_COLORS, BUD_STATUS_LABELS, budRef } from '@/types'
 import type { BUDDocument, BUDPriority, BUDStatus } from '@/types'
-import { initialsOf } from '@/utils/avatar'
 import { formatDate } from '@/utils/date'
 
 const props = defineProps<{

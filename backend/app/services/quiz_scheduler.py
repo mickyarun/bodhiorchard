@@ -17,15 +17,16 @@
 Generation is NOT on this path (that's the batch top-up loop). This loop ticks
 every 60s and, per org, (1) opens the next APPROVED question when the local
 fire time on an active weekday is reached, and (2) flips windows closed to
-REVEALED. The 60s tick recomputes local fire times each pass, so it is naturally
-DST-correct and self-heals after a restart; all durable state lives in Postgres.
+REVEALED, folding each revealed quiz's answers into the monthly totals. The 60s
+tick recomputes local fire times each pass, so it is naturally DST-correct and
+self-heals after a restart; all durable state lives in Postgres.
 """
 
 from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import structlog
 from sqlalchemy.exc import IntegrityError
@@ -39,7 +40,12 @@ from app.schemas.settings import QuizGameSettings
 from app.services.event_bus import publish
 from app.services.org_settings import get_quiz_settings
 from app.services.quiz_notify import notify_quiz_open, notify_quiz_reveal, nudge_low_queue
-from app.services.quiz_schedule_math import compute_open_window, resolve_zone
+from app.services.quiz_reveal import reveal_quiz
+from app.services.quiz_schedule_math import (
+    compute_open_window,
+    current_month_key,
+    resolve_zone,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -106,23 +112,38 @@ async def _open_pass(org_id: uuid.UUID, settings: QuizGameSettings, now_utc: dat
 
 
 async def _reveal_pass(org_id: uuid.UUID, settings: QuizGameSettings, now_utc: datetime) -> None:
-    """Flip any closed-window OPEN quizzes to REVEALED (exactly-once per quiz)."""
-    async with AsyncSessionLocal() as db:
-        quiz_repo = QuizRepository(db, org_id=org_id)
-        due = await quiz_repo.list_open_past_reveal(now_utc)
-        revealed_ids = []
-        for quiz in due:
-            if await quiz_repo.flip_to_revealed(quiz.id):
-                revealed_ids.append(quiz.id)
-        if revealed_ids:
-            await db.commit()
+    """Reveal closed-window OPEN quizzes and fold their scores (exactly-once per quiz).
 
-    for _quiz_id in revealed_ids:
+    Each quiz's flip and score fold commit together, oldest quiz first, and the
+    reveal DM is sent after the commits so its standings include the new points.
+    If one quiz fails, the pass stops there (later quizzes must not fold ahead
+    of it, or streaks advance out of order) and the next tick retries it, but
+    the quizzes already committed still get their event and DM.
+    """
+    # Plain dates, not ORM rows: a rollback expires every row in the session.
+    revealed_dates: list[date] = []
+    async with AsyncSessionLocal() as db:
+        due = await QuizRepository(db, org_id=org_id).list_open_past_reveal(now_utc)
+        for quiz_id, quiz_date in [(q.id, q.quiz_date) for q in due]:
+            try:
+                won = await reveal_quiz(db, org_id=org_id, quiz_id=quiz_id, quiz_date=quiz_date)
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                logger.warning(
+                    "quiz_reveal_failed", org_id=str(org_id), quiz_id=str(quiz_id), exc_info=True
+                )
+                break
+            if won:
+                revealed_dates.append(quiz_date)
+
+    for _ in revealed_dates:
         publish(f"quiz:{org_id}", {"event_type": "quiz_revealed"})
     # One reveal DM per tick regardless of how many quizzes closed (a multi-day
     # outage could close several at once — don't spam members N identical DMs).
-    if revealed_ids and settings.slack_notify_reveal:
-        await notify_quiz_reveal(org_id)
+    # Its standings are the month of the newest quiz just revealed.
+    if revealed_dates and settings.slack_notify_reveal:
+        await notify_quiz_reveal(org_id, period_month=current_month_key(revealed_dates[-1]))
 
 
 async def tick_once() -> None:

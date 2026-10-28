@@ -21,7 +21,8 @@ Two responsibilities:
 
 1. **Optional member auto-creation.** When ``scan.auto_create_members``
    is on (default), every unique git-author email that is not already
-   a ``User`` row triggers an INSERT + ``OrgToUser`` membership. The
+   a ``User`` row triggers an INSERT + ``OrgToUser`` membership (an
+   email already owned by an account in another org is left unmatched). The
    defaulted password is a placeholder — these accounts can't log in
    until the operator resets the password from Settings → Team. With
    the flag off, unknown authors are skipped and surface in
@@ -95,6 +96,14 @@ async def phase_e_skills(
             if email_lower in email_to_user or email_lower in seen_emails:
                 continue
             seen_emails.add(email_lower)
+            if await user_repo.get_by_email(entry.email) is not None:
+                # The address already belongs to an account in another
+                # org. Emails are unique across orgs, so inserting would
+                # fail the whole stage, and adding that account to this
+                # org would hand it access here. Leave the author
+                # unmatched instead.
+                logger.info("scan_author_belongs_to_another_org", org_id=str(org_id))
+                continue
             new_user = User(
                 email=entry.email,
                 name=entry.author_name,

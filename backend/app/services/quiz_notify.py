@@ -89,12 +89,13 @@ async def _dm_all_members(org_id: uuid.UUID, message: str, *, event: str) -> int
     return sent
 
 
-async def _month_standings(org_id: uuid.UUID, *, limit: int = 3) -> list[tuple[str, int]]:
-    """Top (name, points) for the current month — drives the competitive copy."""
+async def _month_standings(
+    org_id: uuid.UUID, *, period_month: str, limit: int = 3
+) -> list[tuple[str, int]]:
+    """Top (name, points) for one month — drives the competitive copy."""
     async with AsyncSessionLocal() as db:
-        period = current_month_key(datetime.now(UTC).date())
         rows = await QuizScoreRepository(db, org_id=org_id).leaderboard(
-            period_month=period, limit=limit
+            period_month=period_month, limit=limit
         )
     return [(r.user_name, r.total_points) for r in rows]
 
@@ -139,7 +140,9 @@ def compose_reveal_message(link: str, standings: list[tuple[str, int]]) -> str:
 async def notify_quiz_open(org_id: uuid.UUID) -> int:
     """DM members that today's quiz is live — SP prize + beat-the-leader nudge."""
     link = f"{settings.frontend_url.rstrip('/')}/dashboard"
-    standings = await _month_standings(org_id)
+    standings = await _month_standings(
+        org_id, period_month=current_month_key(datetime.now(UTC).date())
+    )
     async with AsyncSessionLocal() as db:
         config = await OrganizationRepository(db).get_config(org_id)
     sp_amount = get_quiz_settings(config).monthly_sp_amount
@@ -148,10 +151,10 @@ async def notify_quiz_open(org_id: uuid.UUID) -> int:
     )
 
 
-async def notify_quiz_reveal(org_id: uuid.UUID) -> int:
-    """DM members the answer is in, with the current monthly standings."""
+async def notify_quiz_reveal(org_id: uuid.UUID, *, period_month: str) -> int:
+    """DM members the answer is in, with the standings of the quiz's month."""
     link = f"{settings.frontend_url.rstrip('/')}/dashboard"
-    standings = await _month_standings(org_id)
+    standings = await _month_standings(org_id, period_month=period_month)
     return await _dm_all_members(
         org_id, compose_reveal_message(link, standings), event="quiz_reveal"
     )

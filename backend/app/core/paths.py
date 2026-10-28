@@ -28,6 +28,7 @@ symlinks, then ``commonpath`` compares against the trusted root.
 
 import os.path
 import re
+import shutil
 import unicodedata
 from pathlib import Path
 
@@ -69,6 +70,38 @@ def safe_join(root: Path | str, relative: str) -> Path:
     if common != base:
         raise PathTraversalError(f"path {relative!r} escapes its root {base!r}")
     return Path(candidate)
+
+
+def is_strictly_under(child: Path | str, parent: Path | str) -> bool:
+    """True iff ``child`` resolves to a path nested strictly inside ``parent``.
+
+    Both sides go through ``os.path.realpath`` first, so ``..`` segments
+    and symlinks are judged by where they actually land. The parent itself
+    does not count as "under" — a child that resolves to ``parent`` is
+    refused, because deleting it would take every sibling with it.
+    """
+    base = os.path.realpath(str(parent))
+    candidate = os.path.realpath(str(child))
+    if candidate == base:
+        return False
+    try:
+        return os.path.commonpath([base, candidate]) == base
+    except ValueError:
+        return False
+
+
+def rmtree_strictly_under(target: Path | str, root: Path | str) -> bool:
+    """Delete the ``target`` tree only if it sits strictly inside ``root``.
+
+    Returns ``True`` when the tree was handed to ``shutil.rmtree`` and
+    ``False`` when nothing was touched: containment failed, or ``target``
+    is itself a symlink (which ``rmtree`` refuses), so callers can log the
+    refusal with their own context and never count it as removed.
+    """
+    if os.path.islink(target) or not is_strictly_under(target, root):
+        return False
+    shutil.rmtree(target, ignore_errors=True)
+    return True
 
 
 _FILENAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9._-]")

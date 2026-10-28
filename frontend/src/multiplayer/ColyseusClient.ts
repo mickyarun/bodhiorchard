@@ -37,6 +37,20 @@ export interface MultiplayerCallbacks {
   onPlayerMove?: (sessionId: string, player: PlayerData) => void
 }
 
+/**
+ * The user joining a shared room. The server verifies `token` and takes the
+ * user's id, name and org from it; `userId` / `name` are display hints only.
+ */
+export interface RoomJoinUser {
+  userId: string
+  name: string
+  characterModel?: string
+  token: string
+}
+
+/** Shared rooms joined by their owning keys (see multiplayer/src/roomDefinitions.ts). */
+type SharedRoomName = "house" | "coffeebar" | "cafeteria"
+
 export class ColyseusClient {
   private static instance: ColyseusClient | null = null
   private client: Client
@@ -59,30 +73,16 @@ export class ColyseusClient {
     this.callbacks = cbs
   }
 
-  /** Join a house room. Creates or joins "house-{memberId}". */
-  async joinHouseRoom(
-    memberId: string,
-    userData: { userId: string; name: string; characterModel?: string },
-  ): Promise<Room> {
-    if (this.currentRoom) {
-      await this.leaveRoom()
-    }
-
-    try {
-      this.currentRoom = await this.client.joinOrCreate("house", {
-        roomId: `house-${memberId}`,
-        ownerId: memberId,
-        userId: userData.userId,
-        name: userData.name,
-        characterModel: userData.characterModel ?? '',
-      })
-
-      this.setupStateListeners()
-      return this.currentRoom
-    } catch (err) {
-      console.warn("[ColyseusClient] Failed to join house room:", err)
-      throw err
-    }
+  /**
+   * Join a house room. One room per house owner within an org: visitors of
+   * the same house share `house-{memberId}`.
+   */
+  async joinHouseRoom(orgId: string, memberId: string, user: RoomJoinUser): Promise<Room> {
+    return this.joinSharedRoom(
+      "house",
+      { roomId: `house-${memberId}`, orgId, ownerId: memberId },
+      user,
+    )
   }
 
   /**
@@ -94,29 +94,8 @@ export class ColyseusClient {
    * Coffee-specific messages (enqueue, ack, leave queue) are sent via
    * sendCoffeeEnqueue / sendCoffeeAckDispense / sendCoffeeLeaveQueue.
    */
-  async joinCoffeeBarRoom(
-    orgId: string,
-    userData: { userId: string; name: string; characterModel?: string },
-  ): Promise<Room> {
-    if (this.currentRoom) {
-      await this.leaveRoom()
-    }
-
-    try {
-      this.currentRoom = await this.client.joinOrCreate("coffeebar", {
-        roomId: `coffeebar-${orgId}`,
-        orgId,
-        userId: userData.userId,
-        name: userData.name,
-        characterModel: userData.characterModel ?? '',
-      })
-
-      this.setupStateListeners()
-      return this.currentRoom
-    } catch (err) {
-      console.warn("[ColyseusClient] Failed to join coffee bar room:", err)
-      throw err
-    }
+  async joinCoffeeBarRoom(orgId: string, user: RoomJoinUser): Promise<Room> {
+    return this.joinSharedRoom("coffeebar", { roomId: `coffeebar-${orgId}`, orgId }, user)
   }
 
   /** Send a coffee order enqueue request. Server validates the drink. */
@@ -139,29 +118,8 @@ export class ColyseusClient {
    * joins the same `cafeteria-{orgId}` so the queue and cooking state are
    * globally consistent. Mirrors joinCoffeeBarRoom.
    */
-  async joinCafeteriaRoom(
-    orgId: string,
-    userData: { userId: string; name: string; characterModel?: string },
-  ): Promise<Room> {
-    if (this.currentRoom) {
-      await this.leaveRoom()
-    }
-
-    try {
-      this.currentRoom = await this.client.joinOrCreate("cafeteria", {
-        roomId: `cafeteria-${orgId}`,
-        orgId,
-        userId: userData.userId,
-        name: userData.name,
-        characterModel: userData.characterModel ?? '',
-      })
-
-      this.setupStateListeners()
-      return this.currentRoom
-    } catch (err) {
-      console.warn("[ColyseusClient] Failed to join cafeteria room:", err)
-      throw err
-    }
+  async joinCafeteriaRoom(orgId: string, user: RoomJoinUser): Promise<Room> {
+    return this.joinSharedRoom("cafeteria", { roomId: `cafeteria-${orgId}`, orgId }, user)
   }
 
   /** Send a cafeteria meal enqueue request. Server validates the meal. */
@@ -206,6 +164,36 @@ export class ColyseusClient {
       return this.currentRoom
     } catch (err) {
       console.warn("[ColyseusClient] Failed to join org room:", err)
+      throw err
+    }
+  }
+
+  /**
+   * Leave any current room, then join (or create) the shared room `name`
+   * matched on `keys`, carrying the user's token for the server to verify.
+   */
+  private async joinSharedRoom(
+    name: SharedRoomName,
+    keys: Record<string, string>,
+    user: RoomJoinUser,
+  ): Promise<Room> {
+    if (this.currentRoom) {
+      await this.leaveRoom()
+    }
+
+    try {
+      this.currentRoom = await this.client.joinOrCreate(name, {
+        ...keys,
+        userId: user.userId,
+        name: user.name,
+        characterModel: user.characterModel ?? '',
+        token: user.token,
+      })
+
+      this.setupStateListeners()
+      return this.currentRoom
+    } catch (err) {
+      console.warn(`[ColyseusClient] Failed to join ${name} room:`, err)
       throw err
     }
   }

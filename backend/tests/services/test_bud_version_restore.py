@@ -32,6 +32,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.models.bud import BUDStatus
+from app.repositories.bud import DesignTargetNotInOrgError
 from app.services import bud_version_restore
 
 
@@ -209,3 +210,30 @@ async def test_restore_without_requirements_change_skips_embedding(
     assert result["linked_features_reparsed"] == 0
     # The tech_spec column WAS restored.
     assert bud.tech_spec_md == "new spec"
+
+
+@pytest.mark.asyncio
+async def test_design_restore_skips_a_snapshot_repo_outside_the_org(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A snapshot naming another org's repo restores no design row.
+
+    The design repository refuses the repo before writing; revert reports
+    ``design_html_restored=False`` instead of failing the whole restore.
+    """
+    foreign_repo = uuid.uuid4()
+    design_repo = MagicMock(
+        upsert=AsyncMock(side_effect=DesignTargetNotInOrgError("repo", foreign_repo))
+    )
+    monkeypatch.setattr(
+        bud_version_restore, "BUDDesignRepository", MagicMock(return_value=design_repo)
+    )
+
+    restored = await bud_version_restore._restore_design_html_if_present(
+        MagicMock(),
+        _fake_bud(status=BUDStatus.DESIGN),
+        {"__design_html": "<p>old</p>", "__design_repo_id": str(foreign_repo)},
+    )
+
+    assert restored is False
+    design_repo.upsert.assert_awaited_once()

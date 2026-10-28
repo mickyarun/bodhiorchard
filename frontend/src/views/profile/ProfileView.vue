@@ -17,7 +17,7 @@
 <template>
   <v-container class="py-6" fluid>
     <div class="d-flex align-center ga-2 mb-6">
-      <v-icon icon="mdi-account-circle" size="28" />
+      <AppMonogram :name="authStore.user?.name" :src="authStore.user?.avatar_url" :size="28" />
       <div class="text-h5 font-weight-bold bo-display">My Profile</div>
       <v-spacer />
       <v-btn
@@ -88,6 +88,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
+import AppMonogram from '@/components/common/AppMonogram.vue'
 import { useXPStore } from '@/stores/xp'
 import { useAuthStore } from '@/stores/auth'
 import { parseCharacterModel, type CharacterConfig } from '@/engine/characters/CharacterConfig'

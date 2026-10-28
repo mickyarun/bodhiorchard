@@ -40,6 +40,10 @@ class QuizQuestionNotFoundError(Exception):
     """The pooled question does not exist for this org."""
 
 
+class QuizQuestionAlreadyUsedError(Exception):
+    """The question already ran as a quiz, so its content and status are final."""
+
+
 async def list_review_queue(
     db: AsyncSession, *, org_id: uuid.UUID, statuses: list[QuizQuestionStatus], limit: int = 100
 ) -> list[QuizQuestion]:
@@ -55,12 +59,22 @@ async def _require(repo: QuizQuestionRepository, question_id: uuid.UUID) -> Quiz
     return question
 
 
+async def _require_reviewable(
+    repo: QuizQuestionRepository, question_id: uuid.UUID
+) -> QuizQuestion:
+    """The question, unless it already ran: players answered it and saw its reveal."""
+    question = await _require(repo, question_id)
+    if question.status == QuizQuestionStatus.USED:
+        raise QuizQuestionAlreadyUsedError("This question already ran as a quiz")
+    return question
+
+
 async def edit_question(
     db: AsyncSession, *, org_id: uuid.UUID, question_id: uuid.UUID, edit: QuizReviewEdit
 ) -> QuizQuestion:
     """Apply an admin edit, re-validating content. Raises ValueError if invalid."""
     repo = QuizQuestionRepository(db, org_id=org_id)
-    question = await _require(repo, question_id)
+    question = await _require_reviewable(repo, question_id)
 
     if edit.prompt is not None:
         question.prompt = edit.prompt
@@ -91,7 +105,7 @@ async def approve_question(
 ) -> QuizQuestion:
     """Approve a question and record its topic so future batches avoid it."""
     repo = QuizQuestionRepository(db, org_id=org_id)
-    question = await _require(repo, question_id)
+    question = await _require_reviewable(repo, question_id)
 
     await repo.set_status(
         question,
@@ -114,5 +128,5 @@ async def reject_question(
 ) -> QuizQuestion:
     """Reject a pooled question (it never goes live; its topic isn't burned)."""
     repo = QuizQuestionRepository(db, org_id=org_id)
-    question = await _require(repo, question_id)
+    question = await _require_reviewable(repo, question_id)
     return await repo.set_status(question, status=QuizQuestionStatus.REJECTED)
