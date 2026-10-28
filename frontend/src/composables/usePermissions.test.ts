@@ -100,11 +100,11 @@ describe('permission gates', () => {
     expect(p.canControlCelebrationChannel.value).toBe(false)
   })
 
-  it('separates viewing code settings from adding a local folder', () => {
+  it('separates viewing code settings from changing repositories', () => {
     signIn('developer', ['integrations:configure'])
     const p = usePermissions()
     expect(p.canViewCodeSettings.value).toBe(true)
-    expect(p.canAddLocalRepos.value).toBe(false)
+    expect(p.canManageRepos.value).toBe(false)
   })
 
   it('keeps QA off BUD edits while letting them test', () => {

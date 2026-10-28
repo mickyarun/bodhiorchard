@@ -139,18 +139,9 @@ async def handle_bug_approval(
     if session.status != TriageStatus.AWAITING_PM:
         return
 
-    if not approved:
-        session.status = TriageStatus.REJECTED
-        await slack_client.chat_post_message(
-            bot_token,
-            channel,
-            "❌ Bug report discarded.",
-            thread_ts=session.thread_ts,
-        )
-        return
-
-    # Resolve approver + verify PM/admin role
-    row = await UserRepository(db).get_by_slack_id_with_role(org.id, approver_slack_id)
+    # Resolve the reactor and verify the PM/admin role before either
+    # decision: discarding a report is as much a decision as filing it.
+    row = await UserRepository(db).get_active_by_slack_id_with_role(org.id, approver_slack_id)
     if not row:
         await slack_client.chat_post_message(
             bot_token,
@@ -165,7 +156,17 @@ async def handle_bug_approval(
         await slack_client.chat_post_message(
             bot_token,
             channel,
-            "⚠️ Only PMs and admins can approve bug reports.",
+            "⚠️ Only PMs and admins can approve or discard bug reports.",
+            thread_ts=session.thread_ts,
+        )
+        return
+
+    if not approved:
+        session.status = TriageStatus.REJECTED
+        await slack_client.chat_post_message(
+            bot_token,
+            channel,
+            "❌ Bug report discarded.",
             thread_ts=session.thread_ts,
         )
         return

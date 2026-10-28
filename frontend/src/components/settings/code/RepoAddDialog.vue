@@ -66,7 +66,16 @@
         />
       </header>
 
-      <template v-if="modeReady">
+      <div v-if="!canManageRepos" class="add-body px-4 py-4">
+        <AppCallout
+          variant="warning"
+          title="Adding repositories needs the Edit Project Settings permission"
+        >
+          Ask an org admin to add these repositories for you.
+        </AppCallout>
+      </div>
+
+      <template v-else-if="modeReady">
         <div class="add-tabs px-2">
           <button
             v-if="canPickLocal"
@@ -152,11 +161,13 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import AppCallout from '@/components/common/AppCallout.vue'
 import RepoLocalPickForm from './RepoLocalPickForm.vue'
 import RepoCloneForm from './RepoCloneForm.vue'
 import RepoOnboardBulkTab from './onboard/RepoOnboardBulkTab.vue'
 import { useAddRepoSubmit } from '@/composables/useAddRepoSubmit'
 import { useDeploymentMode } from '@/composables/useDeploymentMode'
+import { usePermissions } from '@/composables/usePermissions'
 import { useRepoImport } from '@/composables/useRepoImport'
 import { useReposcanV2ScansStore } from '@/stores/reposcanv2Scans'
 import { useSettingsStore } from '@/stores/settings'
@@ -183,6 +194,10 @@ const emit = defineEmits<{
   'update:modelValue': [value: boolean]
 }>()
 
+// Every add path (local folder, clone, bulk import) 403s without
+// settings:edit, so say so up front instead of letting the member stage
+// repositories that can't be added.
+const { canManageRepos } = usePermissions()
 const imp = useRepoImport()
 const submitter = useAddRepoSubmit()
 const { mode: deploymentMode } = useDeploymentMode()

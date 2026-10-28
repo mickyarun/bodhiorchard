@@ -35,6 +35,7 @@ from app.models.user import User
 from app.repositories.organization import OrganizationRepository
 from app.repositories.user import UserRepository
 from app.services.github_app_auth import get_installation_token
+from app.services.github_install_repos import list_all_pages
 
 router = APIRouter(tags=["settings-github-members"])
 
@@ -75,15 +76,13 @@ async def list_github_org_members(
         "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"https://api.github.com/orgs/{github_org}/members",
-            params={"per_page": 100},
-            headers=gh_headers,
-            timeout=15,
-        )
-        _raise_for_github_error(resp, github_org)
-        members = resp.json()
+    # Follow every ``Link: rel="next"`` page: GitHub caps a page at 100, and an
+    # organisation past that size would otherwise lose the rest of its roster.
+    try:
+        members = await list_all_pages(token, f"/orgs/{github_org}/members")
+    except httpx.HTTPStatusError as exc:
+        _raise_for_github_error(exc.response, github_org)
+        raise
 
     async with httpx.AsyncClient() as profile_client:
         profiles = await asyncio.gather(

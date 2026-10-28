@@ -34,9 +34,17 @@
  *   enqueueNpc(npcUserId, drink)  — enqueue a simulated character
  *   onActiveChanged(listener)     — subscribe to active-phase transitions
  */
-import { Room, Client } from "colyseus"
+import { Room, Client, type RoomException, type RoomMethodName } from "colyseus"
+import { reportRoomException } from "./roomExceptions"
 import { PlayerState } from "../schema/PlayerState"
 import { CoffeeBarState, CoffeeAction } from "../schema/CoffeeBarState"
+import {
+  requireJoinIdentity,
+  verifyJoin,
+  type JoinCredentials,
+  type JoinIdentity,
+} from "../auth/verifyJoin"
+import { requireRoomKey } from "./roomKeys"
 import { isCoffeeDrink } from "../sim/CoffeeMenu"
 import {
   advancePhase,
@@ -59,9 +67,7 @@ const VALID_ANIMS = new Set([
   "drink",
 ])
 
-interface CoffeeBarJoinOptions {
-  userId: string
-  name: string
+interface CoffeeBarJoinOptions extends JoinCredentials {
   characterModel?: string
 }
 
@@ -105,9 +111,9 @@ export class CoffeeBarRoom extends Room<{ state: CoffeeBarState }> {
 
   private activeListeners: Array<(event: ActiveChangedEvent) => void> = []
 
-  onCreate(options: { orgId?: string }) {
+  onCreate(options: unknown) {
     const state = new CoffeeBarState()
-    if (options.orgId) state.orgId = options.orgId
+    state.orgId = requireRoomKey(options, "orgId")
     this.setState(state)
 
     this.onMessage("move", (client, data: MoveMessage) => {
@@ -150,11 +156,17 @@ export class CoffeeBarRoom extends Room<{ state: CoffeeBarState }> {
     this.setSimulationInterval((_dt) => this.tick(), SIM_TICK_MS)
   }
 
-  onJoin(client: Client, options: CoffeeBarJoinOptions) {
+  /** Only a verified member of this room's org may join (see verifyJoin). */
+  async onAuth(_client: Client, options: CoffeeBarJoinOptions): Promise<JoinIdentity> {
+    return verifyJoin(options, this.state.orgId)
+  }
+
+  onJoin(client: Client, options: CoffeeBarJoinOptions, auth?: JoinIdentity) {
+    const identity = requireJoinIdentity(auth)
     const player = new PlayerState()
-    player.userId = options.userId || client.sessionId
-    player.name = options.name || "Visitor"
-    player.characterModel = options.characterModel || ""
+    player.userId = identity.userId
+    player.name = identity.name
+    player.characterModel = typeof options.characterModel === "string" ? options.characterModel : ""
     player.connected = true
     this.state.players.set(client.sessionId, player)
     this.sessionByUserId.set(player.userId, client.sessionId)
@@ -174,6 +186,11 @@ export class CoffeeBarRoom extends Room<{ state: CoffeeBarState }> {
     }
     this.state.players.delete(client.sessionId)
     this.lastMoveMs.delete(client.sessionId)
+  }
+
+  /** Report a throwing handler or timer instead of letting it exit the process. */
+  onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
+    reportRoomException(this, error, methodName)
   }
 
   onDispose() {

@@ -41,6 +41,7 @@ import {
 import type { TrackShape } from "../../../shared/race/types"
 import { postRaceInvite } from "../bridge/BackendClient"
 import { registerRaceHooks } from "../bridge/RaceRegistry"
+import { issueRaceCreateTicket, revokeRaceCreateTicket } from "../bridge/RaceCreateTickets"
 import { isProductionServer, resolveBotCount } from "./RaceRoomHelpers"
 import { RaceRoom } from "./RaceRoom"
 
@@ -99,9 +100,13 @@ async function handleRaceCreate(
   }
 
   const orgId = room.state.orgId
+  // RaceRoom.onCreate refuses any create without a ticket from this process,
+  // so a client cannot open a race of its own with `create("race", ...)`.
+  const createTicket = issueRaceCreateTicket()
   try {
     const matchMakerMod = await import("colyseus")
     const newRoom = await matchMakerMod.matchMaker.createRoom("race", {
+      createTicket,
       orgId,
       hostUserId,
       hostName,
@@ -164,6 +169,8 @@ async function handleRaceCreate(
   } catch (err) {
     console.error(`[OrgRoom ${orgId}] race_create failed:`, err)
     client.send("race_create_failed", { reason: "server_error" })
+  } finally {
+    revokeRaceCreateTicket(createTicket)
   }
 }
 

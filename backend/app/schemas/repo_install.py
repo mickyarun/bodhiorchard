@@ -24,6 +24,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.git_ref import BranchName
+
 
 class InstallableRepo(BaseModel):
     """One entry in the installation's repository list.
@@ -84,9 +86,9 @@ class BulkOnboardItem(BaseModel):
     """One row in a bulk-onboard request — Phase C consumes these."""
 
     full_name: str = Field(alias="fullName")
-    main_branch: str = Field(alias="mainBranch")
-    develop_branch: str | None = Field(default=None, alias="developBranch")
-    uat_branch: str | None = Field(default=None, alias="uatBranch")
+    main_branch: BranchName = Field(alias="mainBranch")
+    develop_branch: BranchName | None = Field(default=None, alias="developBranch")
+    uat_branch: BranchName | None = Field(default=None, alias="uatBranch")
 
     model_config = ConfigDict(populate_by_name=True)
 

@@ -52,6 +52,21 @@ class PlayerState {
 | `npm run build` | Compile TypeScript to dist/ |
 | `npm run start:prod` | Run compiled JS from dist/ |
 
+## Join Authentication
+
+Every room's `onAuth` goes through `src/auth/verifyJoin.ts`. A join needs the
+user's JWT as the `token` option; the server verifies it against the backend
+(`/api/v1/internal/colyseus/verify-token`) and requires the token's org to be
+exactly the room's org. The user id, display name and org a room acts on come
+from the backend's answer, never from the other join options.
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `MULTIPLAYER_ALLOW_TOKENLESS_JOIN` | unset | `1` accepts joins without a token, ignored when `NODE_ENV=production`. Such a join must name the room's org as `orgId` and gets the identity `dev:<userId>`, so it never acts as a real member. The frontend always sends a token, so local dev does not need this. |
+| `MULTIPLAYER_DEV_MODE` | unset | `1` turns on Colyseus dev mode (rooms restored across restarts). |
+
+The Docker image sets `NODE_ENV=production`.
+
 ## Health Check
 
 ```bash
