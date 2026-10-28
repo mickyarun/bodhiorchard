@@ -104,10 +104,7 @@
           >
             <!-- Member header -->
             <div class="d-flex align-center mb-1">
-              <v-avatar size="24" class="mr-2">
-                <v-img v-if="member.avatar_url" :src="member.avatar_url" />
-                <v-icon v-else icon="mdi-account" size="16" />
-              </v-avatar>
+              <AppMonogram class="mr-2" :name="member.name" :src="member.avatar_url" :size="24" />
               <div class="text-body-2 font-weight-medium text-truncate flex-grow-1">
                 {{ member.name }}
               </div>
@@ -201,6 +198,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import AppMonogram from '@/components/common/AppMonogram.vue'
 import type { MemberStandupItem } from '@/types/standup'
 import { useStandupStore } from '@/stores/standup'
 import { storeToRefs } from 'pinia'

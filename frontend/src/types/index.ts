@@ -453,6 +453,8 @@ export interface DevCommit {
 export interface DevContributor {
   user_id: string | null
   user_name: string | null
+  /** The member's stored photo; null for unattributed commit authors. */
+  avatar_url?: string | null
   author_name: string | null
   author_email: string | null
   commit_count: number
