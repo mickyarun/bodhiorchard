@@ -15,17 +15,12 @@
 -->
 
 <!-- An employee's profile photo, with upload and remove when editable.
-     Falls back to initials, which is also what a broken or expired image
-     URL degrades to — a Slack CDN link can rot after someone leaves the
-     workspace, and a tonal monogram looks better than a broken image. -->
+     The picture itself is AppMonogram, which falls back to initials when
+     there is no photo or it fails to load (a Slack link can rot after
+     someone leaves the workspace). -->
 <template>
   <div class="employee-avatar">
-    <v-avatar :size="size" color="primary" variant="tonal">
-      <v-img v-if="src && !failed" :src="src" :alt="name" cover @error="failed = true" />
-      <span v-else class="font-weight-bold" :style="{ fontSize: `${size / 3}px` }">
-        {{ initials }}
-      </span>
-    </v-avatar>
+    <AppMonogram :name="name" :src="current" :size="size" />
 
     <template v-if="editable">
       <input ref="fileInput" type="file" :accept="ACCEPT" class="d-none" @change="onPick" />
@@ -34,7 +29,7 @@
            does nothing else; without one, it goes straight to the picker.
            Binding the menu to the button (not the wrapper) is what stops a
            single click from opening the file dialog and the menu at once. -->
-      <v-menu v-if="src" location="bottom end">
+      <v-menu v-if="current" location="bottom end">
         <template #activator="{ props: menuProps }">
           <v-btn
             v-bind="menuProps"
@@ -77,10 +72,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 
+import AppMonogram from '@/components/common/AppMonogram.vue'
 import api from '@/services/api'
-import { initialsOf, resolveAvatarUrl } from '@/utils/avatar'
 import { extractApiError } from '@/utils/errors'
 
 const props = withDefaults(
@@ -108,21 +103,11 @@ const MAX_BYTES = 20 * 1024 * 1024
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const busy = ref(false)
-const failed = ref(false)
 // ``undefined`` = no local change yet; ``null`` = removed locally.
 const localUrl = ref<string | null | undefined>(undefined)
 
-const src = computed(() =>
-  resolveAvatarUrl(localUrl.value !== undefined ? localUrl.value : props.avatarUrl),
-)
-
-// A fresh URL deserves a fresh attempt: without this, one failed load
-// would keep showing initials even after a successful re-upload.
-watch(src, () => {
-  failed.value = false
-})
-
-const initials = computed(() => initialsOf(props.name))
+/** The stored URL on show: a local upload or removal wins over the prop. */
+const current = computed(() => (localUrl.value !== undefined ? localUrl.value : props.avatarUrl))
 
 async function onPick(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement

@@ -85,6 +85,7 @@ async def minigame_leaderboard(
                 user_name=r.user_name,
                 best_score=r.best_score,
                 plays=r.plays,
+                avatar_url=r.avatar_url,
             )
             for r in rows
         ],
