@@ -33,7 +33,6 @@ from app.models.quiz_question import QuizQuestionStatus, QuizQuestionType
 from app.schemas.quiz import QuizReviewEdit
 from app.services import quiz_review
 from app.services.quiz_review import (
-    QuizQuestionAlreadyUsedError,
     approve_question,
     edit_question,
     reject_question,
@@ -82,8 +81,10 @@ async def test_a_used_question_cannot_be_reviewed_again(
     repo = _install(monkeypatch, QuizQuestionStatus.USED)
     db = AsyncMock()
 
-    with pytest.raises(QuizQuestionAlreadyUsedError):
+    with pytest.raises(Exception, match="already ran") as raised:
         await action(db, uuid.uuid4())
+
+    assert type(raised.value).__name__ == "QuizQuestionAlreadyUsedError"
 
     repo.set_status.assert_not_awaited()
     db.flush.assert_not_awaited()
