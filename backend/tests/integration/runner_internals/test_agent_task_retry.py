@@ -44,13 +44,6 @@ from tests.integration.runner_internals.stage_support import (
 pytestmark = pytest.mark.integration
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "the retry route queues the job before committing the new task row, so the "
-        "worker finds no task; fixed by branch fix/agent-retry-commit-before-enqueue"
-    ),
-)
 async def test_retry_route_runs_a_failed_task_as_a_new_attempt(
     stage_claude: FakeClaudeRunner, app_sessions: Factory, job_runtime: JobRuntime
 ) -> None:
