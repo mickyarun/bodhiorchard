@@ -47,6 +47,7 @@ class LeaderboardRow:
     user_name: str
     best_score: int
     plays: int
+    avatar_url: str | None = None
 
 
 class MinigameRepository:
@@ -143,6 +144,7 @@ class MinigameRepository:
             select(
                 MinigameScore.user_id,
                 User.name,
+                User.avatar_url,
                 MinigameScore.best_score,
                 MinigameScore.plays,
             )
@@ -164,6 +166,7 @@ class MinigameRepository:
                 user_name=r.name or "",
                 best_score=r.best_score,
                 plays=r.plays,
+                avatar_url=r.avatar_url,
             )
             for r in result.all()
         ]

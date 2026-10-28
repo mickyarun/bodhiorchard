@@ -207,6 +207,7 @@ export interface BUDListItem {
   current_phase_deadline: string | null
   assignee_id: string | null
   assignee_name: string | null
+  assignee_avatar_url?: string | null
   open_bug_count: number
   created_at: string
   updated_at: string
@@ -650,6 +651,7 @@ export interface RepoContributor {
   actorName: string
   commitCount: number
   filesChanged: number
+  avatarUrl?: string | null
 }
 
 export const FEATURE_STATUS_COLORS: Record<string, string> = {
@@ -672,6 +674,7 @@ export interface SkillProfile {
   userId: string | null
   userName: string
   email: string
+  avatarUrl?: string | null
   modules: ModuleSkill[]
 }
 
@@ -866,6 +869,7 @@ export interface BugComment {
   bugId: string
   authorId: string
   authorName: string | null
+  authorAvatarUrl?: string | null
   body: string
   editedAt: string | null
   deletedAt: string | null

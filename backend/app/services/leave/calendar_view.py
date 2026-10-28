@@ -26,8 +26,9 @@ from app.repositories.leave_request import LeaveRequestRepository
 from app.repositories.leave_type import LeaveTypeRepository
 from app.repositories.policy_holiday import PolicyHolidayRepository
 from app.repositories.user import UserRepository
-from app.schemas.leave import LeaveTypeBrief, PersonRef
+from app.schemas.leave import LeaveTypeBrief
 from app.schemas.leave_views import CalendarEntry, CalendarRead
+from app.services.leave.people import person_ref
 from app.services.leave.permissions import APPROVE
 from app.services.leave.policies import resolve_member_policy
 from app.services.leave.summary import holiday_schema
@@ -54,7 +55,7 @@ async def calendar_view(
     reports = {who for who, boss in edges if boss == viewer}
     hr = perms.has(APPROVE)
     sees = sees_restricted(perms)
-    names = await UserRepository(db).get_names_by_ids({r.user_id for r in requests})
+    people = await UserRepository(db).get_people_by_ids({r.user_id for r in requests})
     types = await LeaveTypeRepository(db, org_id=org_id).by_ids(
         {r.leave_type_id for r in requests if r.leave_type_id}
     )
@@ -70,7 +71,7 @@ async def calendar_view(
         entries.append(
             CalendarEntry(
                 request_id=r.id,
-                user=PersonRef(user_id=r.user_id, name=names.get(r.user_id, "Someone")),
+                user=person_ref(r.user_id, people, "Someone"),
                 kind=r.kind,
                 start_date=r.start_date,
                 end_date=r.end_date,

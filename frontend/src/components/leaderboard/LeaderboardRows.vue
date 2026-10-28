@@ -21,7 +21,7 @@
     <ol>
       <li v-for="e in entries" :key="e.key" class="lb-rows__row" :class="{ 'lb-rows__row--me': e.isMe }">
         <span class="lb-rows__rank">{{ e.rank }}</span>
-        <AppMonogram :name="e.name" />
+        <AppMonogram :name="e.name" :src="e.avatarUrl" />
         <span class="lb-rows__who">
           <span class="lb-rows__name">{{ e.name }}<span v-if="e.isMe" class="lb-rows__you"> (you)</span></span>
           <span v-if="e.note" class="lb-rows__note">{{ e.note }}</span>

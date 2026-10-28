@@ -36,6 +36,7 @@ class LeaderboardRow:
     distance_m: int
     finish_time_ms: int | None
     finished_at: object  # datetime — typed loose to avoid circular import
+    avatar_url: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -122,6 +123,7 @@ class RaceResultRepository:
             select(
                 RaceResult.user_id,
                 User.name,
+                User.avatar_url,
                 RaceResult.distance_m,
                 RaceResult.finish_time_ms,
                 RaceResult.finished_at,
@@ -142,6 +144,7 @@ class RaceResultRepository:
                 distance_m=row.distance_m,
                 finish_time_ms=row.finish_time_ms,
                 finished_at=row.finished_at,
+                avatar_url=row.avatar_url,
             )
             for row in result.all()
         ]

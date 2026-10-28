@@ -29,6 +29,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.deps import require_permissions
+from app.core.paths import NO_NUL_PATTERN
 from app.schemas.settings import LocalRepoBranches
 from app.schemas.setup import BrowseDirectoriesResponse
 from app.services.directory_listing import in_clone_root, list_subdirectories, picker_roots
@@ -45,7 +46,11 @@ _OUTSIDE_ROOTS = "Path is outside the directories the repository picker may brow
 
 @router.get("/repos/browse-directories", response_model=BrowseDirectoriesResponse)
 async def browse_directories(
-    path: str = Query(default="", description="Directory path to list. Defaults to home."),
+    path: str = Query(
+        default="",
+        pattern=NO_NUL_PATTERN,
+        description="Directory path to list. Defaults to home.",
+    ),
 ) -> BrowseDirectoriesResponse:
     """List subdirectories at a given path for the folder picker.
 
@@ -80,12 +85,14 @@ async def browse_directories(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_OUTSIDE_ROOTS)
     target = Path(candidate)
 
-    if not target.exists():
+    # os.path, not Path: it reads a name too long for the filesystem as
+    # missing rather than raising.
+    if not os.path.exists(target):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Path does not exist: {target}",
         )
-    if not target.is_dir():
+    if not os.path.isdir(target):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Path is not a directory: {target}",
@@ -110,7 +117,9 @@ async def browse_directories(
 
 @router.get("/repos/local-branches", response_model=LocalRepoBranches)
 async def get_local_repo_branches(
-    path: str = Query(..., description="Absolute path to a git repository"),
+    path: str = Query(
+        ..., pattern=NO_NUL_PATTERN, description="Absolute path to a git repository"
+    ),
 ) -> LocalRepoBranches:
     """List branches of a local checkout and guess its main/develop branches.
 
@@ -134,7 +143,7 @@ async def get_local_repo_branches(
     if in_clone_root(candidate):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_OUTSIDE_ROOTS)
     repo_path = Path(candidate)
-    if not repo_path.exists() or not (repo_path / ".git").exists():
+    if not os.path.exists(repo_path / ".git"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Not a git repository: {path}",
