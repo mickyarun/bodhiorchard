@@ -24,6 +24,7 @@ from httpx import AsyncClient
 
 from app.models.bud import BUDStatus
 from app.models.bud_agent_task import AgentTaskStatus
+from app.models.user import User
 from app.schemas.jobs import JobState
 from app.services import job_queue
 from tests.fakes.claude_runner import FakeClaudeRunner
@@ -67,7 +68,10 @@ async def test_cancel_route_stops_a_running_job_and_the_worker_carries_on(
 
     assert response.status_code == 200
     reason = response.json()["statusMessage"]
-    assert reason.startswith("Cancelled by owner-") and reason.endswith("@acme.dev")
+    async with app_sessions() as db:
+        owner = await db.get(User, org.owner_id)
+    assert owner is not None
+    assert reason == f"Cancelled by {owner.email}"
     assert (job.state, job.error, job.status_message) == (JobState.CANCELLED, reason, "Cancelled")
     task = await load_task(app_sessions, run.task_id)
     assert (task.status, task.error_message) == (AgentTaskStatus.FAILED, reason)

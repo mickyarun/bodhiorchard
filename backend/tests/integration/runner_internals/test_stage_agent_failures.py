@@ -16,11 +16,15 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from app.models.bud import BUDStatus
 from app.models.bud_agent_task import AgentTaskStatus
 from app.schemas.jobs import JobState
+from app.services import bud_agent_handler
+from app.services.claude_runner import ClaudeRunnerConfig
 from tests.fakes.claude_runner import FakeClaudeRunner
 from tests.fakes.claude_script import AgentScript, ToolCall
 from tests.fakes.seed import Factory
@@ -66,9 +70,23 @@ async def test_non_zero_exit_fails_the_task_with_the_cli_error(
 
 
 async def test_timeout_kills_the_agent_and_surfaces_the_timeout_code(
-    stage_claude: FakeClaudeRunner, app_sessions: Factory, job_runtime: JobRuntime
+    stage_claude: FakeClaudeRunner,
+    app_sessions: Factory,
+    job_runtime: JobRuntime,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A hung CLI is killed; the task fails with the 600 s stage deadline in the message."""
+    """A hung CLI is killed at the deadline; the task fails with the timeout code.
+
+    The stage asks for 600 s; the config is shortened to 1 s so the real
+    ``wait_for`` deadline fires quickly.
+    """
+    requested: list[int] = []
+
+    def short_deadline(**options: Any) -> ClaudeRunnerConfig:
+        requested.append(options["timeout_seconds"])
+        return ClaudeRunnerConfig(**{**options, "timeout_seconds": 1})
+
+    monkeypatch.setattr(bud_agent_handler, "ClaudeRunnerConfig", short_deadline)
     org = await seed_agent_org(app_sessions)
     bud = await add_bud(app_sessions, org.org_id, status=BUDStatus.CLOSED)
     stage_claude.enqueue(AgentScript.timeout(ToolCall("get_bud_context", {"limit": 1})))
@@ -77,7 +95,8 @@ async def test_timeout_kills_the_agent_and_surfaces_the_timeout_code(
     job = await job_runtime.wait(run.job_id)
 
     assert (job.state, job.error_code) == (JobState.FAILED, "timeout")
-    assert "600 seconds" in (job.error or "")
+    assert requested == [600]
+    assert "1 second" in (job.error or "")
     (agent_run,) = stage_runs(stage_claude)
     assert agent_run.killed is True
     assert [c.status_code for c in agent_run.tool_calls] == [200]
