@@ -25,9 +25,7 @@
         class="user-menu d-flex align-center ga-2 pa-2 rounded-lg cursor-pointer"
         :class="{ 'user-menu--rail': rail }"
       >
-        <v-avatar size="32" color="primary" variant="tonal">
-          <span class="text-caption font-weight-bold">{{ userInitials }}</span>
-        </v-avatar>
+        <AppMonogram :name="authStore.user?.name" :size="32" />
         <template v-if="!rail">
           <div class="flex-grow-1 overflow-hidden">
             <div class="text-body-2 font-weight-medium text-truncate">
@@ -102,8 +100,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useRouter } from 'vue-router'
+import AppMonogram from '@/components/common/AppMonogram.vue'
 import { useAuthStore } from '@/stores/auth'
 import { usePermissions } from '@/composables/usePermissions'
 import { useThemePreference, type ThemePreference } from '@/composables/useThemePreference'
@@ -121,16 +119,6 @@ const THEME_OPTIONS: { value: ThemePreference; label: string; icon: string; hint
   { value: 'light', label: 'Light', icon: 'mdi-weather-sunny', hint: 'Light theme' },
   { value: 'dark', label: 'Dark', icon: 'mdi-weather-night', hint: 'Dark theme' },
 ]
-
-const userInitials = computed(() => {
-  const name = authStore.user?.name || ''
-  return name
-    .split(' ')
-    .map(w => w[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2) || '?'
-})
 
 function handleLogout(): void {
   authStore.logout()
