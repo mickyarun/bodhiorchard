@@ -17,6 +17,7 @@
  * debounced server preview (only the latest counts), the date clamps, and
  * when Send is allowed. Timers and "today" are faked.
  */
+import { flushPromises } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, type EffectScope } from 'vue'
 import type { LeavePreview, LeaveRequestCreate } from '@/types/leave'
@@ -125,7 +126,24 @@ describe('preview', () => {
     expect(f.canSend.value).toBe(true)
   })
 
-  it('drops a reply that a newer edit overtook', async () => {
+  it('drops a reply that a newer edit overtook, even when it lands last', async () => {
+    let answerOld: (v: unknown) => void = () => undefined
+    preview.mockImplementationOnce(() => new Promise(resolve => { answerOld = resolve }))
+    const f = form()
+    f.reset('wfh')
+    await previewSettles()
+    f.endDate.value = '2026-10-30'
+    await previewSettles()
+    expect(preview).toHaveBeenCalledTimes(2)
+    expect(f.preview.value).toEqual(OK)
+
+    answerOld({ data: { days: '9', problems: [] }, error: '' })
+    await flushPromises()
+    expect(f.preview.value).toEqual(OK)
+    expect(f.canSend.value).toBe(true)
+  })
+
+  it('keeps waiting for the newer preview when the older one answers first', async () => {
     let answerOld: (v: unknown) => void = () => undefined
     preview.mockImplementationOnce(() => new Promise(resolve => { answerOld = resolve }))
     const f = form()
@@ -134,9 +152,10 @@ describe('preview', () => {
     f.endDate.value = '2026-10-30'
     await nextTick()
     answerOld({ data: { days: '9', problems: [] }, error: '' })
-    await previewSettles()
-    expect(f.preview.value).toEqual(OK)
-    expect(f.previewing.value).toBe(false)
+    await flushPromises()
+    expect(f.preview.value).toBeNull()
+    expect(f.previewing.value).toBe(true)
+    expect(f.canSend.value).toBe(false)
   })
 
   it('does not re-run for a change of reason', async () => {

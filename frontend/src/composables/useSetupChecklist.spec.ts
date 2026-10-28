@@ -17,7 +17,7 @@
  * running scan live, stays hidden once dismissed, and comes back when the
  * org is reset. Timers are faked; the socket and scan store are stubs.
  */
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h as render } from 'vue'
 import type { SetupChecklistStatus } from '@/types/setup'
@@ -63,6 +63,7 @@ beforeEach(() => {
   h.scan.aggregateStatus = 'idle'
 })
 
+enableAutoUnmount(afterEach)
 afterEach(() => vi.useRealTimers())
 
 describe('useSetupChecklist', () => {
@@ -134,11 +135,20 @@ describe('useSetupChecklist', () => {
     expect(h.startTracking).toHaveBeenCalledOnce()
   })
 
-  it('reports a failed scan only when nothing is running', async () => {
+  it('reports a failed scan when nothing is running', async () => {
     h.scan.aggregateStatus = 'failed'
     h.get.mockResolvedValue({ data: status({ scanComplete: false }) })
     const { card } = await mountCard()
     expect(card.scanFailed.value).toBe(true)
+  })
+
+  it('does not report the last scan as failed while a new one runs', async () => {
+    h.scan.aggregateStatus = 'failed'
+    h.get.mockResolvedValue({ data: status({ scanComplete: false }) })
+    h.scan.resume.mockResolvedValue('scan-2')
+    const { card } = await mountCard()
+    await card.resumeScan()
+    expect(card.scanFailed.value).toBe(false)
   })
 
   it('keeps the last state when a poll fails', async () => {

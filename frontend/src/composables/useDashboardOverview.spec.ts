@@ -17,7 +17,7 @@
  * size, upcoming time off (the next three weeks, leave only, soonest
  * first) and each card's error. "Today" is frozen.
  */
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h as render, reactive } from 'vue'
 
@@ -64,6 +64,7 @@ beforeEach(() => {
   h.get.mockResolvedValue({ data: { entries: [] } })
 })
 
+enableAutoUnmount(afterEach)
 afterEach(() => vi.useRealTimers())
 
 describe('useDashboardOverview', () => {

@@ -18,8 +18,8 @@
  * arrive, and a new notification refetches the list. Mounted in a host
  * component so its onMounted loads run.
  */
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h as render, nextTick, reactive, ref, type Ref } from 'vue'
 
 const h = vi.hoisted(() => ({
@@ -59,6 +59,8 @@ function mountBoard(): ReturnType<typeof useBudBoard> {
   mount(defineComponent({ setup() { board = useBudBoard(); return () => render('div') } }))
   return board
 }
+
+enableAutoUnmount(afterEach)
 
 beforeEach(() => {
   vi.clearAllMocks()

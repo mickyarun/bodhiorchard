@@ -17,6 +17,7 @@
  * wins, otherwise the BUD's stage), and a load overtaken by a move to
  * another BUD stopping before it touches the page or the live channel.
  */
+import { flushPromises } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, effectScope, nextTick, reactive, ref, type EffectScope } from 'vue'
 import type { BUDDocument, BUDStatus } from '@/types'
@@ -50,18 +51,19 @@ const hooks = {
   onLearningRecorded: vi.fn(),
 }
 
-/** fetchBUD resolves per id when the test says so, and then shows that BUD. */
+/**
+ * fetchBUD resolves per id when the test says so. ``shows`` puts that BUD
+ * on the page; what the store shows for an overtaken load is the store's
+ * concern (stores/bud), so those tests leave the page alone.
+ */
 const pending = new Map<string, () => void>()
-function arriving(id: string, status: BUDStatus): void {
+function arriving(id: string, status: BUDStatus, shows = true): void {
   h.fetchBUD.mockImplementationOnce(() => new Promise<void>(resolve => {
     pending.set(id, () => {
-      current.value = { id, status } as unknown as BUDDocument
+      if (shows) current.value = { id, status } as unknown as BUDDocument
       resolve()
     })
   }))
-}
-async function settle(): Promise<void> {
-  for (let i = 0; i < 5; i++) await Promise.resolve()
 }
 
 let scope: EffectScope
@@ -88,7 +90,7 @@ describe('useBudDetailLoader', () => {
     arriving('A', 'testing')
     open('A')
     pending.get('A')!()
-    await settle()
+    await flushPromises()
     expect(activeTab.value).toBe('testing')
     expect(h.channel.connect).toHaveBeenCalledWith('A')
     expect(h.fetchMembers).toHaveBeenCalled()
@@ -101,7 +103,7 @@ describe('useBudDetailLoader', () => {
     open('A', { tab })
     expect(activeTab.value).toBe(tab)
     pending.get('A')!()
-    await settle()
+    await flushPromises()
     expect(activeTab.value).toBe(tab)
   })
 
@@ -109,7 +111,7 @@ describe('useBudDetailLoader', () => {
     arriving('A', 'code_review')
     open('A', { tab: 'nonsense' })
     pending.get('A')!()
-    await settle()
+    await flushPromises()
     expect(activeTab.value).not.toBe('nonsense')
   })
 
@@ -117,12 +119,12 @@ describe('useBudDetailLoader', () => {
     arriving('A', 'discarded')
     open('A')
     pending.get('A')!()
-    await settle()
+    await flushPromises()
     expect(activeTab.value).toBe('closed')
   })
 
   it('stops a load that a move to another BUD overtook', async () => {
-    arriving('A', 'testing')
+    arriving('A', 'testing', false)
     arriving('B', 'design')
     open('A')
     h.route.params.id = 'B'
@@ -130,9 +132,9 @@ describe('useBudDetailLoader', () => {
     expect(h.channel.disconnect).toHaveBeenCalledTimes(2)
 
     pending.get('B')!()
-    await settle()
+    await flushPromises()
     pending.get('A')!()
-    await settle()
+    await flushPromises()
 
     expect(activeTab.value).toBe('design')
     expect(h.channel.connect).toHaveBeenCalledTimes(1)
@@ -146,7 +148,7 @@ describe('useBudDetailLoader', () => {
     arriving('A', 'bud')
     open('A')
     pending.get('A')!()
-    await settle()
+    await flushPromises()
     expect(h.settings.fetchConnections).not.toHaveBeenCalled()
     expect(h.settings.fetchRepos).not.toHaveBeenCalled()
   })
@@ -155,7 +157,7 @@ describe('useBudDetailLoader', () => {
     h.fetchBUD.mockResolvedValueOnce(undefined)
     activeTab.value = 'design'
     open('A')
-    await settle()
+    await flushPromises()
     expect(activeTab.value).toBe('design')
   })
 
@@ -163,11 +165,11 @@ describe('useBudDetailLoader', () => {
     arriving('A', 'bud')
     const loader = open('A')
     pending.get('A')!()
-    await settle()
+    await flushPromises()
     arriving('A', 'design')
     loader.reload()
     pending.get('A')!()
-    await settle()
+    await flushPromises()
     expect(h.fetchBUD).toHaveBeenCalledTimes(2)
     expect(h.channel.connect).toHaveBeenCalledTimes(2)
     expect(activeTab.value).toBe('design')

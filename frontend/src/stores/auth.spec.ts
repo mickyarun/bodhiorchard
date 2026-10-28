@@ -18,7 +18,7 @@
  * ``.spec.ts`` for jsdom's localStorage.
  */
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/services/api', () => ({ default: { get: vi.fn(), post: vi.fn() } }))
 
@@ -34,6 +34,9 @@ function httpError(status: number, detail?: unknown): Error {
   return Object.assign(new Error(`status ${status}`), { response: { status, data: { detail } } })
 }
 
+/** Refresh listeners each new store adds to window; removed after each test. */
+let added: [string, EventListenerOrEventListenerObject][] = []
+
 beforeEach(() => {
   localStorage.clear()
   sessionStorage.clear()
@@ -41,6 +44,17 @@ beforeEach(() => {
   post.mockReset()
   get.mockResolvedValue({ data: ME })
   setActivePinia(createPinia())
+  const addEventListener = window.addEventListener.bind(window)
+  vi.spyOn(window, 'addEventListener').mockImplementation((type, listener, options) => {
+    added.push([type, listener])
+    addEventListener(type, listener, options)
+  })
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  for (const [type, listener] of added) window.removeEventListener(type, listener)
+  added = []
 })
 
 describe('login', () => {
@@ -68,7 +82,6 @@ describe('login', () => {
     const auth = useAuthStore()
     expect(await auth.login('ana@example.com', 'temp-pass', 'acme')).toBe(true)
     expect(auth.mustChangePassword).toBe(true)
-    // No refresh token in the reply: nothing stale is written.
     expect(localStorage.getItem('bodhiorchard_refresh_token')).toBeNull()
   })
 

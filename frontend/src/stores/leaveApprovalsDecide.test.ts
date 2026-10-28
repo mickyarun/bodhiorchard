@@ -87,12 +87,12 @@ describe('approve and reject', () => {
   })
 
   it('explains a request decided elsewhere and reloads the queue', async () => {
-    const store = await storeWith([item('r1', 'Ravi')])
-    get.mockClear()
+    const store = await storeWith([item('r1', 'Ravi'), item('r2', 'Asha')])
+    get.mockResolvedValue({ data: { items: [item('r2', 'Asha')], truncated: false } })
     post.mockRejectedValue(axios409('Already approved by Asha'))
     expect(await store.approve('r1', '')).toBe('Already approved by Asha')
     expect(store.notice).toBe('Already approved by Asha')
-    expect(get).toHaveBeenCalledWith('/v1/leave/approvals', expect.anything())
+    await vi.waitFor(() => expect(store.items.map(i => i.request.id)).toEqual(['r2']))
     expect(h.fetchApprovalCount).toHaveBeenCalled()
   })
 
