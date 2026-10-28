@@ -118,14 +118,6 @@ async def test_switching_to_subscription_hands_the_next_job_only_the_token(
     assert API_KEY not in logged and OAUTH not in logged
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "host mode keeps an ANTHROPIC_API_KEY the app itself injected, so switching "
-        "api_key → host still runs on the old key; fixed by branch "
-        "fix/host-mode-drops-injected-key"
-    ),
-)
 @pytest.mark.usefixtures("cred_tap")
 async def test_switching_back_to_host_stops_using_the_saved_key(
     stage_claude: FakeClaudeRunner,

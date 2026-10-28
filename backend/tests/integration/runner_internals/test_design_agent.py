@@ -128,13 +128,6 @@ async def test_designer_that_never_writes_fails_the_design_and_the_job(
     assert "ai_agent_failed" in events
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "the output fallback reads 'success' but write_bud_design answers 'saved', "
-        "so a recovered wireframe is reported failed; fixed by branch fix/design-fallback-saved"
-    ),
-)
 async def test_designer_reply_with_a_whole_document_is_saved_without_the_tool(
     stage_claude: FakeClaudeRunner,
     client: AsyncClient,

@@ -126,13 +126,6 @@ async def test_quiet_stretch_after_a_tool_flips_to_the_generating_message(
     ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "the heartbeat timer is never cancelled when the run ends, so it overwrites the "
-        "finished job's message; fixed by branch fix/progress-heartbeat-after-run"
-    ),
-)
 async def test_heartbeat_does_not_overwrite_a_finished_job(
     job_id: str, event_recorder: EventRecorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
