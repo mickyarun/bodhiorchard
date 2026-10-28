@@ -169,6 +169,7 @@ async def get_leaderboard(
                 user_name=row.user_name,
                 best_score=row.wins,
                 plays=row.matches,
+                avatar_url=row.avatar_url,
             )
             for row in rows
         ]

@@ -71,6 +71,7 @@ class LeaderboardEntry(BaseModel):
     user_name: str
     best_score: int
     plays: int
+    avatar_url: str | None = None
 
 
 class MinigameLeaderboardRead(BaseModel):
