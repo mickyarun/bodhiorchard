@@ -37,6 +37,7 @@ from app.api.v1.bud_workflows import router as workflows_router
 from app.core.deps import get_current_user, get_db, get_user_permissions, require_permissions
 from app.database import AsyncSessionLocal
 from app.models.bud import (
+    BUDDesign,
     BUDDesignStatus,
     BUDDocument,
     BUDStatus,
@@ -1890,62 +1891,117 @@ async def retry_agent_task(
                 detail="No design rows found. Use Generate instead of Retry.",
             )
 
-        # Re-enqueue each failed/stuck design (same pattern as regenerate_design)
-        first_job_id: str | None = None
-        for design in designs:
-            if design.status not in (BUDDesignStatus.FAILED, BUDDesignStatus.GENERATING):
-                continue
-            design.status = BUDDesignStatus.GENERATING
-
-            payload = DesignAgentJobPayload(
-                org_id=str(current_user.org_id),
-                bud_id=str(bud_id),
-                bud_number=bud.bud_number,
-                title=bud.title,
-                requirements_md=bud.requirements_md or "",
-                repo_id=str(design.repo_id) if design.repo_id else None,
-                design_id=str(design.id),
-                skill_id=str(old_task.skill_id) if old_task.skill_id else None,
-                task_id=str(new_task.id),
-            )
-            job = create_job(
-                JOB_DESIGN_AGENT,
-                payload=payload.model_dump(),
-                user_id=str(current_user.id),
-            )
-            design.job_id = job.job_id
-            if first_job_id is None:
-                first_job_id = job.job_id
-
-        if first_job_id is None:
+        to_retry = [
+            d for d in designs if d.status in (BUDDesignStatus.FAILED, BUDDesignStatus.GENERATING)
+        ]
+        if not to_retry:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="No failed designs to retry.",
             )
-        new_task.job_id = first_job_id
+        # Commit the rows a design job reads and writes BEFORE enqueueing.
+        # The worker runs in its own session; a job that finishes before our
+        # commit would otherwise have its READY row and its task's terminal
+        # status overwritten by this request's GENERATING / RUNNING.
+        for design in to_retry:
+            design.status = BUDDesignStatus.GENERATING
         new_task.status = AgentTaskStatus.RUNNING
+        await db.commit()
+
+        queued: list[tuple[BUDDesign, str]] = []
+        try:
+            for design in to_retry:
+                payload = DesignAgentJobPayload(
+                    org_id=str(current_user.org_id),
+                    bud_id=str(bud_id),
+                    bud_number=bud.bud_number,
+                    title=bud.title,
+                    requirements_md=bud.requirements_md or "",
+                    repo_id=str(design.repo_id) if design.repo_id else None,
+                    design_id=str(design.id),
+                    skill_id=str(old_task.skill_id) if old_task.skill_id else None,
+                    task_id=str(new_task.id),
+                )
+                job = create_job(
+                    JOB_DESIGN_AGENT,
+                    payload=payload.model_dump(),
+                    user_id=str(current_user.id),
+                )
+                queued.append((design, job.job_id))
+        except Exception as exc:
+            await _fail_unqueued_design_retry(db, to_retry, queued, new_task, exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Job queue unavailable; please retry",
+            ) from exc
+
+        # Only the job ids are written now; each job owns its row's status.
+        for design, job_id in queued:
+            design.job_id = job_id
+        new_task.job_id = queued[0][1]
         await db.commit()
         await db.refresh(new_task)
         return BUDAgentTaskRead.model_validate(new_task)
     else:
-        job = create_job(
-            JOB_BUD_AGENT,
-            payload=BUDAgentTaskPayload(
-                org_id=str(current_user.org_id),
-                bud_id=str(bud_id),
-                task_id=str(new_task.id),
-            ).model_dump(),
-            user_id=str(current_user.id),
-        )
+        # Commit BEFORE enqueueing. The worker opens its own session at READ
+        # COMMITTED and otherwise races us to a row that isn't visible yet,
+        # failing the retry with "Agent task not found" — pattern documented
+        # in bud_agent_trigger.py.
+        await db.commit()
+        await db.refresh(new_task)
+        try:
+            job = create_job(
+                JOB_BUD_AGENT,
+                payload=BUDAgentTaskPayload(
+                    org_id=str(current_user.org_id),
+                    bud_id=str(bud_id),
+                    task_id=str(new_task.id),
+                ).model_dump(),
+                user_id=str(current_user.id),
+            )
+        except Exception as exc:
+            # The committed PENDING row would hold the one-active-task slot
+            # and block every later retry; mark it failed before answering.
+            new_task.status = AgentTaskStatus.FAILED
+            new_task.error_message = f"Failed to enqueue agent job: {exc}"
+            await db.commit()
+            logger.exception("agent_task_retry_enqueue_failed", task_id=str(new_task.id))
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Job queue unavailable; please retry",
+            ) from exc
 
+    # Only the job id is written here. The handler owns the task's status
+    # from the moment the job is queued (it may already have failed it);
+    # same split as bud_agent_trigger.create_agent_task_for_stage.
     new_task.job_id = job.job_id
-    new_task.status = AgentTaskStatus.RUNNING
-
-    # Single atomic commit — must happen before return so the worker can read the task
     await db.commit()
     await db.refresh(new_task)
 
     return BUDAgentTaskRead.model_validate(new_task)
+
+
+async def _fail_unqueued_design_retry(
+    db: AsyncSession,
+    designs: list[BUDDesign],
+    queued: list[tuple[BUDDesign, str]],
+    task: BUDAgentTask,
+    exc: Exception,
+) -> None:
+    """Fail the design rows whose job never got queued (and the task if none did)."""
+    queued_ids = {design.id for design, _ in queued}
+    for design in designs:
+        if design.id not in queued_ids:
+            design.status = BUDDesignStatus.FAILED
+    for design, job_id in queued:
+        design.job_id = job_id
+    if queued:
+        task.job_id = queued[0][1]
+    else:
+        task.status = AgentTaskStatus.FAILED
+        task.error_message = f"Failed to enqueue agent job: {exc}"
+    await db.commit()
+    logger.exception("design_retry_enqueue_failed", task_id=str(task.id))
 
 
 @router.delete(
