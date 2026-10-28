@@ -84,9 +84,9 @@ async def handle_interaction(
 
 
 async def _actor(db: AsyncSession, org_id: uuid.UUID, slack_user: str) -> Actor | None:
-    found = await UserRepository(db).get_by_slack_id_with_role(org_id, slack_user)
     # Same bar as signing in: active, and not waiting to replace a temporary password.
-    if found is None or not found[0].is_active or found[0].must_change_password:
+    found = await UserRepository(db).get_active_by_slack_id_with_role(org_id, slack_user)
+    if found is None:
         return None
     perms = await member_permission_set(db, found[0].id, org_id)
     return Actor(user=found[0], perms=perms) if perms is not None else None

@@ -299,6 +299,24 @@ class UserRepository(BaseRepository[User]):
             return None
         return (rows[0][0], _role_from_name(rows[0][1]))
 
+    async def get_active_by_slack_id_with_role(
+        self, org_id: uuid.UUID, slack_id: str
+    ) -> tuple[User, UserRole | None] | None:
+        """Like :meth:`get_by_slack_id_with_role`, for a member allowed to act.
+
+        This is the lookup for authorising a Slack action (an approval
+        reaction, a button click): the member must clear the same bar as
+        signing in, so a deactivated account, or one still waiting to
+        replace a temporary password, matches nobody. The role is the
+        member's role in ``org_id`` only, never one held in another org.
+        The ambiguity rule runs first, so an inactive duplicate of a Slack
+        id still makes the active one ambiguous rather than picking it.
+        """
+        found = await self.get_by_slack_id_with_role(org_id, slack_id)
+        if found is None or not found[0].is_active or found[0].must_change_password:
+            return None
+        return found
+
     async def list_in_org_by_ids_with_role(
         self, org_id: uuid.UUID, user_ids: list[uuid.UUID]
     ) -> list[tuple[User, UserRole | None, str | None]]:

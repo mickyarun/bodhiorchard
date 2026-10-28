@@ -126,7 +126,7 @@ async def handle_bug_approval(
 
     # Resolve the reactor and verify the PM/admin role before either
     # decision: discarding a report is as much a decision as filing it.
-    row = await UserRepository(db).get_by_slack_id_with_role(org.id, approver_slack_id)
+    row = await UserRepository(db).get_active_by_slack_id_with_role(org.id, approver_slack_id)
     if not row:
         await slack_client.chat_post_message(
             bot_token,
