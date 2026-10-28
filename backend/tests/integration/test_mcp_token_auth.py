@@ -32,22 +32,19 @@ from app.mcp.auth import create_internal_mcp_token
 from app.models.user import OrgToUser, User
 from app.models.user_mcp_token import UserMCPToken
 from tests.integration.leave_support import give_role
-from tests.integration.mcp_support import (
-    Factory,
+from tests.integration.mcp_seed import (
     add_bud,
-    call,
-    drain_background,
-    isolate_side_channels,
     make_tenant,
     set_org_token,
 )
+from tests.integration.mcp_support import (
+    Factory,
+    call,
+    drain_background,
+    mcp_env,  # noqa: F401
+)
 
-pytestmark = pytest.mark.integration
-
-
-@pytest.fixture(autouse=True)
-def _side_channels(monkeypatch: pytest.MonkeyPatch, pg_session_factory: Factory) -> None:
-    isolate_side_channels(monkeypatch, pg_session_factory)
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("mcp_env")]
 
 
 async def test_valid_user_token_reads_own_org_and_records_last_use(
@@ -170,6 +167,7 @@ async def test_org_level_token_reads_but_cannot_write(
 
     assert read.status_code == 200
     assert [b["title"] for b in read.json()["buds"]] == ["Org visible"]
+    assert (create.status_code, takeover.status_code) == (200, 200)
     assert create.json()["code"] == "user_token_required"
     assert takeover.json()["success"] is False
     assert "per-user" in takeover.json()["error"]

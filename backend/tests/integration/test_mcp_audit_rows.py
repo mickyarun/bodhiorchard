@@ -25,20 +25,17 @@ import pytest
 from httpx import AsyncClient
 
 from app.mcp.auth import create_internal_mcp_token
+from tests.integration.mcp_seed import (
+    make_tenant,
+)
 from tests.integration.mcp_support import (
     Factory,
     audit_rows,
     call,
-    isolate_side_channels,
-    make_tenant,
+    mcp_env,  # noqa: F401
 )
 
-pytestmark = pytest.mark.integration
-
-
-@pytest.fixture(autouse=True)
-def _side_channels(monkeypatch: pytest.MonkeyPatch, pg_session_factory: Factory) -> None:
-    isolate_side_channels(monkeypatch, pg_session_factory)
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("mcp_env")]
 
 
 async def test_success_row_names_caller_and_keeps_allowlisted_params(
@@ -71,6 +68,7 @@ async def test_soft_error_result_is_still_a_200_row(
 
     response = await call(client, tenant.token, "get_bud_by_id", {"bud_number": 404})
 
+    assert response.status_code == 200
     assert response.json()["code"] == "not_found"
     (row,) = await audit_rows(pg_session_factory, tenant.org_id)
     assert (row.tool_name, row.status_code, row.params) == (
@@ -127,7 +125,7 @@ async def test_internal_token_row_has_no_user_or_token(
     )
 
 
-async def test_failed_auth_writes_no_row_for_any_org(
+async def test_failed_auth_writes_no_row_for_the_token_org(
     client: AsyncClient, pg_session_factory: Factory
 ) -> None:
     """An unauthenticated call can't be pinned to an org, so it isn't stored."""

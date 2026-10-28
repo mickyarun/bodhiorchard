@@ -121,6 +121,7 @@ async def test_cancelling_a_running_job_interrupts_only_that_job(spy: QueueSpy) 
     assert cancelled is not None
     assert (cancelled.state, cancelled.error) == (JobState.CANCELLED, "Cancelled by ana@acme.dev")
     assert cleaned_up.is_set()
+    assert spy.states(stuck.job_id) == [JobState.RUNNING, JobState.CANCELLED]
     assert not job_queue.is_job_running(stuck.job_id)
     assert job_queue.get_job(after.job_id).state == JobState.COMPLETED  # type: ignore[union-attr]
 

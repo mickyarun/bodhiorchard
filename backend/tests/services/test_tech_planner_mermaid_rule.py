@@ -28,8 +28,11 @@ from app.services.skill_loader import load_skill
 
 def _mermaid_rules() -> str:
     prompt = load_skill("tech-planner").prompt
-    start = prompt.index("No double quotes inside a label")
-    return prompt[start : prompt.index("\n", start)]
+    marker = "No double quotes inside a label"
+    assert marker in prompt, "tech-planner skill lost its Mermaid quote rule"
+    start = prompt.find(marker)
+    end = prompt.find("\n", start)
+    return prompt[start:] if end == -1 else prompt[start:end]
 
 
 def test_rule_forbids_inner_quotes_and_names_the_escape() -> None:
