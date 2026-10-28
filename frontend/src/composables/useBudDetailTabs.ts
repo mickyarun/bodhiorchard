@@ -85,10 +85,13 @@ export function useBudDetailTabs(bud: ComputedRef<BUDDocument | null>) {
   watch(uatStageEnabled, (enabled) => {
     if (!enabled && activeTab.value === 'uat') activeTab.value = 'prod'
   })
-  // Every status change opens the tab for the new stage.
+  // A status change on the open BUD opens the tab for the new stage. The
+  // first load (and a switch to another BUD) is left to the loader, so a
+  // ?tab= link keeps the tab it asked for.
   watch(
-    () => bud.value?.status,
-    (status) => {
+    () => [bud.value?.id, bud.value?.status] as const,
+    ([id, status], [prevId, prevStatus]) => {
+      if (!id || id !== prevId || !prevStatus || status === prevStatus) return
       if (status && STATUS_TAB_MAP[status]) activeTab.value = STATUS_TAB_MAP[status]
     },
   )
