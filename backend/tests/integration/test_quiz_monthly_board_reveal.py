@@ -31,12 +31,12 @@ from app.models.quiz_score import QuizScore
 from app.repositories.quiz_answer import QuizAnswerRepository
 from tests.integration.leave_support import Factory, give_role, setup_org
 from tests.integration.quiz_support import (
-    RIGHT,
+    CORRECT,
     WRONG,
+    add_quiz,
     answer,
     close_quiz,
     monthly_board,
-    open_quiz,
     points_for,
     reveal_pass,
     use_test_db,
@@ -55,9 +55,9 @@ async def test_a_right_answer_stays_off_the_monthly_board_until_reveal(
         await give_role(pg_session_factory, org, user, "developer")
     today = datetime.now(UTC).date()
     month = today.strftime("%Y-%m")
-    quiz_id = await open_quiz(pg_session_factory, org, quiz_date=today)
+    quiz_id = await add_quiz(pg_session_factory, org, quiz_date=today)
 
-    await answer(client, org, dev, quiz_id, RIGHT)
+    await answer(client, org, dev, quiz_id, CORRECT)
     await answer(client, org, peer, quiz_id, WRONG)
     assert await monthly_board(client, org, peer, month=month) == []
 
@@ -79,8 +79,8 @@ async def test_repeated_and_concurrent_reveal_passes_count_each_answer_once(
     org, (dev,), _ = await setup_org(pg_session_factory, "Dev")
     await give_role(pg_session_factory, org, dev, "developer")
     today = datetime.now(UTC).date()
-    quiz_id = await open_quiz(pg_session_factory, org, quiz_date=today)
-    await answer(client, org, dev, quiz_id, RIGHT)
+    quiz_id = await add_quiz(pg_session_factory, org, quiz_date=today)
+    await answer(client, org, dev, quiz_id, CORRECT)
     await close_quiz(pg_session_factory, quiz_id)
 
     await asyncio.gather(reveal_pass(org), reveal_pass(org))
@@ -110,8 +110,8 @@ async def test_scores_already_counted_at_submit_are_not_counted_again(
         await give_role(pg_session_factory, org, user, "developer")
     today = datetime.now(UTC).date()
     month = today.strftime("%Y-%m")
-    quiz_id = await open_quiz(pg_session_factory, org, quiz_date=today)
-    await answer(client, org, old, quiz_id, RIGHT)
+    quiz_id = await add_quiz(pg_session_factory, org, quiz_date=today)
+    await answer(client, org, old, quiz_id, CORRECT)
     old_points = await points_for(pg_session_factory, quiz_id, old)
     async with pg_session_factory() as db:
         repo = QuizAnswerRepository(db, org_id=org)
@@ -132,7 +132,7 @@ async def test_scores_already_counted_at_submit_are_not_counted_again(
             )
         )
         await db.commit()
-    await answer(client, org, new, quiz_id, RIGHT)
+    await answer(client, org, new, quiz_id, CORRECT)
 
     await close_quiz(pg_session_factory, quiz_id)
     await reveal_pass(org)

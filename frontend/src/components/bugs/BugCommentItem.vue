@@ -20,7 +20,7 @@
 <template>
   <div class="comment-row pa-2" :class="{ 'comment-tombstone': !!comment.deletedAt }">
     <div class="d-flex align-center ga-2 mb-1">
-      <AppMonogram :name="comment.authorName" :size="20" />
+      <AppMonogram :name="comment.authorName" :src="comment.authorAvatarUrl" :size="20" />
       <span class="text-caption font-weight-medium">{{ comment.authorName || 'Unknown' }}</span>
       <span class="text-caption text-medium-emphasis">{{ formatDateTime(comment.createdAt) }}</span>
       <span v-if="comment.editedAt && !comment.deletedAt" class="text-caption text-medium-emphasis">

@@ -14,7 +14,7 @@
  * limitations under the License.
  -->
 
-<!-- Self-service notification settings page. Reached from the user menu
+<!-- Self-service notification settings page. Reached from the account menu
      (My Profile → Notification Settings); reuses NotificationPreferencesCard
      so the profile and this page can never drift. -->
 <template>

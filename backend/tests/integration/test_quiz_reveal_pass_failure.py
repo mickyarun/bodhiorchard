@@ -33,12 +33,12 @@ from app.services import quiz_scheduler
 from app.services.quiz_reveal import reveal_quiz
 from tests.integration.leave_support import Factory, give_role, setup_org
 from tests.integration.quiz_support import (
-    RIGHT,
+    CORRECT,
+    add_quiz,
     answer,
     capture_dms,
     close_quiz,
     monthly_board,
-    open_quiz,
     points_for,
     reveal_pass,
     use_test_db,
@@ -63,10 +63,10 @@ async def test_a_failed_quiz_does_not_silence_the_ones_already_revealed(
     monkeypatch.setattr(quiz_scheduler, "publish", lambda topic, payload: events.append(payload))
     org, (ada,), _ = await setup_org(pg_session_factory, "Ada")
     await give_role(pg_session_factory, org, ada, "developer")
-    first = await open_quiz(pg_session_factory, org, quiz_date=date(2026, 2, 10))
-    second = await open_quiz(pg_session_factory, org, quiz_date=date(2026, 2, 11))
+    first = await add_quiz(pg_session_factory, org, quiz_date=date(2026, 2, 10))
+    second = await add_quiz(pg_session_factory, org, quiz_date=date(2026, 2, 11))
     for quiz_id in (first, second):
-        await answer(client, org, ada, quiz_id, RIGHT)
+        await answer(client, org, ada, quiz_id, CORRECT)
         await close_quiz(pg_session_factory, quiz_id)
     broken = {second}
 

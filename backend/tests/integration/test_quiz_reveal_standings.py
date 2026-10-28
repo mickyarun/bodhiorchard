@@ -31,12 +31,12 @@ from app.models.developer_xp import DeveloperXP
 from app.services import quiz_monthly_rollup
 from tests.integration.leave_support import Factory, give_role, setup_org
 from tests.integration.quiz_support import (
-    RIGHT,
+    CORRECT,
     WRONG,
+    add_quiz,
     answer,
     capture_dms,
     close_quiz,
-    open_quiz,
     points_for,
     reveal_pass,
     use_test_db,
@@ -66,8 +66,8 @@ async def test_the_reveal_dm_ranks_the_points_just_revealed(
     org, (ada, bob), _ = await setup_org(pg_session_factory, "Ada", "Bob")
     for user in (ada, bob):
         await give_role(pg_session_factory, org, user, "developer")
-    quiz_id = await open_quiz(pg_session_factory, org, quiz_date=quiz_date)
-    await answer(client, org, ada, quiz_id, RIGHT)
+    quiz_id = await add_quiz(pg_session_factory, org, quiz_date=quiz_date)
+    await answer(client, org, ada, quiz_id, CORRECT)
     await answer(client, org, bob, quiz_id, WRONG)
 
     await close_quiz(pg_session_factory, quiz_id)
@@ -103,13 +103,13 @@ async def test_the_monthly_prize_waits_for_the_last_reveal_of_the_month(
     org, (ada, bob), _ = await setup_org(pg_session_factory, "Ada", "Bob")
     for user in (ada, bob):
         await give_role(pg_session_factory, org, user, "developer")
-    first = await open_quiz(pg_session_factory, org, quiz_date=date(2026, 1, 29))
-    second = await open_quiz(pg_session_factory, org, quiz_date=date(2026, 1, 30))
-    await answer(client, org, ada, first, RIGHT)
-    await answer(client, org, bob, first, RIGHT)
+    first = await add_quiz(pg_session_factory, org, quiz_date=date(2026, 1, 29))
+    second = await add_quiz(pg_session_factory, org, quiz_date=date(2026, 1, 30))
+    await answer(client, org, ada, first, CORRECT)
+    await answer(client, org, bob, first, CORRECT)
     await close_quiz(pg_session_factory, first)
     await reveal_pass(org)
-    await answer(client, org, ada, second, RIGHT)
+    await answer(client, org, ada, second, CORRECT)
     await answer(client, org, bob, second, WRONG)
 
     assert await settle(org, period_month="2026-01", amount=1.0) == 0

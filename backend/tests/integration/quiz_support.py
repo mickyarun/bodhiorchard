@@ -26,7 +26,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from app.models.quiz import Quiz, QuizStatus
 from app.models.quiz_answer import QuizAnswer
@@ -37,32 +37,49 @@ from app.services.quiz_content import topic_hash
 from tests.integration.leave_support import Factory, as_user
 
 MONTHLY = "/api/v1/quiz/leaderboard"
-RIGHT = {"index": 1}
-WRONG = {"index": 0}
+CHOICES = ["Mercury", "Venus", "Earth"]
+CORRECT = {"index": 1}
+WRONG = {"index": 2}
+EXPLANATION = "Venus is the hottest planet."
 
 
-async def open_quiz(factory: Factory, org: uuid.UUID, *, quiz_date: date) -> uuid.UUID:
-    """An open multiple-choice quiz whose right answer is index 1."""
+async def add_quiz(
+    factory: Factory,
+    org: uuid.UUID,
+    *,
+    opened_hours_ago: float = 1,
+    closes_in_hours: float = 2,
+    status: QuizStatus = QuizStatus.OPEN,
+    quiz_date: date | None = None,
+) -> uuid.UUID:
+    """One multiple-choice quiz whose answer is index 1; returns the quiz id.
+
+    ``quiz_date`` defaults to the day the window opened; pass it to place the
+    quiz in a particular month without moving the window off the real clock.
+    """
     now = datetime.now(UTC)
+    open_at = now - timedelta(hours=opened_hours_ago)
     async with factory() as db:
         question = QuizQuestion(
             org_id=org,
             status=QuizQuestionStatus.USED,
             question_type=QuizQuestionType.MULTIPLE_CHOICE,
             prompt="Which planet is hottest?",
-            payload={"choices": ["Mercury", "Venus"]},
+            payload={"choices": CHOICES},
             answer_key={"correct_index": 1},
+            explanation=EXPLANATION,
             topic_hash=topic_hash(f"planets-{uuid.uuid4()}"),
+            source_refs={"doc": "secret-source"},
         )
         db.add(question)
         await db.flush()
         quiz = Quiz(
             org_id=org,
             question_id=question.id,
-            quiz_date=quiz_date,
-            status=QuizStatus.OPEN,
-            open_at=now - timedelta(hours=1),
-            reveal_at=now + timedelta(hours=2),
+            quiz_date=quiz_date or open_at.date(),
+            status=status,
+            open_at=open_at,
+            reveal_at=now + timedelta(hours=closes_in_hours),
         )
         db.add(quiz)
         await db.commit()
@@ -87,11 +104,9 @@ async def answer(
 async def close_quiz(factory: Factory, quiz_id: uuid.UUID) -> None:
     """End the answer window, leaving the quiz OPEN for the reveal pass."""
     async with factory() as db:
-        await db.execute(
-            update(Quiz)
-            .where(Quiz.id == quiz_id)
-            .values(reveal_at=datetime.now(UTC) - timedelta(minutes=1))
-        )
+        quiz = await db.get(Quiz, quiz_id)
+        assert quiz is not None
+        quiz.reveal_at = datetime.now(UTC) - timedelta(minutes=5)
         await db.commit()
 
 

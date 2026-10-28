@@ -43,7 +43,7 @@
         </v-list-item>
         <v-list-item v-for="m in matches" :key="m.id" :active="assigneeId === m.id" @click="pick(m.id)">
           <template #prepend>
-            <AppMonogram class="assignee-menu__avatar" :name="m.name" :size="28" />
+            <AppMonogram class="assignee-menu__avatar" :name="m.name" :src="m.avatar_url" :size="28" />
           </template>
           <v-list-item-title>{{ m.name }}</v-list-item-title>
           <v-list-item-subtitle>{{ m.email }}</v-list-item-subtitle>

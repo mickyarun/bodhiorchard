@@ -190,6 +190,7 @@ async def get_monthly_leaderboard(
             user_name=r.user_name,
             total_points=r.total_points,
             correct_count=r.correct_count,
+            avatar_url=r.avatar_url,
         )
         for r in rows
     ]
