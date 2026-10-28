@@ -45,7 +45,7 @@
     <p v-else-if="bugs.length === 0" class="bugs-panel__empty">No bugs linked to this BUD</p>
     <ul v-else class="bugs-panel__list">
       <li v-for="bug in bugs" :key="bug.id">
-        <router-link to="/bugs" class="bugs-panel__row">
+        <router-link :to="{ path: '/bugs', query: { budId } }" class="bugs-panel__row">
           <v-chip :color="BUG_SEVERITY_COLORS[bug.severity]" size="x-small" variant="tonal">{{ bug.severity }}</v-chip>
           <span class="bugs-panel__title">{{ bug.title }}</span>
           <v-chip :color="BUG_STATUS_COLORS[bug.status]" size="x-small" variant="tonal">{{ bug.status }}</v-chip>
