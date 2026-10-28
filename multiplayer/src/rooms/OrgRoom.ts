@@ -57,6 +57,7 @@ import {
   verifyUserToken,
   type OrgSnapshotResponse,
 } from "../bridge/BackendClient"
+import { safeLog } from "../bridge/logSanitize"
 import { registerOrgRoom, unregisterOrgRoom } from "../bridge/BridgeEndpoint"
 import { installRaceCreateHandler } from "./OrgRaceHandler"
 import { installBacklashCreateHandler } from "./OrgBacklashHandler"
@@ -345,14 +346,18 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
       if (process.env.NODE_ENV === "production") {
         throw new Error("auth token required")
       }
-      console.warn(`[OrgRoom] dev-mode join without token org=${orgId} userId=${options.userId}`)
+      console.warn(
+        `[OrgRoom] dev-mode join without token org=${safeLog(orgId)} ` +
+          `userId=${safeLog(options.userId)}`,
+      )
       return options
     }
     const result = await verifyUserToken(options.token, orgId)
     if (!result.valid) {
       const reason = result.reason ?? "token_invalid"
       console.warn(
-        `[OrgRoom] auth failed org=${orgId} userId=${options.userId} reason=${reason}`,
+        `[OrgRoom] auth failed org=${safeLog(orgId)} userId=${safeLog(options.userId)} ` +
+          `reason=${reason}`,
       )
       if (reason === "backend_unreachable") {
         throw new Error("auth backend unreachable — is the Python server running?")

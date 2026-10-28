@@ -31,6 +31,7 @@ import { FireflyEngine } from "./minigame/FireflyEngine"
 import { FishingEngine } from "./minigame/FishingEngine"
 import { PollenEngine } from "./minigame/PollenEngine"
 import { postMinigameResults, verifyUserToken } from "../bridge/BackendClient"
+import { safeLog } from "../bridge/logSanitize"
 
 const SIM_TICK_MS = 50
 /** Reap an abandoned room (player left a game open) after this long. */
@@ -69,7 +70,9 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
     const claimedOrg = options.orgId ?? ""
     if (!options.token) {
       if (process.env.NODE_ENV === "production") throw new Error("auth token required")
-      console.warn(`[MinigameRoom] dev-mode join without token userId=${options.userId}`)
+      console.warn(
+        `[MinigameRoom] dev-mode join without token userId=${safeLog(options.userId)}`,
+      )
       return options
     }
     const result = await verifyUserToken(options.token, claimedOrg)

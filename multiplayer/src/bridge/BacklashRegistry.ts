@@ -1,6 +1,8 @@
 // Copyright 2025-2026 Arun Rajkumar
 // Licensed under the Apache License, Version 2.0
 
+import { safeLog } from "./logSanitize"
+
 type DeclineHandler = (userId: string) => void
 
 interface BacklashRoomRegistration {
@@ -65,7 +67,7 @@ function runSummaryHook(roomId: string, operation: string, callback: () => void)
     console.error(
       "[BacklashRegistry] %s hook for room %s failed:",
       operation,
-      roomId.replace(/[\r\n]/g, ""),
+      safeLog(roomId),
       error,
     )
   }
