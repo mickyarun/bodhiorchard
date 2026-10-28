@@ -118,7 +118,7 @@ async def handle_bug_approval(
     embedding, and auto-links to the closest BUD.
     """
     repo = TriageSessionRepository(db, org_id=org.id)
-    session = await repo.get_by_summary_msg(channel, message_ts)
+    session = await repo.get_by_summary_msg_for_update(channel, message_ts)
     if not session or session.session_type != "bug":
         return
     if session.status != TriageStatus.AWAITING_PM:

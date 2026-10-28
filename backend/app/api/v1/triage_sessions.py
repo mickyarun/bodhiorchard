@@ -140,7 +140,7 @@ async def approve_triage_session(
         HTTPException: If the session is not found or not in awaiting_pm status.
     """
     repo = TriageSessionRepository(db, org_id=current_user.org_id)
-    session = await repo.get_by_id(session_id)
+    session = await repo.get_by_id_for_update(session_id)
 
     if session is None:
         raise HTTPException(
@@ -284,7 +284,7 @@ async def reject_triage_session(
         HTTPException: If the session is not found or not in awaiting_pm status.
     """
     repo = TriageSessionRepository(db, org_id=current_user.org_id)
-    session = await repo.get_by_id(session_id)
+    session = await repo.get_by_id_for_update(session_id)
 
     if session is None:
         raise HTTPException(
