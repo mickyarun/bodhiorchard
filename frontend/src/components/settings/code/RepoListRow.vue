@@ -150,8 +150,8 @@ import ScanRowTrack from './ScanRowTrack.vue'
 import {
   type LastScanSummary,
   STATUS_PRESENTATION,
-  formatRelative,
 } from './repoListRow.util'
+import { relativeTime } from '@/utils/date'
 import type { RepoInfo } from '@/types'
 import type { RepoRunRow } from '@/stores/reposcanv2Scans'
 
@@ -187,7 +187,7 @@ const lastScan = computed<LastScanSummary | null>(() => {
     label: presentation.label,
     color: presentation.color,
     icon: presentation.icon,
-    relativeTime: ts ? formatRelative(ts) : 'never',
+    relativeTime: ts ? relativeTime(ts, new Date(), { older: 'span' }) : 'never',
     featureCount: props.repo.lastScanFeatureCount ?? null,
   }
 })

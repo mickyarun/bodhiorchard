@@ -16,32 +16,23 @@
  * State for the AI provider settings: the capability table, the saved
  * choice, the edits on screen, save and the connection test. Endpoints:
  * GET /v1/settings/ai/capabilities, GET+PATCH /v1/settings/claude and
- * POST /v1/settings/claude/test.
+ * POST /v1/settings/claude/test (see useAiProviderTest).
  */
 import { computed, ref, watch } from 'vue'
 import type { ProviderCaps } from '@/constants/aiProviders'
 import api from '@/services/api'
+import { authTiles, canSaveProvider, recommendedMode } from '@/utils/aiProviderOptions'
 import {
-  authTiles,
-  canSaveProvider,
-  recommendedMode,
-  testOutcome,
-  type ProviderTestResult,
-} from '@/utils/aiProviderOptions'
-import type { ProviderTest } from '@/utils/integrations'
+  buildSavePayload,
+  hasUnsavedEdits,
+  testRequestBody,
+  type AiProviderEdits,
+  type SavedSettings,
+} from '@/utils/aiProviderSettings'
+import { useAiProviderTest } from './useAiProviderTest'
 
 /** Typing a server address probes it; wait for a pause first. */
 const MODEL_PROBE_DEBOUNCE_MS = 600
-const TEST_TIMEOUT_MS = 120_000
-
-interface SavedSettings {
-  provider: string
-  auth_mode: string
-  has_api_key: boolean
-  base_url: string | null
-  model: string | null
-  thinking: boolean
-}
 
 function quietUnlessAuth(label: string, err: unknown): void {
   if ((err as { response?: { status?: number } })?.response?.status !== 401) console.warn(`[ai settings] ${label}`, err)
@@ -61,10 +52,6 @@ export function useAiProviderSettings() {
   const saving = ref(false)
   // The last saved choice, to tell edits apart and to describe the card.
   const saved = ref<SavedSettings | null>(null)
-  const test = ref<ProviderTest>('idle')
-  const testError = ref('')
-  const testVersion = ref('')
-  const showInstallHint = ref(false)
 
   const caps = computed(() => providers.value.find(p => p.provider === provider.value))
   const tiles = computed(() => authTiles(caps.value, deploymentMode.value))
@@ -72,18 +59,19 @@ export function useAiProviderSettings() {
   const requiresSecret = computed(() => mode.value?.requires_secret ?? false)
   const savedCaps = computed(() => providers.value.find(p => p.provider === savedProvider.value))
   const savedMode = computed(() => savedCaps.value?.auth_modes.find(m => m.value === saved.value?.auth_mode))
-  const dirty = computed(() => {
-    const s = saved.value
-    if (!s) return false
-    return (
-      provider.value !== s.provider
-      || authMode.value !== s.auth_mode
-      || baseUrl.value.trim() !== (s.base_url ?? '')
-      || model.value !== (s.model ?? '')
-      || (thinkingChoice.value === 'on') !== s.thinking
-      || credential.value.trim().length > 0
-    )
-  })
+
+  function edits(): AiProviderEdits {
+    return {
+      provider: provider.value,
+      authMode: authMode.value,
+      baseUrl: baseUrl.value,
+      model: model.value,
+      thinking: thinkingChoice.value === 'on',
+      credential: credential.value,
+    }
+  }
+
+  const dirty = computed(() => hasUnsavedEdits(saved.value, edits()))
   const canSave = computed(() =>
     dirty.value && canSaveProvider({
       requiresSecret: requiresSecret.value,
@@ -91,6 +79,10 @@ export function useAiProviderSettings() {
       providerChanged: provider.value !== savedProvider.value,
       typed: credential.value,
     }),
+  )
+
+  const { test, testError, testVersion, showInstallHint, clearOutcome, runTest } = useAiProviderTest(
+    () => testRequestBody(caps.value?.requires_base_url ?? false, edits()),
   )
 
   function applySaved(data: SavedSettings): void {
@@ -114,13 +106,7 @@ export function useAiProviderSettings() {
 
   // Any change to the choice clears an old test result so the tag always
   // describes what is on screen.
-  watch([provider, authMode, credential], () => {
-    if (test.value === 'passed' || test.value === 'failed') {
-      test.value = 'idle'
-      testError.value = ''
-      testVersion.value = ''
-    }
-  })
+  watch([provider, authMode, credential], clearOutcome)
 
   // The model list belongs to whichever server the address points at.
   let probeTimer: ReturnType<typeof setTimeout> | undefined
@@ -166,18 +152,7 @@ export function useAiProviderSettings() {
     saving.value = true
     testError.value = ''
     try {
-      const secret = credential.value.trim()
-      const sendSecret = requiresSecret.value && secret.length > 0
-      const { data } = await api.patch<SavedSettings>('/v1/settings/claude', {
-        provider: provider.value,
-        auth_mode: authMode.value,
-        // Always sent: the backend clears whichever the provider ignores.
-        base_url: baseUrl.value.trim(),
-        model: model.value,
-        thinking: thinkingChoice.value === 'on',
-        ...(sendSecret && authMode.value === 'subscription' ? { oauth_token: secret } : {}),
-        ...(sendSecret && authMode.value !== 'subscription' ? { api_key: secret } : {}),
-      })
+      const { data } = await api.patch<SavedSettings>('/v1/settings/claude', buildSavePayload(edits(), requiresSecret.value))
       applySaved(data)
       credential.value = ''
       await runTest()
@@ -188,33 +163,6 @@ export function useAiProviderSettings() {
       console.warn('[ai settings] save failed', err)
     } finally {
       saving.value = false
-    }
-  }
-
-  function applyTest(data: ProviderTestResult): void {
-    const outcome = testOutcome(data)
-    test.value = outcome.passed ? 'passed' : 'failed'
-    testVersion.value = outcome.passed ? outcome.message : ''
-    testError.value = outcome.passed ? '' : outcome.message
-    showInstallHint.value = outcome.showInstallHint
-  }
-
-  async function runTest(): Promise<void> {
-    test.value = 'checking'
-    testError.value = ''
-    testVersion.value = ''
-    showInstallHint.value = false
-    try {
-      // Test the address on screen, not the last saved one.
-      const body = caps.value?.requires_base_url
-        ? { base_url: baseUrl.value.trim() || undefined, model: model.value || undefined, thinking: thinkingChoice.value === 'on' }
-        : null
-      const { data } = await api.post<ProviderTestResult>('/v1/settings/claude/test', body, { timeout: TEST_TIMEOUT_MS })
-      applyTest(data)
-    } catch (err) {
-      test.value = 'failed'
-      testError.value = 'Could not reach the server to test the provider.'
-      console.warn('[ai settings] test failed', err)
     }
   }
 

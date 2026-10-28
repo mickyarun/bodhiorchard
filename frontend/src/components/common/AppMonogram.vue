@@ -14,25 +14,35 @@
  * limitations under the License.
  -->
 
-<!-- A person's initials on the accent wash. Decorative: the name is always
-     written beside it, so it stays out of the accessibility tree.
-     ``square`` gives the rounded-square shape used for message authors. -->
+<!-- A person's initials on a tonal wash. Decorative by default: the name is
+     usually written beside it, so it stays out of the accessibility tree.
+     Pass ``label`` when it stands alone and must be announced.
+     ``square`` gives the rounded-square shape used for message authors;
+     ``tone="brand"`` uses the indigo brand wash instead of the accent blue. -->
 <template>
   <span
     class="app-monogram"
-    :class="{ 'app-monogram--square': square }"
+    :class="{ 'app-monogram--square': square, 'app-monogram--brand': tone === 'brand' }"
     :style="{ '--size': `${size}px` }"
-    aria-hidden="true"
+    :role="label ? 'img' : undefined"
+    :aria-label="label"
+    :aria-hidden="label ? undefined : 'true'"
   >{{ initialsOf(name || '?') }}</span>
 </template>
 
 <script setup lang="ts">
 import { initialsOf } from '@/utils/avatar'
 
-withDefaults(defineProps<{ name: string | null | undefined; size?: number; square?: boolean }>(), {
-  size: 32,
-  square: false,
-})
+withDefaults(
+  defineProps<{
+    name: string | null | undefined
+    size?: number
+    square?: boolean
+    tone?: 'accent' | 'brand'
+    label?: string
+  }>(),
+  { size: 32, square: false, tone: 'accent', label: undefined },
+)
 </script>
 
 <style scoped>
@@ -44,12 +54,16 @@ withDefaults(defineProps<{ name: string | null | undefined; size?: number; squar
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  font-size: calc(var(--size) * 0.34);
+  font-size: max(10px, calc(var(--size) * 0.34));
   font-weight: 600;
   color: var(--color-accent-text);
   background: var(--color-accent-soft);
 }
 .app-monogram--square {
   border-radius: 8px;
+}
+.app-monogram--brand {
+  color: rgb(var(--v-theme-brand));
+  background: rgba(var(--v-theme-brand), 0.14);
 }
 </style>
