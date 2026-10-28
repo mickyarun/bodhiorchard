@@ -120,10 +120,13 @@ describe("RaceRoom simulation loop", () => {
 })
 
 describe("MinigameRoom simulation loop", () => {
+  /** The verified identity onAuth hands to onJoin. */
+  const ALICE = { userId: "alice", name: "Alice", orgId: "org-a" }
+
   function playingPollenPop(): MinigameRoom {
     const room = new MinigameRoom()
     room.onCreate({ game: "pollen_pop" })
-    room.onJoin(fakeClient("s-alice"), { userId: "alice", name: "Alice", orgId: "org-a" })
+    room.onJoin(fakeClient("s-alice"), ALICE, ALICE)
     return room
   }
 
@@ -132,7 +135,7 @@ describe("MinigameRoom simulation loop", () => {
     room.onCreate({ game: "pollen_pop" })
     const before = activeClockTimers(room)
 
-    room.onJoin(fakeClient("s-alice"), { userId: "alice", name: "Alice", orgId: "org-a" })
+    room.onJoin(fakeClient("s-alice"), ALICE, ALICE)
     const afterJoin = activeClockTimers(room)
     ;(room as unknown as { stopSim(): void }).stopSim()
 
