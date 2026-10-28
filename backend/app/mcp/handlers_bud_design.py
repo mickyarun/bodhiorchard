@@ -30,7 +30,8 @@ from app.mcp.auth import MCPAuthResult
 from app.mcp.handler_utils import require_non_empty
 from app.models.bud import BUDDesignStatus
 from app.models.organization import Organization
-from app.repositories.bud import BUDDesignRepository
+from app.repositories.bud import BUDDesignRepository, BUDRepository
+from app.repositories.tracked_repository import TrackedRepoRepository
 from app.services.bud_timeline import record_event
 from app.services.html_sanitizer import sanitize_design_html
 
@@ -172,6 +173,10 @@ async def handle_write_bud_design(
         except (ValueError, TypeError):
             return {"success": False, "error": "design_id is not a valid UUID"}
 
+    scope_error = await _check_org_scope(db, org.id, bud_uuid, repo_uuid)
+    if scope_error:
+        return scope_error
+
     raw_html = params["html"]
     safe_html = sanitize_design_html(raw_html)
     notes = params.get("notes")
@@ -243,3 +248,28 @@ async def handle_write_bud_design(
         "design_id": str(design.id),
         "length": len(safe_html),
     }
+
+
+async def _check_org_scope(
+    db: AsyncSession,
+    org_id: uuid_mod.UUID,
+    bud_id: uuid_mod.UUID,
+    repo_id: uuid_mod.UUID | None,
+) -> dict[str, Any] | None:
+    """Refuse a write whose BUD or repo belongs to another org.
+
+    ``BUDDesignRepository.upsert`` stamps the caller's ``org_id`` on a new
+    row but takes ``bud_id`` and ``repo_id`` as given, so without this check
+    a token for one org could attach design rows (and a timeline event) to
+    another org's BUD.
+    """
+    if not await BUDRepository(db, org_id=org_id).exists(bud_id):
+        return {"success": False, "error": f"No BUD with id {bud_id} in this organization"}
+    if repo_id is None:
+        return None
+    if await TrackedRepoRepository(db, org_id=org_id).get_by_id(repo_id) is None:
+        return {
+            "success": False,
+            "error": f"No tracked repository with id {repo_id} in this organization",
+        }
+    return None
