@@ -65,9 +65,9 @@ def _clone_root() -> Path:
 # dots. Everything we match here becomes a directory name under the clone
 # root, so the pattern also rejects path traversal — including a segment
 # made only of dots, which is ``.`` or ``..`` once joined to a path.
-# Always use ``fullmatch``: a ``$``-anchored ``match`` lets a trailing
-# newline through.
-_SAFE_SEG = re.compile(r"(?!\.+\Z)[A-Za-z0-9._-]+")
+# Anchored with ``\A``/``\Z`` (a ``$`` anchor lets a trailing newline
+# through) and checked with ``fullmatch`` in :func:`_safe_segments`.
+_SAFE_SEG = re.compile(r"\A(?!\.+\Z)[A-Za-z0-9._-]+\Z")
 
 
 def _safe_segments(*segments: str) -> bool:
