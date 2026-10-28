@@ -20,6 +20,7 @@ import { computed, onMounted, ref } from 'vue'
 import AppCallout from '@/components/common/AppCallout.vue'
 import SettingsPageShell from '@/components/settings/SettingsPageShell.vue'
 import { usePermissions } from '@/composables/usePermissions'
+import { useSlackPhotoImport } from '@/composables/useSlackPhotoImport'
 import { useCelebrationsStore } from '@/stores/celebrations'
 import type {
   CelebrationPostHistory,
@@ -38,7 +39,8 @@ const { canControlCelebrationChannel } = usePermissions()
 const CHANNEL_LOCKED_HINT = 'Only an admin or the org owner can change this.'
 const saveSuccess = ref(false)
 const notice = ref('')
-const noticeVariant = ref<'info' | 'success' | 'warning'>('info')
+const noticeVariant = ref<'info' | 'success' | 'warning' | 'error'>('info')
+const photos = useSlackPhotoImport()
 
 
 const WEEKEND_POLICIES: { title: string; value: WeekendPolicy; subtitle: string }[] = [
@@ -176,16 +178,10 @@ async function sendTest(): Promise<void> {
 
 async function syncAvatars(): Promise<void> {
   notice.value = ''
-  const result = await store.syncSlackAvatars()
-  if (!result) return
-  noticeVariant.value = result.updated ? 'success' : 'info'
-  notice.value =
-    `${result.updated} photo(s) imported. ` +
-    `${result.skipped_has_photo} already had one, ` +
-    `${result.skipped_no_photo} have no Slack photo` +
-    (result.skipped_shared
-      ? `, ${result.skipped_shared} belong to another org too and can only change their own.`
-      : '.')
+  await photos.run()
+  if (!photos.outcome.value) return
+  noticeVariant.value = photos.outcome.value.variant
+  notice.value = photos.outcome.value.text
 }
 
 onMounted(load)
@@ -391,7 +387,7 @@ onMounted(load)
     <template #header-actions>
       <v-btn
         variant="tonal"
-        :loading="store.syncingAvatars"
+        :loading="photos.importing.value"
         prepend-icon="mdi-account-box-outline"
         @click="syncAvatars"
       >

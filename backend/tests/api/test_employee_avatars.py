@@ -152,6 +152,27 @@ class TestWritePermissions:
         result = await _upload(env, SOMEONE_ELSE, _png(), _Perms({"employees:manage"}))
         assert result.avatar_url
 
+    async def test_member_can_remove_their_own_photo(self, env: dict[str, Any]) -> None:
+        await _upload(env, ME, _png(), _Perms())
+        result = await routes.delete_avatar(ME, current_user=env["me"], perms=_Perms(), db=_Db())
+        assert result.avatar_url is None
+
+    async def test_member_cannot_remove_someone_elses(self, env: dict[str, Any]) -> None:
+        env["users"][SOMEONE_ELSE].avatar_url = "https://a.slack-edge.com/x.png"
+        with pytest.raises(HTTPException) as exc:
+            await routes.delete_avatar(
+                SOMEONE_ELSE, current_user=env["me"], perms=_Perms(), db=_Db()
+            )
+        assert exc.value.status_code == 403
+        assert env["users"][SOMEONE_ELSE].avatar_url == "https://a.slack-edge.com/x.png"
+
+    async def test_hr_can_remove_anyones(self, env: dict[str, Any]) -> None:
+        env["users"][SOMEONE_ELSE].avatar_url = "https://a.slack-edge.com/x.png"
+        await routes.delete_avatar(
+            SOMEONE_ELSE, current_user=env["me"], perms=_Perms({"employees:manage"}), db=_Db()
+        )
+        assert env["users"][SOMEONE_ELSE].avatar_url is None
+
 
 class TestUpload:
     async def test_url_carries_the_key_not_the_user_id(self, env: dict[str, Any]) -> None:

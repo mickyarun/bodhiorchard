@@ -100,7 +100,9 @@ async def finalize_legacy_source_code(
             logger.warning("setup_skip_repo_outside_roots", path=candidate, org_id=str(org.id))
             continue
         repo_path = Path(candidate)
-        if not repo_path.exists() or not (repo_path / ".git").exists():
+        # os.path, not Path: a name too long for the filesystem reads as
+        # missing (and is skipped) instead of failing the whole batch.
+        if not os.path.exists(repo_path / ".git"):
             logger.warning("setup_skip_invalid_repo", path=str(repo_path))
             continue
 
