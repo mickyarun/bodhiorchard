@@ -89,10 +89,11 @@ def rmtree_strictly_under(target: Path | str, root: Path | str) -> bool:
     """Delete the ``target`` tree only if it sits strictly inside ``root``.
 
     Returns ``True`` when the tree was handed to ``shutil.rmtree`` and
-    ``False`` when containment failed and nothing was touched, so callers
-    can log the refusal with their own context.
+    ``False`` when nothing was touched: containment failed, or ``target``
+    is itself a symlink (which ``rmtree`` refuses), so callers can log the
+    refusal with their own context and never count it as removed.
     """
-    if not is_strictly_under(target, root):
+    if os.path.islink(target) or not is_strictly_under(target, root):
         return False
     shutil.rmtree(target, ignore_errors=True)
     return True
