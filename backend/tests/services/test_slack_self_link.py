@@ -116,3 +116,41 @@ async def test_an_existing_link_is_never_replaced(monkeypatch: pytest.MonkeyPatc
     db, member = FakeDb(), _member(slack_id="U_OLD")
     assert await link_own_account(db, ORG, member, SLACK_ID) is False  # type: ignore[arg-type]
     assert member.slack_id == "U_OLD"
+
+
+SLACK_PHOTO = "https://avatars.slack-edge.com/me_512.png"
+
+
+def _with_photo(**extra: Any) -> dict[str, Any]:
+    user = _slack_user()
+    user["profile"] |= {"is_custom_image": True, "image_512": SLACK_PHOTO, **extra}
+    return user
+
+
+def _member_with_photo(url: str | None, stored: str | None = None) -> SimpleNamespace:
+    member = _member()
+    member.avatar_url, member.avatar_storage_path = url, stored
+    return member
+
+
+async def test_linking_brings_in_the_slack_photo(monkeypatch: pytest.MonkeyPatch) -> None:
+    _world(monkeypatch, slack_user=_with_photo())
+    member = _member_with_photo(None)
+    assert await link_own_account(FakeDb(), ORG, member, SLACK_ID) is True  # type: ignore[arg-type]
+    assert member.avatar_url == SLACK_PHOTO
+
+
+async def test_linking_never_replaces_an_uploaded_photo(monkeypatch: pytest.MonkeyPatch) -> None:
+    _world(monkeypatch, slack_user=_with_photo())
+    member = _member_with_photo("/api/v1/employees/avatars/abc", stored="org/avatars/abc.jpg")
+    assert await link_own_account(FakeDb(), ORG, member, SLACK_ID) is True  # type: ignore[arg-type]
+    assert member.avatar_url == "/api/v1/employees/avatars/abc"
+
+
+async def test_slacks_generated_letter_tile_is_not_imported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _world(monkeypatch, slack_user=_with_photo(is_custom_image=False))
+    member = _member_with_photo(None)
+    assert await link_own_account(FakeDb(), ORG, member, SLACK_ID) is True  # type: ignore[arg-type]
+    assert member.avatar_url is None

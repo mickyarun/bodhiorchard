@@ -124,11 +124,13 @@ const showAside = computed(() => tab.value === tabs.value[0]?.value)
 
 /**
  * Keep the loaded record in step with the photo the child just changed,
- * so the header and the directory agree without a refetch.
+ * so the header and the directory agree without a refetch — and, on your
+ * own profile, the top bar too.
  */
 function onAvatarUpdated(avatarUrl: string | null): void {
   avatarError.value = ''
   if (store.record) store.record.avatar_url = avatarUrl
+  if (isOwn.value) authStore.setAvatarUrl(avatarUrl)
 }
 
 watch(

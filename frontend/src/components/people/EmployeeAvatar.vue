@@ -15,26 +15,21 @@
 -->
 
 <!-- An employee's profile photo, with upload and remove when editable.
-     Falls back to initials, which is also what a broken or expired image
-     URL degrades to — a Slack CDN link can rot after someone leaves the
-     workspace, and a tonal monogram looks better than a broken image. -->
+     The picture itself is AppMonogram, which falls back to initials when
+     there is no photo or it fails to load (a Slack link can rot after
+     someone leaves the workspace). -->
 <template>
   <div class="employee-avatar">
-    <v-avatar :size="size" color="primary" variant="tonal">
-      <v-img v-if="src && !failed" :src="src" :alt="name" cover @error="failed = true" />
-      <span v-else class="font-weight-bold" :style="{ fontSize: `${size / 3}px` }">
-        {{ initials }}
-      </span>
-    </v-avatar>
+    <AppMonogram :name="name" :src="current" :size="size" />
 
     <template v-if="editable">
-      <input ref="fileInput" type="file" :accept="ACCEPT" class="d-none" @change="onPick" />
+      <input ref="fileInput" type="file" :accept="AVATAR_ACCEPT" class="d-none" @change="onPick" />
 
       <!-- With a photo, the camera button opens a Replace / Remove menu and
            does nothing else; without one, it goes straight to the picker.
            Binding the menu to the button (not the wrapper) is what stops a
            single click from opening the file dialog and the menu at once. -->
-      <v-menu v-if="src" location="bottom end">
+      <v-menu v-if="current" location="bottom end">
         <template #activator="{ props: menuProps }">
           <v-btn
             v-bind="menuProps"
@@ -77,11 +72,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 
-import api from '@/services/api'
-import { initialsOf, resolveAvatarUrl } from '@/utils/avatar'
-import { extractApiError } from '@/utils/errors'
+import AppMonogram from '@/components/common/AppMonogram.vue'
+import { AVATAR_ACCEPT, useAvatarEditor } from '@/composables/useAvatarEditor'
 
 const props = withDefaults(
   defineProps<{
@@ -101,70 +95,20 @@ const emit = defineEmits<{
   error: [message: string]
 }>()
 
-// Must stay in step with AVATAR_POLICY on the backend, which is the
-// authority — this only saves the user an upload round-trip.
-const ACCEPT = 'image/png,image/jpeg,image/gif,image/webp'
-const MAX_BYTES = 20 * 1024 * 1024
-
 const fileInput = ref<HTMLInputElement | null>(null)
-const busy = ref(false)
-const failed = ref(false)
 // ``undefined`` = no local change yet; ``null`` = removed locally.
 const localUrl = ref<string | null | undefined>(undefined)
 
-const src = computed(() =>
-  resolveAvatarUrl(localUrl.value !== undefined ? localUrl.value : props.avatarUrl),
-)
+/** The stored URL on show: a local upload or removal wins over the prop. */
+const current = computed(() => (localUrl.value !== undefined ? localUrl.value : props.avatarUrl))
 
-// A fresh URL deserves a fresh attempt: without this, one failed load
-// would keep showing initials even after a successful re-upload.
-watch(src, () => {
-  failed.value = false
+const { busy, onPick, remove } = useAvatarEditor(() => props.userId, {
+  updated(avatarUrl) {
+    localUrl.value = avatarUrl
+    emit('updated', avatarUrl)
+  },
+  error: message => emit('error', message),
 })
-
-const initials = computed(() => initialsOf(props.name))
-
-async function onPick(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  // Clear immediately so picking the same file twice still fires change.
-  input.value = ''
-  if (!file) return
-
-  if (file.size > MAX_BYTES) {
-    emit('error', 'That photo is larger than 20 MB.')
-    return
-  }
-
-  busy.value = true
-  try {
-    const body = new FormData()
-    body.append('file', file)
-    const { data } = await api.post<{ avatar_url: string | null }>(
-      `/v1/employees/${props.userId}/avatar`,
-      body,
-    )
-    localUrl.value = data.avatar_url
-    emit('updated', data.avatar_url)
-  } catch (err) {
-    emit('error', extractApiError(err, 'Failed to upload that photo'))
-  } finally {
-    busy.value = false
-  }
-}
-
-async function remove(): Promise<void> {
-  busy.value = true
-  try {
-    await api.delete(`/v1/employees/${props.userId}/avatar`)
-    localUrl.value = null
-    emit('updated', null)
-  } catch (err) {
-    emit('error', extractApiError(err, 'Failed to remove that photo'))
-  } finally {
-    busy.value = false
-  }
-}
 </script>
 
 <style scoped>

@@ -26,16 +26,43 @@
         density="comfortable"
         :aria-label="`Account menu for ${authStore.user?.name || 'you'}`"
       >
-        <AppMonogram :name="authStore.user?.name" :size="32" />
+        <AppMonogram :name="authStore.user?.name" :src="authStore.user?.avatar_url" :size="32" />
       </v-btn>
     </template>
 
     <v-list density="compact" min-width="260">
-      <v-list-item
-        class="account-menu__who"
-        :title="authStore.user?.name || 'User'"
-        :subtitle="authStore.user?.email || ''"
-      />
+      <!-- Your own photo is yours to change. Clicks stay in here: the menu
+           would otherwise close and unmount the file input before the
+           picked photo arrives. -->
+      <div v-if="authStore.user" class="account-menu__who" role="listitem" @click.stop>
+        <AppMonogram :name="authStore.user.name" :src="authStore.user.avatar_url" :size="44" />
+        <div class="account-menu__id">
+          <span class="account-menu__name">{{ authStore.user.name }}</span>
+          <span class="account-menu__email">{{ authStore.user.email }}</span>
+          <div class="account-menu__photo">
+            <input ref="fileInput" type="file" :accept="AVATAR_ACCEPT" class="d-none" @change="photo.onPick" />
+            <v-btn
+              variant="text"
+              size="small"
+              color="primary"
+              :loading="photo.busy.value"
+              @click="fileInput?.click()"
+            >
+              {{ authStore.user.avatar_url ? 'Change photo' : 'Add photo' }}
+            </v-btn>
+            <v-btn
+              v-if="authStore.user.avatar_url"
+              variant="text"
+              size="small"
+              :disabled="photo.busy.value"
+              @click="photo.remove()"
+            >
+              Remove
+            </v-btn>
+          </div>
+        </div>
+      </div>
+      <AppCallout v-if="photoError" variant="error" class="mx-3 mb-2">{{ photoError }}</AppCallout>
       <v-divider class="mb-1" />
       <!-- XP profile, garden character and MCP token are all
            engineering-workspace features. -->
@@ -95,9 +122,12 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import AppCallout from '@/components/common/AppCallout.vue'
 import AppMonogram from '@/components/common/AppMonogram.vue'
 import { useAuthStore } from '@/stores/auth'
+import { AVATAR_ACCEPT, useAvatarEditor } from '@/composables/useAvatarEditor'
 import { usePermissions } from '@/composables/usePermissions'
 import { useThemePreference, type ThemePreference } from '@/composables/useThemePreference'
 
@@ -113,6 +143,16 @@ const THEME_OPTIONS: { value: ThemePreference; label: string; icon: string; hint
   { value: 'dark', label: 'Dark', icon: 'mdi-weather-night', hint: 'Dark theme' },
 ]
 
+const fileInput = ref<HTMLInputElement | null>(null)
+const photoError = ref('')
+const photo = useAvatarEditor(() => authStore.user?.id ?? '', {
+  updated(avatarUrl) {
+    photoError.value = ''
+    authStore.setAvatarUrl(avatarUrl)
+  },
+  error: message => (photoError.value = message),
+})
+
 function handleLogout(): void {
   authStore.logout()
   // A full page load, as when a session expires (services/api.ts): every
@@ -124,7 +164,35 @@ function handleLogout(): void {
 
 <style scoped>
 .account-menu__who {
-  max-width: 260px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 280px;
+  padding: 8px 16px 12px;
+}
+.account-menu__id {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.account-menu__name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-menu__photo {
+  display: flex;
+  gap: 4px;
+  margin: 2px 0 0 -8px;
+}
+.account-menu__email {
+  font-size: 12px;
+  color: rgb(var(--v-theme-on-surface-variant));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Auto / Light / Dark segmented control in the account menu. */

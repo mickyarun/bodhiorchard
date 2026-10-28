@@ -39,6 +39,8 @@ export interface User {
   // ``org_id`` to be readable at runtime.
   org_id: string
   character_model: string | null
+  /** As stored: a Slack CDN URL or a root-relative upload path. Load via resolveAvatarUrl. */
+  avatar_url: string | null
 }
 
 export interface Organization {

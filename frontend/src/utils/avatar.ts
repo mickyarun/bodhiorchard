@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import type { SlackAvatarSyncResult } from '@/types/celebrations'
+import { plural } from '@/utils/format'
+
 /**
  * Turn a stored `avatar_url` into something an `<img>` can load.
  *
@@ -52,4 +55,17 @@ export function initialsOf(name: string): string {
       .toUpperCase()
       .slice(0, 2) || '?'
   )
+}
+
+/** One line saying what "Import photos from Slack" did. */
+export function photoImportSummary(result: SlackAvatarSyncResult): string {
+  const parts = [
+    `${plural(result.updated, 'photo')} imported`,
+    `${result.skipped_has_photo} already had one`,
+    `${result.skipped_no_photo} have no Slack photo`,
+  ]
+  if (result.skipped_shared) {
+    parts.push(`${result.skipped_shared} also belong to another org, so only they can change theirs`)
+  }
+  return `${parts.join(', ')}.`
 }
