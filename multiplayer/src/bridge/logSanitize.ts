@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/** Line breaks that ``JSON.stringify`` does not escape. */
+const UNICODE_LINE_BREAKS = /[\u0085\u2028\u2029]/g
+
 /**
  * Sanitize a value for inclusion in a console / file log line.
  *
@@ -23,8 +26,10 @@
  * downstream log-parsing tools and can mask real events.
  *
  * Defers to ``JSON.stringify`` for the heavy lifting — it escapes
- * every newline form (``\n``, ``\r``, ````, `` ``, `` ``)
- * plus quotes, backslashes, and other control characters. The
+ * ``\n``, ``\r`` and the other C0 control characters plus quotes and
+ * backslashes. It leaves NEL (U+0085) and the Unicode line and paragraph
+ * separators (U+2028, U+2029) as-is, and some log viewers break lines on
+ * them, so those three are escaped explicitly afterwards. The
  * surrounding quotes ``JSON.stringify`` produces are stripped because
  * we want to inline the value into a free-form log message, not embed
  * it as a JSON string. ``JSON.stringify`` is on CodeQL's known-good
@@ -43,6 +48,8 @@ export function safeLog(value: unknown): string {
   const capped = s.slice(0, 500)
   // JSON.stringify on a string returns ``"..."`` with embedded
   // escapes — strip the outer quotes for inline log readability.
-  const escaped = JSON.stringify(capped)
+  const escaped = JSON.stringify(capped).replace(UNICODE_LINE_BREAKS, (ch) =>
+    `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  )
   return escaped.slice(1, -1)
 }

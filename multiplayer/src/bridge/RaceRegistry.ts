@@ -26,18 +26,13 @@
  * goes through `registerRaceDisposeCallback` / `fireRaceDispose`.
  */
 
+import { safeLog } from "./logSanitize"
+
+// `roomId` arrives from network payloads; every console.* site below passes
+// it through safeLog as an argument so the format string stays a literal.
 type DisposeCallback = () => void
 type PhaseCallback = (phase: string) => void
 
-/**
- * Strip CR/LF from values before they reach a log line. `roomId` and
- * `userId` arrive from network payloads, so a malicious sender could
- * forge log entries by embedding newlines. Used at every console.* site
- * in this module so the format-string arg stays a static literal.
- */
-function sanitizeForLog(value: string): string {
-  return value.replace(/[\r\n]/g, "")
-}
 type InviteeDeclinedCallback = (userId: string) => void
 
 interface RoomHooks {
@@ -77,7 +72,7 @@ export function fireRaceDispose(roomId: string): void {
   } catch (err) {
     console.error(
       "[RaceRegistry] dispose callback for room %s threw:",
-      sanitizeForLog(roomId),
+      safeLog(roomId),
       err,
     )
   }
@@ -96,7 +91,7 @@ export function fireRacePhase(roomId: string, phase: string): void {
   } catch (err) {
     console.error(
       "[RaceRegistry] phase callback for room %s threw:",
-      sanitizeForLog(roomId),
+      safeLog(roomId),
       err,
     )
   }
@@ -116,7 +111,7 @@ export function fireRaceInviteDeclined(roomId: string, userId: string): void {
   } catch (err) {
     console.error(
       "[RaceRegistry] inviteeDeclined callback for room %s threw:",
-      sanitizeForLog(roomId),
+      safeLog(roomId),
       err,
     )
   }

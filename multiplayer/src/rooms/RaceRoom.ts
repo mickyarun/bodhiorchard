@@ -65,6 +65,7 @@ import {
 import { driveBots } from "./RaceBotDriver"
 import { postRaceInvite, postRaceResults } from "../bridge/BackendClient"
 import { fireRaceDispose, fireRacePhase } from "../bridge/RaceRegistry"
+import { safeLog } from "../bridge/logSanitize"
 
 const SIM_TICK_MS = TICK_MS
 
@@ -94,7 +95,7 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
   }
 
   onJoin(client: Client, options: { userId: string; name: string; characterModel?: string }): void {
-    console.log(`[RaceRoom ${this.roomId}] ${options.name} (${client.sessionId}) joined`)
+    console.log(`[RaceRoom ${this.roomId}] ${safeLog(options.name)} (${client.sessionId}) joined`)
   }
 
   onLeave(client: Client): void {
@@ -220,7 +221,7 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     const opener = (client.userData as { userId?: string } | undefined)?.userId
     if (opener !== this.state.hostUserId) return
     console.log(
-      `[RaceRoom ${this.roomId}] host ${this.state.hostName} cancelled the race in ${this.state.phase} phase`,
+      `[RaceRoom ${this.roomId}] host ${safeLog(this.state.hostName)} cancelled the race in ${this.state.phase} phase`,
     )
     this.broadcast("race_cancelled", { hostName: this.state.hostName })
     // Allow normal autoDispose to clean up — disconnect terminates every
@@ -287,7 +288,7 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     )
 
     console.log(
-      `[RaceRoom ${this.roomId}] +${additions.length} invitees: ${additions.join(", ")}`,
+      `[RaceRoom ${this.roomId}] +${additions.length} invitees: ${additions.map(safeLog).join(", ")}`,
     )
   }
 
@@ -371,7 +372,7 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     }
 
     console.log(
-      `[RaceRoom ${this.roomId}] invitee declined ${userId} — ` +
+      `[RaceRoom ${this.roomId}] invitee declined ${safeLog(userId)} — ` +
         `invitedUserIds=${this.state.invitedUserIds.length} ` +
         `racers=${this.state.racers.size}`,
     )
