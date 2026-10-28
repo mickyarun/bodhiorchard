@@ -38,6 +38,7 @@ import { Room, Client } from "colyseus"
 import { PlayerState } from "../schema/PlayerState"
 import { CoffeeBarState, CoffeeAction } from "../schema/CoffeeBarState"
 import { isCoffeeDrink } from "../sim/CoffeeMenu"
+import { safeLog } from "../bridge/logSanitize"
 import {
   advancePhase,
   acknowledgeDispense,
@@ -158,7 +159,7 @@ export class CoffeeBarRoom extends Room<{ state: CoffeeBarState }> {
     player.connected = true
     this.state.players.set(client.sessionId, player)
     this.sessionByUserId.set(player.userId, client.sessionId)
-    console.log(`[CoffeeBarRoom] ${player.name} (${client.sessionId}) joined`)
+    console.log(`[CoffeeBarRoom] ${safeLog(player.name)} (${client.sessionId}) joined`)
   }
 
   onLeave(client: Client) {

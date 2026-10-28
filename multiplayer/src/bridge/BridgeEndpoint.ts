@@ -69,12 +69,12 @@ const orgRooms = new Map<string, OrgRoom>()
 
 export function registerOrgRoom(orgId: string, room: OrgRoom): void {
   orgRooms.set(orgId, room)
-  console.log(`[BridgeEndpoint] Registered org=${orgId} (total=${orgRooms.size})`)
+  console.log(`[BridgeEndpoint] Registered org=${safeLog(orgId)} (total=${orgRooms.size})`)
 }
 
 export function unregisterOrgRoom(orgId: string): void {
   orgRooms.delete(orgId)
-  console.log(`[BridgeEndpoint] Unregistered org=${orgId} (total=${orgRooms.size})`)
+  console.log(`[BridgeEndpoint] Unregistered org=${safeLog(orgId)} (total=${orgRooms.size})`)
 }
 
 /**

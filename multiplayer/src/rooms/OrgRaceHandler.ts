@@ -43,6 +43,7 @@ import { postRaceInvite } from "../bridge/BackendClient"
 import { registerRaceHooks } from "../bridge/RaceRegistry"
 import { isProductionServer, resolveBotCount } from "./RaceRoomHelpers"
 import { RaceRoom } from "./RaceRoom"
+import { safeLog } from "../bridge/logSanitize"
 
 export interface RaceCreateMessage {
   invitedUserIds: string[]
@@ -162,7 +163,7 @@ async function handleRaceCreate(
       ),
     )
   } catch (err) {
-    console.error(`[OrgRoom ${orgId}] race_create failed:`, err)
+    console.error("[OrgRoom %s] race_create failed:", safeLog(orgId), err)
     client.send("race_create_failed", { reason: "server_error" })
   }
 }

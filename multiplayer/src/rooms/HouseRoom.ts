@@ -25,6 +25,7 @@
 import { Room, Client } from "colyseus"
 import { Schema, MapSchema, type } from "@colyseus/schema"
 import { PlayerState } from "../schema/PlayerState"
+import { safeLog } from "../bridge/logSanitize"
 
 class HouseRoomState extends Schema {
   @type({ map: PlayerState }) players = new MapSchema<PlayerState>()
@@ -62,7 +63,7 @@ export class HouseRoom extends Room<{ state: HouseRoomState }> {
   }
 
   onJoin(client: Client, options: { userId: string; name: string; characterModel?: string }) {
-    console.log(`[HouseRoom] ${options.name} (${client.sessionId}) joined`)
+    console.log(`[HouseRoom] ${safeLog(options.name)} (${client.sessionId}) joined`)
     const player = new PlayerState()
     player.userId = options.userId || client.sessionId
     player.name = options.name || "Visitor"
@@ -73,7 +74,7 @@ export class HouseRoom extends Room<{ state: HouseRoomState }> {
 
   onLeave(client: Client) {
     const player = this.state.players.get(client.sessionId)
-    console.log(`[HouseRoom] ${player?.name || client.sessionId} left`)
+    console.log(`[HouseRoom] ${safeLog(player?.name || client.sessionId)} left`)
     this.state.players.delete(client.sessionId)
   }
 

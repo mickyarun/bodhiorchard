@@ -21,6 +21,7 @@
  *
  * Shared secret authentication via X-Bridge-Secret header.
  */
+import { safeLog } from "./logSanitize"
 
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:8000"
 
@@ -135,7 +136,9 @@ export async function fetchOrgSnapshot(orgId: string): Promise<OrgSnapshotRespon
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     })
     if (!response.ok) {
-      console.warn(`[BackendClient] org-snapshot failed: ${response.status} ${response.statusText}`)
+      console.warn(
+        `[BackendClient] org-snapshot failed: ${response.status} ${safeLog(response.statusText)}`,
+      )
       return null
     }
     return (await response.json()) as OrgSnapshotResponse
