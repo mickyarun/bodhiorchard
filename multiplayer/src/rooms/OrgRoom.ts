@@ -52,11 +52,13 @@ import {
 } from "../sim/DevActivitySim"
 import { AgentActivitySim, parseAgentActivityEvent } from "../sim/AgentActivitySim"
 import { InferredPresenceSim, buildPresenceConfig } from "../sim/InferredPresenceSim"
+import { fetchOrgSnapshot, type OrgSnapshotResponse } from "../bridge/BackendClient"
 import {
-  fetchOrgSnapshot,
-  verifyUserToken,
-  type OrgSnapshotResponse,
-} from "../bridge/BackendClient"
+  requireJoinIdentity,
+  verifyJoin,
+  type JoinCredentials,
+  type JoinIdentity,
+} from "../auth/verifyJoin"
 import { safeLog } from "../bridge/logSanitize"
 import { registerOrgRoom, unregisterOrgRoom } from "../bridge/BridgeEndpoint"
 import { isUuid } from "../bridge/uuid"
@@ -86,11 +88,8 @@ interface OrgRoomCreateOptions {
   orgId?: string
 }
 
-interface OrgRoomJoinOptions {
-  userId: string
-  name: string
+interface OrgRoomJoinOptions extends JoinCredentials {
   characterModel?: string
-  token?: string
 }
 
 interface MoveMessage {
@@ -346,74 +345,40 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
 
   /**
    * Verify the client's JWT against the backend before allowing them to join.
-   * This is the ONLY point where client-supplied `userId` / `name` are trusted;
-   * everything downstream uses the values returned from this verification.
-   *
-   * In development (`NODE_ENV !== "production"`), if no token is supplied the
-   * room accepts the client-supplied identity as-is — local dev tooling and
-   * unit tests don't go through login. In production, a missing/invalid token
-   * rejects the join.
+   * The identity `verifyJoin` returns (the token's user, in this room's org)
+   * is the only one onJoin uses; client-supplied `userId` / `name` are ignored.
    */
-  async onAuth(_client: Client, options: OrgRoomJoinOptions): Promise<OrgRoomJoinOptions> {
-    const orgId = this.state.orgId || ""
-    if (!options.token) {
-      if (process.env.NODE_ENV === "production") {
-        throw new Error("auth token required")
-      }
-      console.warn(
-        `[OrgRoom] dev-mode join without token org=${safeLog(orgId)} ` +
-          `userId=${safeLog(options.userId)}`,
-      )
-      return options
-    }
-    const result = await verifyUserToken(options.token, orgId)
-    if (!result.valid) {
-      const reason = result.reason ?? "token_invalid"
-      console.warn(
-        `[OrgRoom] auth failed org=${safeLog(orgId)} userId=${safeLog(options.userId)} ` +
-          `reason=${reason}`,
-      )
-      if (reason === "backend_unreachable") {
-        throw new Error("auth backend unreachable — is the Python server running?")
-      }
-      if (reason === "backend_http_error") {
-        throw new Error("auth backend rejected request — check bridge secret and endpoint URL")
-      }
-      throw new Error("invalid auth token — JWT may be expired, try refreshing the page")
-    }
-    // The token's org claim must match the room's org — prevents cross-org spying.
-    if (orgId && result.org_id && result.org_id !== orgId) {
-      throw new Error("token org mismatch")
-    }
-    // Authoritative values from the verified token REPLACE client-supplied claims.
-    return {
-      ...options,
-      userId: result.user_id ?? options.userId,
-      name: result.name ?? options.name,
-    }
+  async onAuth(_client: Client, options: OrgRoomJoinOptions): Promise<JoinIdentity> {
+    return verifyJoin(options, this.state.orgId)
   }
 
-  async onJoin(client: Client, options: OrgRoomJoinOptions) {
+  async onJoin(client: Client, options: OrgRoomJoinOptions, auth?: JoinIdentity) {
+    // Colyseus passes the raw client join options as `options` and the value
+    // returned by onAuth as `auth`. Only `auth` carries the verified identity.
+    const identity = requireJoinIdentity(auth)
     // Wait for the initial snapshot before deciding if the joining user is
     // a known member — prevents a race where the first client races against
     // onCreate's async fetch and sees an empty members map.
     await this.snapshotReady
-    console.log(`[OrgRoom] ${safeLog(options.name ?? "Unknown")} (${client.sessionId}) joined org=${safeLog(this.state.orgId)}`)
+    console.log(
+      `[OrgRoom] ${safeLog(identity.name)} (${client.sessionId}) ` +
+        `joined org=${safeLog(this.state.orgId)}`,
+    )
     // Per-client identity is tracked via client.userData so we can attribute
     // moves/takeovers to the correct memberId later. These values come from
     // onAuth, which verified them against a JWT.
     client.userData = {
-      userId: options.userId,
-      name: options.name,
-      characterModel: options.characterModel ?? "",
+      userId: identity.userId,
+      name: identity.name,
+      characterModel: typeof options.characterModel === "string" ? options.characterModel : "",
     }
     // Users not present in this.state.members at join time indicate a snapshot
     // mismatch — the backend's `/internal/colyseus/org-snapshot` endpoint is
     // responsible for returning every active org member. If you see this
     // warning, check `_collect_org_members` in backend/app/api/v1/internal_colyseus.py.
-    if (options.userId && !this.state.members.has(options.userId)) {
+    if (identity.userId && !this.state.members.has(identity.userId)) {
       console.warn(
-        `[OrgRoom] joining user ${safeLog(options.userId)} not in snapshot — ` +
+        `[OrgRoom] joining user ${safeLog(identity.userId)} not in snapshot — ` +
         `snapshot endpoint may be filtering members`,
       )
     }

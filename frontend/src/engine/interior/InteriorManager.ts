@@ -74,6 +74,21 @@ function getOwnerSeat(tier: number, type: 'desk' | 'bed'): { x: number; z: numbe
     : { x: geom.bed.x,  z: geom.bed.z,  yaw: 0 }
 }
 
+/** The authenticated user entering a house (used for multiplayer presence). */
+export interface HouseVisitor {
+  userId: string
+  name: string
+  characterModel: string | null
+  /** Org of the house, and the user's JWT: the room server verifies both. */
+  orgId: string
+  token: string
+}
+
+interface HouseRoomAccess {
+  orgId: string
+  token: string
+}
+
 export class InteriorManager {
   private app: Application
   private input: InputManager
@@ -99,6 +114,8 @@ export class InteriorManager {
   private visitorId: string | null = null
   private visitorName: string | null = null
   private visitorCharacterModel: string | null = null
+  /** Org and JWT the house room join is verified with; null joins no room. */
+  private roomAccess: HouseRoomAccess | null = null
   private syncAdapter = new PlayerSyncAdapter()
   private remotePlayers = new Map<string, NetworkedPlayer>()
 
@@ -179,20 +196,16 @@ export class InteriorManager {
    * Enter a house interior.
    * Called during SceneTransition.perform() black frame.
    */
-  /** Identity of a user visiting a house (used for multiplayer presence). */
-  // Visitor type defined inline in enter() signature
 
   /**
    * Enter a house interior.
    * @param house - The house to enter (may or may not belong to the visitor)
    * @param visitor - The authenticated user entering the house. Their identity is
    *   broadcast to the multiplayer room so OTHER clients in the same house see them.
-   *   If omitted (e.g., unauthenticated/dev mode), falls back to house owner identity.
+   *   If omitted (e.g., unauthenticated/dev mode), falls back to house owner identity
+   *   and the house is entered without joining its multiplayer room.
    */
-  async enter(
-    house: HouseResult,
-    visitor?: { userId: string; name: string; characterModel: string | null } | null,
-  ): Promise<void> {
+  async enter(house: HouseResult, visitor?: HouseVisitor | null): Promise<void> {
     await this.buildForTier(house.tier)
 
     // Set door exit trigger for this tier's room size
@@ -208,6 +221,7 @@ export class InteriorManager {
     this.visitorId = visitor?.userId ?? house.memberId
     this.visitorName = visitor?.name ?? house.memberName
     this.visitorCharacterModel = visitor?.characterModel ?? house.characterModel
+    this.roomAccess = visitor ? { orgId: visitor.orgId, token: visitor.token } : null
 
     // Enable interior root
     this.interiorRoot!.enabled = true
@@ -314,6 +328,7 @@ export class InteriorManager {
     this.visitorId = null
     this.visitorName = null
     this.visitorCharacterModel = null
+    this.roomAccess = null
   }
 
   get isActive(): boolean { return this.interiorRoot?.enabled ?? false }
@@ -338,6 +353,8 @@ export class InteriorManager {
    * so other clients in the room can distinguish and render this specific user.
    */
   private joinMultiplayerRoom(houseOwnerId: string): void {
+    const access = this.roomAccess
+    if (!access) return
     const client = ColyseusClient.getInstance()
     client.setCallbacks({
       onPlayerJoin: (sessionId, player) => this.spawnRemotePlayer(sessionId, player),
@@ -347,10 +364,11 @@ export class InteriorManager {
       },
     })
     // Non-blocking — multiplayer is optional (game works offline)
-    client.joinHouseRoom(houseOwnerId, {
+    client.joinHouseRoom(access.orgId, houseOwnerId, {
       userId: this.visitorId ?? houseOwnerId,
       name: this.visitorName ?? 'Visitor',
       characterModel: this.visitorCharacterModel ?? '',
+      token: access.token,
     }).catch((err) => {
       console.warn('[InteriorManager] Multiplayer unavailable:', err)
     })

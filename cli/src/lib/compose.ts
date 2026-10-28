@@ -91,6 +91,9 @@ function multiplayerService(): ComposeService {
     environment: {
       BACKEND_URL: "http://backend:8000",
       COLYSEUS_BRIDGE_SECRET: "${COLYSEUS_BRIDGE_SECRET}",
+      // Set here as well as in the image, so an older image pulled by tag
+      // still refuses tokenless joins and keeps Colyseus dev mode off.
+      NODE_ENV: "production",
     },
     ports: ["${MULTIPLAYER_HOST_PORT}:2567"],
   };

@@ -27,7 +27,8 @@ import { CafeteriaRoom } from "./CafeteriaRoom"
 import { CoffeeBarRoom } from "./CoffeeBarRoom"
 import { HouseRoom } from "./HouseRoom"
 import type { OrgRoom } from "./OrgRoom"
-import { RaceRoom } from "./RaceRoom"
+import type { JoinCredentials, JoinIdentity } from "../auth/verifyJoin"
+import { createRaceRoom } from "../testing/raceRoom"
 
 const CR = "\r"
 const LF = "\n"
@@ -38,6 +39,14 @@ const RAW_SPECIALS = [CR, LF, LINE_SEPARATOR, PARAGRAPH_SEPARATOR, ESC]
 const FORGED_NAME =
   `bob${CR}${LF}[HouseRoom] admin joined${LINE_SEPARATOR}x${PARAGRAPH_SEPARATOR}y` +
   `${ESC}[31mred${ESC}[0m`
+
+const ORG = "org-a"
+
+/** The join hooks every shared room exposes. */
+interface JoinableRoom {
+  onAuth(client: Client, options: JoinCredentials): Promise<JoinIdentity>
+  onJoin(client: Client, options: JoinCredentials, auth?: JoinIdentity): void
+}
 
 let logSpy: ReturnType<typeof vi.spyOn>
 let warnSpy: ReturnType<typeof vi.spyOn>
@@ -72,42 +81,62 @@ afterEach(() => {
 })
 
 describe("join log lines escape a forged display name", () => {
-  it("HouseRoom join", () => {
+  // The name a room logs on join is the stored one the backend returns from
+  // verify-token, and members choose their own display names.
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({ valid: true, user_id: "bob", org_id: ORG, name: FORGED_NAME }),
+      ),
+    )
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** Run a join the way Colyseus does: onAuth, then onJoin with its result. */
+  async function verifiedJoin(room: JoinableRoom, client: Client): Promise<void> {
+    const options = { token: "jwt-bob", orgId: ORG }
+    room.onJoin(client, options, await room.onAuth(client, options))
+  }
+
+  it("HouseRoom join", async () => {
     const room = new HouseRoom()
-    room.onCreate({ ownerId: "alice" })
-    room.onJoin(joinClient(), { userId: "bob", name: FORGED_NAME })
+    room.onCreate({ orgId: ORG, ownerId: "alice" })
+    await verifiedJoin(room, joinClient())
     expectSanitised(loggedLine())
   })
 
-  it("HouseRoom leave", () => {
+  it("HouseRoom leave", async () => {
     const room = new HouseRoom()
-    room.onCreate({ ownerId: "alice" })
-    room.onJoin(joinClient(), { userId: "bob", name: FORGED_NAME })
+    room.onCreate({ orgId: ORG, ownerId: "alice" })
+    await verifiedJoin(room, joinClient())
     logSpy.mockClear()
     room.onLeave(joinClient())
     expectSanitised(loggedLine())
   })
 
-  it("CoffeeBarRoom join", () => {
+  it("CoffeeBarRoom join", async () => {
     const room = new CoffeeBarRoom()
-    room.onCreate({ orgId: "org-a" })
-    room.onJoin(joinClient(), { userId: "bob", name: FORGED_NAME })
+    room.onCreate({ orgId: ORG })
+    await verifiedJoin(room, joinClient())
     expectSanitised(loggedLine())
     room.setSimulationInterval(undefined)
   })
 
-  it("CafeteriaRoom join", () => {
+  it("CafeteriaRoom join", async () => {
     const room = new CafeteriaRoom()
-    room.onCreate({ orgId: "org-a" })
-    room.onJoin(joinClient(), { userId: "bob", name: FORGED_NAME })
+    room.onCreate({ orgId: ORG })
+    await verifiedJoin(room, joinClient())
     expectSanitised(loggedLine())
     room.setSimulationInterval(undefined)
   })
 
-  it("RaceRoom join", () => {
-    const room = new RaceRoom()
-    room.onCreate({ orgId: "org-a", hostUserId: "alice", hostName: "Alice", distanceM: 100 })
-    room.onJoin(joinClient(), { userId: "bob", name: FORGED_NAME })
+  it("RaceRoom join", async () => {
+    const room = createRaceRoom({ orgId: ORG })
+    await verifiedJoin(room, joinClient())
     expectSanitised(loggedLine())
     room.clock.clear()
   })
