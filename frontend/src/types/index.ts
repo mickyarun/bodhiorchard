@@ -39,6 +39,8 @@ export interface User {
   // ``org_id`` to be readable at runtime.
   org_id: string
   character_model: string | null
+  /** As stored: a Slack CDN URL or a root-relative upload path. Load via resolveAvatarUrl. */
+  avatar_url: string | null
 }
 
 export interface Organization {
@@ -205,6 +207,7 @@ export interface BUDListItem {
   current_phase_deadline: string | null
   assignee_id: string | null
   assignee_name: string | null
+  assignee_avatar_url?: string | null
   open_bug_count: number
   created_at: string
   updated_at: string
@@ -648,6 +651,7 @@ export interface RepoContributor {
   actorName: string
   commitCount: number
   filesChanged: number
+  avatarUrl?: string | null
 }
 
 export const FEATURE_STATUS_COLORS: Record<string, string> = {
@@ -670,6 +674,7 @@ export interface SkillProfile {
   userId: string | null
   userName: string
   email: string
+  avatarUrl?: string | null
   modules: ModuleSkill[]
 }
 
@@ -864,6 +869,7 @@ export interface BugComment {
   bugId: string
   authorId: string
   authorName: string | null
+  authorAvatarUrl?: string | null
   body: string
   editedAt: string | null
   deletedAt: string | null
@@ -994,6 +1000,7 @@ export interface ChatMessageRead {
 }
 
 // ── Notification Types ──────────────────────────────────────────
+// Mirrors NotificationType in backend/app/models/notification.py.
 export type NotificationType =
   | 'job_completed'
   | 'job_failed'
@@ -1002,8 +1009,15 @@ export type NotificationType =
   | 'approval_rejected'
   | 'developer_assigned'
   | 'reassignment_done'
+  | 'testing_ready'
+  | 'pr_opened'
+  | 'pr_merged'
+  | 'all_prs_merged'
   | 'race_invite'
   | 'minigame_invite'
+  | 'leave_requested'
+  | 'leave_decided'
+  | 'employee_record_changed'
 
 /**
  * Structured payload attached to a race-invite notification.
