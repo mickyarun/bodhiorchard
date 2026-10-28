@@ -22,7 +22,7 @@
     <p v-if="error" class="time-off__empty">{{ error }}</p>
     <ul v-else-if="entries.length" class="time-off">
       <li v-for="entry in entries" :key="entry.request_id" class="time-off__row">
-        <AppMonogram :name="entry.user.name" :size="30" />
+        <AppMonogram :name="entry.user.name" :src="entry.user.avatar_url" :size="30" />
         <span class="time-off__text">
           <span class="time-off__name">{{ entry.user.name }}</span>
           <span class="time-off__dates">{{ formatDayRange(entry.start_date, entry.end_date) }}</span>

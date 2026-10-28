@@ -308,6 +308,7 @@ async def top_contributors(
             actorName=row.actor_name,
             commitCount=row.commit_count,
             filesChanged=row.files_changed,
+            avatarUrl=row.avatar_url,
         )
         for row in rows
     ]

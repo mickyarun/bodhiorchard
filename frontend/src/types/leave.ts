@@ -98,6 +98,8 @@ export interface OptionalHolidayBalance {
 export interface PersonRef {
   user_id: string
   name: string
+  /** The stored photo, on the lists that show one. */
+  avatar_url?: string | null
 }
 
 /** Leave taken this leave year against the policy's heads-up / warning lines. */
