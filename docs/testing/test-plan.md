@@ -47,24 +47,33 @@ cases and `it.each` rows count once). Baseline before this work: 3,315 backend u
 238 backend integration tests (plus 10 integration tests that were not marked), 867 frontend
 tests, 160 multiplayer tests and 27 CLI tests.
 
-| Area | Positive | Negative | Corner cases | New files | New tests | Bugs fixed |
-| --- | --- | --- | --- | --- | --- | --- |
-| Auth, JWT, RBAC, org isolation | yes | yes | yes | 9 | 36 | 2 |
-| Setup wizard, repos, settings, Jira, design systems | yes | yes | yes | 15 | 98 | 5 |
-| BUD lifecycle | yes | yes | yes | 17 | 83 | 4 |
-| Agents, jobs, MCP server | yes | yes | yes | 18 | 93 | 4 |
-| Repo scanning, features, bugs, triage, Slack intake | yes | yes | yes | 19 | 122 | 5 |
-| People and leave | yes | yes | yes | 16 | 69 | 0 |
-| Employee records and gamification | yes | yes | yes | 9 | 55 | 5 |
-| Frontend (Vitest) | yes | yes | yes | 21 | 186 | 5 |
-| Multiplayer, shared world, CLI | yes | yes | yes | 17 | 156 | 5 |
+| Area | Positive | Negative | Corner cases | New files | New tests | Bugs fixed | Test PR | Fix PRs |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Auth, JWT, RBAC, org isolation | yes | yes | yes | 9 | 36 | 2 | [#420](https://github.com/mickyarun/glideship/pull/420) | [#417](https://github.com/mickyarun/glideship/pull/417), [#418](https://github.com/mickyarun/glideship/pull/418) |
+| Setup wizard, repos, settings, Jira, design systems | yes | yes | yes | 15 | 98 | 5 | [#421](https://github.com/mickyarun/glideship/pull/421) | [#403](https://github.com/mickyarun/glideship/pull/403), [#404](https://github.com/mickyarun/glideship/pull/404), [#405](https://github.com/mickyarun/glideship/pull/405), [#406](https://github.com/mickyarun/glideship/pull/406), [#407](https://github.com/mickyarun/glideship/pull/407) |
+| BUD lifecycle | yes | yes | yes | 17 | 83 | 4 | [#436](https://github.com/mickyarun/glideship/pull/436) | [#427](https://github.com/mickyarun/glideship/pull/427), [#428](https://github.com/mickyarun/glideship/pull/428), [#429](https://github.com/mickyarun/glideship/pull/429), [#430](https://github.com/mickyarun/glideship/pull/430) |
+| Agents, jobs, MCP server | yes | yes | yes | 18 | 93 | 4 | [#422](https://github.com/mickyarun/glideship/pull/422) | [#408](https://github.com/mickyarun/glideship/pull/408), [#409](https://github.com/mickyarun/glideship/pull/409), [#410](https://github.com/mickyarun/glideship/pull/410), [#411](https://github.com/mickyarun/glideship/pull/411) |
+| Repo scanning, features, bugs, triage, Slack intake | yes | yes | yes | 19 | 122 | 5 | [#437](https://github.com/mickyarun/glideship/pull/437) | [#431](https://github.com/mickyarun/glideship/pull/431), [#432](https://github.com/mickyarun/glideship/pull/432), [#433](https://github.com/mickyarun/glideship/pull/433), [#434](https://github.com/mickyarun/glideship/pull/434), [#435](https://github.com/mickyarun/glideship/pull/435) |
+| People and leave | yes | yes | yes | 16 | 69 | 0 | [#423](https://github.com/mickyarun/glideship/pull/423) | none |
+| Employee records and gamification | yes | yes | yes | 9 | 55 | 5 | [#424](https://github.com/mickyarun/glideship/pull/424) | [#412](https://github.com/mickyarun/glideship/pull/412), [#413](https://github.com/mickyarun/glideship/pull/413), [#414](https://github.com/mickyarun/glideship/pull/414), [#415](https://github.com/mickyarun/glideship/pull/415), [#416](https://github.com/mickyarun/glideship/pull/416) |
+| Frontend (Vitest) | yes | yes | yes | 21 | 186 | 5 | [#425](https://github.com/mickyarun/glideship/pull/425) | [#393](https://github.com/mickyarun/glideship/pull/393), [#394](https://github.com/mickyarun/glideship/pull/394), [#395](https://github.com/mickyarun/glideship/pull/395), [#396](https://github.com/mickyarun/glideship/pull/396), [#397](https://github.com/mickyarun/glideship/pull/397) |
+| Multiplayer, shared world, CLI | yes | yes | yes | 17 | 156 | 5 | [#426](https://github.com/mickyarun/glideship/pull/426) | [#398](https://github.com/mickyarun/glideship/pull/398), [#399](https://github.com/mickyarun/glideship/pull/399), [#400](https://github.com/mickyarun/glideship/pull/400), [#401](https://github.com/mickyarun/glideship/pull/401), [#402](https://github.com/mickyarun/glideship/pull/402) |
 
 With every test branch and fix merged together, all gates pass: ruff, ruff format and
 `mypy --strict app/`; 3,560 backend unit tests; 852 backend integration tests on Postgres;
 1,243 frontend tests with `vue-tsc` clean; 309 multiplayer tests; 77 CLI tests with the CLI
 type check clean. The backend suites were also run against the newest dependency versions
 the `pyproject.toml` ranges allow (what CI installs), with the same result apart from the
-known flaky test below.
+known flaky test described above, which failed once in that run and passed in the next.
+
+The test-suite fix that marks every integration module is [#419](https://github.com/mickyarun/glideship/pull/419), and this plan is [#438](https://github.com/mickyarun/glideship/pull/438).
+
+### Merge order
+
+The test PRs don't depend on any fix PR: each test branch passes on main without the fixes,
+and each regression test lives in its own fix PR. Every PR branch merges cleanly with main and
+with every other PR branch (checked pairwise with `git merge-tree`), so they can land in any
+order.
 
 ## Areas
 
@@ -902,42 +911,42 @@ test fails on main and passes with its fix.
 
 | Area | Bug | PR |
 | --- | --- | --- |
-| Test suite | Four integration modules ran in the Docker-free pass and never under `-m integration` | #419 |
-| Auth | Deleting a role members still hold answered 500 | #417 |
-| Auth | BUD and todo assignees could be users from another org | #418 |
-| Setup | Branch detection matched prefixes (`devops` taken for `dev`, `main-legacy` for `main`) | #403 |
-| Setup | `.` and `..` passed the cloner's name check; purging `..` deleted every org's clones | #404 |
-| Setup | One unreadable folder made the whole picker answer 403 | #405 |
-| Setup | A NUL byte or over-long name in a repo path answered 500 | #406 |
-| Setup | The same checkout named twice started two scans of one repo | #407 |
-| BUD | Two BUDs created at once in one org: the second failed with 500 | #427 |
-| BUD | Two writers of one BUD at once: double close side effects or a 500 on history numbering | #428 |
-| BUD | Auto-close always recorded "prod -> closed" | #429 |
-| BUD | Auto-close never wrote learning metrics (the error was swallowed) | #430 |
-| MCP | `write_bud_design` wrote onto another org's BUD or repo | #408 |
-| MCP | A long User-Agent, forwarded address or tool name left no audit row | #409 |
-| MCP | A call whose database write failed was never audited | #410 |
-| Jobs | A job cancelled while queued still ran, from the UI's cancel buttons too | #411 |
-| Bugs | Bugs could link to another org's BUD or feature or be assigned outside the org; bad ids answered 500 | #431 |
-| Bugs | `rejectedAt` was always null in responses | #432 |
-| Triage | Two concurrent decisions on one triage session (API or Slack reactions) | #433 |
-| Triage | A severity like "High" or "P1" from the agent crashed Slack bug approval | #434 |
-| Triage | Anyone, even outside the org, could discard a Slack bug report | #435 |
-| Gamification | A duplicate XP award that lost a race still paid | #412 |
-| Gamification | The greeting bonus paid for any target, including yourself or a made-up id | #413 |
-| Gamification | Fishing and Pollen Pop scores over 1000 were refused and lost | #414 |
-| Gamification | The per-quiz board showed who was right while the quiz was open | #415 |
-| Gamification | Race results stored users from another org | #416 |
-| Frontend | A BUD in UAT with UAT turned off opened on a blank tab | #394 |
-| Frontend | Re-ticking a repo in bulk import lost its default branch | #395 |
-| Frontend | The generated org slug could end with a hyphen the wizard then rejected | #393 |
-| Frontend | A slow load of the previous BUD could replace the BUD on screen | #396 |
-| Frontend | An unknown `?tab=` link kept the previous BUD's tab | #397 |
-| Multiplayer | A message with no payload crashed the whole server | #398 |
-| Multiplayer | Org and mini-game rooms took the join identity from the client, not the token | #399 |
-| Multiplayer | Race rooms had no join auth and inputs could drive any racer | #400 |
-| Multiplayer | Log sanitising missed Unicode line breaks | #401 |
-| Multiplayer | Org, coffee bar, cafeteria and house rooms were shared across orgs and houses | #402 |
+| Test suite | Four integration modules ran in the Docker-free pass and never under `-m integration` | [#419](https://github.com/mickyarun/glideship/pull/419) |
+| Auth | Deleting a role members still hold answered 500 | [#417](https://github.com/mickyarun/glideship/pull/417) |
+| Auth | BUD and todo assignees could be users from another org | [#418](https://github.com/mickyarun/glideship/pull/418) |
+| Setup | Branch detection matched prefixes (`devops` taken for `dev`, `main-legacy` for `main`) | [#403](https://github.com/mickyarun/glideship/pull/403) |
+| Setup | `.` and `..` passed the cloner's name check; purging `..` deleted every org's clones | [#404](https://github.com/mickyarun/glideship/pull/404) |
+| Setup | One unreadable folder made the whole picker answer 403 | [#405](https://github.com/mickyarun/glideship/pull/405) |
+| Setup | A NUL byte or over-long name in a repo path answered 500 | [#406](https://github.com/mickyarun/glideship/pull/406) |
+| Setup | The same checkout named twice started two scans of one repo | [#407](https://github.com/mickyarun/glideship/pull/407) |
+| BUD | Two BUDs created at once in one org: the second failed with 500 | [#427](https://github.com/mickyarun/glideship/pull/427) |
+| BUD | Two writers of one BUD at once: double close side effects or a 500 on history numbering | [#428](https://github.com/mickyarun/glideship/pull/428) |
+| BUD | Auto-close always recorded "prod -> closed" | [#429](https://github.com/mickyarun/glideship/pull/429) |
+| BUD | Auto-close never wrote learning metrics (the error was swallowed) | [#430](https://github.com/mickyarun/glideship/pull/430) |
+| MCP | `write_bud_design` wrote onto another org's BUD or repo | [#408](https://github.com/mickyarun/glideship/pull/408) |
+| MCP | A long User-Agent, forwarded address or tool name left no audit row | [#409](https://github.com/mickyarun/glideship/pull/409) |
+| MCP | A call whose database write failed was never audited | [#410](https://github.com/mickyarun/glideship/pull/410) |
+| Jobs | A job cancelled while queued still ran, from the UI's cancel buttons too | [#411](https://github.com/mickyarun/glideship/pull/411) |
+| Bugs | Bugs could link to another org's BUD or feature or be assigned outside the org; bad ids answered 500 | [#431](https://github.com/mickyarun/glideship/pull/431) |
+| Bugs | `rejectedAt` was always null in responses | [#432](https://github.com/mickyarun/glideship/pull/432) |
+| Triage | Two concurrent decisions on one triage session (API or Slack reactions) | [#433](https://github.com/mickyarun/glideship/pull/433) |
+| Triage | A severity like "High" or "P1" from the agent crashed Slack bug approval | [#434](https://github.com/mickyarun/glideship/pull/434) |
+| Triage | Anyone, even outside the org, could discard a Slack bug report | [#435](https://github.com/mickyarun/glideship/pull/435) |
+| Gamification | A duplicate XP award that lost a race still paid | [#412](https://github.com/mickyarun/glideship/pull/412) |
+| Gamification | The greeting bonus paid for any target, including yourself or a made-up id | [#413](https://github.com/mickyarun/glideship/pull/413) |
+| Gamification | Fishing and Pollen Pop scores over 1000 were refused and lost | [#414](https://github.com/mickyarun/glideship/pull/414) |
+| Gamification | The per-quiz board showed who was right while the quiz was open | [#415](https://github.com/mickyarun/glideship/pull/415) |
+| Gamification | Race results stored users from another org | [#416](https://github.com/mickyarun/glideship/pull/416) |
+| Frontend | A BUD in UAT with UAT turned off opened on a blank tab | [#394](https://github.com/mickyarun/glideship/pull/394) |
+| Frontend | Re-ticking a repo in bulk import lost its default branch | [#395](https://github.com/mickyarun/glideship/pull/395) |
+| Frontend | The generated org slug could end with a hyphen the wizard then rejected | [#393](https://github.com/mickyarun/glideship/pull/393) |
+| Frontend | A slow load of the previous BUD could replace the BUD on screen | [#396](https://github.com/mickyarun/glideship/pull/396) |
+| Frontend | An unknown `?tab=` link kept the previous BUD's tab | [#397](https://github.com/mickyarun/glideship/pull/397) |
+| Multiplayer | A message with no payload crashed the whole server | [#398](https://github.com/mickyarun/glideship/pull/398) |
+| Multiplayer | Org and mini-game rooms took the join identity from the client, not the token | [#399](https://github.com/mickyarun/glideship/pull/399) |
+| Multiplayer | Race rooms had no join auth and inputs could drive any racer | [#400](https://github.com/mickyarun/glideship/pull/400) |
+| Multiplayer | Log sanitising missed Unicode line breaks | [#401](https://github.com/mickyarun/glideship/pull/401) |
+| Multiplayer | Org, coffee bar, cafeteria and house rooms were shared across orgs and houses | [#402](https://github.com/mickyarun/glideship/pull/402) |
 
 ## Open questions
 
@@ -946,7 +955,7 @@ These need a product decision. No test asserts either behaviour.
 Access and security:
 - The repo write endpoints in `settings_repos.py` (clone, delete, branch and status changes,
   classify, extract routes) need only engineering access, so a developer with `settings:view`
-  can remove a repo. Add-by-path, finalize and the picker need `settings:edit` since #389.
+  can remove a repo. Add-by-path, finalize and the picker need `settings:edit` since [#389](https://github.com/mickyarun/glideship/pull/389).
 - `GET/POST /api/v1/jobs/{id}` don't check the job's org; the job id is the access key.
 - Any per-user MCP token can call all 29 tools on `/mcp/tools/*`, including `write_bud` (no
   assignee or closed-status check), `post_slack_message` and `get_team_context`.
@@ -994,7 +1003,7 @@ Behaviour:
 - About ten MCP handlers answer 500 for badly typed params (a string `limit`, a non-UUID
   `repo_id`, an out-of-range `bud_number`). A shared coercion helper would fix the class.
   `create_bud` silently drops a feature id from another org.
-- The #388 tech-planner rule reaches only orgs seeded after it; stored prompts aren't
+- The [#388](https://github.com/mickyarun/glideship/pull/388) tech-planner rule reaches only orgs seeded after it; stored prompts aren't
   refreshed.
 - Leave: a skip-level manager doesn't see the leave type on the team calendar; the report
   range check allows 366 days in some years.
