@@ -20,6 +20,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.core.paths import NO_NUL_PATTERN
 from app.models.quiz_question import QuizDifficulty, QuizQuestionType
 
 
@@ -617,7 +618,7 @@ class LocalRepoBranches(BaseModel):
 class AddRepoRequest(BaseModel):
     """Request to add a repository path."""
 
-    path: str
+    path: str = Field(..., pattern=NO_NUL_PATTERN)
 
 
 class RepoStatusRequest(BaseModel):

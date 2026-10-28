@@ -20,8 +20,25 @@
   <section class="sync" aria-labelledby="slack-sync-title">
     <div class="sync__head">
       <h3 id="slack-sync-title" class="sync__title">Sync members</h3>
-      <v-btn variant="outlined" size="small" prepend-icon="mdi-sync" :loading="s.syncing.value" @click="s.sync()">Fetch from Slack</v-btn>
+      <div class="sync__head-actions">
+        <!-- Linking and importing bring photos in already; this catches
+             up members linked before that, or who added a photo since. -->
+        <v-btn
+          v-if="canImportSlackPhotos"
+          variant="text"
+          size="small"
+          prepend-icon="mdi-account-box-outline"
+          :loading="photos.importing.value"
+          @click="photos.run()"
+        >
+          Import photos
+        </v-btn>
+        <v-btn variant="outlined" size="small" prepend-icon="mdi-sync" :loading="s.syncing.value" @click="s.sync()">Fetch from Slack</v-btn>
+      </div>
     </div>
+    <AppCallout v-if="photos.outcome.value" :variant="photos.outcome.value.variant" class="mt-3">
+      {{ photos.outcome.value.text }}
+    </AppCallout>
     <p class="sync__note">
       Needs the <code v-for="scope in SLACK_SYNC_SCOPES" :key="scope" class="mr-1">{{ scope }}</code> bot scopes.
     </p>
@@ -96,6 +113,8 @@ import AppCallout from '@/components/common/AppCallout.vue'
 import AppMonogram from '@/components/common/AppMonogram.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import { useSlackMemberSync, type SlackAction } from '@/composables/useSlackMemberSync'
+import { usePermissions } from '@/composables/usePermissions'
+import { useSlackPhotoImport } from '@/composables/useSlackPhotoImport'
 import { useMembersStore } from '@/stores/members'
 import { plural } from '@/utils/format'
 import { memberPickerItems } from '@/utils/members'
@@ -107,6 +126,8 @@ const ACTION_OPTIONS: { label: string; value: SlackAction }[] = [
 ]
 
 const s = useSlackMemberSync()
+const photos = useSlackPhotoImport()
+const { canImportSlackPhotos } = usePermissions()
 const membersStore = useMembersStore()
 </script>
 
@@ -121,6 +142,12 @@ const membersStore = useMembersStore()
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+.sync__head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
 }
 .sync__title {
   margin: 0;

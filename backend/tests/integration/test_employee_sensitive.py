@@ -32,9 +32,10 @@ from app.models.employee_audit_event import EmployeeAuditEvent
 from app.models.employee_document import EmployeeDocument
 from app.models.employee_sensitive import EmployeeSensitiveDetails
 from app.models.notification import Notification, NotificationType
-from app.services.employees import documents, hr_key_rotation, record_alerts
+from app.services.employees import hr_key_rotation
 from app.services.employees.document_policy import MAX_DOCUMENT_BYTES
 from app.services.file_storage import FileStorage
+from tests.integration.hr_support import configure_hr_storage
 from tests.integration.leave_support import Factory, as_user, give_role, setup_org
 
 pytestmark = pytest.mark.integration
@@ -45,15 +46,7 @@ PDF = b"%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\n%%EOF"
 @pytest.fixture
 def hr_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> FileStorage:
     """A configured HR key, and document storage in a temp folder."""
-    key = base64.b64encode(b"k" * 32).decode()
-    monkeypatch.setattr(settings.hr_crypto, "hr_encryption_keys", SecretStr(f"test:{key}"))
-    hr_crypto._configured_keyring.cache_clear()
-    storage = FileStorage()
-    storage.local_dir = tmp_path
-    monkeypatch.setattr(documents, "get_file_storage", lambda: storage)
-    monkeypatch.setattr(hr_key_rotation, "get_file_storage", lambda: storage)
-    monkeypatch.setattr(record_alerts, "spawn", lambda job: job.close())
-    return storage
+    return configure_hr_storage(monkeypatch, tmp_path)
 
 
 async def _team(factory: Factory) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]:
