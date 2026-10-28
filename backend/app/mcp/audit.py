@@ -188,7 +188,7 @@ def emit_audit(
             transport=transport,
             status_code=status_code,
             org_id=str(org_id),
-            user_id=str(auth.user.id) if auth and auth.user else None,
+            user_id=str(auth.user_id) if auth and auth.user_id else None,
             token_id=str(token_id) if token_id else None,
             ip=_client_ip(request),
             user_agent=request.headers.get("user-agent"),
@@ -198,7 +198,7 @@ def emit_audit(
     task = asyncio.create_task(
         _write_audit_row(
             org_id=org_id,
-            user_id=auth.user.id if auth and auth.user else None,
+            user_id=auth.user_id if auth else None,
             token_id=token_id,
             tool_name=tool_name,
             transport=transport,
