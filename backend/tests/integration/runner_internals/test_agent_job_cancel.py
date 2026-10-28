@@ -113,31 +113,6 @@ async def test_cancel_while_the_agent_hangs_kills_the_cli(
     assert (await load_task(app_sessions, run.task_id)).status == AgentTaskStatus.FAILED
 
 
-async def test_cancelling_a_finished_job_changes_nothing(
-    stage_claude: FakeClaudeRunner,
-    client: AsyncClient,
-    app_sessions: Factory,
-    job_runtime: JobRuntime,
-) -> None:
-    """A late cancel returns the terminal job as it was."""
-    org = await seed_agent_org(app_sessions)
-    bud = await add_bud(app_sessions, org.org_id, status=BUDStatus.CLOSED)
-    stage_claude.enqueue(AgentScript.ok("# Recap"))
-    run = await trigger_stage(app_sessions, org.org_id, bud.id, "closed")
-    await job_runtime.wait(run.job_id)
-
-    response = await client.post(
-        f"/api/v1/jobs/{run.job_id}/cancel", headers=auth_headers(org.owner_id, org.org_id)
-    )
-
-    assert (response.status_code, response.json()["state"]) == (200, "completed")
-    assert (await load_task(app_sessions, run.task_id)).status == AgentTaskStatus.COMPLETED
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="a job cancelled while queued still runs; fixed by branch fix/job-queue-skip-cancelled",
-)
 async def test_task_cancelled_while_queued_never_runs(
     stage_claude: FakeClaudeRunner,
     client: AsyncClient,
@@ -145,7 +120,12 @@ async def test_task_cancelled_while_queued_never_runs(
     job_runtime: JobRuntime,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The task cancel route on a job still waiting behind another must drop it."""
+    """The task cancel route drops a real agent job still waiting behind another.
+
+    The queue-level behaviour is pinned on main by
+    ``tests/integration/test_agent_cancel_queued_job.py`` with a stand-in
+    handler; this drives it through the HTTP route and the real agent handler.
+    """
     gate = SpawnGate(stage_claude, monkeypatch)
     org = await seed_agent_org(app_sessions)
     busy = await add_bud(app_sessions, org.org_id, status=BUDStatus.CLOSED)

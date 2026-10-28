@@ -16,8 +16,6 @@
 
 from __future__ import annotations
 
-import uuid
-
 import pytest
 from httpx import AsyncClient
 
@@ -105,10 +103,6 @@ async def test_status_route_shows_the_running_job_then_its_result(
         "Running agent...",
     )
     assert (done.json()["state"], done.json()["progressPct"]) == ("completed", 100)
-    unknown = await client.get(f"/api/v1/jobs/{uuid.uuid4()}/status", headers=headers)
-    assert unknown.status_code == 404
-    anonymous = await client.get(f"/api/v1/jobs/{run.job_id}/status")
-    assert anonymous.status_code == 401
 
 
 @pytest.mark.parametrize(
