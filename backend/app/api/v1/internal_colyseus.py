@@ -39,6 +39,7 @@ from app.config import settings
 from app.core.deps import get_db, member_has_permission
 from app.core.permissions import WORKSPACE_ENGINEERING
 from app.core.security import verify_token
+from app.models.user import User
 from app.repositories.minigame import MinigameRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
@@ -216,8 +217,11 @@ async def verify_user_token(
 ) -> dict[str, Any]:
     """Verify a user JWT token.
 
-    Called by Colyseus when a client attempts to join an OrgRoom.
-    Prevents unauthorized users from joining org rooms they don't belong to.
+    Called by Colyseus when a client attempts to join any room. Prevents
+    unauthorized users from joining rooms of an org they don't belong to.
+    The token's org must be exactly the room's org named in the payload, and
+    the returned name is the user's stored display name (the JWT has none),
+    so the room server never has to take a name from the client.
 
     Args:
         payload: `{"token": "<jwt>", "org_id": "<uuid>"}`
@@ -248,7 +252,7 @@ async def verify_user_token(
         return {"valid": False}
 
     token_org_id = jwt_payload.get("org_id")
-    if claimed_org_id and token_org_id and str(token_org_id) != str(claimed_org_id):
+    if not claimed_org_id or str(token_org_id) != str(claimed_org_id):
         logger.warning(
             "colyseus_verify_token_org_mismatch",
             token_org_id=str(token_org_id),
@@ -259,7 +263,8 @@ async def verify_user_token(
 
     # The garden is part of the engineering workspace: people-only roles
     # (and deactivated users with a still-valid JWT) don't join the room.
-    if not await _may_join_org_room(db, jwt_payload.get("sub"), token_org_id):
+    member = await _org_room_member(db, jwt_payload.get("sub"), token_org_id)
+    if member is None:
         logger.warning(
             "colyseus_verify_token_no_engineering_access",
             user_id=jwt_payload.get("sub", ""),
@@ -269,23 +274,25 @@ async def verify_user_token(
 
     return {
         "valid": True,
-        "user_id": jwt_payload.get("sub", ""),
-        "org_id": str(token_org_id) if token_org_id else "",
-        "name": jwt_payload.get("name", ""),
+        "user_id": str(member.id),
+        "org_id": str(token_org_id),
+        "name": member.name,
     }
 
 
-async def _may_join_org_room(db: AsyncSession, sub: Any, org_id: Any) -> bool:
-    """True if the JWT subject is an active member with engineering access."""
+async def _org_room_member(db: AsyncSession, sub: Any, org_id: Any) -> User | None:
+    """The JWT subject if it is an active member with engineering access."""
     try:
         user_id = uuid.UUID(str(sub))
         org_uuid = uuid.UUID(str(org_id))
     except ValueError:
-        return False
+        return None
     user = await UserRepository(db).get_by_id(user_id)
     if user is None or not user.is_active:
-        return False
-    return await member_has_permission(db, user_id, org_uuid, WORKSPACE_ENGINEERING)
+        return None
+    if not await member_has_permission(db, user_id, org_uuid, WORKSPACE_ENGINEERING):
+        return None
+    return user
 
 
 class RaceInviteRequest(BaseModel):
