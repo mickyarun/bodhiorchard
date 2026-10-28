@@ -61,6 +61,17 @@ def build_snapshot(bud: BUDDocument) -> dict[str, Any]:
 
 
 async def _next_version_no(db: AsyncSession, bud_id: uuid.UUID, phase: BUDStatus) -> int:
+    """``max(version_no) + 1`` for the phase, under the BUD's row lock.
+
+    Every history writer (PATCH, revert, chat, agents, MCP) comes through
+    here, so the lock is taken here: without it two writers read the same
+    max and the second insert fails on ``uq_bud_version_per_phase``. The
+    lock is ``FOR NO KEY UPDATE`` (it does not block inserts of rows that
+    reference the BUD) and is held until the caller's transaction ends.
+    """
+    await db.execute(
+        select(BUDDocument.id).where(BUDDocument.id == bud_id).with_for_update(key_share=True)
+    )
     stmt = select(func.coalesce(func.max(BUDVersion.version_no), 0)).where(
         BUDVersion.bud_id == bud_id, BUDVersion.phase == phase
     )

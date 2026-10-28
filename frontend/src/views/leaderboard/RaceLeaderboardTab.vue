@@ -50,6 +50,7 @@ const entries = computed<BoardEntry[]>(() =>
   rows.value.map((row, i) => ({
     key: `${row.userId}:${row.finishedAt}:${i}`,
     name: row.userName,
+    avatarUrl: row.avatarUrl,
     figure: formatRaceTime(row.finishTimeMs ?? 0),
     note: relativeTime(row.finishedAt, now.value),
     isMe: row.userId === authStore.user?.id,

@@ -1065,7 +1065,7 @@ async def call_tool(
         emit_audit(
             request=request,
             auth=auth,
-            org_id=auth.org.id,
+            org_id=auth.org_id,
             token_id=auth.token_id,
             tool_name=tool_name,
             transport="http",
@@ -1081,7 +1081,7 @@ async def call_tool(
         emit_audit(
             request=request,
             auth=auth,
-            org_id=auth.org.id,
+            org_id=auth.org_id,
             token_id=auth.token_id,
             tool_name=tool_name,
             transport="http",
@@ -1103,7 +1103,7 @@ async def call_tool(
         emit_audit(
             request=request,
             auth=auth,
-            org_id=auth.org.id,
+            org_id=auth.org_id,
             token_id=auth.token_id,
             tool_name=tool_name,
             transport="http",
@@ -1115,7 +1115,7 @@ async def call_tool(
         emit_audit(
             request=request,
             auth=auth,
-            org_id=auth.org.id,
+            org_id=auth.org_id,
             token_id=auth.token_id,
             tool_name=tool_name,
             transport="http",
@@ -1127,7 +1127,7 @@ async def call_tool(
     emit_audit(
         request=request,
         auth=auth,
-        org_id=auth.org.id,
+        org_id=auth.org_id,
         token_id=auth.token_id,
         tool_name=tool_name,
         transport="http",
