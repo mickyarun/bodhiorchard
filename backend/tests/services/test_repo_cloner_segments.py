@@ -17,6 +17,8 @@
 ``.`` and ``..`` pass a letters-digits-dots check, and joined under the
 clone root they name the org folder or the root itself: a clone would
 land on every org's clones, and a purge of ``..`` would delete them all.
+The check is a full match, so a trailing newline doesn't slip past a
+``$`` anchor either.
 """
 
 from __future__ import annotations
@@ -63,6 +65,7 @@ def _clones(root: Path) -> int:
         ("https://github.com/acme/...", "acme"),
         ("git@github.com:../widgets.git", "acme"),
         ("https://github.com/acme/widgets", ".."),
+        ("https://github.com/acme/widgets", "acme\n"),
     ],
 )
 async def test_clone_refuses_dot_segments_without_running_git(
@@ -74,7 +77,7 @@ async def test_clone_refuses_dot_segments_without_running_git(
     assert git_calls == []
 
 
-@pytest.mark.parametrize("name", ["..", ".", "..."])
+@pytest.mark.parametrize("name", ["..", ".", "...", "repo\n", "..\n"])
 def test_purges_refuse_dot_segments_and_delete_nothing(repos_dir: Path, name: str) -> None:
     with pytest.raises(ValueError):
         repo_cloner.purge_repo_clones("acme", [name])
