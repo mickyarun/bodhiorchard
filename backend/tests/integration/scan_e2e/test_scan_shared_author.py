@@ -30,6 +30,7 @@ from httpx import AsyncClient
 
 from app.models.scan_phase import ScanPhase
 from app.models.scan_run_enums import RepoRunStatus, StepStatus
+from app.repositories.user import UserRepository
 from tests.fakes.claude_runner import FakeClaudeRunner
 from tests.fakes.git_repo import LocalGitRepo
 from tests.fakes.seed import auth_headers, seed_org, seed_repo
@@ -37,6 +38,7 @@ from tests.integration.scan_e2e.scan_support import (
     SYNTHESIS_MARKER,
     Factory,
     load_outcome,
+    require,
     start_scan_over_http,
     synthesis_writing,
 )
@@ -46,13 +48,13 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 async def _scan_in_new_org(
     client: AsyncClient, factory: Factory, repo: LocalGitRepo
-) -> tuple[RepoRunStatus, StepStatus | None, str | None]:
+) -> tuple[RepoRunStatus, StepStatus | None, str | None, uuid.UUID]:
     org = await seed_org(factory)
     repo_id = await seed_repo(factory, org.org_id, repo)
     scan_id = await start_scan_over_http(client, auth_headers(org.owner_id, org.org_id), repo_id)
     outcome = await load_outcome(factory, org.org_id, scan_id)
     steps = {step.phase: step.status for step in outcome.steps}
-    return outcome.run.status, steps.get(ScanPhase.SKILL_EXTRACTION), outcome.run.error
+    return outcome.run.status, steps.get(ScanPhase.SKILL_EXTRACTION), outcome.run.error, org.org_id
 
 
 @pytest.mark.xfail(
@@ -73,8 +75,15 @@ async def test_second_org_scanning_the_same_author_still_completes(
     second = git_repo_factory("shop-web", author_email=author)
     mcp_claude.when(SYNTHESIS_MARKER, synthesis_writing(1))
 
-    assert (await _scan_in_new_org(client, app_sessions, first))[0] is RepoRunStatus.DONE
-    status, skills, error = await _scan_in_new_org(client, app_sessions, second)
+    first_status, _, _, first_org = await _scan_in_new_org(client, app_sessions, first)
+    require(first_status is RepoRunStatus.DONE, "the first org's scan should complete")
+    status, skills, error, second_org = await _scan_in_new_org(client, app_sessions, second)
 
     assert status is RepoRunStatus.DONE, error
     assert skills is StepStatus.DONE
+    async with app_sessions() as db:
+        users = UserRepository(db)
+        owner = await users.get_by_email(author)
+        assert owner is not None
+        assert await users.get_membership(owner.id, first_org) is not None
+        assert await users.get_membership(owner.id, second_org) is None

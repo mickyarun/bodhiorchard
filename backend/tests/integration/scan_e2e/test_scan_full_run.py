@@ -14,7 +14,8 @@
 
 """A full first scan of a real git repo, from the HTTP request to the features.
 
-Nothing below the HTTP route is mocked except the agent CLI: the worktree is
+Below the HTTP route only the agent CLI and the embedding model are faked
+(and Redis is off, so its users fail open): the worktree is
 refreshed from a local ``origin``, the real indexer clusters the code, every
 reduction stage runs, the scripted synthesis agent files features through
 the real MCP route, and the global phases finish the scan.
@@ -134,8 +135,47 @@ async def test_rescan_at_the_same_sha_reuses_the_caches_and_skips_the_agent(
     second = await start_scan_over_http(client, headers, repo_id)
 
     outcome = await load_outcome(app_sessions, org.org_id, second)
-    assert outcome.run.status in {RepoRunStatus.DONE, RepoRunStatus.SKIPPED_UNCHANGED}
+    assert outcome.run.status is RepoRunStatus.DONE
     by_phase = {step.phase: step.status for step in outcome.steps}
     assert by_phase[ScanPhase.FEATURE_SYNTHESIS] is StepStatus.SKIPPED_CACHE
     assert len(mcp_claude.runs) == 1
     assert await active_feature_titles(app_sessions, org.org_id, repo_id) == before
+
+
+def _push_from_elsewhere(repo: LocalGitRepo, tmp_path: Path) -> str:
+    """A teammate merges to main: commit in another clone and push to origin."""
+    other = tmp_path / "teammate"
+    git(tmp_path, "clone", "-q", str(repo.origin), str(other))
+    (other / "shop/orders/refunds.py").write_text("def refund_order(order):\n    return order\n")
+    git(other, "add", "-A")
+    git(other, "commit", "-q", "-m", "Add refunds", author_email=repo.author_email)
+    git(other, "push", "-q", "origin", "main")
+    return repo.head("main")
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="the synthesis skip check compares the clone's checked-out branch, not the "
+    "scanned origin/main, so main's new code is never synthesised; reported, not fixed",
+)
+async def test_main_advancing_while_the_clone_sits_on_another_branch_is_resynthesised(
+    client: AsyncClient,
+    app_sessions: Factory,
+    mcp_claude: FakeClaudeRunner,
+    shop_repo: LocalGitRepo,
+    data_dir: Path,
+    tmp_path: Path,
+) -> None:
+    git(shop_repo.work, "checkout", "-q", "develop")
+    org = await seed_org(app_sessions)
+    repo_id = await seed_repo(app_sessions, org.org_id, shop_repo)
+    headers = auth_headers(org.owner_id, org.org_id)
+    mcp_claude.when(SYNTHESIS_MARKER, synthesis_writing(1))
+    await start_scan_over_http(client, headers, repo_id)
+    newer = _push_from_elsewhere(shop_repo, tmp_path)
+
+    await start_scan_over_http(client, headers, repo_id)
+
+    assert len(mcp_claude.runs) == 2
+    assert (await tracked_repo(app_sessions, org.org_id, repo_id)).head_sha == newer

@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -42,7 +43,10 @@ from app.repositories.scan import ScanRepository
 from app.repositories.scan_run import ScanRunRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.services.scan.runner import wait_for_scan_task
+from tests.fakes.claude_runner import FakeClaudeRunner
 from tests.fakes.claude_script import AgentRun, AgentScript, ToolCall
+from tests.fakes.git_repo import LocalGitRepo
+from tests.fakes.seed import auth_headers, seed_org, seed_repo
 
 Factory = async_sessionmaker[AsyncSession]
 SYNTHESIS_MARKER = "write_synthesis_feature"
@@ -64,13 +68,14 @@ def feature_params(run: AgentRun, index: int, prefix: str = "Capability") -> dic
     """``write_synthesis_feature`` params for the ``index``-th cluster in the prompt."""
     cluster = prompt_clusters(run.prompt)[index]
     repo_id = _REPO_ID_RE.search(run.prompt)
+    assert repo_id is not None, "the synthesis prompt lost its repo_id"
     label = cluster["label"] or "+".join(cluster["cluster_ids"])
     return {
         "name": f"{prefix} {label}",
         "description": f"{prefix}: handles {label} for the shop service.",
         "source_community_ids": cluster["cluster_ids"],
         "repo_name": "shop-api",
-        "repo_id": repo_id.group(1) if repo_id else None,
+        "repo_id": repo_id.group(1),
         "capabilities": [f"manage {label}"],
     }
 
@@ -168,3 +173,39 @@ async def tracked_repo(
         row = await TrackedRepoRepository(db, org_id=org_id).get_by_id(repo_id)
         assert row is not None
         return row
+
+
+def require(condition: bool, message: str) -> None:
+    """Fail the test outright (not via AssertionError) when a precondition breaks."""
+    if not condition:
+        pytest.fail(message)
+
+
+@dataclass(frozen=True)
+class Scanned:
+    """An org whose repo has had one successful full scan."""
+
+    org_id: uuid.UUID
+    owner_id: uuid.UUID
+    repo_id: uuid.UUID
+    head_sha: str
+    titles: set[str]
+
+
+async def scanned_once(
+    client: AsyncClient,
+    factory: Factory,
+    claude: FakeClaudeRunner,
+    repo: LocalGitRepo,
+    *,
+    timeout_seconds: int | None = None,
+) -> Scanned:
+    """Seed an org, scan ``repo`` once with two features, return the baseline."""
+    config = {"scan": {"timeout_seconds": timeout_seconds}} if timeout_seconds else {}
+    org = await seed_org(factory, config=config)
+    repo_id = await seed_repo(factory, org.org_id, repo)
+    claude.enqueue(synthesis_writing(2))
+    await start_scan_over_http(client, auth_headers(org.owner_id, org.org_id), repo_id)
+    titles = await active_feature_titles(factory, org.org_id, repo_id)
+    require(len(titles) == 2, f"the baseline scan should file two features, got {titles}")
+    return Scanned(org.org_id, org.owner_id, repo_id, repo.head("main"), titles)
