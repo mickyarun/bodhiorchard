@@ -28,7 +28,7 @@ from app.services import event_bus
 from app.services.embedding_service import embedding_service
 from tests.fakes.app_state import EventRecorder
 from tests.fakes.embeddings import DIMENSIONS, FakeEmbedder
-from tests.fakes.git_repo import LocalGitRepo
+from tests.fakes.git_repo import LocalGitRepo, git
 from tests.fakes.guard import (
     OLLAMA_PORT,
     ExternalCallBlockedError,
@@ -131,3 +131,13 @@ async def test_event_recorder_sees_every_publish(event_recorder: EventRecorder) 
 def test_data_dir_redirects_the_settings(data_dir: Path) -> None:
     assert settings.storage.data_dir == str(data_dir)
     assert data_dir.is_dir()
+
+
+def test_fixture_commits_survive_the_app_rewriting_origin(git_repo: LocalGitRepo) -> None:
+    git(git_repo.work, "remote", "set-url", "origin", "https://github.com/acme/shop.git")
+
+    sha = git_repo.commit({"shop/notes.py": "NOTE = 1\n"}, "Notes")
+
+    assert git_repo.head("main") == sha
+    with pytest.raises(RuntimeError, match="not allowed"):
+        git(git_repo.work, "fetch", "origin")
