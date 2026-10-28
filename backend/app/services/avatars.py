@@ -37,7 +37,7 @@ import io
 import secrets
 from collections.abc import Collection
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlparse
 
 import structlog
@@ -58,6 +58,7 @@ __all__ = [
     "AvatarImageError",
     "SlackPhotoSync",
     "absolute_avatar_url",
+    "adopt_slack_photo",
     "avatar_storage_path",
     "may_edit_avatar",
     "new_avatar_key",
@@ -205,6 +206,29 @@ def slack_photo_url(profile: dict[str, Any]) -> str | None:
     return url
 
 
+class _HasPhoto(Protocol):
+    """The two photo columns ``adopt_slack_photo`` reads and writes."""
+
+    avatar_url: str | None
+    avatar_storage_path: str | None
+
+
+def adopt_slack_photo(user: _HasPhoto, url: str, *, overwrite: bool = False) -> bool:
+    """Give ``user`` their Slack photo ``url``; True if it changed.
+
+    An upload made here always wins — someone who chose a photo meant it —
+    so a stored file is never replaced. ``overwrite`` only lets a newer
+    Slack photo replace an older one. Every path that copies a Slack photo
+    onto a member goes through this rule.
+    """
+    if user.avatar_storage_path or user.avatar_url == url:
+        return False
+    if user.avatar_url and not overwrite:
+        return False
+    user.avatar_url = url
+    return True
+
+
 @dataclass(frozen=True)
 class SlackPhotoSync:
     """Outcome of importing photos from Slack."""
@@ -270,13 +294,9 @@ async def sync_slack_photos(
         if not url:
             skipped_no_photo += 1
             continue
-        if user.avatar_storage_path or user.avatar_url == url:
+        if not adopt_slack_photo(user, url, overwrite=overwrite):
             skipped_has_photo += 1
             continue
-        if user.avatar_url and not overwrite:
-            skipped_has_photo += 1
-            continue
-        user.avatar_url = url
         updated += 1
     await db.flush()
     return SlackPhotoSync(

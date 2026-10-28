@@ -26,7 +26,7 @@ from sqlalchemy.orm import aliased
 from app.models.dev_activity import DevActivityLog
 from app.models.role import Role, RoleScopeType
 from app.models.tracked_repository import TrackedRepository
-from app.models.user import OrgToUser
+from app.models.user import OrgToUser, User
 from app.repositories.base import BaseRepository
 
 
@@ -63,12 +63,14 @@ class RepoContributor:
     git committer name written by the hook; we group by it as a
     fallback identity when ``user_id`` is NULL so anonymous commits
     still aggregate per-author instead of collapsing to one bucket.
+    ``avatar_url`` is the member's stored photo; anonymous rows have none.
     """
 
     user_id: uuid.UUID | None
     actor_name: str
     commit_count: int
     files_changed: int
+    avatar_url: str | None = None
 
 
 def _apply_role_filter(
@@ -237,7 +239,8 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
         rows (NULL user_id, before user attribution rolled out) bucket
         per author instead of collapsing into a single anonymous row.
         Returns the top ``limit`` rows ordered by commit count
-        descending.
+        descending. Attributed rows carry the member's stored photo;
+        it depends only on ``user_id``, so grouping by it splits nothing.
         """
         DAL = DevActivityLog  # noqa: N806
         files_count = func.coalesce(
@@ -251,16 +254,18 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
             select(
                 DAL.user_id,
                 DAL.actor_name,
+                User.avatar_url,
                 func.count(func.distinct(DAL.commit_sha)).label("commit_count"),
                 func.coalesce(func.sum(files_count), 0).label("files_changed"),
             )
+            .outerjoin(User, User.id == DAL.user_id)
             .where(
                 DAL.repo_id == repo_id,
                 DAL.event_type == "commit",
                 DAL.commit_sha.is_not(None),
                 DAL.actor_name.is_not(None),
             )
-            .group_by(DAL.user_id, DAL.actor_name)
+            .group_by(DAL.user_id, DAL.actor_name, User.avatar_url)
             .order_by(func.count(func.distinct(DAL.commit_sha)).desc())
             .limit(limit)
         )
@@ -271,6 +276,7 @@ class DevActivityLogRepository(BaseRepository[DevActivityLog]):
                 actor_name=row.actor_name or "Unknown",
                 commit_count=int(row.commit_count or 0),
                 files_changed=int(row.files_changed or 0),
+                avatar_url=row.avatar_url,
             )
             for row in result.all()
         ]

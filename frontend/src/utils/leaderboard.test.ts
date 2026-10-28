@@ -53,4 +53,9 @@ describe('leaderboard', () => {
     ])
     expect(xpBoard([xp('z', 0)], 'z')[0].bar).toBe(0)
   })
+
+  it('carries each person\'s photo onto the board', () => {
+    const board = xpBoard([xp('a', 2, { avatar_url: '/api/v1/employees/avatars/a' }), xp('b', 1)], 'b')
+    expect(board.map(b => b.avatarUrl)).toEqual(['/api/v1/employees/avatars/a', null])
+  })
 })

@@ -17,6 +17,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import PermissionSet, get_db, get_permission_set, require_permissions
@@ -224,7 +225,12 @@ async def delete_role(
     perms: PermissionSet = Depends(get_permission_set),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Delete one of this org's custom roles. System roles cannot be deleted."""
+    """Delete one of this org's custom roles. System roles cannot be deleted.
+
+    A role someone still holds is refused with 409: their membership points
+    at it, and quietly dropping them to the unassigned default would change
+    their access without anyone choosing it.
+    """
     role_repo = RoleRepository(db, org_id=current_user.org_id)
     role = await role_repo.get_by_id(role_id)
     if role is None:
@@ -235,4 +241,18 @@ async def delete_role(
             detail="System roles cannot be deleted",
         )
     await assert_can_manage_role(db, actor=perms, role_id=role.id)
-    await role_repo.delete(role)
+    holders = await role_repo.count_holders(role.id)
+    if holders:
+        raise _role_in_use(f"{holders} member(s) still have this role.")
+    try:
+        await role_repo.delete(role)
+    except IntegrityError as exc:
+        # Someone was given the role between the count and the delete.
+        raise _role_in_use("A member was just given this role.") from exc
+
+
+def _role_in_use(reason: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=f"{reason} Give them another role first.",
+    )

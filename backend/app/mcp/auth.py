@@ -18,7 +18,7 @@ import asyncio
 import hashlib
 import secrets
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import structlog
@@ -85,6 +85,17 @@ class MCPAuthResult:
     org: Organization
     user: User | None = None
     token_id: uuid.UUID | None = None
+    # Plain copies of the ORM ids, taken while the request session is
+    # healthy. A handler whose flush fails rolls the session back and
+    # expires ``org`` and ``user``; reading ``org.id`` after that raises,
+    # so the audit write on the error path must use these instead.
+    org_id: uuid.UUID = field(init=False)
+    user_id: uuid.UUID | None = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Snapshot the org and user ids at authentication time."""
+        object.__setattr__(self, "org_id", self.org.id)
+        object.__setattr__(self, "user_id", self.user.id if self.user else None)
 
 
 def create_internal_mcp_token(org_id: uuid.UUID) -> str:
