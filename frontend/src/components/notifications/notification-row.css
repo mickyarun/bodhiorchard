@@ -1,17 +1,21 @@
 /* Shared by NotificationRow and YieldOfferRow: icon, text column, actions. */
 .n-row {
+  /* Solid row colour, so the actions' fade can match it exactly. */
+  --n-row-bg: rgb(var(--v-theme-surface));
   position: relative;
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
+  grid-template-columns: 36px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
   padding: 12px 12px 12px 16px;
   border-bottom: 1px solid rgb(var(--v-theme-rule));
+  background: var(--n-row-bg);
 }
+/* Keyboard focus only: a clicked button keeps no highlight behind. */
 .n-row:hover,
-.n-row:focus-within {
-  /* A translucent wash, so the neutral icon box still shows on it. */
-  background: rgba(var(--v-theme-on-surface), 0.04);
+.n-row:has(:focus-visible) {
+  /* A light wash, so the neutral icon box still shows on it. */
+  --n-row-bg: color-mix(in srgb, rgb(var(--v-theme-on-surface)) 4%, rgb(var(--v-theme-surface)));
 }
 .n-row__icon {
   position: relative;
@@ -96,8 +100,7 @@
   color: rgb(var(--v-theme-on-surface-variant));
 }
 /* Buttons above the stretched title so they take their own clicks. */
-.n-row__inline,
-.n-row__actions {
+.n-row__inline {
   position: relative;
   z-index: 1;
 }
@@ -107,18 +110,43 @@
   gap: 8px;
   margin-top: 8px;
 }
+/* With a pointer, the actions float over the end of the title while the
+   row is hovered or focused, so they never take room from the text. */
 .n-row__actions {
+  position: absolute;
+  z-index: 1;
+  top: 8px;
+  right: 8px;
   display: flex;
-  margin: -4px -4px 0 0;
+  padding-left: 24px;
+  background: linear-gradient(to right, transparent, var(--n-row-bg) 24px);
   opacity: 0;
   transition: opacity var(--dur-short) var(--ease-out);
 }
 .n-row:hover .n-row__actions,
-.n-row:focus-within .n-row__actions {
+.n-row:has(:focus-visible) .n-row__actions {
   opacity: 1;
 }
+/* On touch screens tapping the row opens it, so only Dismiss shows, in
+   its own column and with a full-size target. */
 @media (hover: none) {
+  .n-row:has(.n-row__actions) {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+  }
   .n-row__actions {
+    position: relative;
+    top: auto;
+    right: auto;
+    margin: -8px -8px 0 0;
+    padding: 0;
+    background: none;
     opacity: 1;
+  }
+  .n-row__actions .v-btn {
+    width: 40px;
+    height: 40px;
+  }
+  .n-row__open-action {
+    display: none;
   }
 }

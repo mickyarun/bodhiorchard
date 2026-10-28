@@ -22,9 +22,16 @@
        focused row or button would not activate from the keyboard. -->
   <section class="tray elevation-8" aria-labelledby="tray-title" @keydown.enter.stop>
     <header class="tray__head">
-      <h2 id="tray-title" class="tray__title">Notifications</h2>
+      <h2 id="tray-title" ref="heading" class="tray__title" tabindex="-1">Notifications</h2>
       <span v-if="unread" class="tray__count">{{ unread }} unread</span>
-      <v-btn v-if="store.unreadCount > 0" variant="text" size="small" class="ml-auto" @click="store.markAllRead()">
+      <!-- Disabled rather than hidden, so the header keeps its height. -->
+      <v-btn
+        :disabled="!store.unreadCount"
+        variant="text"
+        size="small"
+        class="ml-auto"
+        @click="store.markAllRead()"
+      >
         Mark all read
       </v-btn>
     </header>
@@ -48,17 +55,17 @@
         </ul>
         <h3 v-if="store.items.length" class="tray__group">Notifications</h3>
       </template>
-      <ul v-if="store.items.length" class="tray__list">
+      <ul v-if="store.items.length" ref="list" class="tray__list">
         <NotificationRow
-          v-for="notif in store.items"
+          v-for="(notif, index) in store.items"
           :key="notif.id"
           :notif="notif"
           :viewer-id="viewerId"
           :now="now"
           :declining="store.pendingDeclineIds.has(notif.id)"
           @open="open(notif)"
-          @dismiss="store.dismiss(notif.id)"
-          @decline="kind => decline(notif.id, kind)"
+          @dismiss="dismiss(notif.id, index)"
+          @decline="kind => decline(notif.id, kind, index)"
         />
       </ul>
     </div>
@@ -74,17 +81,18 @@
     </footer>
 
     <AppConfirmDialog
-      v-model="confirmClear"
+      :model-value="confirmClear"
       title="Clear all notifications?"
       body="This removes every notification in the tray. It can't be undone."
       action="Clear all"
+      @update:model-value="open => !open && cancelClear()"
       @confirm="clearAll"
     />
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppConfirmDialog from '@/components/common/AppConfirmDialog.vue'
 import NotificationRow from '@/components/notifications/NotificationRow.vue'
@@ -111,14 +119,10 @@ const { hasPermission } = usePermissions()
 // shared composable keeps the in-flight `busy` flag in step with them.
 const { busy, onAccept, askReject, askReassign } = useYieldOfferActions()
 
+const heading = ref<HTMLElement | null>(null)
+const list = ref<HTMLElement | null>(null)
 const confirmClear = ref(false)
 const clearButton = ref<{ $el: HTMLElement } | null>(null)
-// Back to the button when the confirmation closes without clearing.
-watch(confirmClear, async (open) => {
-  if (open) return
-  await nextTick()
-  clearButton.value?.$el.focus()
-})
 const isAdmin = computed(() => hasPermission('team:manage'))
 const unread = computed(() => store.unreadCount + yieldStore.items.length)
 const total = computed(() => store.items.length + yieldStore.items.length)
@@ -135,8 +139,32 @@ function open(notif: AppNotification): void {
   void router.push(notif.deepLink)
 }
 
-function decline(id: string, kind: DeclinableInvite): void {
-  void (kind === 'race' ? store.declineRaceInvite(id) : store.declineBacklashInvite(id))
+/**
+ * After a row leaves, keep focus in the list: on the row that took its
+ * place, else the one above, else the heading. Without this it falls to
+ * the page behind the tray.
+ */
+async function refocusFrom(index: number): Promise<void> {
+  await nextTick()
+  const titles = list.value?.querySelectorAll<HTMLElement>('.n-row__open') ?? []
+  ;(titles[index] ?? titles[index - 1] ?? heading.value)?.focus()
+}
+
+async function dismiss(id: string, index: number): Promise<void> {
+  await store.dismiss(id)
+  if (!store.items.some(n => n.id === id)) await refocusFrom(index)
+}
+
+async function decline(id: string, kind: DeclinableInvite, index: number): Promise<void> {
+  await (kind === 'race' ? store.declineRaceInvite(id) : store.declineBacklashInvite(id))
+  if (!store.items.some(n => n.id === id)) await refocusFrom(index)
+}
+
+/** The confirmation closed without clearing: back to its button. */
+async function cancelClear(): Promise<void> {
+  confirmClear.value = false
+  await nextTick()
+  clearButton.value?.$el.focus()
 }
 
 function clearAll(): void {

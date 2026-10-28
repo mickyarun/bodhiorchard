@@ -16,7 +16,7 @@
 
 <!-- One notification in the tray. The whole row opens it (the title is a
      button stretched over the row); its own actions sit above that and
-     show on hover or keyboard focus, always on touch screens. An invite
+     show on hover or keyboard focus. Touch screens get Dismiss only. An invite
      that can be declined gets a Decline button under the text. -->
 <template>
   <li class="n-row" :class="{ 'n-row--unread': !notif.isRead }">
@@ -48,6 +48,7 @@
     <div class="n-row__actions">
       <v-btn
         v-if="notif.deepLink"
+        class="n-row__open-action"
         icon="mdi-arrow-right"
         variant="text"
         size="small"
@@ -61,6 +62,7 @@
         size="small"
         density="comfortable"
         :aria-label="`Dismiss: ${notif.title}`"
+        :disabled="declining"
         @click="emit('dismiss')"
       />
     </div>

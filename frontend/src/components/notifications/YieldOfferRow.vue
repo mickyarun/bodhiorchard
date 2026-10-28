@@ -21,6 +21,8 @@
   <li class="n-row n-row--unread">
     <span class="n-row__icon n-row__icon--warning" aria-hidden="true">
       <v-icon icon="mdi-flag-outline" size="18" />
+      <!-- Pending offers count as unread until acted on. -->
+      <span class="n-row__dot" />
     </span>
     <div class="n-row__text">
       <span class="n-row__title">

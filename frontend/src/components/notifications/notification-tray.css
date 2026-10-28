@@ -20,6 +20,7 @@
 }
 .tray__title {
   margin: 0;
+  outline: none;
   font-size: 15px;
   font-weight: 600;
 }

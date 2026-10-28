@@ -16,12 +16,14 @@
 
 <template>
   <v-menu
+    ref="menu"
     v-model="menuOpen"
     location="bottom end"
     :offset="6"
     :close-on-content-click="false"
     max-width="400"
     max-height="560"
+    @after-leave="onMenuAfterLeave"
   >
     <template #activator="{ props: menuProps }">
       <v-btn
@@ -47,12 +49,13 @@
       </v-btn>
     </template>
 
-    <NotificationTray :viewer-id="userId" @close="menuOpen = false" />
+    <NotificationTray :viewer-id="userId" @close="closeTray" />
   </v-menu>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import type { VMenu } from 'vuetify/components'
 import NotificationTray from '@/components/notifications/NotificationTray.vue'
 import { useNotificationSocket } from '@/composables/useNotificationSocket'
 import { usePermissions } from '@/composables/usePermissions'
@@ -68,6 +71,21 @@ const yieldStore = useYieldOfferStore()
 const membersStore = useMembersStore()
 const { hasPermission, canAccessEngineering } = usePermissions()
 const menuOpen = ref(false)
+// The bell is the menu's activator; its own ref is taken by the menu.
+const menu = ref<VMenu | null>(null)
+
+// Closing from inside the tray puts focus back on the bell. That waits
+// for the menu's leave transition: until then the menu keeps focus in its
+// content, which is about to disappear.
+let refocusBell = false
+function closeTray(): void {
+  refocusBell = true
+  menuOpen.value = false
+}
+function onMenuAfterLeave(): void {
+  if (refocusBell) menu.value?.activatorEl?.focus()
+  refocusBell = false
+}
 
 const isAdmin = computed(() => hasPermission('team:manage'))
 // Reactive scope: read .value at fetch time, NOT at setup. Otherwise
