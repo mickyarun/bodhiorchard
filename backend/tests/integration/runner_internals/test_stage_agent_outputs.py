@@ -69,13 +69,6 @@ async def test_insight_and_chat_preamble_are_stripped_from_the_tech_spec(
     assert (await load_bud(app_sessions, org.org_id, bud.id)).tech_spec_md == TECH_SPEC
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "an empty agent reply replaces the existing tech spec and the task completes; "
-        "fixed by branch fix/stage-results-keep-content"
-    ),
-)
 async def test_empty_tech_spec_output_fails_and_keeps_the_current_spec(
     stage_claude: FakeClaudeRunner, app_sessions: Factory, job_runtime: JobRuntime
 ) -> None:
@@ -114,13 +107,6 @@ async def test_empty_learning_output_writes_no_recap(
     assert "learning_recorded" not in events
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "unreadable test-case JSON replaces the recorded manual cases (results and "
-        "evidence included) with empty lists; fixed by branch fix/stage-results-keep-content"
-    ),
-)
 async def test_malformed_testing_json_fails_and_keeps_the_recorded_cases(
     stage_claude: FakeClaudeRunner, app_sessions: Factory, job_runtime: JobRuntime
 ) -> None:
