@@ -37,7 +37,7 @@
             </td>
             <td class="m-table__wide">
               <span v-if="membersOf(team.id).length" class="stack">
-                <AppMonogram v-for="m in membersOf(team.id).slice(0, 3)" :key="m.user_id" :name="m.name" :size="26" :title="m.name" />
+                <AppMonogram v-for="m in membersOf(team.id).slice(0, 3)" :key="m.user_id" :name="m.name" :src="m.avatar_url" :size="26" :title="m.name" />
                 <span v-if="membersOf(team.id).length > 3" class="m-table__sub">+{{ membersOf(team.id).length - 3 }}</span>
               </span>
               <span v-else class="m-table__sub">No members</span>

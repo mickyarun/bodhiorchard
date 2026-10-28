@@ -32,6 +32,11 @@ import shutil
 import unicodedata
 from pathlib import Path
 
+# Validation pattern for a caller-supplied filesystem path: no NUL byte.
+# ``os.path.realpath`` raises ``ValueError`` on one, which would surface as
+# a 500 instead of a validation error.
+NO_NUL_PATTERN = r"^[^\x00]*$"
+
 
 class PathTraversalError(ValueError):
     """Raised when a caller-supplied path resolves outside its root."""

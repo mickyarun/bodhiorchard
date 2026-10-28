@@ -73,18 +73,24 @@ export const useBUDStore = defineStore('bud', () => {
     }
   }
 
+  // Latest fetchBUD call. Moving from /buds/A to /buds/B while A is still
+  // loading must not let A's late reply replace B on the page.
+  let fetchSeq = 0
+
   async function fetchBUD(id: string): Promise<BUDDocument | null> {
+    const seq = ++fetchSeq
+    const latest = (): boolean => seq === fetchSeq
     loading.value = true
     error.value = ''
     try {
       const { data } = await api.get(`/v1/buds/${id}`)
-      currentBUD.value = data
+      if (latest()) currentBUD.value = data
       return data
     } catch {
-      error.value = 'Failed to load BUD'
+      if (latest()) error.value = 'Failed to load BUD'
       return null
     } finally {
-      loading.value = false
+      if (latest()) loading.value = false
     }
   }
 

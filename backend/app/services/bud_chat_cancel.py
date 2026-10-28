@@ -23,7 +23,7 @@ every terminal path, so this module only has to:
 
 1. Resolve the active-job pointer for the ``(bud, section, design_id)``
    thread.
-2. Signal the in-memory worker when the job is still alive.
+2. Signal the in-memory job, whether it is running or still queued.
 3. Lazily clear the pointer on the stale-pointer path (post-restart or
    already-terminal job whose worker never wrote terminal state).
 
@@ -91,24 +91,26 @@ async def cancel_chat(
     job_id = pointer.job_id
     alive = is_job_running(job_id)
 
-    if alive:
-        try:
-            cancel_in_memory_job(job_id, reason=reason)
-        except Exception as exc:
-            logger.warning(
-                "bud_chat_cancel_signal_failed",
-                bud_id=str(bud_id),
-                section=section,
-                job_id=job_id,
-                error=str(exc),
-            )
-            raise BUDChatCancelError(str(exc)) from exc
-        # Worker's terminal ``finally`` hook clears the DB pointer
-        # after publishing the CANCELLED WS frame.
-    else:
-        # Stale pointer (post-restart or worker crashed before
-        # publishing). Clear it directly so the next chat send can
-        # claim the section immediately.
+    # Signal even when no handler is running: a chat still waiting in the
+    # queue must be dropped, or a worker would run it after the pointer
+    # below is cleared. Unknown or finished jobs make this a no-op.
+    try:
+        cancel_in_memory_job(job_id, reason=reason)
+    except Exception as exc:
+        logger.warning(
+            "bud_chat_cancel_signal_failed",
+            bud_id=str(bud_id),
+            section=section,
+            job_id=job_id,
+            error=str(exc),
+        )
+        raise BUDChatCancelError(str(exc)) from exc
+
+    if not alive:
+        # Queued, stale (post-restart) or crashed before publishing: no
+        # worker will run its ``finally`` hook, so clear the pointer here
+        # and the next chat send can claim the section immediately.
+        # A live job's worker clears it after the CANCELLED WS frame.
         await repo.clear_active_job(bud_id, section, design_id)
         await db.commit()
 

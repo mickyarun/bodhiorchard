@@ -16,6 +16,7 @@
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
+from app.core.paths import NO_NUL_PATTERN
 from app.schemas.git_ref import BranchName
 from app.schemas.repo_install import BulkOnboardItem
 
@@ -40,7 +41,7 @@ class SetupRepo(BaseModel):
 
     model_config = {"populate_by_name": True}
 
-    path: str
+    path: str = Field(..., pattern=NO_NUL_PATTERN)
     main_branch: BranchName | None = Field(None, alias="mainBranch")
     develop_branch: BranchName | None = Field(None, alias="developBranch")
 

@@ -21,6 +21,7 @@ import { addDays, MONTH_SHORT, parseIsoDate } from '@/utils/leaveDates'
 export interface OutRow {
   id: string
   name: string
+  avatarUrl?: string | null
   start: string
   end: string
   /** "Leave" or "WFH": never the leave type, which coworkers don't see. */
@@ -47,6 +48,7 @@ export function outSoon(
   const rows = all.slice(0, limit).map(e => ({
       id: e.request_id,
       name: e.user.name,
+      avatarUrl: e.user.avatar_url,
       start: e.start_date,
       end: e.end_date,
       label: e.kind === 'wfh' ? 'WFH' : 'Leave',

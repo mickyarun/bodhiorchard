@@ -16,11 +16,14 @@
 
 <template>
   <v-menu
+    ref="menu"
     v-model="menuOpen"
     location="bottom end"
     :offset="6"
     :close-on-content-click="false"
-    max-width="420"
+    max-width="400"
+    max-height="560"
+    @after-leave="onMenuAfterLeave"
   >
     <template #activator="{ props: menuProps }">
       <v-btn
@@ -46,226 +49,20 @@
       </v-btn>
     </template>
 
-    <v-card class="notification-panel" elevation="8">
-      <!-- Header -->
-      <v-card-title class="d-flex align-center justify-space-between pa-3 pb-1">
-        <span class="text-body-1 font-weight-medium">Notifications</span>
-        <v-btn
-          v-if="store.unreadCount > 0"
-          variant="text"
-          size="small"
-          density="compact"
-          color="primary"
-          @click="store.markAllRead()"
-        >
-          Mark all read
-        </v-btn>
-      </v-card-title>
-
-      <v-divider />
-
-      <!-- Yield offers section. Sits above the regular notifications
-           because the actions are time-sensitive (someone else's work
-           is queued behind a decision). The TARGET of an offer sees
-           Accept / Reject; admins (team:manage) see Reassign for any
-           offer that isn't theirs. -->
-      <template v-if="yieldStore.items.length > 0">
-        <div class="px-3 pt-2 pb-1 text-caption text-medium-emphasis font-weight-medium">
-          Yield offers ({{ yieldStore.items.length }})
-        </div>
-        <v-list density="compact" class="notification-list pa-0">
-          <template v-for="offer in yieldStore.items" :key="offer.id">
-            <v-list-item class="notification-item notification-unread px-3 py-2">
-              <template #prepend>
-                <v-icon icon="mdi-flag-outline" color="warning" size="20" class="mr-3" />
-              </template>
-              <v-list-item-title class="text-body-2 font-weight-medium">
-                BUD-{{ pad(offer.incoming_bud_number) }}
-                <span class="text-warning">({{ offer.incoming_bud_priority }})</span>
-                <span class="mx-1 text-medium-emphasis">↔</span>
-                BUD-{{ pad(offer.yieldable_bud_number) }}
-                <span class="text-medium-emphasis">({{ offer.yieldable_bud_priority }})</span>
-              </v-list-item-title>
-              <v-list-item-subtitle class="text-caption mt-1">
-                <template v-if="isMine(offer)">
-                  Your lower-priority BUD can be deprioritized.
-                </template>
-                <template v-else>
-                  Targeted at <strong>{{ targetName(offer) }}</strong>.
-                </template>
-              </v-list-item-subtitle>
-              <div class="d-flex ga-1 mt-2">
-                <template v-if="isMine(offer)">
-                  <v-btn
-                    color="primary"
-                    variant="flat"
-                    size="x-small"
-                    density="comfortable"
-                    :loading="busy === offer.id"
-                    @click.stop="onAccept(offer.id)"
-                  >
-                    Accept
-                  </v-btn>
-                  <v-btn
-                    variant="text"
-                    size="x-small"
-                    density="comfortable"
-                    :disabled="busy === offer.id"
-                    @click.stop="askReject(offer.id)"
-                  >
-                    Reject
-                  </v-btn>
-                </template>
-                <v-btn
-                  v-if="isAdmin"
-                  variant="text"
-                  size="x-small"
-                  density="comfortable"
-                  :disabled="busy === offer.id"
-                  @click.stop="askReassign(offer)"
-                >
-                  Reassign…
-                </v-btn>
-              </div>
-            </v-list-item>
-            <v-divider />
-          </template>
-        </v-list>
-      </template>
-
-      <!-- Notification list -->
-      <v-list
-        v-if="store.items.length > 0"
-        density="compact"
-        class="notification-list pa-0"
-      >
-        <template v-for="notif in store.items" :key="notif.id">
-          <v-list-item
-            class="notification-item px-3 py-2"
-            :class="{ 'notification-unread': !notif.isRead }"
-            @click="handleClick(notif)"
-          >
-            <template #prepend>
-              <v-icon
-                :icon="notifIcon(notif.type)"
-                :color="notifColor(notif.type)"
-                size="20"
-                class="mr-3"
-              />
-            </template>
-
-            <v-list-item-title class="text-body-2 font-weight-medium">
-              {{ notif.title }}
-            </v-list-item-title>
-            <v-list-item-subtitle v-if="notif.message" class="text-caption mt-1">
-              {{ notif.message }}
-            </v-list-item-subtitle>
-            <v-list-item-subtitle class="text-caption text-medium-emphasis mt-1">
-              {{ relativeTime(notif.createdAt, new Date(), SHORT_AGO) }}
-            </v-list-item-subtitle>
-
-            <template #append>
-              <div class="d-flex align-center ga-1">
-                <!-- Decline is a *server-side* action — unlike the
-                     adjacent X (local dismiss), it tells the host to
-                     stop waiting. Only rendered on actionable race
-                     invites so the host's own "X declined" entries
-                     can't be declined back at themselves. -->
-                <!-- Decline is a real, clearly-rendered button (tonal +
-                     outlined border) so the eye separates it from the
-                     adjacent X icon. Misreading these two was the bug
-                     the user hit: an invisible "Decline" looked like
-                     they only had X (which doesn't notify the host). -->
-                <v-btn
-                  v-if="canDeclineRaceInvite(notif)"
-                  variant="tonal"
-                  size="x-small"
-                  density="comfortable"
-                  color="error"
-                  class="notif-decline-btn"
-                  :disabled="store.pendingDeclineIds.has(notif.id)"
-                  :loading="store.pendingDeclineIds.has(notif.id)"
-                  @click.stop="store.declineRaceInvite(notif.id)"
-                >
-                  Decline
-                </v-btn>
-                <v-btn
-                  v-if="canDeclineBacklashInvite(notif)"
-                  variant="tonal"
-                  size="x-small"
-                  density="comfortable"
-                  color="error"
-                  class="notif-decline-btn"
-                  :disabled="store.pendingDeclineIds.has(notif.id)"
-                  :loading="store.pendingDeclineIds.has(notif.id)"
-                  @click.stop="store.declineBacklashInvite(notif.id)"
-                >
-                  Decline
-                </v-btn>
-                <v-btn
-                  v-if="notif.deepLink"
-                  icon
-                  variant="text"
-                  size="x-small"
-                  density="compact"
-                  @click.stop="navigateTo(notif)"
-                >
-                  <v-icon icon="mdi-arrow-right" size="16" />
-                </v-btn>
-                <v-btn
-                  icon
-                  variant="text"
-                  size="x-small"
-                  density="compact"
-                  @click.stop="store.dismiss(notif.id)"
-                >
-                  <v-icon icon="mdi-close" size="14" />
-                </v-btn>
-              </div>
-            </template>
-          </v-list-item>
-          <v-divider />
-        </template>
-      </v-list>
-
-      <!-- Empty state -->
-      <div v-else class="text-center pa-6 text-medium-emphasis">
-        <v-icon icon="mdi-bell-check-outline" size="32" class="mb-2 d-block mx-auto" />
-        <div class="text-body-2">No notifications</div>
-      </div>
-
-      <!-- Footer -->
-      <template v-if="store.items.length > 0">
-        <v-divider />
-        <v-card-actions class="justify-center pa-2">
-          <v-btn
-            variant="text"
-            size="small"
-            density="compact"
-            color="error"
-            @click="handleClearAll"
-          >
-            Clear all
-          </v-btn>
-        </v-card-actions>
-      </template>
-    </v-card>
+    <NotificationTray :viewer-id="userId" @close="closeTray" />
   </v-menu>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { useNotificationStore } from '@/stores/notifications'
+import { computed, onMounted, ref, watch } from 'vue'
+import type { VMenu } from 'vuetify/components'
+import NotificationTray from '@/components/notifications/NotificationTray.vue'
 import { useNotificationSocket } from '@/composables/useNotificationSocket'
-import { useYieldOfferStore } from '@/stores/yieldOffers'
-import { useYieldOfferSocket } from '@/composables/useYieldOfferSocket'
-import { useYieldOfferActions } from '@/composables/useYieldOfferActions'
-import { useMembersStore } from '@/stores/members'
 import { usePermissions } from '@/composables/usePermissions'
-import type { AppNotification, BacklashInviteMeta, RaceInviteMeta, YieldOffer } from '@/types'
-import { isInviteUnexpired } from '@/utils/inviteExpiry'
-import { SHORT_AGO, relativeTime } from '@/utils/date'
+import { useYieldOfferSocket } from '@/composables/useYieldOfferSocket'
+import { useMembersStore } from '@/stores/members'
+import { useNotificationStore } from '@/stores/notifications'
+import { useYieldOfferStore } from '@/stores/yieldOffers'
 
 const props = defineProps<{ userId: string }>()
 
@@ -273,8 +70,22 @@ const store = useNotificationStore()
 const yieldStore = useYieldOfferStore()
 const membersStore = useMembersStore()
 const { hasPermission, canAccessEngineering } = usePermissions()
-const router = useRouter()
 const menuOpen = ref(false)
+// The bell is the menu's activator; its own ref is taken by the menu.
+const menu = ref<VMenu | null>(null)
+
+// Closing from inside the tray puts focus back on the bell. That waits
+// for the menu's leave transition: until then the menu keeps focus in its
+// content, which is about to disappear.
+let refocusBell = false
+function closeTray(): void {
+  refocusBell = true
+  menuOpen.value = false
+}
+function onMenuAfterLeave(): void {
+  if (refocusBell) menu.value?.activatorEl?.focus()
+  refocusBell = false
+}
 
 const isAdmin = computed(() => hasPermission('team:manage'))
 // Reactive scope: read .value at fetch time, NOT at setup. Otherwise
@@ -292,18 +103,9 @@ const bellLabel = computed(() =>
   totalUnread.value > 0 ? `Notifications, ${totalUnread.value} unread` : 'Notifications',
 )
 
-// Reject / reassign dialogs are mounted layout-wide in YieldOfferDialogs;
-// the shared composable owns the in-flight `busy` flag so the row buttons
-// here and the confirm buttons there stay in lockstep.
-const { busy, onAccept, askReject, askReassign } = useYieldOfferActions()
-
 // Getter form (not snapshot) so the composable re-targets the WS
-// subscription when ``authStore.user.id`` hydrates after this bell
-// has already mounted via ``v-show`` in AppLayout. Without this,
-// notifications fired before hydration would only surface on tab
-// refresh (the visibility-change ``fetchAll`` path), not via the
-// live WS push. See ``useNotificationSocket.ts`` for the full
-// rationale.
+// subscription when ``authStore.user.id`` hydrates after this bell has
+// already mounted. See ``useNotificationSocket.ts`` for the rationale.
 useNotificationSocket(() => props.userId)
 useYieldOfferSocket(props.userId, () => canAccessEngineering.value)
 
@@ -334,126 +136,10 @@ onMounted(() => {
 // offers and reassign targets would stay empty.
 watch([yieldScope, canAccessEngineering], loadYieldOffers)
 watch(isAdmin, loadMembersIfAdmin)
-
-function isMine(offer: YieldOffer): boolean {
-  return offer.target_user_id === props.userId
-}
-
-function targetName(offer: YieldOffer): string {
-  const m = membersStore.members.find(x => x.id === offer.target_user_id)
-  return m?.name ?? '(unknown)'
-}
-
-function pad(num: number | null): string {
-  return String(num ?? 0).padStart(3, '0')
-}
-
-function handleClick(notif: AppNotification): void {
-  if (!notif.isRead) {
-    store.markRead(notif.id)
-  }
-  if (notif.deepLink) {
-    navigateTo(notif)
-  }
-}
-
-function navigateTo(notif: AppNotification): void {
-  if (!notif.isRead) {
-    store.markRead(notif.id)
-  }
-  menuOpen.value = false
-  if (notif.deepLink) {
-    router.push(notif.deepLink)
-  }
-}
-
-/**
- * True when the row is an actionable race invite the viewer can still
- * decline. False for: non-race notifications; the host's own "X
- * declined" rows (which carry `declinedBy` in meta); and the host
- * looking at their own invite (which shouldn't happen but is
- * defensive against future invite-self bugs).
- */
-function canDeclineRaceInvite(notif: AppNotification): boolean {
-  if (notif.type !== 'race_invite') return false
-  const meta = (notif.meta ?? {}) as RaceInviteMeta
-  if (meta.declinedBy) return false
-  if (!meta.hostUserId) return false
-  return meta.hostUserId !== props.userId
-}
-
-function canDeclineBacklashInvite(notif: AppNotification): boolean {
-  if (notif.type !== 'minigame_invite') return false
-  const meta = (notif.meta ?? {}) as BacklashInviteMeta
-  return meta.game === 'backlash' && Boolean(meta.hostUserId) && !meta.declinedBy
-    && isInviteUnexpired(meta.expiresAt)
-    && meta.hostUserId !== props.userId
-}
-
-function handleClearAll(): void {
-  store.dismissAll()
-  menuOpen.value = false
-}
-
-function notifIcon(type: string): string {
-  switch (type) {
-    case 'job_failed': return 'mdi-alert-circle'
-    case 'approval_requested': return 'mdi-bell-ring-outline'
-    case 'approval_granted': return 'mdi-check-decagram'
-    case 'approval_rejected': return 'mdi-close-circle-outline'
-    case 'developer_assigned': return 'mdi-account-check'
-    case 'reassignment_done': return 'mdi-swap-horizontal'
-    case 'minigame_invite': return 'mdi-sword-cross'
-    default: return 'mdi-check-circle'
-  }
-}
-
-function notifColor(type: string): string {
-  switch (type) {
-    case 'job_failed':
-    case 'approval_rejected': return 'error'
-    case 'approval_requested': return 'warning'
-    case 'developer_assigned':
-    case 'reassignment_done': return 'info'
-    default: return 'success'
-  }
-}
-
 </script>
 
 <style scoped>
 .notification-bell-btn {
   overflow: visible !important;
-}
-
-.notification-panel {
-  /* Sized here: the menu's min-width gives way to the bell's own width. */
-  width: min(360px, calc(100vw - 24px));
-  max-height: 480px;
-  display: flex;
-  flex-direction: column;
-}
-
-.notification-list {
-  overflow-y: auto;
-  max-height: 360px;
-}
-
-.notification-unread {
-  background: rgba(var(--v-theme-primary), 0.04);
-}
-
-.notification-item:hover {
-  background: rgba(var(--v-theme-on-surface), 0.04);
-  cursor: pointer;
-}
-
-/* Sharpen the Decline button's outline so it can't be visually
-   conflated with the adjacent X icon. Tonal alone leaves it looking
-   too soft against the row's hover background. */
-.notif-decline-btn {
-  border: 1px solid rgba(var(--v-theme-error), 0.45);
-  letter-spacing: 0.04em;
-  font-weight: 600;
 }
 </style>

@@ -26,16 +26,25 @@
         density="comfortable"
         :aria-label="`Account menu for ${authStore.user?.name || 'you'}`"
       >
-        <AppMonogram :name="authStore.user?.name" :size="32" />
+        <AppMonogram :name="authStore.user?.name" :src="authStore.user?.avatar_url" :size="32" />
       </v-btn>
     </template>
 
     <v-list density="compact" min-width="260">
-      <v-list-item
-        class="account-menu__who"
-        :title="authStore.user?.name || 'User'"
-        :subtitle="authStore.user?.email || ''"
-      />
+      <!-- Who you are; your photo is changed on My details, so the
+           header goes there. -->
+      <div v-if="authStore.user" role="listitem">
+        <router-link :to="{ name: 'my-details' }" class="account-menu__who">
+          <AppMonogram :name="authStore.user.name" :src="authStore.user.avatar_url" :size="44" />
+          <span class="account-menu__id">
+            <span class="account-menu__name">{{ authStore.user.name }}</span>
+            <span class="account-menu__email">{{ authStore.user.email }}</span>
+            <span class="account-menu__photo">
+              {{ authStore.user.avatar_url ? 'Change photo' : 'Add a photo' }}
+            </span>
+          </span>
+        </router-link>
+      </div>
       <v-divider class="mb-1" />
       <!-- XP profile, garden character and MCP token are all
            engineering-workspace features. -->
@@ -124,7 +133,47 @@ function handleLogout(): void {
 
 <style scoped>
 .account-menu__who {
-  max-width: 260px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 280px;
+  margin: 0 4px 4px;
+  padding: 8px 12px;
+  border-radius: var(--radius-card);
+  color: inherit;
+  text-decoration: none;
+}
+.account-menu__who:hover {
+  background: rgba(var(--v-theme-on-surface), 0.04);
+}
+.account-menu__who:focus-visible {
+  outline: 2px solid var(--color-focus, rgb(var(--v-theme-primary)));
+  outline-offset: -2px;
+}
+.account-menu__id {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.account-menu__name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-menu__photo {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgb(var(--v-theme-primary));
+}
+.account-menu__email {
+  font-size: 12px;
+  color: rgb(var(--v-theme-on-surface-variant));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Auto / Light / Dark segmented control in the account menu. */

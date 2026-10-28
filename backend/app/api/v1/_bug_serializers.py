@@ -128,6 +128,7 @@ async def bug_to_read(
         assignee_name=user_names.get(bug.assignee_id) if bug.assignee_id else None,
         comment_count=comment_counts.get(bug.id, 0),
         resolved_at=bug.resolved_at,
+        rejected_at=bug.rejected_at,
         created_at=bug.created_at,
         updated_at=bug.updated_at,
     )
