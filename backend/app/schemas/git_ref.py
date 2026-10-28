@@ -31,14 +31,15 @@ BRANCH_NAME_MAX_LENGTH = 100
 
 _FORBIDDEN_CHARS = frozenset(" ~^:?*[\\")
 _FORBIDDEN_SEQUENCES = ("..", "//", "@{")
+_RESERVED_NAMES = frozenset({"@", "HEAD"})
 
 
 def branch_name_problem(name: str) -> str | None:
     """Return why ``name`` isn't a valid branch name, or ``None`` if it is."""
     if not name:
         return "must not be empty"
-    if name == "@":
-        return "must not be '@'"
+    if name in _RESERVED_NAMES:
+        return f"must not be {name!r}"
     if name.startswith("-"):
         return "must not start with '-'"
     if name.startswith("/") or name.endswith("/"):

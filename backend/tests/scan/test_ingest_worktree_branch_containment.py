@@ -61,10 +61,25 @@ def _other_worktree(data_dir: Path) -> Path:
     return keep
 
 
-@pytest.mark.parametrize("branch", ["..", "."])
-async def test_a_dot_branch_deletes_nothing_and_fails(
+@pytest.mark.parametrize("branch", ["..", ".", "-b", "--orphan"])
+async def test_a_hostile_stored_branch_runs_no_git_and_deletes_nothing(
     data_dir: Path, git_calls: list[list[str]], branch: str
 ) -> None:
+    keep = _other_worktree(data_dir)
+
+    with pytest.raises(RuntimeError):
+        await mod.ensure_scan_test_worktree("/srv/repos/acme/widgets", branch, skip_fetch=True)
+
+    assert keep.is_file()
+    assert git_calls == []
+
+
+@pytest.mark.parametrize("branch", ["..", "."])
+async def test_containment_alone_still_keeps_cleanup_inside(
+    monkeypatch: pytest.MonkeyPatch, data_dir: Path, git_calls: list[list[str]], branch: str
+) -> None:
+    """Even if a bad name got past the name check, nothing outside is deleted."""
+    monkeypatch.setattr(mod, "branch_name_problem", lambda _name: None)
     keep = _other_worktree(data_dir)
 
     with pytest.raises(RuntimeError):

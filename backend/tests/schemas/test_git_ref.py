@@ -43,6 +43,7 @@ BAD = [
     ".",
     "..",
     "@",
+    "HEAD",
     "-main",
     "--upload-pack=x",
     "a..b",
