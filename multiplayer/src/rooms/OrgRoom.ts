@@ -59,6 +59,7 @@ import {
 } from "../bridge/BackendClient"
 import { safeLog } from "../bridge/logSanitize"
 import { registerOrgRoom, unregisterOrgRoom } from "../bridge/BridgeEndpoint"
+import { isUuid } from "../bridge/uuid"
 import { installRaceCreateHandler } from "./OrgRaceHandler"
 import { installBacklashCreateHandler } from "./OrgBacklashHandler"
 
@@ -188,8 +189,18 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   private static readonly VALID_VEHICLES = ["horse"]
 
   async onCreate(options: OrgRoomCreateOptions) {
+    // Validate and claim the org before anything else runs, so a refused room
+    // never starts a timer. Only a well-formed org id may key the bridge
+    // registry or reach the snapshot URL. onCreate runs before onAuth, so a
+    // second room for an org that already has one (a client calling `create`
+    // directly) is refused rather than taking the bridge from the open room.
+    const orgId = options.orgId
+    if (!isUuid(orgId)) throw new Error("OrgRoom.onCreate: orgId must be a UUID")
+    if (!registerOrgRoom(orgId, this)) {
+      throw new Error("OrgRoom.onCreate: this org already has an open room")
+    }
     this.setState(new OrgRoomState())
-    this.state.orgId = options.orgId ?? ""
+    this.state.orgId = orgId
     console.log(`[OrgRoom] Created org=${safeLog(this.state.orgId)}`)
 
     this.onMessage("move", (client, data: MoveMessage) => this.handleMove(client, data))
@@ -275,7 +286,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
     }, INFERRED_PRESENCE_TICK_MS)
 
     // Kick off snapshot load and expose a promise so onJoin can wait for it.
-    // onCreate MUST NOT throw — the room stays usable (empty state) on failure.
+    // A failed load must not throw: the room stays usable with empty state.
     this.snapshotReady = this.loadInitialSnapshot()
   }
 
@@ -285,8 +296,6 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
    * and resolves cleanly so onJoin can `await` it without risk of rejection.
    */
   private async loadInitialSnapshot(): Promise<void> {
-    if (!this.state.orgId) return
-    registerOrgRoom(this.state.orgId, this)
     try {
       const snapshot = await fetchOrgSnapshot(this.state.orgId)
       if (snapshot) {
@@ -457,7 +466,7 @@ export class OrgRoom extends Room<{ state: OrgRoomState }> {
   onDispose() {
     console.log(`[OrgRoom] Disposed org=${safeLog(this.state.orgId)}`)
     if (this.state.orgId) {
-      unregisterOrgRoom(this.state.orgId)
+      unregisterOrgRoom(this.state.orgId, this)
     }
   }
 

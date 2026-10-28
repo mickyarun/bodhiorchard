@@ -127,7 +127,8 @@ async function postBridgeJson<TResponse>(
 /** Fetch an org snapshot from the backend. Returns null on failure. */
 export async function fetchOrgSnapshot(orgId: string): Promise<OrgSnapshotResponse | null> {
   try {
-    const url = `${BACKEND_URL}/api/v1/internal/colyseus/org-snapshot/${orgId}`
+    const url =
+      `${BACKEND_URL}/api/v1/internal/colyseus/org-snapshot/${encodeURIComponent(orgId)}`
     const response = await fetch(url, {
       method: "GET",
       headers: {

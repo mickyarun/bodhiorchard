@@ -67,12 +67,23 @@ function verifyBridgeSecret(provided: string | undefined): boolean {
 // Populated by OrgRoom on create, cleared on dispose.
 const orgRooms = new Map<string, OrgRoom>()
 
-export function registerOrgRoom(orgId: string, room: OrgRoom): void {
+/**
+ * Make `room` the bridge target for `orgId`. Returns false and leaves the
+ * registry untouched when a different room already holds the org: a client
+ * can `create("org", ...)` for any org id, and that room must not take over
+ * the bridge from the room the org's members are in.
+ */
+export function registerOrgRoom(orgId: string, room: OrgRoom): boolean {
+  const holder = orgRooms.get(orgId)
+  if (holder && holder !== room) return false
   orgRooms.set(orgId, room)
   console.log(`[BridgeEndpoint] Registered org=${safeLog(orgId)} (total=${orgRooms.size})`)
+  return true
 }
 
-export function unregisterOrgRoom(orgId: string): void {
+/** Release the org's bridge slot, but only if `room` is the one holding it. */
+export function unregisterOrgRoom(orgId: string, room: OrgRoom): void {
+  if (orgRooms.get(orgId) !== room) return
   orgRooms.delete(orgId)
   console.log(`[BridgeEndpoint] Unregistered org=${safeLog(orgId)} (total=${orgRooms.size})`)
 }

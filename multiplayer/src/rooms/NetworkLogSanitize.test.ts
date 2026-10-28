@@ -119,7 +119,7 @@ describe("bridge registry log lines escape a forged org id", () => {
     registerOrgRoom(FORGED_NAME, fakeRoom)
     expectSanitised(loggedLine())
     logSpy.mockClear()
-    unregisterOrgRoom(FORGED_NAME)
+    unregisterOrgRoom(FORGED_NAME, fakeRoom)
     expectSanitised(loggedLine())
   })
 })
