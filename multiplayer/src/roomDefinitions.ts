@@ -20,8 +20,14 @@
  * room of that name unless the handler filters on a creation option. The
  * shared rooms are therefore partitioned by the option that names their
  * owner: one org room, coffee bar and cafeteria per `orgId`, one house room
- * per `ownerId`. Race, mini-game and backlash rooms are created per match
- * and joined by id, so they need no filter.
+ * per `orgId` + `ownerId`. Race, mini-game and backlash rooms are created per
+ * match and joined by id, so they need no filter.
+ *
+ * The filter only routes; it is not access control. Colyseus treats a filter
+ * key the client leaves out as "any value", so a join without `orgId` can be
+ * matched to any org's room. Each of these rooms therefore refuses creation
+ * without its keys (`roomKeys.ts`) and refuses, in `onAuth`, any token whose
+ * org is not the room's own (`auth/verifyJoin.ts`).
  */
 import { defineRoom } from "colyseus"
 import { OrgRoom } from "./rooms/OrgRoom"
@@ -34,7 +40,7 @@ import { BacklashRoom } from "./rooms/BacklashRoom"
 
 export const roomDefinitions = {
   org: defineRoom(OrgRoom).filterBy(["orgId"]),
-  house: defineRoom(HouseRoom).filterBy(["ownerId"]),
+  house: defineRoom(HouseRoom).filterBy(["orgId", "ownerId"]),
   coffeebar: defineRoom(CoffeeBarRoom).filterBy(["orgId"]),
   cafeteria: defineRoom(CafeteriaRoom).filterBy(["orgId"]),
   race: defineRoom(RaceRoom),

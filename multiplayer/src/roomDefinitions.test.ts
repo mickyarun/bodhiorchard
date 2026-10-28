@@ -13,46 +13,13 @@
 // limitations under the License.
 
 /**
- * Matchmaking for the shared rooms. Replays what `joinOrCreate` does against
- * Colyseus's in-memory room cache (LocalDriver): store the listing a room
- * gets on creation, then look up an open room for a later join. The option
- * names are the ones the frontend sends (`ColyseusClient`, `OrgRoomClient`).
+ * Matchmaking for the shared rooms. The option names are the ones the
+ * frontend sends (`ColyseusClient`, `OrgRoomClient`).
  */
 import { LocalDriver } from "colyseus"
 import { describe, expect, it } from "vitest"
 import { roomDefinitions } from "./roomDefinitions"
-
-type SharedRoom = "org" | "coffeebar" | "cafeteria" | "house"
-
-function createListing(driver: LocalDriver, name: SharedRoom, roomId: string, options: object): void {
-  driver.persist(
-    {
-      roomId,
-      name,
-      clients: 1,
-      maxClients: 100,
-      locked: false,
-      private: false,
-      processId: "test",
-      ...roomDefinitions[name].getMetadataFromOptions(options),
-    } as never,
-    true,
-  )
-}
-
-async function findOpenRoom(
-  driver: LocalDriver,
-  name: SharedRoom,
-  options: object,
-): Promise<string | undefined> {
-  const found = await driver.findOne({
-    locked: false,
-    name,
-    private: false,
-    ...roomDefinitions[name].getFilterOptions(options),
-  } as never)
-  return found?.roomId
-}
+import { createListing, findOpenRoom } from "./testing/matchmaking"
 
 describe("shared room matchmaking", () => {
   it.each(["org", "coffeebar", "cafeteria"] as const)(
@@ -68,11 +35,44 @@ describe("shared room matchmaking", () => {
 
   it("keeps visitors of different houses in different rooms", async () => {
     const driver = new LocalDriver()
-    createListing(driver, "house", "house-alice", { ownerId: "alice", userId: "bob" })
+    createListing(driver, "house", "house-alice", { orgId: "org-a", ownerId: "alice" })
 
-    expect(await findOpenRoom(driver, "house", { ownerId: "carol", userId: "dan" })).toBeUndefined()
-    expect(await findOpenRoom(driver, "house", { ownerId: "alice", userId: "eve" })).toBe(
+    expect(
+      await findOpenRoom(driver, "house", { orgId: "org-a", ownerId: "carol" }),
+    ).toBeUndefined()
+    expect(await findOpenRoom(driver, "house", { orgId: "org-a", ownerId: "alice" })).toBe(
       "house-alice",
+    )
+  })
+
+  it("keeps the same owner's house apart across orgs", async () => {
+    const driver = new LocalDriver()
+    createListing(driver, "house", "house-a-alice", { orgId: "org-a", ownerId: "alice" })
+
+    expect(
+      await findOpenRoom(driver, "house", { orgId: "org-b", ownerId: "alice" }),
+    ).toBeUndefined()
+  })
+
+  // The filter routes, it does not guard: a key the client leaves out matches
+  // any value. That is why every shared room re-checks the token's org in
+  // onAuth (see rooms/SharedRoomAuth.test.ts for the join that follows).
+  it.each(["org", "coffeebar", "cafeteria"] as const)(
+    "matches a %s join that leaves out orgId to whichever org's room is open",
+    async (name) => {
+      const driver = new LocalDriver()
+      createListing(driver, name, "room-a", { orgId: "org-a" })
+
+      expect(await findOpenRoom(driver, name, { userId: "mallory", token: "t" })).toBe("room-a")
+    },
+  )
+
+  it("matches a house join that leaves out orgId to any org's house of that owner", async () => {
+    const driver = new LocalDriver()
+    createListing(driver, "house", "house-a-alice", { orgId: "org-a", ownerId: "alice" })
+
+    expect(await findOpenRoom(driver, "house", { ownerId: "alice", token: "t" })).toBe(
+      "house-a-alice",
     )
   })
 
@@ -80,9 +80,9 @@ describe("shared room matchmaking", () => {
     expect(
       roomDefinitions.org.getFilterOptions({ orgId: "org-a", userId: "u1", token: "secret" }),
     ).toEqual({ orgId: "org-a" })
-    expect(roomDefinitions.house.getFilterOptions({ ownerId: "alice", name: "Bob" })).toEqual({
-      ownerId: "alice",
-    })
+    expect(
+      roomDefinitions.house.getFilterOptions({ orgId: "org-a", ownerId: "alice", name: "Bob" }),
+    ).toEqual({ orgId: "org-a", ownerId: "alice" })
   })
 
   it.each(["race", "minigame", "backlash"] as const)(

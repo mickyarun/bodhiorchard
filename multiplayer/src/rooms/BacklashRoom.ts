@@ -18,7 +18,8 @@ import {
   isBacklashEncouragement,
   isBacklashLivePhase,
 } from "../../../shared/minigames/backlashSocial"
-import { postBacklashResults, verifyUserToken } from "../bridge/BackendClient"
+import { postBacklashResults } from "../bridge/BackendClient"
+import { verifyJoin, type JoinIdentity } from "../auth/verifyJoin"
 import {
   fireBacklashDispose,
   fireBacklashPhase,
@@ -41,6 +42,11 @@ interface BacklashRoomOptions {
   name?: string
   token?: string
   viewer?: boolean
+}
+
+/** A verified join, seated as a player (host or invitee) or as a viewer. */
+interface BacklashJoin extends JoinIdentity {
+  viewer: boolean
 }
 
 interface MovePayload {
@@ -95,34 +101,16 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
     }, BACKLASH_LOBBY_MS)
   }
 
-  async onAuth(_client: Client, options: BacklashRoomOptions): Promise<BacklashRoomOptions> {
-    if (!options.token) {
-      if (process.env.NODE_ENV === "production") throw new Error("auth token required")
-      return this.validateJoin(options)
-    }
-    const verified = await verifyUserToken(options.token, this.state.orgId)
-    if (!verified.valid || !verified.user_id || !verified.org_id) {
-      throw new Error(verified.reason ?? "invalid auth token")
-    }
-    if (verified.org_id !== this.state.orgId) throw new Error("token org mismatch")
-    const verifiedName = verified.name?.trim()
-    const requestedName = options.name?.trim()
-    return this.validateJoin({
-      ...options,
-      userId: verified.user_id,
-      name: verifiedName || requestedName || "Player",
-    })
+  /** Verify the token for this room's org, then seat it (see validateJoin). */
+  async onAuth(_client: Client, options: BacklashRoomOptions): Promise<BacklashJoin> {
+    return this.validateJoin(await verifyJoin(options, this.state.orgId))
   }
 
-  onJoin(
-    client: Client,
-    options: BacklashRoomOptions,
-    authenticated?: BacklashRoomOptions,
-  ): void {
-    const identity = authenticated ?? options
-    const userId = identity.userId!
-    const name = (identity.name?.trim() || "Viewer").slice(0, 120)
-    const viewer = identity.viewer === true
+  onJoin(client: Client, _options: BacklashRoomOptions, authenticated?: BacklashJoin): void {
+    if (!authenticated?.userId) throw new Error("join was not verified")
+    const userId = authenticated.userId
+    const name = authenticated.name.slice(0, 120)
+    const viewer = authenticated.viewer
     client.userData = { userId, name, viewer }
     if (viewer) {
       const sessions = this.viewerSessions.get(userId) ?? new Set<string>()
@@ -199,13 +187,13 @@ export class BacklashRoom extends Room<{ state: BacklashRoomState }> {
     this.handleInviteDeclined(userId)
   }
 
-  private validateJoin(options: BacklashRoomOptions): BacklashRoomOptions {
-    const userId = options.userId ?? ""
-    if (!userId) throw new Error("authenticated user required")
+  /** The host and the invitee play; anyone else in the org may only watch a live match. */
+  private validateJoin(identity: JoinIdentity): BacklashJoin {
+    const { userId } = identity
     const participant = userId === this.state.hostUserId || userId === this.state.invitedUserId
-    if (participant) return { ...options, userId, viewer: false }
+    if (participant) return { ...identity, viewer: false }
     if (this.state.phase === "lobby") throw new Error("Backlash match is not live yet")
-    return { ...options, userId, viewer: true }
+    return { ...identity, viewer: true }
   }
 
   private assignInitialColors(): void {

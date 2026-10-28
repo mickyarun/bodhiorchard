@@ -25,6 +25,17 @@
 import { Room, Client } from "colyseus"
 import { Schema, MapSchema, type } from "@colyseus/schema"
 import { PlayerState } from "../schema/PlayerState"
+import {
+  requireJoinIdentity,
+  verifyJoin,
+  type JoinCredentials,
+  type JoinIdentity,
+} from "../auth/verifyJoin"
+import { requireRoomKey } from "./roomKeys"
+
+interface HouseJoinOptions extends JoinCredentials {
+  characterModel?: string
+}
 
 class HouseRoomState extends Schema {
   @type({ map: PlayerState }) players = new MapSchema<PlayerState>()
@@ -34,11 +45,13 @@ class HouseRoomState extends Schema {
 export class HouseRoom extends Room<{ state: HouseRoomState }> {
   maxClients = 10
 
-  onCreate(options: { ownerId?: string }) {
+  /** Org the house belongs to; only that org's members may visit. */
+  private orgId = ""
+
+  onCreate(options: unknown) {
     this.setState(new HouseRoomState())
-    if (options.ownerId) {
-      this.state.ownerId = options.ownerId
-    }
+    this.orgId = requireRoomKey(options, "orgId")
+    this.state.ownerId = requireRoomKey(options, "ownerId")
 
     // Handle position updates with server-side validation
     this.onMessage("move", (client, data: {
@@ -61,12 +74,18 @@ export class HouseRoom extends Room<{ state: HouseRoomState }> {
     })
   }
 
-  onJoin(client: Client, options: { userId: string; name: string; characterModel?: string }) {
+  /** Only a verified member of the house's org may visit (see verifyJoin). */
+  async onAuth(_client: Client, options: HouseJoinOptions): Promise<JoinIdentity> {
+    return verifyJoin(options, this.orgId)
+  }
+
+  onJoin(client: Client, options: HouseJoinOptions, auth?: JoinIdentity) {
     console.log(`[HouseRoom] ${options.name} (${client.sessionId}) joined`)
+    const identity = requireJoinIdentity(auth)
     const player = new PlayerState()
-    player.userId = options.userId || client.sessionId
-    player.name = options.name || "Visitor"
-    player.characterModel = options.characterModel || ""
+    player.userId = identity.userId
+    player.name = identity.name
+    player.characterModel = typeof options.characterModel === "string" ? options.characterModel : ""
     player.connected = true
     this.state.players.set(client.sessionId, player)
   }
