@@ -17,8 +17,9 @@
 Generation is NOT on this path (that's the batch top-up loop). This loop ticks
 every 60s and, per org, (1) opens the next APPROVED question when the local
 fire time on an active weekday is reached, and (2) flips windows closed to
-REVEALED. The 60s tick recomputes local fire times each pass, so it is naturally
-DST-correct and self-heals after a restart; all durable state lives in Postgres.
+REVEALED, folding each revealed quiz's answers into the monthly totals. The 60s
+tick recomputes local fire times each pass, so it is naturally DST-correct and
+self-heals after a restart; all durable state lives in Postgres.
 """
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ from app.schemas.settings import QuizGameSettings
 from app.services.event_bus import publish
 from app.services.org_settings import get_quiz_settings
 from app.services.quiz_notify import notify_quiz_open, notify_quiz_reveal, nudge_low_queue
+from app.services.quiz_reveal import reveal_quiz
 from app.services.quiz_schedule_math import compute_open_window, resolve_zone
 
 logger = structlog.get_logger(__name__)
@@ -106,15 +108,17 @@ async def _open_pass(org_id: uuid.UUID, settings: QuizGameSettings, now_utc: dat
 
 
 async def _reveal_pass(org_id: uuid.UUID, settings: QuizGameSettings, now_utc: datetime) -> None:
-    """Flip any closed-window OPEN quizzes to REVEALED (exactly-once per quiz)."""
+    """Reveal closed-window OPEN quizzes and fold their scores (exactly-once per quiz).
+
+    Each quiz's flip and score fold commit together, oldest quiz first, and the
+    reveal DM is sent after the commits so its standings include the new points.
+    """
     async with AsyncSessionLocal() as db:
-        quiz_repo = QuizRepository(db, org_id=org_id)
-        due = await quiz_repo.list_open_past_reveal(now_utc)
+        due = await QuizRepository(db, org_id=org_id).list_open_past_reveal(now_utc)
         revealed_ids = []
         for quiz in due:
-            if await quiz_repo.flip_to_revealed(quiz.id):
+            if await reveal_quiz(db, org_id=org_id, quiz=quiz):
                 revealed_ids.append(quiz.id)
-        if revealed_ids:
             await db.commit()
 
     for _quiz_id in revealed_ids:

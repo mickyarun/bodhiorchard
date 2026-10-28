@@ -20,6 +20,8 @@ Once a month is over, its top scorer per org earns SP via the shared
 - **Idempotent + catch-up**: the award is keyed on a month ``source_ref`` and
   attempted on EVERY daily tick (not just the 1st), so it's granted exactly once
   but still lands even if the process was down on the 1st.
+- **Settled after the last reveal**: points reach the monthly totals when a
+  quiz is revealed, so a month with a quiz still open is left for a later run.
 - **No zero-point champion**: a member who only answered (and got everything
   wrong) never wins — the winner must have > 0 points.
 - **Active winner only**: if the top scorer left the org, the award rolls to the
@@ -40,10 +42,11 @@ import structlog
 
 from app.database import AsyncSessionLocal
 from app.repositories.organization import OrganizationRepository
+from app.repositories.quiz import QuizRepository
 from app.repositories.quiz_score import MonthlyLeaderboardRow, QuizScoreRepository
 from app.repositories.user import UserRepository
 from app.services.org_settings import get_quiz_settings
-from app.services.quiz_schedule_math import previous_month_key
+from app.services.quiz_schedule_math import month_bounds, previous_month_key
 from app.services.sp_service import award_sp
 
 logger = structlog.get_logger(__name__)
@@ -85,6 +88,13 @@ async def finalize_org_month(org_id: uuid.UUID, *, period_month: str, amount: fl
         return 0
 
     async with AsyncSessionLocal() as db:
+        month_start, month_end = month_bounds(period_month)
+        if await QuizRepository(db, org_id=org_id).has_unrevealed_in_range(
+            month_start=month_start, month_end=month_end
+        ):
+            # Scores reach the monthly totals at reveal; settle the month on a
+            # later daily run, once its last quiz has been revealed.
+            return 0
         score_repo = QuizScoreRepository(db, org_id=org_id)
         rows = await score_repo.leaderboard(period_month=period_month, limit=WINNER_CANDIDATES)
         if not rows:

@@ -90,26 +90,58 @@ class QuizRepository:
         row = (await self._db.execute(stmt)).first()
         return (row[0], row[1]) if row else None
 
-    async def get_with_question(self, quiz_id: uuid.UUID) -> tuple[Quiz, QuizQuestion] | None:
-        """One quiz with its question by id, org-scoped (any status)."""
+    async def get_with_question(
+        self, quiz_id: uuid.UUID, *, share_lock: bool = False
+    ) -> tuple[Quiz, QuizQuestion] | None:
+        """One quiz with its question by id, org-scoped (any status).
+
+        ``share_lock`` takes FOR SHARE on the quiz row for the rest of the
+        transaction. Answer submits use it so the reveal flip (an UPDATE of the
+        same row) waits for in-flight submits, and the reveal fold then sees
+        every answer accepted while the quiz was open. Submits don't block each
+        other.
+        """
         stmt = (
             select(Quiz, QuizQuestion)
             .join(QuizQuestion, QuizQuestion.id == Quiz.question_id)
             .where(Quiz.org_id == self._org_id)
             .where(Quiz.id == quiz_id)
         )
+        if share_lock:
+            stmt = stmt.with_for_update(read=True, of=Quiz)
         row = (await self._db.execute(stmt)).first()
         return (row[0], row[1]) if row else None
 
     async def list_open_past_reveal(self, now: datetime) -> list[Quiz]:
-        """OPEN quizzes whose window has closed — the reveal pass works this list."""
+        """OPEN quizzes whose window has closed, oldest first.
+
+        The reveal pass folds scores in this order, so streaks advance quiz by
+        quiz even when an outage closes several at once.
+        """
         stmt = (
             select(Quiz)
             .where(Quiz.org_id == self._org_id)
             .where(Quiz.status == QuizStatus.OPEN)
             .where(Quiz.reveal_at <= now)
+            .order_by(Quiz.quiz_date.asc())
         )
         return list((await self._db.execute(stmt)).scalars().all())
+
+    async def has_unrevealed_in_range(self, *, month_start: date, month_end: date) -> bool:
+        """True if a quiz dated in ``[month_start, month_end)`` is still OPEN.
+
+        Its scores are not in the monthly totals until the reveal folds them in,
+        so the month's champion can't be settled yet.
+        """
+        stmt = (
+            select(Quiz.id)
+            .where(Quiz.org_id == self._org_id)
+            .where(Quiz.status == QuizStatus.OPEN)
+            .where(Quiz.quiz_date >= month_start)
+            .where(Quiz.quiz_date < month_end)
+            .limit(1)
+        )
+        return (await self._db.execute(stmt)).scalar_one_or_none() is not None
 
     async def flip_to_revealed(self, quiz_id: uuid.UUID) -> bool:
         """Conditionally flip OPEN→REVEALED. Returns True only for the winning
