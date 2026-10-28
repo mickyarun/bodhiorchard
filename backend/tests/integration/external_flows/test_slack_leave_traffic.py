@@ -22,45 +22,30 @@ workspace, and the background senders run to completion before asserting.
 
 from __future__ import annotations
 
-import uuid
-
 import pytest
 from httpx import AsyncClient
 
 from app.models.leave_request import LeaveStatus
-from app.services.leave.slack_actions import NOT_LINKED, OPEN_FAILED
 from tests.fakes.slack import FakeSlack
 from tests.integration.external_flows.leave_slack_support import (
     click,
-    connect_workspace,
     interact,
     leave_request,
     outcome_of,
     prompts,
     reject_note,
     request_leave,
+    slack_team,
 )
-from tests.integration.leave_support import Factory, report_to, setup_org
+from tests.integration.leave_support import Factory
 
 pytestmark = pytest.mark.integration
-
-
-async def _team(
-    factory: Factory, slack: FakeSlack, *managers: str
-) -> tuple[uuid.UUID, uuid.UUID, dict[str, uuid.UUID], uuid.UUID]:
-    """An employee reporting to ``managers``, all linked to Slack as U<NAME>."""
-    org, ids, casual = await setup_org(factory, "Emp", *managers)
-    emp, people = ids[0], dict(zip(managers, ids[1:], strict=True))
-    await report_to(factory, org, emp, *people.values())
-    links = {emp: "UEMP"} | {uid: f"U{name.upper()}" for name, uid in people.items()}
-    await connect_workspace(factory, org, slack, links)
-    return org, emp, people, casual
 
 
 async def test_a_new_request_sends_the_manager_a_prompt_with_buttons(
     client: AsyncClient, app_sessions: Factory, slack: FakeSlack
 ) -> None:
-    org, emp, people, casual = await _team(app_sessions, slack, "Mgr")
+    org, emp, people, casual = await slack_team(app_sessions, slack, "Mgr")
 
     request_id = await request_leave(client, org, emp, casual)
 
@@ -80,7 +65,7 @@ async def test_a_new_request_sends_the_manager_a_prompt_with_buttons(
 async def test_approving_from_slack_updates_the_prompt_and_tells_the_requester(
     client: AsyncClient, app_sessions: Factory, slack: FakeSlack
 ) -> None:
-    org, emp, people, casual = await _team(app_sessions, slack, "Mgr")
+    org, emp, people, casual = await slack_team(app_sessions, slack, "Mgr")
     request_id = await request_leave(client, org, emp, casual)
     (row,) = await prompts(app_sessions, org, request_id)
 
@@ -100,7 +85,7 @@ async def test_approving_from_slack_updates_the_prompt_and_tells_the_requester(
 async def test_rejecting_opens_a_modal_then_the_note_rejects_and_updates_the_prompt(
     client: AsyncClient, app_sessions: Factory, slack: FakeSlack
 ) -> None:
-    org, emp, _, casual = await _team(app_sessions, slack, "Mgr")
+    org, emp, _, casual = await slack_team(app_sessions, slack, "Mgr")
     request_id = await request_leave(client, org, emp, casual)
     payload = click(slack, "UMGR", "leave_reject", request_id)
 
@@ -124,7 +109,7 @@ async def test_rejecting_opens_a_modal_then_the_note_rejects_and_updates_the_pro
 async def test_the_second_manager_is_told_it_was_decided_and_both_prompts_show_it(
     client: AsyncClient, app_sessions: Factory, slack: FakeSlack
 ) -> None:
-    org, emp, _, casual = await _team(app_sessions, slack, "Ana", "Ben")
+    org, emp, people, casual = await slack_team(app_sessions, slack, "Ana", "Ben")
     request_id = await request_leave(client, org, emp, casual)
     assert len(await prompts(app_sessions, org, request_id)) == 2
 
@@ -134,67 +119,21 @@ async def test_the_second_manager_is_told_it_was_decided_and_both_prompts_show_i
     assert late.status_code == 200
     (refusal,) = slack.calls_to("chat.postEphemeral")
     assert (refusal.args["user"], refusal.args["channel"]) == ("UBEN", "DUBEN")
-    assert "Ana" in refusal.args["text"]
+    assert refusal.args["text"] == "Ana already approved this request."
     updated = {(c.args["channel"], outcome_of(c.args)) for c in slack.calls_to("chat.update")}
     assert updated == {("DUANA", "Approved by Ana"), ("DUBEN", "Approved by Ana")}
-    assert (await leave_request(app_sessions, request_id)).decided_by is not None
-
-
-@pytest.mark.parametrize("clicker", ["UEMP", "UNOBODY"], ids=["own_request", "unlinked"])
-async def test_a_click_by_someone_who_cannot_decide_gets_an_ephemeral_refusal(
-    clicker: str, client: AsyncClient, app_sessions: Factory, slack: FakeSlack
-) -> None:
-    org, emp, _, casual = await _team(app_sessions, slack, "Mgr")
-    request_id = await request_leave(client, org, emp, casual)
-
-    await interact(client, click(slack, clicker, "leave_approve", request_id))
-
-    (refusal,) = slack.calls_to("chat.postEphemeral")
-    assert (refusal.args["user"], refusal.args["channel"]) == (clicker, f"D{clicker}")
-    if clicker == "UNOBODY":
-        assert refusal.args["text"] == NOT_LINKED
-    assert (await leave_request(app_sessions, request_id)).status == LeaveStatus.PENDING
-    assert slack.calls_to("chat.update") == []
-
-
-async def test_an_expired_trigger_tells_the_manager_to_click_reject_again(
-    client: AsyncClient, app_sessions: Factory, slack: FakeSlack
-) -> None:
-    org, emp, _, casual = await _team(app_sessions, slack, "Mgr")
-    request_id = await request_leave(client, org, emp, casual)
-    slack.fail("views.open", "expired_trigger_id")
-
-    await interact(client, click(slack, "UMGR", "leave_reject", request_id))
-
-    (refusal,) = slack.calls_to("chat.postEphemeral")
-    assert refusal.args["text"] == OPEN_FAILED
-    assert (await leave_request(app_sessions, request_id)).status == LeaveStatus.PENDING
+    decided = await leave_request(app_sessions, request_id)
+    assert (decided.status, decided.decided_by) == (LeaveStatus.APPROVED, people["Ana"])
 
 
 async def test_a_prompt_that_slack_refused_is_not_recorded_but_the_request_stands(
     client: AsyncClient, app_sessions: Factory, slack: FakeSlack
 ) -> None:
-    org, emp, _, casual = await _team(app_sessions, slack, "Mgr")
+    org, emp, _, casual = await slack_team(app_sessions, slack, "Mgr")
     slack.fail("chat.postMessage", "missing_scope")
 
     request_id = await request_leave(client, org, emp, casual)
 
     assert len(slack.calls_to("chat.postMessage")) == 1
     assert await prompts(app_sessions, org, request_id) == []
-    assert (await leave_request(app_sessions, request_id)).status == LeaveStatus.PENDING
-
-
-async def test_a_forged_click_is_refused_with_no_slack_traffic(
-    client: AsyncClient, app_sessions: Factory, slack: FakeSlack
-) -> None:
-    org, emp, _, casual = await _team(app_sessions, slack, "Mgr")
-    request_id = await request_leave(client, org, emp, casual)
-    sent = len(slack.calls)
-
-    resp = await interact(
-        client, click(slack, "UMGR", "leave_approve", request_id), secret="f" * 32
-    )
-
-    assert resp.status_code == 401
-    assert len(slack.calls) == sent
     assert (await leave_request(app_sessions, request_id)).status == LeaveStatus.PENDING

@@ -29,7 +29,7 @@ from typing import Any
 
 import pytest
 
-from app.schemas.jobs import JobStatusRead
+from app.schemas.jobs import JobState, JobStatusRead
 from app.services import background, job_queue
 
 JobHandler = Callable[[str, dict[str, Any]], Awaitable[None]]
@@ -43,6 +43,7 @@ class InlineJobs:
         self._monkeypatch = monkeypatch
         self._queues: dict[str, asyncio.Queue[tuple[str, dict[str, Any]]]] = {}
         self.ran: list[tuple[str, str]] = []
+        self.failed: list[tuple[str, str]] = []
 
     def register(self, job_type: str, handler: JobHandler) -> None:
         """Accept ``job_type`` jobs for this test and run them with ``handler``."""
@@ -55,17 +56,32 @@ class InlineJobs:
         return self._queues[job_type].qsize()
 
     async def run_all(self) -> list[str]:
-        """Run every queued job (and any job those enqueue); return the job ids."""
+        """Run every queued job (and any job those enqueue); return the job ids.
+
+        Mirrors the queue's worker: the job is marked running first, and a
+        handler that raises leaves the job failed with the error, the way
+        the frontend would see it, rather than failing the test here.
+        """
         done: list[str] = []
         while any(not q.empty() for q in self._queues.values()):
             for job_type, queue in self._queues.items():
                 while not queue.empty():
                     job_id, payload = queue.get_nowait()
-                    handler = job_queue._registry[job_type][0]
-                    await handler(job_id, payload)
-                    self.ran.append((job_type, job_id))
+                    await self._run_one(job_type, job_id, payload)
                     done.append(job_id)
         return done
+
+    async def _run_one(self, job_type: str, job_id: str, payload: dict[str, Any]) -> None:
+        handler = job_queue._registry[job_type][0]
+        job_queue.update_job(job_id, state=JobState.RUNNING, status_message="Starting...")
+        try:
+            await handler(job_id, payload)
+        except Exception as exc:
+            job_queue.update_job(
+                job_id, state=JobState.FAILED, error=str(exc)[:500], status_message="Failed"
+            )
+            self.failed.append((job_type, job_id))
+        self.ran.append((job_type, job_id))
 
     @staticmethod
     def status(job_id: str) -> JobStatusRead:

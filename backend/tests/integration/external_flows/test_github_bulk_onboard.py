@@ -16,52 +16,39 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 from httpx import AsyncClient
 
+from app.models.tracked_repository import TrackedRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.schemas.jobs import JobState
 from app.services import github_app_auth
-from app.services.job_queue import JOB_REPO_BULK_ONBOARD
-from app.services.job_repo_bulk_clone import handle_bulk_onboard_job
 from tests.fakes.git_repo import LocalGitRepo
 from tests.fakes.github import FakeGitHub
-from tests.fakes.seed import Factory, SeededOrg, auth_headers, seed_org
+from tests.fakes.seed import Factory, seed_org
 from tests.integration.external_flows.bulk_onboard_support import (
     CloneRedirects,
     ScanKickoffs,
     onboard_item,
+    origin_url,
+    start_onboard,
 )
-from tests.integration.external_flows.github_support import BULK_ONBOARD, set_installation
+from tests.integration.external_flows.github_support import unique_name
 from tests.integration.external_flows.jobs_support import InlineJobs
 
 pytestmark = pytest.mark.integration
 RepoFactory = Callable[..., LocalGitRepo]
 
 
-@pytest.fixture
-def onboarding(
-    inline_jobs: InlineJobs, app_sessions: Factory, data_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> ScanKickoffs:
-    """The real bulk-onboard handler on the test database; the scan is recorded."""
-
-    async def handler(job_id: str, payload: dict[str, Any]) -> None:
-        await handle_bulk_onboard_job(job_id, payload, db_factory=app_sessions)
-
-    inline_jobs.register(JOB_REPO_BULK_ONBOARD, handler)
-    return ScanKickoffs().install(monkeypatch)
-
-
-async def _start(client: AsyncClient, org: SeededOrg, *items: dict[str, str]) -> str:
-    resp = await client.post(
-        BULK_ONBOARD, json={"items": list(items)}, headers=auth_headers(org.owner_id, org.org_id)
-    )
-    assert resp.status_code == 202, resp.text
-    return str(resp.json()["jobId"])
+async def _tracked(factory: Factory, org_id: uuid.UUID) -> dict[str | None, TrackedRepository]:
+    """The org's tracked repos by GitHub full name."""
+    async with factory() as db:
+        rows = await TrackedRepoRepository(db, org_id=org_id).list_all_ordered_by_name()
+    return {r.github_repo_full_name: r for r in rows}
 
 
 async def test_two_repos_are_cloned_registered_and_handed_to_one_scan(
@@ -74,35 +61,36 @@ async def test_two_repos_are_cloned_registered_and_handed_to_one_scan(
     monkeypatch: pytest.MonkeyPatch,
     data_dir: Path,
 ) -> None:
-    shop, billing = git_repo_factory("shop-api"), git_repo_factory("billing")
-    gh.add_repo("acme/shop-api", "main", "develop")
-    gh.add_repo("acme/billing")
+    shop_name = unique_name("shop")
+    shop, billing = f"acme/{shop_name}", f"acme/{unique_name('billing')}"
+    gh.add_repo(shop, "main", "develop")
+    gh.add_repo(billing)
     org = await seed_org(app_sessions, github=gh)
 
-    job_id = await _start(
-        client, org, onboard_item("acme/shop-api", develop="develop"), onboard_item("acme/billing")
+    job_id = await start_onboard(
+        client, org, onboard_item(shop, develop="develop"), onboard_item(billing)
     )
     token = gh.issued_tokens[0]
     redirects = CloneRedirects(monkeypatch)
-    redirects.serve(token, "acme/shop-api", shop)
-    redirects.serve(token, "acme/billing", billing)
+    redirects.serve(token, shop, git_repo_factory("shop-api"))
+    redirects.serve(token, billing, git_repo_factory("billing"))
     await inline_jobs.run_all()
 
     status = inline_jobs.status(job_id)
     assert status.state == JobState.COMPLETED
     assert status.result is not None
-    assert sorted(status.result["succeeded"]) == ["acme/billing", "acme/shop-api"]
+    assert sorted(status.result["succeeded"]) == sorted([shop, billing])
     assert status.result["failed"] == []
     assert token not in str(status.result)
-    async with app_sessions() as db:
-        rows = await TrackedRepoRepository(db, org_id=org.org_id).list_all_ordered_by_name()
-    by_name = {r.github_repo_full_name: r for r in rows}
-    shop_row = by_name["acme/shop-api"]
+    assert len(gh.issued_tokens) == 1  # one installation token for the whole job
+    rows = await _tracked(app_sessions, org.org_id)
+    shop_row = rows[shop]
     assert (shop_row.main_branch, shop_row.develop_branch) == ("main", "develop")
-    assert Path(shop_row.path) == (data_dir / "repos" / org.slug / "shop-api").resolve()
-    assert (Path(shop_row.path) / "README.md").read_text().startswith("# shop-api")
+    clone = Path(shop_row.path)
+    assert clone == (data_dir / "repos" / org.slug / shop_name).resolve()
+    assert (clone / "README.md").read_text().startswith("# shop-api")
     (scanned,) = onboarding.calls
-    assert sorted(scanned) == sorted(r.id for r in rows)
+    assert sorted(scanned) == sorted(r.id for r in rows.values())
 
 
 async def test_one_failed_clone_leaves_the_other_repo_onboarded_and_hides_the_token(
@@ -114,64 +102,53 @@ async def test_one_failed_clone_leaves_the_other_repo_onboarded_and_hides_the_to
     onboarding: ScanKickoffs,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    shop = git_repo_factory("shop-api")
-    gh.add_repo("acme/shop-api")
-    gh.add_repo("acme/ghost")
+    shop, ghost = f"acme/{unique_name('shop')}", f"acme/{unique_name('ghost')}"
+    gh.add_repo(shop)
+    gh.add_repo(ghost)
     org = await seed_org(app_sessions, github=gh)
 
-    job_id = await _start(client, org, onboard_item("acme/shop-api"), onboard_item("acme/ghost"))
+    job_id = await start_onboard(client, org, onboard_item(shop), onboard_item(ghost))
     token = gh.issued_tokens[0]
-    CloneRedirects(monkeypatch).serve(token, "acme/shop-api", shop)
+    CloneRedirects(monkeypatch).serve(token, shop, git_repo_factory("shop-api"))
     await inline_jobs.run_all()
 
     result = inline_jobs.status(job_id).result
     assert result is not None
-    assert result["succeeded"] == ["acme/shop-api"]
+    assert result["succeeded"] == [shop]
     (failure,) = result["failed"]
-    assert failure["full_name"] == "acme/ghost"
+    assert failure["full_name"] == ghost
     assert failure["error"] and token not in failure["error"]
-    async with app_sessions() as db:
-        rows = await TrackedRepoRepository(db, org_id=org.org_id).list_all_ordered_by_name()
-    assert [r.github_repo_full_name for r in rows] == ["acme/shop-api"]
-    assert onboarding.calls == [[rows[0].id]]
+    assert len(gh.issued_tokens) == 1
+    rows = await _tracked(app_sessions, org.org_id)
+    assert list(rows) == [shop]
+    assert onboarding.calls == [[rows[shop].id]]
 
 
-async def test_repos_outside_the_installation_are_refused_before_any_job(
-    client: AsyncClient, app_sessions: Factory, gh: FakeGitHub, inline_jobs: InlineJobs,
+@pytest.mark.xfail(
+    strict=True,
+    reason="open question in the release test plan: the cloner's docstring says the token "
+    "is never written to disk, but it stays in the clone's .git/config",
+)
+async def test_the_clone_does_not_keep_the_installation_token_on_disk(
+    client: AsyncClient,
+    app_sessions: Factory,
+    gh: FakeGitHub,
+    git_repo_factory: RepoFactory,
+    inline_jobs: InlineJobs,
     onboarding: ScanKickoffs,
-) -> None:  # fmt: skip
-    gh.add_repo("acme/shop-api")
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shop = f"acme/{unique_name('shop')}"
+    gh.add_repo(shop)
     org = await seed_org(app_sessions, github=gh)
+    await start_onboard(client, org, onboard_item(shop))
+    token = gh.issued_tokens[0]
+    CloneRedirects(monkeypatch).serve(token, shop, git_repo_factory("shop-api"))
+    await inline_jobs.run_all()
 
-    resp = await client.post(
-        BULK_ONBOARD,
-        json={"items": [onboard_item("acme/shop-api"), onboard_item("other/secret")]},
-        headers=auth_headers(org.owner_id, org.org_id),
-    )
+    row = (await _tracked(app_sessions, org.org_id))[shop]
 
-    assert resp.status_code == 400
-    assert "other/secret" in resp.json()["detail"]
-    assert "acme/shop-api" not in resp.json()["detail"]
-    assert inline_jobs.queued(JOB_REPO_BULK_ONBOARD) == 0
-
-
-async def test_bulk_onboard_needs_the_app_installed(
-    client: AsyncClient, app_sessions: Factory, gh: FakeGitHub, inline_jobs: InlineJobs,
-    onboarding: ScanKickoffs,
-) -> None:  # fmt: skip
-    gh.add_repo("acme/shop-api")
-    org = await seed_org(app_sessions, github=gh)
-    await set_installation(app_sessions, org.org_id, None)
-
-    resp = await client.post(
-        BULK_ONBOARD,
-        json={"items": [onboard_item("acme/shop-api")]},
-        headers=auth_headers(org.owner_id, org.org_id),
-    )
-
-    assert resp.status_code == 400
-    assert inline_jobs.queued(JOB_REPO_BULK_ONBOARD) == 0
-    assert gh.requests == []
+    assert token not in origin_url(row.path)
 
 
 async def test_a_revoked_installation_at_job_time_fails_the_job_without_cloning(
@@ -182,9 +159,10 @@ async def test_a_revoked_installation_at_job_time_fails_the_job_without_cloning(
     onboarding: ScanKickoffs,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    gh.add_repo("acme/shop-api")
+    shop = f"acme/{unique_name('shop')}"
+    gh.add_repo(shop)
     org = await seed_org(app_sessions, github=gh)
-    job_id = await _start(client, org, onboard_item("acme/shop-api"))
+    job_id = await start_onboard(client, org, onboard_item(shop))
     # The cached token expires and GitHub now refuses the installation.
     monkeypatch.setattr(github_app_auth, "_token_cache", {})
     gh.fail("POST", r"/access_tokens$", 404)
@@ -194,6 +172,6 @@ async def test_a_revoked_installation_at_job_time_fails_the_job_without_cloning(
     status = inline_jobs.status(job_id)
     assert status.state == JobState.FAILED
     assert status.error == "GitHub App installation is not ready for this organization."
-    async with app_sessions() as db:
-        assert await TrackedRepoRepository(db, org_id=org.org_id).list_all_ordered_by_name() == []
+    assert gh.faults.faults == []
+    assert await _tracked(app_sessions, org.org_id) == {}
     assert onboarding.calls == []

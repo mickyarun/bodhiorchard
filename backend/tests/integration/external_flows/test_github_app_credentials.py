@@ -27,8 +27,10 @@ from tests.fakes.seed import Factory, auth_headers, seed_org
 from tests.integration.external_flows.github_support import (
     CONNECTIONS,
     INSTALLABLE,
+    fresh_app_id,
     load_org,
     requests_to,
+    unique_name,
     update_org,
 )
 
@@ -87,6 +89,7 @@ async def test_rejected_credentials_are_reported_and_not_saved(
 
     assert resp.status_code == status
     assert resp.json()["detail"]["error"] == code
+    assert ([r.url.path for r in gh.requests], gh.faults.faults) == (["/app"], [])
     saved = await load_org(app_sessions, org.org_id)
     assert (saved.github_app_id, saved.github_app_private_key) == (None, None)
     after = (await client.get(CONNECTIONS, headers=headers)).json()["github"]
@@ -100,18 +103,25 @@ async def test_a_key_that_does_not_belong_to_the_app_id_is_rejected_by_the_jwt_c
 
     resp = await client.patch(
         CONNECTIONS,
-        json={"github": {"appId": gh.app_id + 7, "privateKey": gh.private_key_pem}},
+        json={"github": {"appId": fresh_app_id(), "privateKey": gh.private_key_pem}},
         headers=auth_headers(org.owner_id, org.org_id),
     )
 
     assert resp.status_code == 400
     assert resp.json()["detail"]["error"] == "github_app_credentials_invalid"
+    assert [r.url.path for r in gh.requests] == ["/app"]
+    saved = await load_org(app_sessions, org.org_id)
+    assert (saved.github_app_id, saved.github_app_private_key, saved.github_app_slug) == (
+        None,
+        None,
+        None,
+    )
 
 
 async def test_a_missing_slug_is_back_filled_after_the_first_token_exchange(
     client: AsyncClient, app_sessions: Factory, gh: FakeGitHub
 ) -> None:
-    gh.add_repo("acme/one")
+    gh.add_repo(f"acme/{unique_name()}")
     org = await seed_org(app_sessions, github=gh)
     await update_org(app_sessions, org.org_id, github_app_slug=None)
 
@@ -126,7 +136,7 @@ async def test_a_missing_slug_is_back_filled_after_the_first_token_exchange(
 async def test_the_slug_back_fill_tolerates_github_refusing_the_app_lookup(
     client: AsyncClient, app_sessions: Factory, gh: FakeGitHub
 ) -> None:
-    gh.add_repo("acme/one")
+    gh.add_repo(f"acme/{unique_name()}")
     org = await seed_org(app_sessions, github=gh)
     await update_org(app_sessions, org.org_id, github_app_slug=None)
     gh.fail("GET", r"^/app$", 500)
@@ -135,4 +145,6 @@ async def test_the_slug_back_fill_tolerates_github_refusing_the_app_lookup(
     await asyncio.gather(*github_app_slug._BACKGROUND_RETROFIT_TASKS)
 
     assert resp.status_code == 200
+    assert [r.url.path for r in gh.requests if r.url.path == "/app"] == ["/app"]
+    assert gh.faults.faults == []
     assert (await load_org(app_sessions, org.org_id)).github_app_slug is None

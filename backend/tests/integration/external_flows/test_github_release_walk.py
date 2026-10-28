@@ -23,6 +23,7 @@ token, and records ``merged_to_prod`` on every BUD whose merge SHA is there.
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 import pytest
 from httpx import AsyncClient
@@ -32,7 +33,11 @@ from tests.fakes.git_repo import LocalGitRepo
 from tests.fakes.github import FakeGitHub
 from tests.fakes.github_payloads import pull_request_event
 from tests.fakes.seed import Factory, SeededOrg, seed_org, seed_repo
-from tests.integration.external_flows.github_support import bearer_tokens, unique_name
+from tests.integration.external_flows.github_support import (
+    bearer_tokens,
+    requests_to,
+    unique_name,
+)
 from tests.integration.external_flows.webhook_support import (
     add_bud,
     deliver,
@@ -44,6 +49,7 @@ pytestmark = pytest.mark.integration
 BUD_SHA = "b" * 40
 OTHER_SHA = "c" * 40
 RELEASE_PR = 90
+RELEASE_TITLE = "Release 2026.10"
 
 
 async def _ship_bud_to_develop(
@@ -52,10 +58,12 @@ async def _ship_bud_to_develop(
     """Open and merge ``bud-NNN/work`` into develop; return the BUD id."""
     bud_id, number = await add_bud(factory, org.org_id, "Refund to wallet")
     branch = f"bud-{number:03d}/refund-wallet"
-    opened = pull_request_event(full_name, 11, action="opened", merged=False, base="develop",
-                                head=branch)  # fmt: skip
-    merged = pull_request_event(full_name, 11, base="develop", head=branch,
-                                merge_commit_sha=BUD_SHA)  # fmt: skip
+    opened = pull_request_event(
+        full_name, 11, action="opened", merged=False, base="develop", head=branch
+    )
+    merged = pull_request_event(
+        full_name, 11, base="develop", head=branch, merge_commit_sha=BUD_SHA
+    )
     assert (await deliver(client, "pull_request", opened)).status_code == 200
     assert (await deliver(client, "pull_request", merged)).status_code == 200
     return bud_id
@@ -63,16 +71,21 @@ async def _ship_bud_to_develop(
 
 async def _release(client: AsyncClient, full_name: str, delivery_id: str | None = None) -> None:
     """Open and merge the develop -> main release PR."""
-    title = "Release 2026.10"
     opened = pull_request_event(
-        full_name, RELEASE_PR, action="opened", merged=False, head="develop", title=title
-    )
-    merged = pull_request_event(
-        full_name, RELEASE_PR, head="develop", title=title, merge_commit_sha="d" * 40
+        full_name, RELEASE_PR, action="opened", merged=False, head="develop", title=RELEASE_TITLE
     )
     await deliver(client, "pull_request", opened)
-    resp = await deliver(client, "pull_request", merged, delivery_id=delivery_id)
+    resp = await deliver(
+        client, "pull_request", _release_merge(full_name), delivery_id=delivery_id
+    )
     assert resp.status_code == 200
+
+
+def _release_merge(full_name: str) -> dict[str, Any]:
+    """The ``closed`` + merged delivery for the develop -> main release PR."""
+    return pull_request_event(
+        full_name, RELEASE_PR, head="develop", title=RELEASE_TITLE, merge_commit_sha="d" * 40
+    )
 
 
 async def _tracked_org(
@@ -118,6 +131,22 @@ async def test_a_release_without_any_bud_commit_records_nothing(
     assert len(bearer_tokens(gh, f"/pulls/{RELEASE_PR}/commits")) == 1
 
 
+async def test_a_bud_commit_on_the_second_page_of_a_long_release_is_found(
+    client: AsyncClient, app_sessions: Factory, gh: FakeGitHub, git_repo: LocalGitRepo
+) -> None:
+    org, full_name = await _tracked_org(app_sessions, gh, git_repo)
+    bud_id = await _ship_bud_to_develop(client, app_sessions, org, full_name)
+    filler = [f"{n:040x}" for n in range(1, 151)]
+    gh.pr_commits[(full_name, RELEASE_PR)] = filler[:120] + [BUD_SHA] + filler[120:]
+
+    await _release(client, full_name)
+
+    (prod,) = await timeline_details(app_sessions, org.org_id, bud_id, "merged_to_prod")
+    assert prod["matched_commits"] == [{"sha": BUD_SHA, "message": ""}]
+    pages = [r.url.params["page"] for r in requests_to(gh, f"/pulls/{RELEASE_PR}/commits")]
+    assert pages == ["1", "2"]
+
+
 @pytest.mark.parametrize("failure", ["token_refused", "commits_unavailable"])
 async def test_github_failures_during_the_walk_still_record_the_merge(
     failure: str,
@@ -139,6 +168,9 @@ async def test_github_failures_during_the_walk_still_record_the_merge(
     assert await timeline_details(app_sessions, org.org_id, bud_id, "merged_to_prod") == []
     release = await pull_request(app_sessions, org.org_id, 10_000 + RELEASE_PR)
     assert release.state == PRState.MERGED
+    assert gh.faults.faults == []
+    walks = requests_to(gh, f"/pulls/{RELEASE_PR}/commits")
+    assert len(walks) == (0 if failure == "token_refused" else 1)
 
 
 async def test_a_redelivered_release_merge_does_not_record_prod_twice(
@@ -150,9 +182,7 @@ async def test_a_redelivered_release_merge_does_not_record_prod_twice(
 
     await _release(client, full_name)
     # GitHub sends the same merge again under a fresh delivery id (a manual redeliver).
-    merged = pull_request_event(full_name, RELEASE_PR, head="develop", title="Release 2026.10",
-                                merge_commit_sha="d" * 40)  # fmt: skip
-    assert (await deliver(client, "pull_request", merged)).status_code == 200
+    assert (await deliver(client, "pull_request", _release_merge(full_name))).status_code == 200
 
     assert len(await timeline_details(app_sessions, org.org_id, bud_id, "merged_to_prod")) == 1
     assert len(bearer_tokens(gh, f"/pulls/{RELEASE_PR}/commits")) == 2

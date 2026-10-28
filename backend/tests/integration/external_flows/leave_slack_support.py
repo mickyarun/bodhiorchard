@@ -31,7 +31,7 @@ from tests.fakes.signing import signed_slack_interaction
 from tests.fakes.slack import FakeSlack
 from tests.integration.external_flows.jobs_support import settle_background
 from tests.integration.external_flows.slack_support import link_slack
-from tests.integration.leave_support import as_user, future_monday
+from tests.integration.leave_support import as_user, future_monday, report_to, setup_org
 
 INTERACTIONS = "/api/v1/slack/interactions"
 
@@ -119,3 +119,15 @@ def outcome_of(update_args: dict[str, Any]) -> str:
     """The outcome line a ``chat.update`` put in place of the buttons."""
     blocks = update_args["blocks"]
     return str(blocks[-1]["elements"][0]["text"])
+
+
+async def slack_team(
+    factory: Factory, slack: FakeSlack, *managers: str
+) -> tuple[uuid.UUID, uuid.UUID, dict[str, uuid.UUID], uuid.UUID]:
+    """An employee reporting to ``managers``, all linked to Slack as U<NAME>."""
+    org, ids, casual = await setup_org(factory, "Emp", *managers)
+    emp, people = ids[0], dict(zip(managers, ids[1:], strict=True))
+    await report_to(factory, org, emp, *people.values())
+    links = {emp: "UEMP"} | {uid: f"U{name.upper()}" for name, uid in people.items()}
+    await connect_workspace(factory, org, slack, links)
+    return org, emp, people, casual

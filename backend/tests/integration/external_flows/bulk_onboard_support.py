@@ -24,13 +24,19 @@ fails, because the guard only lets git speak the ``file`` protocol.
 
 from __future__ import annotations
 
+import os
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
+from httpx import AsyncClient
 
 from app.services import job_repo_bulk_clone
-from tests.fakes.git_repo import LocalGitRepo
+from tests.fakes.git_repo import LocalGitRepo, git
+from tests.fakes.seed import SeededOrg, auth_headers
+
+BULK_ONBOARD = "/api/v1/settings/repos/bulk-onboard"
 
 
 class CloneRedirects:
@@ -38,7 +44,8 @@ class CloneRedirects:
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._monkeypatch = monkeypatch
-        self._count = 0
+        # Append after any config entries the environment already passes to git.
+        self._count = int(os.environ.get("GIT_CONFIG_COUNT", "0") or "0")
 
     def serve(self, token: str, full_name: str, repo: LocalGitRepo) -> None:
         """Clone ``full_name`` (with ``token``) from ``repo``'s bare origin."""
@@ -76,3 +83,17 @@ def onboard_item(full_name: str, main: str = "main", develop: str | None = None)
     if develop is not None:
         item["developBranch"] = develop
     return item
+
+
+async def start_onboard(client: AsyncClient, org: SeededOrg, *items: dict[str, str]) -> str:
+    """``POST /repos/bulk-onboard`` as the owner; returns the 202's job id."""
+    resp = await client.post(
+        BULK_ONBOARD, json={"items": list(items)}, headers=auth_headers(org.owner_id, org.org_id)
+    )
+    assert resp.status_code == 202, resp.text
+    return str(resp.json()["jobId"])
+
+
+def origin_url(clone: str) -> str:
+    """The ``remote.origin.url`` the clone keeps in its ``.git/config``."""
+    return git(Path(clone), "config", "--get", "remote.origin.url")

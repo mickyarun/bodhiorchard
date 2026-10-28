@@ -20,10 +20,12 @@ import pytest
 from httpx import AsyncClient
 
 from tests.fakes.github import FakeGitHub
+from tests.fakes.http_router import FakeHttpRouter
 from tests.fakes.seed import Factory, SeededOrg, auth_headers, seed_member, seed_org
 from tests.integration.external_flows.github_support import (
     ORG_MEMBERS,
     bearer_tokens,
+    page_org_members,
     requests_to,
     set_github_org,
     set_github_username,
@@ -62,6 +64,27 @@ async def test_members_come_back_with_profiles_and_the_already_added_flag(
     assert by_login["quiet-dev"]["already_added"] is False
     assert set(bearer_tokens(gh, "/users/")) == set(gh.issued_tokens)
     assert requests_to(gh, "/orgs/acme/members")[0].url.params["per_page"] == "100"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="the roster reads one page of 100 and never follows Link, "
+    "fixed by branch fix/github-org-members-pagination",
+)
+async def test_a_roster_past_one_page_comes_back_whole(
+    client: AsyncClient, app_sessions: Factory, gh: FakeGitHub, http_router: FakeHttpRouter
+) -> None:
+    page_org_members(http_router, gh)
+    logins = [f"dev-{n:03d}" for n in range(130)]
+    for login in logins:
+        gh.add_member(login)
+    org = await seed_org(app_sessions, github=gh)
+    await set_github_org(app_sessions, org.org_id, "acme")
+
+    resp = await client.get(ORG_MEMBERS, headers=auth_headers(org.owner_id, org.org_id))
+
+    assert sorted(m["login"] for m in resp.json()) == logins
+    assert len(requests_to(gh, "/orgs/acme/members")) == 2
 
 
 async def test_one_failing_profile_does_not_blank_the_roster(

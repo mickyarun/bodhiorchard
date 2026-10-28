@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import itertools
+import re
 import uuid
 
 import httpx
@@ -24,13 +26,22 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.models.organization import Organization
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
-from tests.fakes.github import FakeGitHub
+from tests.fakes.github import API_HOST, FakeGitHub
+from tests.fakes.http_router import FakeHttpRouter
 from tests.fakes.seed import Factory
 
 INSTALLABLE = "/api/v1/settings/repos/installable"
 BULK_ONBOARD = "/api/v1/settings/repos/bulk-onboard"
 ORG_MEMBERS = "/api/v1/settings/github/org-members"
 CONNECTIONS = "/api/v1/settings/connections"
+
+
+_APP_IDS = itertools.count(500_001)
+
+
+def fresh_app_id() -> int:
+    """A GitHub App id no other org in this test session uses."""
+    return next(_APP_IDS)
 
 
 def unique_name(prefix: str = "svc") -> str:
@@ -99,3 +110,24 @@ def bearer_tokens(github: FakeGitHub, path_part: str) -> list[str]:
 def requests_to(github: FakeGitHub, path_part: str) -> list[httpx.Request]:
     """Requests the fake saw whose path contains ``path_part``."""
     return [r for r in github.requests if path_part in r.url.path]
+
+
+def page_org_members(router: FakeHttpRouter, github: FakeGitHub) -> None:
+    """Serve ``/orgs/{org}/members`` a page at a time, with ``Link``, as GitHub does.
+
+    The shared fake answers the member list in one response; this override
+    (mounted over it for ``api.github.com``) pages it like every other list
+    and hands every other request to the fake.
+    """
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if not re.fullmatch(r"/orgs/[^/]+/members", request.url.path):
+            return github.handle(request)
+        github.requests.append(request)
+        token = request.headers.get("authorization", "").removeprefix("Bearer ")
+        if token not in github.issued_tokens:
+            return httpx.Response(401, json={"message": "Bad credentials"})
+        items = [{"login": login, "avatar_url": ""} for login in github.members]
+        return github.page(request, items, None)
+
+    router.mount(API_HOST, handle)

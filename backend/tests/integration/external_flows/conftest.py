@@ -24,13 +24,23 @@ id and Slack team (org lookups by either must match exactly one org).
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from app.services.jira_import_pipeline import handle_discovery_job, handle_import_job
 from app.services.job_agents import handle_triage_job
 from app.services.job_feature_qa import handle_feature_qa_job
-from app.services.job_queue import JOB_FEATURE_QA, JOB_JIRA_DISCOVERY, JOB_JIRA_IMPORT, JOB_TRIAGE
+from app.services.job_queue import (
+    JOB_FEATURE_QA,
+    JOB_JIRA_DISCOVERY,
+    JOB_JIRA_IMPORT,
+    JOB_REPO_BULK_ONBOARD,
+    JOB_TRIAGE,
+)
+from app.services.job_repo_bulk_clone import handle_bulk_onboard_job
 from tests.fakes.fixtures import (
     data_dir,
     event_recorder,
@@ -48,6 +58,8 @@ from tests.fakes.fixtures_db import app_sessions, mcp_claude
 from tests.fakes.github import FakeGitHub
 from tests.fakes.seed import Factory
 from tests.fakes.slack import FakeSlack
+from tests.integration.external_flows.bulk_onboard_support import ScanKickoffs
+from tests.integration.external_flows.github_support import fresh_app_id
 from tests.integration.external_flows.jobs_support import InlineJobs
 
 __all__ = [
@@ -67,15 +79,24 @@ __all__ = [
     "inline_jobs",
     "jira_jobs",
     "mcp_claude",
+    "onboarding",
     "slack",
     "triage_jobs",
 ]
 
 
 @pytest.fixture
-def inline_jobs(monkeypatch: pytest.MonkeyPatch) -> InlineJobs:
-    """Register real job handlers for this test and run them on demand."""
-    return InlineJobs(monkeypatch)
+def inline_jobs(monkeypatch: pytest.MonkeyPatch) -> Iterator[InlineJobs]:
+    """Register real job handlers for this test and run them on demand.
+
+    A handler that raised is recorded as a failed job, as the worker would;
+    the test fails at teardown unless it inspected and cleared ``failed``.
+    """
+    jobs = InlineJobs(monkeypatch)
+    yield jobs
+    assert not jobs.failed, (
+        f"job handlers raised: {[jobs.status(j).error for _, j in jobs.failed]}"
+    )
 
 
 @pytest.fixture
@@ -95,9 +116,22 @@ def jira_jobs(inline_jobs: InlineJobs, app_sessions: Factory) -> InlineJobs:
 
 
 @pytest.fixture
+def onboarding(
+    inline_jobs: InlineJobs, app_sessions: Factory, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> ScanKickoffs:
+    """The real bulk-onboard handler on the test database; the scan kickoff is recorded."""
+
+    async def handler(job_id: str, payload: dict[str, Any]) -> None:
+        await handle_bulk_onboard_job(job_id, payload, db_factory=app_sessions)
+
+    inline_jobs.register(JOB_REPO_BULK_ONBOARD, handler)
+    return ScanKickoffs().install(monkeypatch)
+
+
+@pytest.fixture
 def gh(fake_github: FakeGitHub) -> FakeGitHub:
     """``fake_github`` with an App id no other org in the shared database uses."""
-    fake_github.app_id = 100_000 + uuid.uuid4().int % 800_000
+    fake_github.app_id = fresh_app_id()
     return fake_github
 
 

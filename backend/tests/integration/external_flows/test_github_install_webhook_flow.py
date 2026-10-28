@@ -27,6 +27,7 @@ from tests.fakes.github_payloads import installation_event
 from tests.fakes.seed import Factory, auth_headers, seed_org
 from tests.integration.external_flows.github_support import (
     INSTALLABLE,
+    fresh_app_id,
     load_org,
     set_installation,
 )
@@ -93,11 +94,14 @@ async def test_a_reinstall_under_a_new_installation_id_is_followed_by_the_token_
     org = await seed_org(app_sessions, github=gh)
     gh.installation_id += 1  # GitHub issued a new installation
 
-    await deliver(
+    resp = await deliver(
         client, "installation", installation_event("created", gh.app_id, gh.installation_id)
     )
     picker = await client.get(INSTALLABLE, headers=auth_headers(org.owner_id, org.org_id))
 
+    assert resp.status_code == 200
+    stored = (await load_org(app_sessions, org.org_id)).github_app_installation_id
+    assert stored == gh.installation_id
     assert [r["fullName"] for r in picker.json()["repos"]] == ["acme/shop-api"]
     (exchange,) = [r for r in gh.requests if r.url.path.endswith("/access_tokens")]
     assert f"/installations/{gh.installation_id}/" in exchange.url.path
@@ -130,7 +134,7 @@ async def test_an_install_delivery_for_an_unknown_app_is_acknowledged_and_ignore
     resp = await deliver(
         client,
         "installation",
-        installation_event("deleted", gh.app_id + 1, gh.installation_id),
+        installation_event("deleted", fresh_app_id(), gh.installation_id),
         delivery_id=delivery,
     )
 

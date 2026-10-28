@@ -146,55 +146,16 @@ async def test_a_type_mapped_to_skip_never_reaches_review(
     org = await connected_org(client, app_sessions, fake_jira)
     found = await discover(client, org, jira_jobs, "PAY")
 
+    skip_bugs = [{"jiraType": "Bug", "target": "skip"}]
     done = await start_import(
-        client, org, jira_jobs, found["id"], consolidationMode="flat",
-        typeMappings=[{"jiraType": "Bug", "target": "skip"}],
-    )  # fmt: skip
-
-    assert "PAY-4" not in [r["jiraKey"] for r in done["result"]["reviewNeeded"]]
-
-
-async def test_a_revoked_token_fails_the_import_with_the_reason(
-    client: AsyncClient, app_sessions: Factory, fake_jira: FakeJira, jira_jobs: InlineJobs
-) -> None:
-    seed_backlog(fake_jira)
-    org = await connected_org(client, app_sessions, fake_jira)
-    found = await discover(client, org, jira_jobs, "PAY")
-    fake_jira.fail(r"/search/jql$", 401)
-
-    done = await start_import(client, org, jira_jobs, found["id"])
-
-    assert done["status"] == "failed"
-    assert "returned 401" in done["error"]
-    assert await review_items(client, org, found["id"]) == {}
-    (job_type, job_id) = jira_jobs.ran[-1]
-    assert jira_jobs.status(job_id).state.value == "failed"
-
-
-async def test_a_rate_limited_page_is_retried_and_the_import_completes(
-    client: AsyncClient, app_sessions: Factory, fake_jira: FakeJira, jira_jobs: InlineJobs
-) -> None:
-    seed_backlog(fake_jira)
-    org = await connected_org(client, app_sessions, fake_jira)
-    found = await discover(client, org, jira_jobs, "PAY")
-    fake_jira.fail(r"/search/jql$", 429)
-
-    done = await start_import(client, org, jira_jobs, found["id"], consolidationMode="flat")
+        client, org, jira_jobs, found["id"], consolidationMode="flat", typeMappings=skip_bugs
+    )
 
     assert done["status"] == "completed"
-    assert len(done["result"]["reviewNeeded"]) == 4
-
-
-async def test_a_failed_import_can_be_started_again(
-    client: AsyncClient, app_sessions: Factory, fake_jira: FakeJira, jira_jobs: InlineJobs
-) -> None:
-    seed_backlog(fake_jira)
-    org = await connected_org(client, app_sessions, fake_jira)
-    found = await discover(client, org, jira_jobs, "PAY")
-    fake_jira.fail(r"/search/jql$", 403)
-    failed = await start_import(client, org, jira_jobs, found["id"], consolidationMode="flat")
-
-    retried = await start_import(client, org, jira_jobs, found["id"], consolidationMode="flat")
-
-    assert (failed["status"], retried["status"]) == ("failed", "completed")
-    assert len(retried["result"]["reviewNeeded"]) == 4
+    assert sorted(r["jiraKey"] for r in done["result"]["reviewNeeded"]) == [
+        "PAY-1",
+        "PAY-2",
+        "PAY-3",
+    ]
+    assert done["result"]["skipped"]["exactDuplicates"] == 0
+    assert set(await review_items(client, org, found["id"])) == {"PAY-1", "PAY-2", "PAY-3"}

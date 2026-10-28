@@ -26,12 +26,15 @@ from app.models.triage_session import TriageSession
 from app.models.user import User
 from app.repositories.triage_session import TriageSessionRepository
 from app.services.skill_loader import seed_skills_for_org
-from tests.fakes.claude_script import AgentScript, Step
+from tests.fakes.claude_runner import FakeClaudeRunner
+from tests.fakes.claude_script import AgentScript, Step, ToolCall
 from tests.fakes.seed import SLACK_SIGNING_SECRET, Factory, SeededOrg, seed_org
 from tests.fakes.signing import signed_slack_event
 from tests.fakes.slack import FakeSlack
+from tests.integration.external_flows.jobs_support import InlineJobs
 
 EVENTS = "/api/v1/slack/events"
+SLACK_SETTINGS = "/api/v1/settings/slack"
 CHANNEL = "C0PRODUCT"
 
 
@@ -125,3 +128,50 @@ async def session_for(
 def slack_user_id() -> str:
     """A Slack member id no other test uses."""
     return f"U{uuid.uuid4().hex[:9].upper()}"
+
+
+PHOTO = "https://avatars.slack-edge.com/2026/ana_512.png"
+
+
+def with_photo(slack: FakeSlack, slack_id: str, url: str = PHOTO) -> None:
+    """Give a workspace member a custom profile photo."""
+    slack.users[slack_id]["profile"]["image_512"] = url
+
+
+async def member_row(factory: Factory, user_id: uuid.UUID) -> User:
+    """The member's ``users`` row as it is now."""
+    async with factory() as db:
+        user = await db.get(User, user_id)
+        assert user is not None
+        return user
+
+
+REQUEST = "Merchants keep asking to refund straight to the customer's wallet."
+SUMMARY = "*Wallet refunds* for merchants. Priority: high."
+
+
+async def summarised_request(
+    client: AsyncClient,
+    factory: Factory,
+    slack: FakeSlack,
+    agent: FakeClaudeRunner,
+    jobs: InlineJobs,
+) -> tuple[SeededOrg, str]:
+    """Brain-react a request and let the agent summarise it; return (org, message ts)."""
+    org = await triage_org(factory, slack)
+    requester = slack_user_id()
+    slack.add_user(requester, "Riya Shah", "riya@acme.dev")
+    ts = say_in_channel(slack, requester, REQUEST)
+    agent.enqueue(
+        triage_reply(
+            "summary",
+            ToolCall("check_feature_exists", {"feature_description": "refund to wallet"}),
+            feature_name="Wallet refunds",
+            priority="high",
+            message=SUMMARY,
+            context={"user_impact": "Refunds land in minutes, not days."},
+        )
+    )
+    assert (await post_event(client, slack, reaction(requester, "brain", ts))).status_code == 200
+    await jobs.run_all()
+    return org, ts

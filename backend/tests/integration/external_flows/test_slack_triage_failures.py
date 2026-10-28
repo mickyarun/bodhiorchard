@@ -82,18 +82,24 @@ async def test_a_rate_limited_first_reply_leaves_no_half_started_session(
 @pytest.mark.parametrize(
     ("script", "reply", "status"),
     [
-        (AgentScript.crash(1, "boom"),
-         "⚠️ Triage is taking longer than expected. A team member will follow up.",
-         TriageStatus.INTERVIEWING),
-        (AgentScript.malformed("not json at all"),
-         "⚠️ Couldn't read the triage response. Please react 🧠 again to retry.",
-         TriageStatus.INTERVIEWING),
-        (triage_reply("exists", kind="feature", title="Dark mode"),
-         "ℹ️ *Dark mode* is already tracked in the product backlog.",
-         TriageStatus.REJECTED),
+        (
+            AgentScript.crash(1, "boom"),
+            "⚠️ Triage is taking longer than expected. A team member will follow up.",
+            TriageStatus.INTERVIEWING,
+        ),
+        (
+            AgentScript.malformed("not json at all"),
+            "⚠️ Couldn't read the triage response. Please react 🧠 again to retry.",
+            TriageStatus.INTERVIEWING,
+        ),
+        (
+            triage_reply("exists", kind="feature", title="Dark mode"),
+            "ℹ️ *Dark mode* is already tracked in the product backlog.",
+            TriageStatus.REJECTED,
+        ),
     ],
     ids=["agent_crash", "unreadable_answer", "already_tracked"],
-)  # fmt: skip
+)
 async def test_agent_outcomes_are_explained_in_the_thread(
     script: AgentScript,
     reply: str,

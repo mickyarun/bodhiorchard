@@ -89,17 +89,36 @@ async def test_slack_retries_are_acknowledged_without_reprocessing(
 @pytest.mark.parametrize(
     "event",
     [
-        {"type": "reaction_added", "user": "UREQ", "reaction": "thumbsup",
-         "item": {"type": "message", "channel": "C0PRODUCT", "ts": "1.0"}},
-        {"type": "reaction_added", "user": "UREQ", "reaction": "brain",
-         "item": {"type": "file", "channel": "C0PRODUCT", "ts": "1.0"}},
-        {"type": "message", "bot_id": "B1", "text": "beep", "ts": "2.0", "thread_ts": "1.0",
-         "channel": "C0PRODUCT"},
-        {"type": "message", "user": "UREQ", "text": "top level", "ts": "3.0",
-         "channel": "C0PRODUCT"},
+        {
+            "type": "reaction_added",
+            "user": "UREQ",
+            "reaction": "thumbsup",
+            "item": {"type": "message", "channel": "C0PRODUCT", "ts": "1.0"},
+        },
+        {
+            "type": "reaction_added",
+            "user": "UREQ",
+            "reaction": "brain",
+            "item": {"type": "file", "channel": "C0PRODUCT", "ts": "1.0"},
+        },
+        {
+            "type": "message",
+            "bot_id": "B1",
+            "text": "beep",
+            "ts": "2.0",
+            "thread_ts": "1.0",
+            "channel": "C0PRODUCT",
+        },
+        {
+            "type": "message",
+            "user": "UREQ",
+            "text": "top level",
+            "ts": "3.0",
+            "channel": "C0PRODUCT",
+        },
     ],
     ids=["other_emoji", "reaction_on_a_file", "bot_reply", "top_level_message"],
-)  # fmt: skip
+)
 async def test_events_that_are_not_intake_are_acknowledged_and_ignored(
     event: dict[str, object],
     client: AsyncClient,
