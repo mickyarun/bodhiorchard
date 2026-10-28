@@ -33,7 +33,7 @@ from app.services import github_app_auth
 from tests.fakes.app_state import EventRecorder, disable_redis, isolate_data_dir
 from tests.fakes.claude_runner import FakeClaudeRunner
 from tests.fakes.embeddings import FakeEmbedder
-from tests.fakes.git_repo import LocalGitRepo, build_git_repo
+from tests.fakes.git_repo import DEFAULT_AUTHOR_EMAIL, LocalGitRepo, build_git_repo
 from tests.fakes.github import API_HOST as GITHUB_HOST
 from tests.fakes.github import FakeGitHub
 from tests.fakes.guard import ExternalCallGuard
@@ -115,10 +115,14 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture
 def git_repo_factory(tmp_path: Path) -> Callable[..., LocalGitRepo]:
-    """Build more local repos: ``git_repo_factory("billing-api")``."""
+    """Build more local repos: ``git_repo_factory("billing-api", author_email=...)``."""
 
-    def build(name: str = "shop-api", files: dict[str, str] | None = None) -> LocalGitRepo:
-        return build_git_repo(tmp_path / "repos", name, files)
+    def build(
+        name: str = "shop-api",
+        files: dict[str, str] | None = None,
+        author_email: str = DEFAULT_AUTHOR_EMAIL,
+    ) -> LocalGitRepo:
+        return build_git_repo(tmp_path / "repos", name, files, author_email)
 
     return build
 

@@ -162,6 +162,10 @@ tree always has the same SHAs. `repo.commit({"path": "text"}, "message", branch=
 adds and pushes a commit; `repo.head("main")` reads `origin/main`. `git_repo_factory(name)`
 builds more. The real indexer, worktrees and `git fetch origin` all work against it.
 
+Every commit is authored by `fixture.dev@acme.dev` unless you pass `author_email=`. A scan
+turns git authors into members of the scanning org and an email is unique across orgs, so a
+test that scans in more than one org should give each repo its own author.
+
 ## App state helpers
 
 - `app_sessions` (integration): rebinds `AsyncSessionLocal` in every app module to the

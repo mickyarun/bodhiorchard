@@ -35,11 +35,10 @@ from pathlib import Path
 from tests.fakes.sample_code import SAMPLE_TREE
 
 _FIXED_DATE = "2026-01-05T10:00:00+00:00"
+DEFAULT_AUTHOR_EMAIL = "fixture.dev@acme.dev"
 _GIT_ENV = {
     "GIT_AUTHOR_NAME": "Fixture Dev",
-    "GIT_AUTHOR_EMAIL": "fixture.dev@acme.dev",
     "GIT_COMMITTER_NAME": "Fixture Dev",
-    "GIT_COMMITTER_EMAIL": "fixture.dev@acme.dev",
     "GIT_AUTHOR_DATE": _FIXED_DATE,
     "GIT_COMMITTER_DATE": _FIXED_DATE,
     "GIT_CONFIG_NOSYSTEM": "1",
@@ -48,9 +47,10 @@ _GIT_ENV = {
 }
 
 
-def git(cwd: Path, *args: str) -> str:
+def git(cwd: Path, *args: str, author_email: str = DEFAULT_AUTHOR_EMAIL) -> str:
     """Run ``git args`` in ``cwd`` with the fixture identity; return stdout."""
-    env = {**os.environ, **_GIT_ENV}
+    identity = {"GIT_AUTHOR_EMAIL": author_email, "GIT_COMMITTER_EMAIL": author_email}
+    env = {**os.environ, **_GIT_ENV, **identity}
     done = subprocess.run(
         ["git", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main", *args],
         cwd=cwd,
@@ -69,6 +69,7 @@ class LocalGitRepo:
     name: str
     work: Path
     origin: Path
+    author_email: str = DEFAULT_AUTHOR_EMAIL
 
     @property
     def path(self) -> str:
@@ -88,15 +89,23 @@ class LocalGitRepo:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text)
         git(self.work, "add", "-A")
-        git(self.work, "commit", "-q", "-m", message)
+        git(self.work, "commit", "-q", "-m", message, author_email=self.author_email)
         git(self.work, "push", "-q", "origin", branch)
         return git(self.work, "rev-parse", "HEAD")
 
 
 def build_git_repo(
-    root: Path, name: str = "shop-api", files: dict[str, str] | None = None
+    root: Path,
+    name: str = "shop-api",
+    files: dict[str, str] | None = None,
+    author_email: str = DEFAULT_AUTHOR_EMAIL,
 ) -> LocalGitRepo:
-    """Create the bare origin and clone with ``main`` and ``develop``."""
+    """Create the bare origin and clone with ``main`` and ``develop``.
+
+    Every commit is authored by ``author_email``. The scan's skill extraction
+    turns git authors into org members, and an email is unique across orgs,
+    so tests that scan in several orgs pass a distinct author per repo.
+    """
     origin = root / f"{name}-origin.git"
     work = root / name
     origin.mkdir(parents=True)
@@ -104,7 +113,7 @@ def build_git_repo(
     work.mkdir()
     git(work, "init", "-q")
     git(work, "remote", "add", "origin", str(origin))
-    repo = LocalGitRepo(name=name, work=work, origin=origin)
+    repo = LocalGitRepo(name=name, work=work, origin=origin, author_email=author_email)
     tree = dict(files if files is not None else SAMPLE_TREE)
     readme = {"README.md": f"# {name}\n\nA small service used by the test suite.\n"}
     first = dict(list(tree.items())[: len(tree) // 2]) | readme
