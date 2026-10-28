@@ -22,13 +22,15 @@ break the user-facing MCP response.
 
 import asyncio
 import uuid
-from typing import Any
+from typing import Any, cast
 
 import structlog
 from fastapi import Request
+from sqlalchemy import String
 
 from app.database import AsyncSessionLocal
 from app.mcp.auth import MCPAuthResult
+from app.models.mcp_audit_log import MCPAuditLogEntry
 from app.repositories.mcp_audit_log import MCPAuditLogRepository
 
 logger = structlog.get_logger(__name__)
@@ -134,6 +136,21 @@ _AUDITABLE_PARAM_KEYS: frozenset[str] = frozenset(
 _AUDIT_PARAM_VALUE_MAX = 500
 
 
+def _fit_column[S: (str, str | None)](column: str, value: S) -> S:
+    """Cut a caller-controlled string to the width of its audit column.
+
+    A ``str`` comes back as ``str``; an absent header stays ``None``.
+
+    The tool name comes from the URL and the IP and user agent from request
+    headers. A value longer than its ``varchar`` column made the insert fail,
+    and since that failure is swallowed the call left no audit row at all.
+    """
+    if value is None:
+        return value
+    width = cast(String, MCPAuditLogEntry.__table__.c[column].type).length
+    return value[:width]
+
+
 def _sanitise_params(params: dict[str, Any] | None) -> dict[str, Any] | None:
     """Return a copy of ``params`` containing only allowlisted keys with
     string values truncated to ``_AUDIT_PARAM_VALUE_MAX``.
@@ -200,10 +217,10 @@ def emit_audit(
             org_id=org_id,
             user_id=auth.user.id if auth and auth.user else None,
             token_id=token_id,
-            tool_name=tool_name,
+            tool_name=_fit_column("tool_name", tool_name),
             transport=transport,
-            ip=_client_ip(request),
-            user_agent=request.headers.get("user-agent"),
+            ip=_fit_column("ip", _client_ip(request)),
+            user_agent=_fit_column("user_agent", request.headers.get("user-agent")),
             status_code=status_code,
             params=cleaned_params,
         )
