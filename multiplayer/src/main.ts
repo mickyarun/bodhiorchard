@@ -31,31 +31,17 @@
  *
  * Default port: 2567 (Colyseus standard)
  */
-import { defineServer, defineRoom } from "colyseus"
+import { defineServer } from "colyseus"
 import { WebSocketTransport } from "@colyseus/ws-transport"
 import { json as expressJson } from "express"
 import type { Request, Response } from "express"
-import { OrgRoom } from "./rooms/OrgRoom"
-import { HouseRoom } from "./rooms/HouseRoom"
-import { CoffeeBarRoom } from "./rooms/CoffeeBarRoom"
-import { CafeteriaRoom } from "./rooms/CafeteriaRoom"
-import { RaceRoom } from "./rooms/RaceRoom"
-import { MinigameRoom } from "./rooms/MinigameRoom"
-import { BacklashRoom } from "./rooms/BacklashRoom"
+import { roomDefinitions } from "./roomDefinitions"
 import { handleBridgePublish } from "./bridge/BridgeEndpoint"
 
 const port = parseInt(process.env.PORT || "2567", 10)
 
 const server = defineServer({
-  rooms: {
-    org: defineRoom(OrgRoom),
-    house: defineRoom(HouseRoom),
-    coffeebar: defineRoom(CoffeeBarRoom),
-    cafeteria: defineRoom(CafeteriaRoom),
-    race: defineRoom(RaceRoom),
-    minigame: defineRoom(MinigameRoom),
-    backlash: defineRoom(BacklashRoom),
-  },
+  rooms: roomDefinitions,
 
   transport: new WebSocketTransport({
     pingInterval: 10000,
