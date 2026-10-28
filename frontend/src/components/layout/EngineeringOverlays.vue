@@ -40,8 +40,7 @@
   <ChatCompletionToast />
 
   <!-- Yield-offer reject / reassign confirmation dialogs. Lifted out
-       of NotificationBell so the bell stays single-root and v-show
-       on it doesn't trip Vue's "runtime directive on fragment" warn.
+       of NotificationBell so the bell stays a single-root component.
        The shared composable wires the bell-row triggers to these
        modals; v-dialog teleports to body so co-location doesn't
        matter for the rendered DOM. -->

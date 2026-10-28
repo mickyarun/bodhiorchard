@@ -190,6 +190,7 @@ class BugCommentRead(BaseModel):
     bug_id: str = Field(alias="bugId")
     author_id: str = Field(alias="authorId")
     author_name: str | None = Field(None, alias="authorName")
+    author_avatar_url: str | None = Field(None, alias="authorAvatarUrl")
     body: str
     edited_at: datetime | None = Field(None, alias="editedAt")
     deleted_at: datetime | None = Field(None, alias="deletedAt")

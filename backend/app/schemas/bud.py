@@ -239,6 +239,7 @@ class BUDRead(BaseModel):
     current_phase_deadline: datetime | None = None
     assignee_id: uuid.UUID | None = None
     assignee_name: str | None = None
+    assignee_avatar_url: str | None = None
     active_agent_task: BUDAgentTaskRead | None = None
     # In-flight phase-worker event (assignment / todo-gen / estimation):
     # see services/agent_activity_logger.py. ``None`` when nothing is running.
@@ -266,9 +267,10 @@ class BUDRead(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def extract_assignee_name(cls, data: Any) -> Any:
-        """Pull assignee name from the joined User relationship."""
+        """Pull assignee name and photo from the joined User relationship."""
         if hasattr(data, "assignee") and data.assignee is not None:
             data.assignee_name = data.assignee.name
+            data.assignee_avatar_url = data.assignee.avatar_url
         return data
 
 
@@ -307,6 +309,7 @@ class BUDListItem(BaseModel):
     current_phase_deadline: datetime | None = None
     assignee_id: uuid.UUID | None = None
     assignee_name: str | None = None
+    assignee_avatar_url: str | None = None
     open_bug_count: int = 0
     created_at: datetime
     updated_at: datetime
@@ -316,9 +319,10 @@ class BUDListItem(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def extract_assignee_name(cls, data: Any) -> Any:
-        """Pull assignee name from the joined User relationship."""
+        """Pull assignee name and photo from the joined User relationship."""
         if hasattr(data, "assignee") and data.assignee is not None:
             data.assignee_name = data.assignee.name
+            data.assignee_avatar_url = data.assignee.avatar_url
         return data
 
 
