@@ -86,6 +86,17 @@ describe("a second org room for the same org", () => {
     expect(received).toHaveBeenCalledTimes(1)
   })
 
+  it("cannot be opened under an upper-case copy of the org id", async () => {
+    const real = await openRoom(ORG_ID)
+    const received = vi.spyOn(real, "handleBridgeEvent")
+
+    await expect(openRoom(ORG_ID.toUpperCase())).rejects.toThrow("orgId must be a UUID")
+
+    expect(publish(ORG_ID)).toBe(true)
+    expect(publish(ORG_ID.toUpperCase())).toBe(false)
+    expect(received).toHaveBeenCalledTimes(1)
+  })
+
   it("cannot evict the open room when it is disposed", async () => {
     const real = await openRoom(ORG_ID)
     const received = vi.spyOn(real, "handleBridgeEvent")

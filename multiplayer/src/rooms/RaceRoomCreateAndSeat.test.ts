@@ -18,7 +18,7 @@
  * one-time create ticket); a client's own `create("race", ...)` has none.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { issueRaceCreateTicket } from "../bridge/RaceCreateTickets"
+import { issueRoomCreateTicket } from "../bridge/RoomCreateTickets"
 import {
   createRaceRoom,
   fakeBackend,
@@ -81,11 +81,19 @@ describe("opening a race", () => {
   })
 
   it("accepts a ticket once", () => {
-    const createTicket = issueRaceCreateTicket()
+    const createTicket = issueRoomCreateTicket("race")
     const first = new RaceRoom()
 
     first.onCreate({ ...CREATE_OPTIONS, createTicket })
     track(first)
+
+    expect(() => new RaceRoom().onCreate({ ...CREATE_OPTIONS, createTicket })).toThrow(
+      "race rooms are created by the server",
+    )
+  })
+
+  it("refuses a ticket issued for another room type", () => {
+    const createTicket = issueRoomCreateTicket("backlash")
 
     expect(() => new RaceRoom().onCreate({ ...CREATE_OPTIONS, createTicket })).toThrow(
       "race rooms are created by the server",

@@ -38,12 +38,8 @@ import { Room, Client, type RoomException, type RoomMethodName } from "colyseus"
 import { reportRoomException } from "./roomExceptions"
 import { PlayerState } from "../schema/PlayerState"
 import { CafeteriaState } from "../schema/CafeteriaState"
-import {
-  requireJoinIdentity,
-  verifyJoin,
-  type JoinCredentials,
-  type JoinIdentity,
-} from "../auth/verifyJoin"
+import type { JoinCredentials, JoinIdentity } from "../auth/verifyJoin"
+import { authenticateJoin, requireRoomIdentity } from "../auth/roomAuth"
 import { requireRoomKey } from "./roomKeys"
 import { isCafeteriaMeal } from "../sim/CafeteriaMenu"
 import { safeLog } from "../bridge/logSanitize"
@@ -84,6 +80,9 @@ interface EnqueueMessage {
 
 export class CafeteriaRoom extends Room<{ state: CafeteriaState }> {
   maxClients = 20
+
+  /** Verify every join before matchmaking reserves a seat (see auth/roomAuth). */
+  static onAuth = authenticateJoin
 
   private lastMoveMs = new Map<string, number>()
 
@@ -139,13 +138,9 @@ export class CafeteriaRoom extends Room<{ state: CafeteriaState }> {
     this.setSimulationInterval((_dt) => this.tick(), SIM_TICK_MS)
   }
 
-  /** Only a verified member of this room's org may join (see verifyJoin). */
-  async onAuth(_client: Client, options: CafeteriaJoinOptions): Promise<JoinIdentity> {
-    return verifyJoin(options, this.state.orgId)
-  }
-
+  /** Only a verified member of this room's org may join. */
   onJoin(client: Client, options: CafeteriaJoinOptions, auth?: JoinIdentity) {
-    const identity = requireJoinIdentity(auth)
+    const identity = requireRoomIdentity(auth, this.state.orgId)
     const player = new PlayerState()
     player.userId = identity.userId
     player.name = identity.name

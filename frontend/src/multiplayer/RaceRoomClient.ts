@@ -119,6 +119,8 @@ interface RaceStateShape {
 export interface RaceAuth {
   userId: string
   name: string
+  /** The user's org; the server verifies the token for exactly this org before matchmaking. */
+  orgId: string
   characterModel?: string
   token?: string
 }
@@ -187,6 +189,7 @@ export class RaceRoomClient {
     this.room = await this.client.joinById(roomId, {
       userId: auth.userId,
       name: auth.name,
+      orgId: auth.orgId,
       characterModel: this.authCharacterModel,
       token: auth.token ?? "",
     })

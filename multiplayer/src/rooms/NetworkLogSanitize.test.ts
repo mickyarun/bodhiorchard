@@ -27,7 +27,7 @@ import { CafeteriaRoom } from "./CafeteriaRoom"
 import { CoffeeBarRoom } from "./CoffeeBarRoom"
 import { HouseRoom } from "./HouseRoom"
 import type { OrgRoom } from "./OrgRoom"
-import type { JoinCredentials, JoinIdentity } from "../auth/verifyJoin"
+import { joinRoom } from "../testing/join"
 import { createRaceRoom } from "../testing/raceRoom"
 
 const CR = "\r"
@@ -40,13 +40,7 @@ const FORGED_NAME =
   `bob${CR}${LF}[HouseRoom] admin joined${LINE_SEPARATOR}x${PARAGRAPH_SEPARATOR}y` +
   `${ESC}[31mred${ESC}[0m`
 
-const ORG = "org-a"
-
-/** The join hooks every shared room exposes. */
-interface JoinableRoom {
-  onAuth(client: Client, options: JoinCredentials): Promise<JoinIdentity>
-  onJoin(client: Client, options: JoinCredentials, auth?: JoinIdentity): void
-}
+const ORG = "8a3c9d1e-5f6b-4c8d-8e9f-0a1b2c3d4e5f"
 
 let logSpy: ReturnType<typeof vi.spyOn>
 let warnSpy: ReturnType<typeof vi.spyOn>
@@ -96,10 +90,9 @@ describe("join log lines escape a forged display name", () => {
     vi.unstubAllGlobals()
   })
 
-  /** Run a join the way Colyseus does: onAuth, then onJoin with its result. */
-  async function verifiedJoin(room: JoinableRoom, client: Client): Promise<void> {
-    const options = { token: "jwt-bob", orgId: ORG }
-    room.onJoin(client, options, await room.onAuth(client, options))
+  /** Run a join the way Colyseus does: the static onAuth, then onJoin with its result. */
+  async function verifiedJoin(room: Parameters<typeof joinRoom>[0], client: Client): Promise<void> {
+    await joinRoom(room, client, { token: "jwt-bob", orgId: ORG })
   }
 
   it("HouseRoom join", async () => {

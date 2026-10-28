@@ -31,7 +31,7 @@ import { timingSafeEqual } from "crypto"
 import { OrgRoom } from "../rooms/OrgRoom"
 import { fireRaceInviteDeclined } from "./RaceRegistry"
 import { fireBacklashInviteDeclined } from "./BacklashRegistry"
-import { safeLog } from "./logSanitize"
+import { safeError, safeLog } from "./logSanitize"
 
 // Fail-closed in production: if the secret isn't configured, refuse to start.
 // In dev/test we allow a well-known placeholder so local tooling works without
@@ -68,17 +68,18 @@ function verifyBridgeSecret(provided: string | undefined): boolean {
 const orgRooms = new Map<string, OrgRoom>()
 
 /**
- * Make `room` the bridge target for `orgId`. Returns false and leaves the
- * registry untouched when a different room already holds the org: a client
- * can `create("org", ...)` for any org id, and that room must not take over
- * the bridge from the room the org's members are in.
+ * Make `room` the bridge target for `orgId` and return it, or return the
+ * room that already holds the org and leave the registry untouched: a
+ * second room for the org (a direct `create("org", ...)`, or a
+ * `joinOrCreate` that found the open room full) must not take over the
+ * bridge from the room the org's members are in.
  */
-export function registerOrgRoom(orgId: string, room: OrgRoom): boolean {
+export function registerOrgRoom(orgId: string, room: OrgRoom): OrgRoom {
   const holder = orgRooms.get(orgId)
-  if (holder && holder !== room) return false
+  if (holder && holder !== room) return holder
   orgRooms.set(orgId, room)
   console.log(`[BridgeEndpoint] Registered org=${safeLog(orgId)} (total=${orgRooms.size})`)
-  return true
+  return room
 }
 
 /** Release the org's bridge slot, but only if `room` is the one holding it. */
@@ -158,7 +159,11 @@ export function handleBridgePublish(req: Request, res: Response): void {
     // treats its first parameter as a format string once a second one is
     // present, so interpolating there is an externally-controlled format
     // string however well the value itself is sanitised.
-    console.error("[BridgeEndpoint] Error handling event type=%s:", safeLog(payload.type), err)
+    console.error(
+      "[BridgeEndpoint] Error handling event type=%s: %s",
+      safeLog(payload.type),
+      safeError(err),
+    )
     res.status(500).json({ error: "internal error" })
   }
 }

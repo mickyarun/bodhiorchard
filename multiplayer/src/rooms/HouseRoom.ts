@@ -27,12 +27,8 @@ import { reportRoomException } from "./roomExceptions"
 import { Schema, MapSchema, type } from "@colyseus/schema"
 import { PlayerState } from "../schema/PlayerState"
 import { safeLog } from "../bridge/logSanitize"
-import {
-  requireJoinIdentity,
-  verifyJoin,
-  type JoinCredentials,
-  type JoinIdentity,
-} from "../auth/verifyJoin"
+import type { JoinCredentials, JoinIdentity } from "../auth/verifyJoin"
+import { authenticateJoin, requireRoomIdentity } from "../auth/roomAuth"
 import { requireRoomKey } from "./roomKeys"
 
 interface HouseJoinOptions extends JoinCredentials {
@@ -55,6 +51,9 @@ const VALID_ANIMS = ["idle", "walk", "sit", "sleep", "brew", "drink"]
 
 export class HouseRoom extends Room<{ state: HouseRoomState }> {
   maxClients = 10
+
+  /** Verify every join before matchmaking reserves a seat (see auth/roomAuth). */
+  static onAuth = authenticateJoin
 
   /** Org the house belongs to; only that org's members may visit. */
   private orgId = ""
@@ -88,13 +87,9 @@ export class HouseRoom extends Room<{ state: HouseRoomState }> {
     player.animState = move.animState
   }
 
-  /** Only a verified member of the house's org may visit (see verifyJoin). */
-  async onAuth(_client: Client, options: HouseJoinOptions): Promise<JoinIdentity> {
-    return verifyJoin(options, this.orgId)
-  }
-
+  /** Only a verified member of the house's org may visit. */
   onJoin(client: Client, options: HouseJoinOptions, auth?: JoinIdentity) {
-    const identity = requireJoinIdentity(auth)
+    const identity = requireRoomIdentity(auth, this.orgId)
     console.log(`[HouseRoom] ${safeLog(identity.name)} (${client.sessionId}) joined`)
     const player = new PlayerState()
     player.userId = identity.userId

@@ -12,12 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/** Canonical 8-4-4-4-12 hex form the backend issues for every id. */
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/**
+ * Canonical form the backend issues for every id: lowercase 8-4-4-4-12 hex,
+ * as Python's `str(uuid)` and Postgres print it.
+ */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /**
- * True when `value` is a UUID string. Ids that arrive in client room options
- * are checked with this before they key a registry or reach a backend URL.
+ * True when `value` is a UUID string in canonical (lowercase) form. Ids that
+ * arrive in client room options are checked with this before they key a
+ * registry, filter a room or reach a backend URL. Only the canonical form is
+ * accepted, so one org has exactly one spelling: an upper-case copy of an
+ * org id can never open a second bridge slot or a second set of rooms.
  */
 export function isUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value)

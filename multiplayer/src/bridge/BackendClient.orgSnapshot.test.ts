@@ -57,7 +57,8 @@ describe("fetchOrgSnapshot", () => {
 describe("isUuid", () => {
   it.each([
     ["0b4f4f53-58a4-4c55-9a0e-6f1c2b7d9e10", true],
-    ["0B4F4F53-58A4-4C55-9A0E-6F1C2B7D9E10", true],
+    ["0B4F4F53-58A4-4C55-9A0E-6F1C2B7D9E10", false],
+    ["0b4f4f53-58a4-4c55-9A0E-6f1c2b7d9e10", false],
     ["0b4f4f5358a44c559a0e6f1c2b7d9e10", false],
     [" 0b4f4f53-58a4-4c55-9a0e-6f1c2b7d9e10", false],
     ["org-a", false],

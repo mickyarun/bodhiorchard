@@ -15,17 +15,14 @@
 /**
  * RaceRoom per-client identity.
  *
- * A client's racer identity comes only from the join `verifyJoin` accepted
- * in `onAuth` (the token's user, in the race's org). The `race_join` payload
- * never chooses which user a client races as, and host-only actions compare
- * against this identity.
+ * A client's racer identity comes only from the join the static `onAuth`
+ * accepted (the token's user), and only when that user is in the race's org.
+ * The `race_join` payload never chooses which user a client races as, and
+ * host-only actions compare against this identity.
  */
 import type { Client } from "colyseus"
-import {
-  requireJoinIdentity,
-  type JoinCredentials,
-  type JoinIdentity,
-} from "../auth/verifyJoin"
+import type { JoinCredentials, JoinIdentity } from "../auth/verifyJoin"
+import { requireRoomIdentity } from "../auth/roomAuth"
 
 export interface RaceJoinOptions extends JoinCredentials {
   characterModel?: string
@@ -40,13 +37,15 @@ export interface RaceClientIdentity {
 
 /**
  * The identity a joined client acts as: the verified user, plus the avatar
- * it asked for (cosmetic). Refuses a join that did not pass onAuth.
+ * it asked for (cosmetic). Refuses a join that did not pass onAuth, or whose
+ * verified org is not the race's.
  */
 export function raceIdentityFrom(
   auth: JoinIdentity | undefined,
   options: RaceJoinOptions,
+  raceOrgId: string,
 ): RaceClientIdentity {
-  const { userId, name } = requireJoinIdentity(auth)
+  const { userId, name } = requireRoomIdentity(auth, raceOrgId)
   const characterModel = typeof options.characterModel === "string" ? options.characterModel : ""
   return { userId, name, characterModel }
 }

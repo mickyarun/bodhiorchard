@@ -14,6 +14,10 @@
 
 /** Line breaks that ``JSON.stringify`` does not escape. */
 const UNICODE_LINE_BREAKS = /[\u0085\u2028\u2029]/g
+/** Longest value ``safeLog`` keeps by default. */
+const DEFAULT_MAX_LENGTH = 500
+/** Longest error ``safeError`` keeps: room for a message and a useful stack. */
+const ERROR_MAX_LENGTH = 2_000
 
 /**
  * Sanitize a value for inclusion in a console / file log line.
@@ -41,15 +45,27 @@ const UNICODE_LINE_BREAKS = /[\u0085\u2028\u2029]/g
  * surfaced as literal placeholders so a missing-field bug stays
  * diagnosable.
  */
-export function safeLog(value: unknown): string {
+export function safeLog(value: unknown, maxLength = DEFAULT_MAX_LENGTH): string {
   if (value === null) return "<null>"
   if (value === undefined) return "<undefined>"
   const s = typeof value === "string" ? value : String(value)
-  const capped = s.slice(0, 500)
+  const capped = s.slice(0, maxLength)
   // JSON.stringify on a string returns ``"..."`` with embedded
   // escapes — strip the outer quotes for inline log readability.
   const escaped = JSON.stringify(capped).replace(UNICODE_LINE_BREAKS, (ch) =>
     `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`,
   )
   return escaped.slice(1, -1)
+}
+
+/**
+ * A caught error as one sanitised log field: its stack (which starts with
+ * the name and message), or the value itself when something other than an
+ * Error was thrown. Error messages are not trusted text: a failed JSON parse
+ * quotes the backend's body, a network error can quote a URL. Pass the result
+ * as an argument to a constant format string, never as the format itself.
+ */
+export function safeError(err: unknown): string {
+  if (err instanceof Error) return safeLog(err.stack ?? `${err.name}: ${err.message}`, ERROR_MAX_LENGTH)
+  return safeLog(err, ERROR_MAX_LENGTH)
 }

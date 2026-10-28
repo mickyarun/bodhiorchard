@@ -38,15 +38,11 @@ import { Room, Client, type RoomException, type RoomMethodName } from "colyseus"
 import { reportRoomException } from "./roomExceptions"
 import { PlayerState } from "../schema/PlayerState"
 import { CoffeeBarState, CoffeeAction } from "../schema/CoffeeBarState"
-import {
-  requireJoinIdentity,
-  verifyJoin,
-  type JoinCredentials,
-  type JoinIdentity,
-} from "../auth/verifyJoin"
+import type { JoinCredentials, JoinIdentity } from "../auth/verifyJoin"
+import { authenticateJoin, requireRoomIdentity } from "../auth/roomAuth"
 import { requireRoomKey } from "./roomKeys"
 import { isCoffeeDrink } from "../sim/CoffeeMenu"
-import { safeLog } from "../bridge/logSanitize"
+import { safeError, safeLog } from "../bridge/logSanitize"
 import {
   advancePhase,
   acknowledgeDispense,
@@ -97,6 +93,9 @@ export interface ActiveChangedEvent {
 
 export class CoffeeBarRoom extends Room<{ state: CoffeeBarState }> {
   maxClients = 20
+
+  /** Verify every join before matchmaking reserves a seat (see auth/roomAuth). */
+  static onAuth = authenticateJoin
 
   // Per-session move throttle timestamps
   private lastMoveMs = new Map<string, number>()
@@ -157,13 +156,9 @@ export class CoffeeBarRoom extends Room<{ state: CoffeeBarState }> {
     this.setSimulationInterval((_dt) => this.tick(), SIM_TICK_MS)
   }
 
-  /** Only a verified member of this room's org may join (see verifyJoin). */
-  async onAuth(_client: Client, options: CoffeeBarJoinOptions): Promise<JoinIdentity> {
-    return verifyJoin(options, this.state.orgId)
-  }
-
+  /** Only a verified member of this room's org may join. */
   onJoin(client: Client, options: CoffeeBarJoinOptions, auth?: JoinIdentity) {
-    const identity = requireJoinIdentity(auth)
+    const identity = requireRoomIdentity(auth, this.state.orgId)
     const player = new PlayerState()
     player.userId = identity.userId
     player.name = identity.name
@@ -297,7 +292,7 @@ export class CoffeeBarRoom extends Room<{ state: CoffeeBarState }> {
       try {
         listener(event)
       } catch (err) {
-        console.error("[CoffeeBarRoom] active listener threw", err)
+        console.error("[CoffeeBarRoom] active listener threw: %s", safeError(err))
       }
     }
   }

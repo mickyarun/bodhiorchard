@@ -19,7 +19,7 @@
  */
 import type { Client, Room } from "colyseus"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { consumeRaceCreateTicket } from "../bridge/RaceCreateTickets"
+import { consumeRoomCreateTicket } from "../bridge/RoomCreateTickets"
 import { OrgRoomState } from "../schema/OrgRoomState"
 import { installRaceCreateHandler } from "./OrgRaceHandler"
 import { RaceRoom } from "./RaceRoom"
@@ -85,6 +85,6 @@ describe("race_create from the verified host", () => {
       expect(host.send).toHaveBeenCalledWith("race_created", { roomId: "race-1" }),
     )
     expect(created[0]?.state.hostUserId).toBe("host")
-    expect(consumeRaceCreateTicket(createOptions[0]?.createTicket)).toBe(false)
+    expect(consumeRoomCreateTicket("race", createOptions[0]?.createTicket)).toBe(false)
   })
 })

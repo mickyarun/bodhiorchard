@@ -68,14 +68,18 @@ import { driveBots } from "./RaceBotDriver"
 import { raceIdentityFrom, raceIdentityOf, type RaceJoinOptions } from "./RaceRoomAuth"
 import { postRaceInvite, postRaceResults } from "../bridge/BackendClient"
 import { fireRaceDispose, fireRacePhase } from "../bridge/RaceRegistry"
-import { safeLog } from "../bridge/logSanitize"
-import { consumeRaceCreateTicket } from "../bridge/RaceCreateTickets"
-import { verifyJoin, type JoinIdentity } from "../auth/verifyJoin"
+import { safeError, safeLog } from "../bridge/logSanitize"
+import { requireRoomCreateTicket } from "../bridge/RoomCreateTickets"
+import type { JoinIdentity } from "../auth/verifyJoin"
+import { authenticateJoin } from "../auth/roomAuth"
 
 const SIM_TICK_MS = TICK_MS
 
 export class RaceRoom extends Room<{ state: RaceRoomState }> {
   maxClients = MAX_RACERS * 2 // racers + spectators
+
+  /** Verify every join before matchmaking reserves a seat (see auth/roomAuth). */
+  static onAuth = authenticateJoin
 
   /** In-memory physics mirror — schema state is updated from this each tick. */
   private physicsRacers: Racer[] = []
@@ -86,9 +90,8 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
   private runningStartedAtMs = 0
 
   onCreate(rawOptions: unknown): void {
-    // Only OrgRaceHandler, for a verified host, opens races (see RaceCreateTickets).
-    const ticket = (rawOptions as { createTicket?: unknown } | null)?.createTicket
-    if (!consumeRaceCreateTicket(ticket)) throw new Error("race rooms are created by the server")
+    // Only OrgRaceHandler, for a verified host, opens races (see RoomCreateTickets).
+    requireRoomCreateTicket("race", rawOptions)
     const options = assertRaceCreateOptions(rawOptions, ALLOWED_DISTANCES_M)
     this.seedState(options)
     this.seedBots(options.botCount)
@@ -102,15 +105,11 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     this.clock.setTimeout(() => this.expireLobbyIfStillWaiting(), LOBBY_MAX_MS)
   }
 
-  /** Verify the join token for this race's org; its user becomes the racer identity. */
-  async onAuth(_client: Client, options: RaceJoinOptions): Promise<JoinIdentity> {
-    return verifyJoin(options, this.state.orgId)
-  }
-
   onJoin(client: Client, options: RaceJoinOptions, auth?: JoinIdentity): void {
-    // `options` are the raw client join options; `auth` is what onAuth
-    // returned. Racing, host actions and inputs all key off this identity.
-    const identity = raceIdentityFrom(auth, options)
+    // `options` are the raw client join options; `auth` is what the static
+    // onAuth returned, accepted only in this race's org. Racing, host
+    // actions and inputs all key off this identity.
+    const identity = raceIdentityFrom(auth, options, this.state.orgId)
     // Invites quote the host's name, so it is the verified one, not the
     // name the room was created with.
     if (identity.userId === this.state.hostUserId) this.state.hostName = identity.name
@@ -181,7 +180,11 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
     // Fire-and-forget — Colyseus cannot await dispose. Network failures here
     // do NOT roll back local state; the bridge is expected to retry on 5xx.
     postRaceResults(payload).catch((err: unknown) => {
-      console.error(`[RaceRoom ${this.roomId}] postRaceResults failed:`, err)
+      console.error(
+        "[RaceRoom %s] postRaceResults failed: %s",
+        safeLog(this.roomId),
+        safeError(err),
+      )
     })
   }
 
@@ -499,7 +502,11 @@ export class RaceRoom extends Room<{ state: RaceRoomState }> {
       try {
         await postRaceResults(payload)
       } catch (err) {
-        console.error(`[RaceRoom ${this.roomId}] postRaceResults failed:`, err)
+        console.error(
+          "[RaceRoom %s] postRaceResults failed: %s",
+          safeLog(this.roomId),
+          safeError(err),
+        )
       }
     }
 

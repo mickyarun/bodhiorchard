@@ -7,6 +7,8 @@ import { BACKLASH_MAX_VIEWERS } from "../../../shared/minigames/backlashSocial"
 import type { OrgRoomState } from "../schema/OrgRoomState"
 import { postBacklashInvite } from "../bridge/BackendClient"
 import { registerBacklashSummaryHooks } from "../bridge/BacklashRegistry"
+import { safeError } from "../bridge/logSanitize"
+import { createServerRoom } from "../bridge/RoomCreateTickets"
 import { ActiveBacklashSummary } from "../schema/ActiveBacklashSummary"
 
 interface BacklashCreateMessage {
@@ -54,7 +56,10 @@ async function handleBacklashCreate(
   }
 
   try {
-    const created = await matchMaker.createRoom("backlash", {
+    // BacklashRoom.onCreate refuses any create without a ticket from this
+    // process, so a client cannot open a match (and skip the invite) with
+    // `create("backlash", ...)` (see RoomCreateTickets).
+    const created = await createServerRoom("backlash", {
       orgId: room.state.orgId,
       hostUserId,
       invitedUserId: parsed.invitedUserId,
@@ -98,7 +103,7 @@ async function handleBacklashCreate(
     })
     client.send("backlash_created", { roomId: created.roomId })
   } catch (error) {
-    console.error("[OrgBacklashHandler] room creation failed", error)
+    console.error("[OrgBacklashHandler] room creation failed: %s", safeError(error))
     client.send("backlash_create_failed", { reason: "server_error" })
   }
 }

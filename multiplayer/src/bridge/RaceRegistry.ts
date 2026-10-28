@@ -26,7 +26,7 @@
  * goes through `registerRaceDisposeCallback` / `fireRaceDispose`.
  */
 
-import { safeLog } from "./logSanitize"
+import { safeError, safeLog } from "./logSanitize"
 
 // `roomId` arrives from network payloads; every console.* site below passes
 // it through safeLog as an argument so the format string stays a literal.
@@ -71,9 +71,9 @@ export function fireRaceDispose(roomId: string): void {
     pair.onDispose()
   } catch (err) {
     console.error(
-      "[RaceRegistry] dispose callback for room %s threw:",
+      "[RaceRegistry] dispose callback for room %s threw: %s",
       safeLog(roomId),
-      err,
+      safeError(err),
     )
   }
 }
@@ -90,9 +90,9 @@ export function fireRacePhase(roomId: string, phase: string): void {
     pair.onPhase(phase)
   } catch (err) {
     console.error(
-      "[RaceRegistry] phase callback for room %s threw:",
+      "[RaceRegistry] phase callback for room %s threw: %s",
       safeLog(roomId),
-      err,
+      safeError(err),
     )
   }
 }
@@ -110,9 +110,9 @@ export function fireRaceInviteDeclined(roomId: string, userId: string): void {
     pair.onInviteeDeclined(userId)
   } catch (err) {
     console.error(
-      "[RaceRegistry] inviteeDeclined callback for room %s threw:",
+      "[RaceRegistry] inviteeDeclined callback for room %s threw: %s",
       safeLog(roomId),
-      err,
+      safeError(err),
     )
   }
 }
