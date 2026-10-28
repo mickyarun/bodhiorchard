@@ -22,9 +22,7 @@
     <p v-if="error" class="time-off__empty">{{ error }}</p>
     <ul v-else-if="entries.length" class="time-off">
       <li v-for="entry in entries" :key="entry.request_id" class="time-off__row">
-        <v-avatar size="30" color="primary" variant="tonal" class="time-off__avatar" aria-hidden="true">
-          {{ initialsOf(entry.user.name) }}
-        </v-avatar>
+        <AppMonogram :name="entry.user.name" :size="30" />
         <span class="time-off__text">
           <span class="time-off__name">{{ entry.user.name }}</span>
           <span class="time-off__dates">{{ formatDayRange(entry.start_date, entry.end_date) }}</span>
@@ -37,10 +35,10 @@
 </template>
 
 <script setup lang="ts">
+import AppMonogram from '@/components/common/AppMonogram.vue'
 import AppPanel from '@/components/common/AppPanel.vue'
 import LeaveStatusChip from '@/components/leave/LeaveStatusChip.vue'
 import type { CalendarEntry } from '@/types/leave'
-import { initialsOf } from '@/utils/avatar'
 import { formatDayRange } from '@/utils/leaveDates'
 
 defineProps<{ entries: CalendarEntry[]; error: string }>()
@@ -57,10 +55,6 @@ defineProps<{ entries: CalendarEntry[]; error: string }>()
   align-items: center;
   gap: 10px;
   padding: 8px 0;
-}
-.time-off__avatar {
-  font-size: 11px;
-  font-weight: 600;
 }
 .time-off__text {
   display: flex;

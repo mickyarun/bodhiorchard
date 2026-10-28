@@ -199,9 +199,7 @@
               @click="emit('developer-highlight', member.user_id)"
             >
               <template #prepend>
-                <v-avatar size="28" color="primary" variant="tonal" class="mr-2">
-                  <span class="text-caption">{{ initials(member.name) }}</span>
-                </v-avatar>
+                <AppMonogram :name="member.name" :size="28" class="mr-2" />
               </template>
               <v-list-item-title class="text-body-2">
                 {{ member.name }}
@@ -222,6 +220,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import AppMonogram from '@/components/common/AppMonogram.vue'
 import type { GraphRepoInfo, GraphFeatureInfo } from '@/engine/graph'
 import type { TreeData, FeatureItem } from '@/types/dashboard'
 
@@ -291,11 +290,6 @@ function statusDotColor(status: string): string {
 
 function formatStatus(status: string): string {
   return status.replace(/_/g, ' ')
-}
-
-function initials(name: string): string {
-  if (!name.trim()) return '?'
-  return name.split(' ').filter(w => w.length > 0).map(w => w[0]).join('').toUpperCase().slice(0, 2)
 }
 
 /** All features belonging to the selected repo. */

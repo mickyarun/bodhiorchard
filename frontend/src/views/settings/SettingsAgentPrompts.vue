@@ -16,79 +16,11 @@
 
 <template>
   <div class="settings-page">
-    <!-- Page header -->
-    <header class="page-header pa-6 pb-5">
-      <div class="d-flex align-start justify-space-between flex-wrap ga-4">
-        <div>
-          <div class="d-flex align-center ga-2 mb-1">
-            <v-icon icon="mdi-robot-happy-outline" size="22" color="primary" />
-            <h1 class="page-title">Agent Prompts</h1>
-          </div>
-          <div class="page-subtitle">
-            Tune the persona, tooling, and prompt that drives each AI agent
-            skill. Add your own and pick a default per agent type.
-          </div>
-        </div>
-        <div class="d-flex ga-2 align-center">
-          <v-btn
-            color="primary"
-            variant="flat"
-            prepend-icon="mdi-plus"
-            class="text-none"
-            @click="showCreateDialog = true"
-          >
-            Add custom skill
-          </v-btn>
-          <v-btn
-            variant="text"
-            prepend-icon="mdi-arrow-left"
-            class="text-none text-medium-emphasis"
-            :to="{ name: 'settings' }"
-          >
-            Back to settings
-          </v-btn>
-        </div>
-      </div>
-
-      <!-- Search + filter -->
-      <div class="d-flex align-center ga-3 mt-5 flex-wrap">
-        <v-text-field
-          v-model="search"
-          placeholder="Search skills, descriptions, slugs…"
-          prepend-inner-icon="mdi-magnify"
-          variant="solo-filled"
-          density="compact"
-          hide-details
-          flat
-          single-line
-          class="search-input"
-          clearable
-        />
-        <v-chip-group
-          v-model="filterMode"
-          mandatory
-          selected-class="filter-chip-selected"
-          class="filter-chips"
-        >
-          <v-chip value="all" variant="tonal" size="small" filter>All</v-chip>
-          <v-chip value="custom" variant="tonal" size="small" filter>Custom</v-chip>
-          <v-chip value="modified" variant="tonal" size="small" filter>Modified</v-chip>
-        </v-chip-group>
-      </div>
-
-      <AppCallout v-if="store.error" variant="error" class="mt-4">
-        {{ store.error }}
-        <template #actions>
-          <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="store.error = null" />
-        </template>
-      </AppCallout>
-      <AppCallout v-if="store.saveSuccess" variant="success" class="mt-4">
-        Saved.
-        <template #actions>
-          <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="store.saveSuccess = false" />
-        </template>
-      </AppCallout>
-    </header>
+    <AgentPromptsHeader
+      v-model:search="search"
+      v-model:filter-mode="filterMode"
+      @create="showCreateDialog = true"
+    />
 
     <!-- Content -->
     <div class="page-content px-6 pb-8">
@@ -112,382 +44,72 @@
 
       <!-- Agent-type groups -->
       <div v-else class="d-flex flex-column ga-5">
-        <section
+        <AgentSkillGroup
           v-for="group in filteredGroups"
           :key="group.agentType"
-          class="agent-group"
+          :agent-type="group.agentType"
+          :count="group.skills.length"
+          @add="openCreateForAgent(group.agentType)"
         >
-          <!-- Section header -->
-          <div class="group-header">
-            <div class="group-icon-wrap">
-              <v-icon :icon="agentIcon(group.agentType)" size="20" />
-            </div>
-            <div class="group-meta">
-              <div class="group-title">{{ agentTypeLabel(group.agentType) }}</div>
-              <div class="group-sub">{{ agentBlurb(group.agentType) }}</div>
-            </div>
-            <v-chip variant="tonal" size="x-small" label class="group-count">
-              {{ group.skills.length }}
-              skill{{ group.skills.length === 1 ? '' : 's' }}
-            </v-chip>
-          </div>
-
-          <!-- Skill rows -->
-          <div class="skill-list">
-            <article
-              v-for="skill in group.skills"
-              :key="skillKey(skill)"
-              class="skill-row"
-              :class="{ 'is-open': expanded === skillKey(skill) }"
-            >
-              <!-- Compact summary row (always visible) -->
-              <button
-                type="button"
-                class="skill-summary"
-                @click="toggle(skill)"
-              >
-                <v-icon
-                  :icon="expanded === skillKey(skill) ? 'mdi-chevron-down' : 'mdi-chevron-right'"
-                  size="18"
-                  class="skill-chevron"
-                />
-                <div class="skill-headline">
-                  <div class="skill-name-row">
-                    <v-icon
-                      v-if="skill.isDefault"
-                      icon="mdi-star"
-                      size="14"
-                      color="secondary"
-                      class="mr-1"
-                    />
-                    <span class="skill-name">{{ skill.name }}</span>
-                    <v-chip
-                      v-if="skill.isDefault"
-                      color="primary"
-                      variant="flat"
-                      size="x-small"
-                      label
-                      class="ml-2"
-                    >
-                      Default
-                    </v-chip>
-                    <v-chip
-                      v-if="skill.isCustom"
-                      color="secondary"
-                      variant="tonal"
-                      size="x-small"
-                      label
-                      class="ml-2"
-                    >
-                      Custom
-                    </v-chip>
-                    <v-chip
-                      v-else-if="skill.isCustomized"
-                      color="warning"
-                      variant="tonal"
-                      size="x-small"
-                      label
-                      class="ml-2"
-                    >
-                      Modified
-                    </v-chip>
-                  </div>
-                  <div v-if="skill.description" class="skill-desc">
-                    {{ skill.description }}
-                  </div>
-                </div>
-                <div class="skill-meta">
-                  <span class="skill-meta-chip">
-                    <v-icon icon="mdi-cube-outline" size="12" />
-                    {{ coerceModel(skill.model) || 'default' }}
-                  </span>
-                  <code class="skill-slug">{{ skill.skillSlug }}</code>
-                </div>
-              </button>
-
-              <!-- Expanded editor -->
-              <div v-if="expanded === skillKey(skill)" class="skill-editor">
-                <v-divider />
-
-                <div class="editor-grid">
-                  <div class="field col-6">
-                    <label class="field-label">Name</label>
-                    <v-text-field
-                      v-model="editForm.name"
-                      variant="outlined"
-                      density="compact"
-                      hide-details
-                    />
-                  </div>
-                  <div class="field col-6">
-                    <label class="field-label">Description</label>
-                    <v-text-field
-                      v-model="editForm.description"
-                      variant="outlined"
-                      density="compact"
-                      hide-details
-                    />
-                  </div>
-
-                  <div class="field col-6">
-                    <label class="field-label">Tools</label>
-                    <v-combobox
-                      v-model="editForm.tools"
-                      placeholder="Type and press enter"
-                      variant="outlined"
-                      density="compact"
-                      hide-details
-                      multiple
-                      chips
-                      closable-chips
-                    />
-                  </div>
-                  <div class="field col-6">
-                    <label class="field-label">MCP tools</label>
-                    <v-combobox
-                      v-model="editForm.mcpTools"
-                      placeholder="get_bud_context, write_bud, …"
-                      variant="outlined"
-                      density="compact"
-                      hide-details
-                      multiple
-                      chips
-                      closable-chips
-                    />
-                  </div>
-
-                  <div class="field col-2">
-                    <label class="field-label">Model</label>
-                    <v-select
-                      v-model="editForm.model"
-                      :items="modelOptions"
-                      item-title="title"
-                      item-value="value"
-                      variant="outlined"
-                      density="compact"
-                      hide-details
-                      :disabled="!providerSupportsModelChoice"
-                    />
-                  </div>
-                  <div
-                    v-if="providerSupportsIterationModel && providerSupportsModelChoice"
-                    class="field col-2"
-                  >
-                    <label class="field-label">Iteration model</label>
-                    <v-select
-                      v-model="editForm.iterationModel"
-                      :items="iterationModelOptions"
-                      item-title="title"
-                      item-value="value"
-                      variant="outlined"
-                      density="compact"
-                      hide-details
-                    />
-                  </div>
-                  <div v-if="providerSupportsEffort" class="field col-2">
-                    <label class="field-label">Effort</label>
-                    <v-select
-                      v-model="editForm.effort"
-                      :items="effortOptions"
-                      item-title="title"
-                      item-value="value"
-                      variant="outlined"
-                      density="compact"
-                      hide-details
-                    />
-                  </div>
-                  <div class="field col-2">
-                    <label class="field-label">Max turns</label>
-                    <v-text-field
-                      v-model.number="editForm.maxTurns"
-                      type="number"
-                      :min="0"
-                      :max="100"
-                      variant="outlined"
-                      density="compact"
-                      hide-details
-                    />
-                  </div>
-                  <div class="field col-2">
-                    <label class="field-label">Iteration max turns</label>
-                    <v-text-field
-                      v-model.number="editForm.iterationMaxTurns"
-                      type="number"
-                      :min="1"
-                      :max="100"
-                      variant="outlined"
-                      density="compact"
-                      hide-details
-                    />
-                  </div>
-                  <div class="field col-2">
-                    <label class="field-label">Timeout (s)</label>
-                    <v-text-field
-                      v-model.number="editForm.timeoutSeconds"
-                      type="number"
-                      :min="0"
-                      :max="3600"
-                      variant="outlined"
-                      density="compact"
-                      hide-details
-                    />
-                  </div>
-
-                  <div class="field col-12">
-                    <div class="d-flex align-center justify-space-between">
-                      <label class="field-label">Prompt</label>
-                      <AppPillToggle v-model="previewMode" :options="PREVIEW_MODE_OPTIONS" size="sm" />
-                    </div>
-                    <v-textarea
-                      v-if="previewMode === 'edit'"
-                      v-model="editForm.prompt"
-                      variant="outlined"
-                      density="compact"
-                      auto-grow
-                      :rows="14"
-                      class="prompt-editor"
-                      hide-details
-                    />
-                    <div
-                      v-else
-                      class="preview-content rendered-markdown"
-                      v-html="renderedPreview"
-                    />
-                  </div>
-                </div>
-
-                <!-- Action bar -->
-                <div class="editor-actions">
-                  <v-btn
-                    color="primary"
-                    variant="flat"
-                    :loading="store.saving"
-                    class="text-none"
-                    @click="saveSkill(skill)"
-                  >
-                    Save changes
-                  </v-btn>
-                  <v-btn variant="text" class="text-none" @click="expanded = null">
-                    Cancel
-                  </v-btn>
-                  <v-btn
-                    v-if="!skill.isDefault && skill.id"
-                    variant="tonal"
-                    color="secondary"
-                    prepend-icon="mdi-star-outline"
-                    :loading="store.saving"
-                    class="text-none"
-                    @click="store.setDefault(skill.id)"
-                  >
-                    Set as default
-                  </v-btn>
-                  <v-spacer />
-                  <v-btn
-                    v-if="skill.isCustom && skill.id"
-                    variant="text"
-                    color="error"
-                    prepend-icon="mdi-trash-can-outline"
-                    :loading="store.saving"
-                    class="text-none"
-                    @click="confirmDeleteId = skill.id"
-                  >
-                    Delete skill
-                  </v-btn>
-                  <v-btn
-                    v-else-if="!skill.isCustom"
-                    variant="text"
-                    :color="skill.isCustomized ? 'warning' : 'default'"
-                    prepend-icon="mdi-restore"
-                    :loading="store.saving"
-                    class="text-none"
-                    @click="confirmResetTarget = {
-                      slug: skill.skillSlug,
-                      agentType: skill.agentType,
-                      isCustomized: skill.isCustomized,
-                    }"
-                  >
-                    Reset to default
-                  </v-btn>
-                </div>
-              </div>
-            </article>
-
-            <!-- Inline add-button per group -->
-            <button
-              type="button"
-              class="skill-add"
-              @click="openCreateForAgent(group.agentType)"
-            >
-              <v-icon icon="mdi-plus" size="16" />
-              Add a custom skill for {{ agentTypeLabel(group.agentType) }}
-            </button>
-          </div>
-        </section>
+          <article
+            v-for="skill in group.skills"
+            :key="skillKey(skill)"
+            class="skill-row"
+            :class="{ 'is-open': isOpen(skill) }"
+          >
+            <AgentSkillSummary :skill="skill" :open="isOpen(skill)" :caps="caps" @toggle="toggle(skill)" />
+            <AgentSkillEditor
+              v-if="isOpen(skill)"
+              v-model:form="editForm"
+              v-model:preview-mode="previewMode"
+              :skill="skill"
+              :caps="caps"
+              @save="saveSkill(skill)"
+              @cancel="collapse"
+              @delete="confirmDeleteId = $event"
+              @reset="confirmResetTarget = $event"
+            />
+          </article>
+        </AgentSkillGroup>
       </div>
     </div>
 
     <!-- Reset confirmation -->
-    <v-dialog v-model="showResetDialog" max-width="420">
-      <v-card class="confirm-card">
-        <div class="confirm-icon confirm-icon-warn">
-          <v-icon icon="mdi-restore" size="24" />
-        </div>
-        <h3 class="confirm-title">Reset to default?</h3>
-        <p v-if="confirmResetTarget?.isCustomized" class="confirm-body">
-          Discards your customizations for
-          <strong>{{ confirmResetTarget?.slug }}</strong>
-          and restores the original prompt. Can't be undone.
-        </p>
-        <p v-else class="confirm-body">
-          Reloads
-          <strong>{{ confirmResetTarget?.slug }}</strong>
-          from its canonical skill file on disk. Use this after the
-          prompt has been updated in source. No customizations to lose.
-        </p>
-        <div class="confirm-actions">
-          <v-btn variant="text" class="text-none" @click="confirmResetTarget = null">
-            Cancel
-          </v-btn>
-          <v-btn
-            color="warning"
-            variant="flat"
-            class="text-none"
-            :loading="store.saving"
-            @click="doReset"
-          >
-            Reset
-          </v-btn>
-        </div>
-      </v-card>
-    </v-dialog>
+    <AgentSkillConfirmDialog
+      v-model="showResetDialog"
+      icon="mdi-restore"
+      tone="warning"
+      title="Reset to default?"
+      confirm-label="Reset"
+      :loading="store.saving"
+      @confirm="doReset"
+    >
+      <template v-if="confirmResetTarget?.isCustomized">
+        Discards your customizations for
+        <strong>{{ confirmResetTarget?.slug }}</strong>
+        and restores the original prompt. Can't be undone.
+      </template>
+      <template v-else>
+        Reloads
+        <strong>{{ confirmResetTarget?.slug }}</strong>
+        from its canonical skill file on disk. Use this after the
+        prompt has been updated in source. No customizations to lose.
+      </template>
+    </AgentSkillConfirmDialog>
 
     <!-- Delete confirmation -->
-    <v-dialog v-model="showDeleteDialog" max-width="420">
-      <v-card class="confirm-card">
-        <div class="confirm-icon confirm-icon-err">
-          <v-icon icon="mdi-trash-can-outline" size="24" />
-        </div>
-        <h3 class="confirm-title">Delete this custom skill?</h3>
-        <p class="confirm-body">
-          Permanently removes the skill. BUDs that pinned it will fall
-          back to the agent default.
-        </p>
-        <div class="confirm-actions">
-          <v-btn variant="text" class="text-none" @click="confirmDeleteId = null">
-            Cancel
-          </v-btn>
-          <v-btn
-            color="error"
-            variant="flat"
-            class="text-none"
-            :loading="store.saving"
-            @click="doDelete"
-          >
-            Delete
-          </v-btn>
-        </div>
-      </v-card>
-    </v-dialog>
+    <AgentSkillConfirmDialog
+      v-model="showDeleteDialog"
+      icon="mdi-trash-can-outline"
+      tone="error"
+      title="Delete this custom skill?"
+      confirm-label="Delete"
+      :loading="store.saving"
+      @confirm="doDelete"
+    >
+      Permanently removes the skill. BUDs that pinned it will fall
+      back to the agent default.
+    </AgentSkillConfirmDialog>
 
     <CustomSkillDialog
       v-model="showCreateDialog"
@@ -498,316 +120,36 @@
 </template>
 
 <script setup lang="ts">
-import AppCallout from '@/components/common/AppCallout.vue'
 import { ref, computed, onMounted } from 'vue'
+import { useAgentSkillsStore, type AgentType } from '@/stores/agentSkills'
+import AgentPromptsHeader from '@/components/settings/agentPrompts/AgentPromptsHeader.vue'
+import AgentSkillConfirmDialog from '@/components/settings/agentPrompts/AgentSkillConfirmDialog.vue'
+import AgentSkillEditor from '@/components/settings/agentPrompts/AgentSkillEditor.vue'
+import AgentSkillGroup from '@/components/settings/agentPrompts/AgentSkillGroup.vue'
+import AgentSkillSummary from '@/components/settings/agentPrompts/AgentSkillSummary.vue'
 import {
-  useAgentSkillsStore,
-  AGENT_TYPE_LABELS,
-  type AgentSkill,
-  type AgentType,
-} from '@/stores/agentSkills'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+  groupAgentSkills,
+  skillKey,
+  type SkillFilterMode,
+} from '@/components/settings/agentPrompts/agentPrompts.util'
+import { useAgentSkillCapabilities } from '@/composables/useAgentSkillCapabilities'
+import { useAgentSkillConfirm } from '@/composables/useAgentSkillConfirm'
+import { useAgentSkillEditor } from '@/composables/useAgentSkillEditor'
 import CustomSkillDialog from './CustomSkillDialog.vue'
-import AppPillToggle from '@/components/common/AppPillToggle.vue'
-import api from '@/services/api'
-
-const PREVIEW_MODE_OPTIONS: { label: string; value: 'edit' | 'preview' }[] = [
-  { label: 'Edit', value: 'edit' },
-  { label: 'Preview', value: 'preview' },
-]
 
 const store = useAgentSkillsStore()
+const { caps, load: loadProviderCapabilities } = useAgentSkillCapabilities()
+const { previewMode, editForm, isOpen, toggle, collapse, saveSkill } = useAgentSkillEditor(caps)
 
-const expanded = ref<string | null>(null)
-const previewMode = ref<'edit' | 'preview'>('edit')
-const confirmResetTarget = ref<{
-  slug: string
-  agentType: AgentType
-  isCustomized: boolean
-} | null>(null)
-const confirmDeleteId = ref<string | null>(null)
+const {
+  confirmResetTarget, confirmDeleteId, showResetDialog, showDeleteDialog, doReset, doDelete,
+} = useAgentSkillConfirm(collapse)
 const showCreateDialog = ref(false)
 const createForAgent = ref<AgentType | null>(null)
 const search = ref('')
-const filterMode = ref<'all' | 'custom' | 'modified'>('all')
+const filterMode = ref<SkillFilterMode>('all')
 
-const showResetDialog = computed({
-  get: () => confirmResetTarget.value !== null,
-  set: (v: boolean) => { if (!v) confirmResetTarget.value = null },
-})
-
-const showDeleteDialog = computed({
-  get: () => confirmDeleteId.value !== null,
-  set: (v: boolean) => { if (!v) confirmDeleteId.value = null },
-})
-
-function skillKey(skill: AgentSkill): string {
-  return `${skill.skillSlug}__${skill.agentType}`
-}
-
-function agentTypeLabel(at: AgentType): string {
-  return AGENT_TYPE_LABELS[at] ?? at
-}
-
-// Visual identity per agent type — picked so each section is distinguishable
-// at a glance even when scrolling fast. Colors map to Vuetify theme tokens.
-const AGENT_ICONS: Record<AgentType, string> = {
-  triage: 'mdi-magnify-scan',
-  bud: 'mdi-clipboard-text-outline',
-  status: 'mdi-pulse',
-  standup: 'mdi-account-group-outline',
-  learning: 'mdi-book-open-page-variant-outline',
-  bugLinker: 'mdi-bug-outline',
-  reassignment: 'mdi-account-switch-outline',
-  skill: 'mdi-shield-check-outline',
-  techPlan: 'mdi-vector-polyline',
-  testPlan: 'mdi-test-tube',
-  design: 'mdi-palette-outline',
-  slackTriage: 'mdi-slack',
-  slackFeatureQa: 'mdi-message-question-outline',
-}
-
-const AGENT_BLURBS: Record<AgentType, string> = {
-  triage: 'Classifies inbound items into BUDs vs noise',
-  bud: 'Writes the PRD when a BUD is opened',
-  status: 'Surfaces DevOps and infra signals',
-  standup: 'Generates the daily team digest',
-  learning: 'Captures retrospective learnings',
-  bugLinker: 'Matches incoming bugs to existing BUDs',
-  reassignment: 'Suggests new owners when assignments stall',
-  skill: 'Reviews code for the code-review stage',
-  techPlan: 'Authors the technical architecture',
-  testPlan: 'Designs test plans and QA cases',
-  design: 'Produces visual designs from the design system',
-  slackTriage: 'Triages Slack messages into actions',
-  slackFeatureQa: 'Answers Slack questions about feature delivery, status, and ownership',
-}
-
-function agentIcon(at: AgentType): string {
-  return AGENT_ICONS[at] ?? 'mdi-robot-outline'
-}
-
-function agentBlurb(at: AgentType): string {
-  return AGENT_BLURBS[at] ?? ''
-}
-
-// Stable display order of agent types — matches the visible BUD lifecycle
-// flow first (bud → design → tech_plan → test_plan → skill review), then the
-// non-stage agents (triage, standup, etc.) below.
-const AGENT_ORDER: AgentType[] = [
-  'bud', 'design', 'techPlan', 'testPlan', 'skill',
-  'triage', 'bugLinker', 'reassignment', 'standup',
-  'learning', 'status', 'slackTriage', 'slackFeatureQa',
-]
-
-interface AgentGroup {
-  agentType: AgentType
-  skills: AgentSkill[]
-}
-
-const filteredGroups = computed<AgentGroup[]>(() => {
-  const q = search.value.trim().toLowerCase()
-  const grouped = new Map<AgentType, AgentSkill[]>()
-  for (const s of store.skills) {
-    if (filterMode.value === 'custom' && !s.isCustom) continue
-    if (filterMode.value === 'modified' && !s.isCustomized) continue
-    if (q) {
-      const hay = `${s.name} ${s.description} ${s.skillSlug}`.toLowerCase()
-      if (!hay.includes(q)) continue
-    }
-    const list = grouped.get(s.agentType) ?? []
-    list.push(s)
-    grouped.set(s.agentType, list)
-  }
-  const ordered: AgentGroup[] = []
-  for (const at of AGENT_ORDER) {
-    const skills = grouped.get(at)
-    if (skills && skills.length > 0) {
-      ordered.push({
-        agentType: at,
-        skills: skills.sort((a, b) => {
-          if (a.isCustom !== b.isCustom) return a.isCustom ? 1 : -1
-          if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1
-          return a.name.localeCompare(b.name)
-        }),
-      })
-    }
-  }
-  return ordered
-})
-
-// Model/effort options are provider-aware: fetched from the AI capabilities
-// endpoint for the org's active provider so the dropdowns never offer a value
-// the backend would reject. Effort is hidden entirely when the provider
-// doesn't support it (e.g. a provider with no reasoning levels).
-interface CapModel { id: string; label: string }
-const capModels = ref<CapModel[]>([{ id: '', label: 'Default' }])
-const capDefaultModel = ref('')
-const capEffortValues = ref<string[]>([])
-const providerSupportsEffort = ref(true)
-const providerSupportsIterationModel = ref(true)
-
-// Providers that expose a single model (e.g. Copilot, whose only choice is
-// "auto — Copilot picks the model") give the user nothing to select, so the
-// model dropdowns are shown read-only rather than as a one-item picker.
-const providerSupportsModelChoice = computed(() => capModels.value.length > 1)
-
-function titleCase(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1)
-}
-
-// A skill's stored model is tuned for whatever provider it was saved under
-// (e.g. a Claude ``sonnet``). When the active provider doesn't list it, the
-// backend's ``resolve_model`` falls back to that provider's default at run
-// time — so surface the DEFAULT here rather than a stale foreign id, which
-// reads as "this skill runs on sonnet" when it doesn't. Returns '' (the
-// provider default) for any model/effort the active provider can't honour.
-function coerceModel(saved: string | null | undefined): string {
-  const v = saved ?? ''
-  // Coerce to the provider's DEFAULT model (not a bare ''), so a provider
-  // whose default isn't the empty-string option — e.g. Copilot's "auto" —
-  // preselects a real, listed value instead of showing a blank dropdown.
-  if (v && capModels.value.some((m) => m.id === v)) return v
-  return capDefaultModel.value
-}
-
-function coerceEffort(saved: string | null | undefined): string {
-  const v = saved ?? ''
-  if (!v || !providerSupportsEffort.value) return ''
-  return capEffortValues.value.includes(v) ? v : ''
-}
-
-// Show a saved value the active provider no longer lists as a clearly-labelled
-// fallback option, so the select isn't blank and the user understands it.
-function withFallback(
-  base: { title: string; value: string }[],
-  saved: string | undefined,
-): { title: string; value: string }[] {
-  if (!saved || base.some((o) => o.value === saved)) return base
-  return [...base, { title: `${saved} (falls back to default)`, value: saved }]
-}
-
-const modelOptions = computed(() =>
-  withFallback(
-    capModels.value.map((m) => ({ title: m.label, value: m.id })),
-    editForm.value?.model,
-  ),
-)
-
-const iterationModelOptions = computed(() =>
-  withFallback(
-    capModels.value.map((m) => ({
-      title: m.id === '' ? 'Same as model' : m.label,
-      value: m.id,
-    })),
-    editForm.value?.iterationModel,
-  ),
-)
-
-const effortOptions = computed(() => {
-  const base = [{ title: 'Default', value: '' }]
-  return base.concat(capEffortValues.value.map((v) => ({ title: titleCase(v), value: v })))
-})
-
-async function loadProviderCapabilities(): Promise<void> {
-  try {
-    const { data } = await api.get('/v1/settings/ai/capabilities')
-    const current = data.current_provider ?? 'claude'
-    const caps = (data.providers ?? []).find(
-      (p: { provider: string }) => p.provider === current,
-    )
-    if (!caps) return
-    capModels.value = caps.models?.length ? caps.models : [{ id: '', label: 'Default' }]
-    capDefaultModel.value = caps.default_model ?? ''
-    capEffortValues.value = caps.supports_effort ? caps.effort_values ?? [] : []
-    providerSupportsEffort.value = !!caps.supports_effort
-    providerSupportsIterationModel.value = !!caps.supports_iteration_model
-  } catch (err: unknown) {
-    const axiosErr = err as { response?: { status?: number } }
-    if (axiosErr?.response?.status !== 401) {
-      console.warn('[SettingsAgentPrompts] failed to load provider capabilities', err)
-    }
-  }
-}
-
-const editForm = ref({
-  name: '',
-  description: '',
-  tools: [] as string[],
-  mcpTools: [] as string[],
-  prompt: '',
-  maxTurns: 0,
-  timeoutSeconds: 0,
-  model: '',
-  iterationModel: '',
-  iterationMaxTurns: 0,
-  effort: '',
-})
-
-function toggle(skill: AgentSkill): void {
-  const key = skillKey(skill)
-  if (expanded.value === key) {
-    expanded.value = null
-    return
-  }
-  expanded.value = key
-  previewMode.value = 'edit'
-  editForm.value = {
-    name: skill.name,
-    description: skill.description,
-    tools: [...skill.tools],
-    mcpTools: [...skill.mcpTools],
-    prompt: skill.prompt,
-    maxTurns: skill.maxTurns,
-    timeoutSeconds: skill.timeoutSeconds ?? 0,
-    // Preselect the active provider's model/effort — a foreign saved id
-    // (e.g. Claude ``sonnet`` under a Codex org) coerces to the provider
-    // default so the dropdown shows what actually runs, not a fallback label.
-    model: coerceModel(skill.model),
-    iterationModel: coerceModel(skill.iterationModel),
-    iterationMaxTurns: skill.iterationMaxTurns ?? 0,
-    effort: coerceEffort(skill.effort),
-  }
-}
-
-const renderedPreview = computed(() => {
-  if (!editForm.value.prompt) return ''
-  const raw = marked.parse(editForm.value.prompt, { async: false }) as string
-  return DOMPurify.sanitize(raw)
-})
-
-async function saveSkill(skill: AgentSkill): Promise<void> {
-  await store.updateSkill(skill.skillSlug, skill.agentType, {
-    name: editForm.value.name,
-    description: editForm.value.description,
-    tools: editForm.value.tools,
-    mcpTools: editForm.value.mcpTools,
-    prompt: editForm.value.prompt,
-    maxTurns: editForm.value.maxTurns,
-    timeoutSeconds: editForm.value.timeoutSeconds,
-    model: editForm.value.model,
-    iterationModel: editForm.value.iterationModel,
-    iterationMaxTurns: editForm.value.iterationMaxTurns,
-    effort: editForm.value.effort,
-  })
-}
-
-async function doReset(): Promise<void> {
-  const target = confirmResetTarget.value
-  if (!target) return
-  const ok = await store.resetSkill(target.slug, target.agentType)
-  confirmResetTarget.value = null
-  if (ok) expanded.value = null
-}
-
-async function doDelete(): Promise<void> {
-  const id = confirmDeleteId.value
-  if (!id) return
-  const ok = await store.deleteCustomSkill(id)
-  confirmDeleteId.value = null
-  if (ok) expanded.value = null
-}
+const filteredGroups = computed(() => groupAgentSkills(store.skills, filterMode.value, search.value))
 
 function openCreateForAgent(at: AgentType): void {
   createForAgent.value = at
@@ -832,53 +174,6 @@ onMounted(() => {
   flex-direction: column;
 }
 
-/* ── Header ──────────────────────────────────────────────────── */
-
-.page-header {
-  flex-shrink: 0;
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: rgb(var(--v-theme-background));
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.06);
-  backdrop-filter: blur(8px);
-}
-
-.page-title {
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  margin: 0;
-  color: rgb(var(--v-theme-on-surface));
-}
-
-.page-subtitle {
-  font-size: 13px;
-  color: rgba(var(--v-theme-on-surface), 0.6);
-  max-width: 560px;
-  line-height: 1.5;
-}
-
-.search-input {
-  max-width: 420px;
-  flex: 1;
-}
-
-.search-input :deep(.v-field) {
-  background: rgba(var(--v-theme-on-surface), 0.04);
-  border-radius: 10px;
-}
-
-.filter-chips :deep(.v-chip) {
-  text-transform: none;
-  font-weight: 500;
-}
-
-.filter-chip-selected {
-  background-color: rgba(var(--v-theme-primary), 0.18) !important;
-  color: rgb(var(--v-theme-primary)) !important;
-}
-
 /* ── Content ─────────────────────────────────────────────────── */
 
 .page-content {
@@ -898,60 +193,7 @@ onMounted(() => {
 .empty-title { font-size: 15px; font-weight: 500; color: rgba(var(--v-theme-on-surface), 0.7); }
 .empty-sub { font-size: 13px; }
 
-/* ── Agent group ─────────────────────────────────────────────── */
-
-.agent-group {
-  display: flex;
-  flex-direction: column;
-}
-
-.group-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 4px 4px 12px;
-}
-
-.group-icon-wrap {
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgb(var(--v-theme-surface-variant));
-  color: rgb(var(--v-theme-ink-2));
-}
-
-.group-meta { flex: 1; min-width: 0; }
-.group-title {
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0;
-  color: rgb(var(--v-theme-on-surface));
-}
-.group-sub {
-  font-size: 12px;
-  color: rgba(var(--v-theme-on-surface), 0.55);
-}
-
-.group-count {
-  font-variant-numeric: tabular-nums;
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 500;
-}
-
-/* ── Skill list ──────────────────────────────────────────────── */
-
-.skill-list {
-  display: flex;
-  flex-direction: column;
-  border-radius: 12px;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  background: rgba(var(--v-theme-surface), 0.6);
-  overflow: hidden;
-}
+/* ── Skill rows (rendered into each AgentSkillGroup) ─────────── */
 
 .skill-row + .skill-row .skill-summary {
   border-top: 1px solid rgba(var(--v-theme-on-surface), 0.06);
@@ -960,236 +202,4 @@ onMounted(() => {
 .skill-row.is-open {
   background: rgba(var(--v-theme-on-surface), 0.025);
 }
-
-.skill-summary {
-  all: unset;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  width: 100%;
-  box-sizing: border-box;
-  transition: background 120ms ease;
-}
-
-.skill-summary:hover { background: rgba(var(--v-theme-on-surface), 0.04); }
-.skill-summary:focus-visible {
-  outline: 2px solid rgba(var(--v-theme-primary), 0.45);
-  outline-offset: -2px;
-}
-
-.skill-chevron { color: rgba(var(--v-theme-on-surface), 0.45); flex-shrink: 0; }
-
-.skill-headline { flex: 1; min-width: 0; }
-
-.skill-name-row { display: flex; align-items: center; flex-wrap: wrap; }
-.skill-name {
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-  color: rgb(var(--v-theme-on-surface));
-}
-.skill-desc {
-  font-size: 12.5px;
-  color: rgba(var(--v-theme-on-surface), 0.6);
-  margin-top: 2px;
-  line-height: 1.45;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 720px;
-}
-
-.skill-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
-
-.skill-meta-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 500;
-  color: rgba(var(--v-theme-on-surface), 0.7);
-  background: rgba(var(--v-theme-on-surface), 0.06);
-  text-transform: lowercase;
-}
-
-.skill-slug {
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 11px;
-  color: rgba(var(--v-theme-on-surface), 0.45);
-}
-
-/* ── Editor ──────────────────────────────────────────────────── */
-
-.skill-editor {
-  padding: 14px 18px 18px;
-}
-
-.editor-grid {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  column-gap: 12px;
-  row-gap: 12px;
-  padding-top: 14px;
-}
-
-.col-2 { grid-column: span 2; }
-.col-3 { grid-column: span 3; }
-.col-6 { grid-column: span 6; }
-.col-12 { grid-column: 1 / -1; }
-
-@media (max-width: 1100px) {
-  .col-2,
-  .col-3 { grid-column: span 4; }
-}
-@media (max-width: 720px) {
-  .col-2,
-  .col-3,
-  .col-6 { grid-column: 1 / -1; }
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-}
-
-.field-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: rgba(var(--v-theme-on-surface), 0.75);
-  line-height: 1;
-}
-
-/* Tighten Vuetify's outlined input height now that the label lives
-   outside. Compact density alone leaves a small gap that adds up
-   across 9 fields. */
-.editor-grid :deep(.v-field--variant-outlined .v-field__input) {
-  min-height: 36px;
-  padding-top: 4px;
-  padding-bottom: 4px;
-}
-.editor-grid :deep(.v-input--density-compact .v-input__details) {
-  min-height: 0;
-}
-
-.prompt-editor :deep(textarea) {
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 13px;
-  line-height: 1.65;
-}
-
-.prompt-editor :deep(.v-field) {
-  background: rgb(var(--v-theme-background));
-}
-
-.preview-content {
-  max-height: 540px;
-  overflow-y: auto;
-  padding: 16px 18px;
-  background: rgb(var(--v-theme-background));
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  border-radius: 8px;
-  font-size: 13.5px;
-  line-height: 1.7;
-  color: rgba(var(--v-theme-on-surface), 0.85);
-}
-
-.preview-content :deep(h1),
-.preview-content :deep(h2),
-.preview-content :deep(h3) { margin: 14px 0 6px; font-weight: 600; }
-.preview-content :deep(h1) { font-size: 1.25em; }
-.preview-content :deep(h2) { font-size: 1.1em; }
-.preview-content :deep(h3) { font-size: 1em; }
-.preview-content :deep(code) {
-  background: rgba(var(--v-theme-on-surface), 0.08);
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 0.87em;
-}
-.preview-content :deep(pre) {
-  background: rgb(var(--v-theme-background));
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  border-radius: 6px;
-  padding: 12px 16px;
-  margin: 10px 0;
-  overflow-x: auto;
-}
-.preview-content :deep(pre code) { background: none; padding: 0; }
-.preview-content :deep(ul),
-.preview-content :deep(ol) { padding-left: 20px; margin: 8px 0; }
-
-.editor-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-top: 14px;
-  margin-top: 14px;
-  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.05);
-}
-
-/* ── Add-skill button (per group) ────────────────────────────── */
-
-.skill-add {
-  all: unset;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 12px 16px;
-  font-size: 13px;
-  font-weight: 500;
-  color: rgba(var(--v-theme-on-surface), 0.55);
-  border-top: 1px dashed rgba(var(--v-theme-on-surface), 0.1);
-  transition: background 120ms ease, color 120ms ease;
-}
-.skill-add:hover {
-  background: rgba(var(--v-theme-primary), 0.06);
-  color: rgb(var(--v-theme-primary));
-}
-
-/* ── Confirm dialogs ─────────────────────────────────────────── */
-
-.confirm-card { padding: 24px; }
-.confirm-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 12px;
-}
-.confirm-icon-warn {
-  background: rgba(var(--v-theme-warning), 0.16);
-  color: rgb(var(--v-theme-warning));
-}
-.confirm-icon-err {
-  background: rgba(var(--v-theme-error), 0.16);
-  color: rgb(var(--v-theme-error));
-}
-.confirm-title {
-  font-size: 16px;
-  font-weight: 600;
-  margin: 0 0 6px;
-  color: rgb(var(--v-theme-on-surface));
-}
-.confirm-body {
-  font-size: 13px;
-  color: rgba(var(--v-theme-on-surface), 0.7);
-  line-height: 1.55;
-  margin: 0 0 18px;
-}
-.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
 </style>

@@ -15,43 +15,23 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/services/api'
+import { createBugComments } from '@/stores/bugComments'
 import { extractApiError } from '@/utils/errors'
+import {
+  type BugBoardFilters,
+  type BugListFilters,
+  bugBoardParams,
+  bugListParams,
+  emptyBoard,
+} from '@/stores/bugQuery'
 import {
   BUG_BOARD_COLUMNS,
   type BugBoardResponse,
-  type BugComment,
-  type BugCommentListResponse,
   type BugListItem,
   type BugListResponse,
   type BugRead,
   type BugStatusValue,
 } from '@/types'
-
-function emptyBoard(): Record<BugStatusValue, BugListItem[]> {
-  return BUG_BOARD_COLUMNS.reduce(
-    (acc, col) => {
-      acc[col] = []
-      return acc
-    },
-    {} as Record<BugStatusValue, BugListItem[]>,
-  )
-}
-
-interface BugListFilters {
-  status?: string
-  severity?: string
-  budId?: string
-  featureId?: string
-  page?: number
-  pageSize?: number
-}
-
-interface BugBoardFilters {
-  bugType?: 'testing' | 'production' | 'all'
-  severity?: string
-  featureId?: string
-  assigneeId?: string
-}
 
 export const useBugsStore = defineStore('bugs', () => {
   const bugs = ref<BugListItem[]>([])
@@ -66,21 +46,14 @@ export const useBugsStore = defineStore('bugs', () => {
   // Load failures for the list and board, kept apart from ``error`` (a
   // failed save, comment or attachment) so a page can show them in place.
   const loadError = ref<string | null>(null)
-  const comments = ref<BugComment[]>([])
-  const commentsLoading = ref(false)
+  const { comments, commentsLoading, fetchComments, addComment, editComment, deleteComment } =
+    createBugComments(error, _bumpCommentCount)
 
   async function fetchBugs(filters?: BugListFilters): Promise<void> {
     loading.value = true
     loadError.value = null
     try {
-      const params: Record<string, string | number> = {}
-      if (filters?.status) params.status = filters.status
-      if (filters?.severity) params.severity = filters.severity
-      if (filters?.budId) params.budId = filters.budId
-      if (filters?.featureId) params.featureId = filters.featureId
-      params.page = filters?.page ?? page.value
-      params.pageSize = filters?.pageSize ?? pageSize.value
-
+      const params = bugListParams(filters, page.value, pageSize.value)
       const { data } = await api.get<BugListResponse>('/v1/bugs', { params })
       bugs.value = data.items
       total.value = data.total
@@ -97,12 +70,7 @@ export const useBugsStore = defineStore('bugs', () => {
     boardLoading.value = true
     loadError.value = null
     try {
-      const params: Record<string, string> = {}
-      if (filters?.bugType) params.bugType = filters.bugType
-      if (filters?.severity) params.severity = filters.severity
-      if (filters?.featureId) params.featureId = filters.featureId
-      if (filters?.assigneeId) params.assigneeId = filters.assigneeId
-
+      const params = bugBoardParams(filters)
       const { data } = await api.get<BugBoardResponse>('/v1/bugs/board', { params })
       const merged = emptyBoard()
       for (const col of BUG_BOARD_COLUMNS) {
@@ -163,7 +131,7 @@ export const useBugsStore = defineStore('bugs', () => {
     }
   }
 
-    async function fetchBugsForBud(budId: string): Promise<BugListItem[]> {
+  async function fetchBugsForBud(budId: string): Promise<BugListItem[]> {
     try {
       const { data } = await api.get<BugListResponse>('/v1/bugs', {
         params: { budId, pageSize: 100 },
@@ -171,83 +139,6 @@ export const useBugsStore = defineStore('bugs', () => {
       return data.items
     } catch {
       return []
-    }
-  }
-
-  // ── Comments ─────────────────────────────────────────────────────
-
-  // Tracks the bugId of the active comment fetch so a slow request
-  // doesn't overwrite the thread after the user has navigated to a
-  // different bug (or closed the drawer).
-  let commentsRequestId = 0
-
-  async function fetchComments(bugId: string): Promise<void> {
-    commentsRequestId += 1
-    const requestId = commentsRequestId
-    commentsLoading.value = true
-    error.value = null
-    try {
-      const { data } = await api.get<BugCommentListResponse>(`/v1/bugs/${bugId}/comments`)
-      if (requestId === commentsRequestId) {
-        comments.value = data.items
-      }
-    } catch (err) {
-      if (requestId === commentsRequestId) {
-        error.value = extractApiError(err, 'Failed to load comments.')
-      }
-    } finally {
-      if (requestId === commentsRequestId) {
-        commentsLoading.value = false
-      }
-    }
-  }
-
-  async function addComment(bugId: string, body: string): Promise<BugComment | null> {
-    error.value = null
-    try {
-      const { data } = await api.post<BugComment>(`/v1/bugs/${bugId}/comments`, { body })
-      comments.value.push(data)
-      _bumpCommentCount(bugId, 1)
-      return data
-    } catch (err) {
-      error.value = extractApiError(err, 'Failed to post comment.')
-      return null
-    }
-  }
-
-  async function editComment(
-    bugId: string,
-    commentId: string,
-    body: string,
-  ): Promise<BugComment | null> {
-    error.value = null
-    try {
-      const { data } = await api.patch<BugComment>(
-        `/v1/bugs/${bugId}/comments/${commentId}`,
-        { body },
-      )
-      const idx = comments.value.findIndex((c) => c.id === commentId)
-      if (idx >= 0) comments.value[idx] = data
-      return data
-    } catch (err) {
-      error.value = extractApiError(err, 'Failed to edit comment.')
-      return null
-    }
-  }
-
-  async function deleteComment(bugId: string, commentId: string): Promise<boolean> {
-    error.value = null
-    try {
-      const { data } = await api.delete<BugComment>(
-        `/v1/bugs/${bugId}/comments/${commentId}`,
-      )
-      const idx = comments.value.findIndex((c) => c.id === commentId)
-      if (idx >= 0) comments.value[idx] = data
-      _bumpCommentCount(bugId, -1)
-      return true
-    } catch (err) {
-      error.value = extractApiError(err, 'Failed to delete comment.')
-      return false
     }
   }
 

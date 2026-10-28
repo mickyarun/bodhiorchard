@@ -22,7 +22,7 @@
     <p>{{ viewer ? 'Send the players a quick reaction.' : 'React to a clever move.' }}</p>
     <div v-if="viewers.length" class="crowd-panel__watchers" aria-label="People watching">
       <span v-for="(watcher, index) in viewers" :key="`${watcher.userId}-${index}`">
-        <i>{{ initials(watcher.name) }}</i>{{ watcher.name }}
+        <i>{{ initialsOf(watcher.name) }}</i>{{ watcher.name }}
       </span>
     </div>
     <div v-else class="crowd-panel__empty">No one is watching yet</div>
@@ -47,6 +47,7 @@ import {
   type BacklashEncouragement,
 } from '@shared/minigames/backlashSocial'
 import type { BacklashViewerSnapshot } from '@/multiplayer/BacklashRoomClient'
+import { initialsOf } from '@/utils/avatar'
 
 defineProps<{
   viewer: boolean
@@ -58,10 +59,6 @@ defineProps<{
 const emit = defineEmits<{
   encourage: [reaction: BacklashEncouragement]
 }>()
-
-function initials(name: string): string {
-  return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || '?'
-}
 </script>
 
 <style scoped>

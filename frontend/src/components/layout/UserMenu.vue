@@ -20,14 +20,14 @@
 <div class="px-3 pb-3" :class="{ 'd-flex justify-center': rail }">
   <v-menu location="top start" :offset="[0, 4]">
     <template #activator="{ props }">
-      <div
+      <button
         v-bind="props"
-        class="user-menu d-flex align-center ga-2 pa-2 rounded-lg cursor-pointer"
+        type="button"
+        class="user-menu d-flex align-center ga-2 pa-2 rounded-lg"
         :class="{ 'user-menu--rail': rail }"
+        :aria-label="`Account menu for ${authStore.user?.name || 'you'}`"
       >
-        <v-avatar size="32" color="primary" variant="tonal">
-          <span class="text-caption font-weight-bold">{{ userInitials }}</span>
-        </v-avatar>
+        <AppMonogram :name="authStore.user?.name" :size="32" />
         <template v-if="!rail">
           <div class="flex-grow-1 overflow-hidden">
             <div class="text-body-2 font-weight-medium text-truncate">
@@ -39,7 +39,7 @@
           </div>
           <v-icon icon="mdi-chevron-up" size="16" class="text-medium-emphasis" />
         </template>
-      </div>
+      </button>
     </template>
 
     <v-list density="compact" min-width="244">
@@ -102,8 +102,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useRouter } from 'vue-router'
+import AppMonogram from '@/components/common/AppMonogram.vue'
 import { useAuthStore } from '@/stores/auth'
 import { usePermissions } from '@/composables/usePermissions'
 import { useThemePreference, type ThemePreference } from '@/composables/useThemePreference'
@@ -122,16 +122,6 @@ const THEME_OPTIONS: { value: ThemePreference; label: string; icon: string; hint
   { value: 'dark', label: 'Dark', icon: 'mdi-weather-night', hint: 'Dark theme' },
 ]
 
-const userInitials = computed(() => {
-  const name = authStore.user?.name || ''
-  return name
-    .split(' ')
-    .map(w => w[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2) || '?'
-})
-
 function handleLogout(): void {
   authStore.logout()
   // A full page load, as when a session expires (services/api.ts): every
@@ -143,6 +133,16 @@ function handleLogout(): void {
 
 <style scoped>
 .user-menu {
+  /* The name-and-email height in both states, so the rows above it don't
+     move when a rail opens under the pointer. */
+  min-height: 56px;
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
   transition: background-color 0.15s ease;
 }
 
