@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from app.core.paths import is_strictly_under, rmtree_strictly_under
+from app.schemas.git_ref import branch_name_problem
 from app.services.git_operations import run_git
 from app.services.scan.stages._origin_auth import (
     build_app_https_url_for_origin,
@@ -116,6 +117,13 @@ async def ensure_scan_test_worktree(
 
     Returns the absolute path of the worktree to operate on.
     """
+    # Branch names are validated on the way in, but rows stored before
+    # that still reach here. Refuse them before the name becomes a git
+    # argument (``-b`` would read as an option) or a folder name (``..``).
+    problem = branch_name_problem(main_branch)
+    if problem is not None:
+        raise RuntimeError(f"invalid main branch {main_branch!r}: {problem}")
+
     current_branch_out, _, _ = await run_git(
         ["rev-parse", "--abbrev-ref", "HEAD"],
         cwd=repo_path,
@@ -132,10 +140,9 @@ async def ensure_scan_test_worktree(
     parent.mkdir(parents=True, exist_ok=True)
     wt_path = parent / main_branch.replace("/", "-")
     wt_str = str(wt_path)
-    # Branch names are validated on the way in, but rows stored before
-    # that (or written some other way) still reach here. A name like
-    # ``..`` would make the worktree path the shared parent of every
-    # repo's worktrees, so refuse anything that isn't strictly inside.
+    # Defence in depth: whatever the name, the worktree must sit strictly
+    # inside its parent, never be the parent shared by every repo's
+    # worktrees.
     if not is_strictly_under(wt_path, parent):
         raise RuntimeError(f"scan worktree for branch {main_branch!r} escapes {parent}")
 

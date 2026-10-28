@@ -62,3 +62,11 @@ def test_rmtree_deletes_only_inside(root: Path) -> None:
     assert rmtree_strictly_under(root / "org" / "repo", root) is True
     assert not (root / "org" / "repo").exists()
     assert (root / "org").is_dir()
+
+
+def test_rmtree_refuses_a_symlink_even_inside(root: Path) -> None:
+    link = root / "org" / "alias"
+    link.symlink_to(root / "org" / "repo")
+    assert rmtree_strictly_under(link, root) is False
+    assert link.is_symlink()
+    assert (root / "org" / "repo").is_dir()
