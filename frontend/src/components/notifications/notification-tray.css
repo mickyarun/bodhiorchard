@@ -1,9 +1,11 @@
 .tray {
   display: flex;
   flex-direction: column;
-  /* Wide enough for two-line bodies; nearly full width on phones. */
-  width: min(400px, calc(100vw - 16px));
-  max-height: min(560px, calc(100vh - 80px));
+  /* Wide enough for two-line bodies; the menu narrows it on phones and
+     caps its height to the space below the bell. */
+  width: 400px;
+  max-width: 100%;
+  max-height: inherit;
   border: 1px solid rgb(var(--v-theme-rule));
   border-radius: 12px;
   background: rgb(var(--v-theme-surface));

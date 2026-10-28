@@ -26,12 +26,12 @@
     </span>
 
     <div class="n-row__text">
-      <button type="button" class="n-row__open" @click="emit('open')">
+      <button type="button" class="n-row__open" :aria-describedby="describedBy" @click="emit('open')">
         <span class="n-row__title">{{ notif.title }}</span>
         <span v-if="!notif.isRead" class="d-sr-only">, unread</span>
       </button>
-      <p v-if="notif.message" class="n-row__body">{{ notif.message }}</p>
-      <span class="n-row__time">{{ relativeTime(notif.createdAt, now, SHORT_AGO) }}</span>
+      <p v-if="notif.message" :id="bodyId" class="n-row__body">{{ notif.message }}</p>
+      <span :id="timeId" class="n-row__time">{{ relativeTime(notif.createdAt, now, SHORT_AGO) }}</span>
       <div v-if="invite" class="n-row__inline">
         <v-btn
           size="small"
@@ -68,7 +68,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useId } from 'vue'
 import type { AppNotification } from '@/types'
 import { SHORT_AGO, relativeTime } from '@/utils/date'
 import { declinableInvite, notificationVisual, type DeclinableInvite } from '@/utils/notificationVisuals'
@@ -84,6 +84,11 @@ const emit = defineEmits<{ open: []; dismiss: []; decline: [kind: DeclinableInvi
 
 const visual = computed(() => notificationVisual(props.notif.type))
 const invite = computed(() => declinableInvite(props.notif, props.viewerId))
+
+// The title button is the row's name; its body and time describe it.
+const bodyId = useId()
+const timeId = useId()
+const describedBy = computed(() => (props.notif.message ? `${bodyId} ${timeId}` : timeId))
 </script>
 
 <style scoped src="./notification-row.css"></style>

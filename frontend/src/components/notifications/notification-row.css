@@ -10,7 +10,8 @@
 }
 .n-row:hover,
 .n-row:focus-within {
-  background: rgb(var(--v-theme-surface-bright));
+  /* A translucent wash, so the neutral icon box still shows on it. */
+  background: rgba(var(--v-theme-on-surface), 0.04);
 }
 .n-row__icon {
   position: relative;
@@ -19,7 +20,7 @@
   justify-content: center;
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   background: rgb(var(--v-theme-surface-variant));
   color: rgb(var(--v-theme-on-surface-variant));
 }

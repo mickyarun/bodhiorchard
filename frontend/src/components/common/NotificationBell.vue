@@ -20,7 +20,8 @@
     location="bottom end"
     :offset="6"
     :close-on-content-click="false"
-    max-width="420"
+    max-width="400"
+    max-height="560"
   >
     <template #activator="{ props: menuProps }">
       <v-btn

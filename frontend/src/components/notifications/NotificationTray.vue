@@ -18,7 +18,9 @@
      time-sensitive), then notifications, newest first. Clearing all asks
      first, since it can't be undone. -->
 <template>
-  <section class="tray" aria-labelledby="tray-title">
+  <!-- Enter is stopped here: the menu would otherwise cancel it, so a
+       focused row or button would not activate from the keyboard. -->
+  <section class="tray elevation-8" aria-labelledby="tray-title" @keydown.enter.stop>
     <header class="tray__head">
       <h2 id="tray-title" class="tray__title">Notifications</h2>
       <span v-if="unread" class="tray__count">{{ unread }} unread</span>
@@ -46,7 +48,7 @@
         </ul>
         <h3 v-if="store.items.length" class="tray__group">Notifications</h3>
       </template>
-      <ul class="tray__list">
+      <ul v-if="store.items.length" class="tray__list">
         <NotificationRow
           v-for="notif in store.items"
           :key="notif.id"
@@ -68,7 +70,7 @@
     </div>
 
     <footer v-if="store.items.length" class="tray__foot">
-      <v-btn variant="text" size="small" @click="confirmClear = true">Clear all</v-btn>
+      <v-btn ref="clearButton" variant="text" size="small" @click="confirmClear = true">Clear all</v-btn>
     </footer>
 
     <AppConfirmDialog
@@ -82,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AppConfirmDialog from '@/components/common/AppConfirmDialog.vue'
 import NotificationRow from '@/components/notifications/NotificationRow.vue'
@@ -110,6 +112,13 @@ const { hasPermission } = usePermissions()
 const { busy, onAccept, askReject, askReassign } = useYieldOfferActions()
 
 const confirmClear = ref(false)
+const clearButton = ref<{ $el: HTMLElement } | null>(null)
+// Back to the button when the confirmation closes without clearing.
+watch(confirmClear, async (open) => {
+  if (open) return
+  await nextTick()
+  clearButton.value?.$el.focus()
+})
 const isAdmin = computed(() => hasPermission('team:manage'))
 const unread = computed(() => store.unreadCount + yieldStore.items.length)
 const total = computed(() => store.items.length + yieldStore.items.length)
