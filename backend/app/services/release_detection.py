@@ -329,7 +329,15 @@ async def _maybe_auto_close_bud(
         {"event_type": "status_change", "to": "closed"},
     )
 
-    # Post-closure side-effects: award contributor XP + trigger scan
+    # Write the close and reload the row before the closure hook, as the
+    # PATCH path does. The flush bumps ``updated_at`` (server-side
+    # onupdate) and expires it; the learning-metrics compute then reads it
+    # as the close time, and a lazy load there fails in async code
+    # (MissingGreenlet), so no learnings were ever recorded on auto-close.
+    await db.flush()
+    await db.refresh(bud)
+
+    # Post-closure side-effects: contributor XP, SP, learning metrics
     try:
         from app.services.bud_closure import on_bud_closed
 
