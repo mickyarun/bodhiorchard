@@ -34,26 +34,54 @@ from app.models.leave_type import LeaveAccrual, LeaveType
 from app.models.policy_holiday import HolidayKind, PolicyHoliday
 from app.models.user import User
 from app.repositories.employee_profile import EmployeeProfileRepository
-from app.services.leave import policies
+from app.services.leave import notify, policies
 from app.services.leave.summary import build_summary
 from tests.integration.leave_support import Factory
 
 _REAL_TODAY_FOR = policies.today_for
+# Modules whose "today" decides what these tests check; each must be frozen.
+_MUST_FREEZE = frozenset(
+    {
+        "app.api.v1.leave",
+        "app.services.leave.cancellation",
+        "app.services.leave.changes",
+        "app.services.leave.evaluation",
+        "app.services.leave.holidays",
+        "app.services.leave.summary",
+    }
+)
 
 
 def freeze_today(monkeypatch: pytest.MonkeyPatch, day: date) -> None:
     """Make every policy's today ``day``, in each module that imported ``today_for``.
 
     The defining module keeps the real one, so a module first imported
-    while frozen can't keep the frozen day after the test.
+    while frozen can't keep the frozen day after the test. Freezing twice
+    in one test is refused: the second call would otherwise find nothing
+    left to patch and silently keep the first day.
     """
-    for name, module in list(sys.modules.items()):
-        if (
-            name.startswith("app.")
-            and module is not policies
-            and getattr(module, "today_for", None) is _REAL_TODAY_FOR
-        ):
-            monkeypatch.setattr(module, "today_for", lambda _policy: day)
+    frozen = {
+        name
+        for name, module in sys.modules.items()
+        if name.startswith("app.") and module is not policies and hasattr(module, "today_for")
+    }
+    patched = set()
+    for name in sorted(frozen):
+        module = sys.modules[name]
+        if module.today_for is not _REAL_TODAY_FOR:
+            raise RuntimeError(f"today is already frozen in {name}; freeze once per test")
+        monkeypatch.setattr(module, "today_for", lambda _policy: day)
+        patched.add(name)
+    missing = _MUST_FREEZE - patched
+    assert not missing, f"today_for not found in {sorted(missing)}"
+
+
+def quiet_notifications(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drop the background Slack, prompt and calendar jobs a decision starts.
+
+    They open the app's own database session, not the test database.
+    """
+    monkeypatch.setattr(notify, "spawn", lambda job: job.close())
 
 
 async def add_policy(

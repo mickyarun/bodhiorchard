@@ -31,7 +31,13 @@ import pytest
 from httpx import AsyncClient
 
 from app.models.policy_holiday import HolidayKind
-from tests.integration.leave_edge_support import add_holiday, add_policy, freeze_today, stored
+from tests.integration.leave_edge_support import (
+    add_holiday,
+    add_policy,
+    freeze_today,
+    quiet_notifications,
+    stored,
+)
 from tests.integration.leave_support import Factory, as_user, give_role, report_to, setup_org
 
 pytestmark = pytest.mark.integration
@@ -44,6 +50,7 @@ SATURDAY = date(2030, 6, 15)  # worked in London only
 @pytest.fixture(autouse=True)
 def _frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     freeze_today(monkeypatch, TODAY)
+    quiet_notifications(monkeypatch)
 
 
 @dataclass(frozen=True)
@@ -68,7 +75,9 @@ async def _place(
     assert created.status_code == 201, created.text
     # The answer lists every office in the org.
     office = next(o for o in created.json() if o["name"] == name)
-    record = (await client.get(f"/api/v1/employees/{user}", headers=as_user(hr, org))).json()
+    fetched = await client.get(f"/api/v1/employees/{user}", headers=as_user(hr, org))
+    assert fetched.status_code == 200, fetched.text
+    record = fetched.json()
     work = {**record["work"], "office_id": office["id"]}
     placed = await client.put(
         f"/api/v1/employees/{user}/work", json=work, headers=as_user(hr, org)
@@ -166,6 +175,7 @@ async def test_the_calendar_shows_each_viewer_their_own_offices_holidays(
         response = await client.get(
             f"{LEAVE}/calendar", params=params, headers=as_user(who, o.org)
         )
+        assert response.status_code == 200, response.text
         assert [h["date"] for h in response.json()["holidays"]] == expected
 
 

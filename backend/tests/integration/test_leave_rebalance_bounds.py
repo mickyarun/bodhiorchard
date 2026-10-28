@@ -31,7 +31,12 @@ from httpx import AsyncClient
 
 from app.models.leave_request import LeaveStatus
 from app.services.leave.lifecycle import decide, submit
-from tests.integration.leave_edge_support import days_left, freeze_today, stored
+from tests.integration.leave_edge_support import (
+    days_left,
+    freeze_today,
+    quiet_notifications,
+    stored,
+)
 from tests.integration.leave_support import (
     NOBODY,
     Factory,
@@ -52,6 +57,7 @@ LATE = (date(2030, 6, 17), date(2030, 6, 19))  # 3 days
 @pytest.fixture(autouse=True)
 def _frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     freeze_today(monkeypatch, TODAY)
+    quiet_notifications(monkeypatch)
 
 
 async def _setup(factory: Factory) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]:

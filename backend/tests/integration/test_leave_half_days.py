@@ -148,11 +148,17 @@ async def test_half_day_wfh_uses_half_of_the_monthly_allowance(
     assert (await _send(pg_session_factory, org, emp, wfh(TUE, AM)))[3] == LeaveStatus.APPROVED
     assert (await _send(pg_session_factory, org, emp, wfh(TUE, PM)))[3] == LeaveStatus.APPROVED
     assert (await _send(pg_session_factory, org, emp, wfh(WED, AM)))[3] == LeaveStatus.PENDING
-    # The allowance is per calendar month: July starts afresh.
-    july = date(2030, 7, 2)
-    assert (await _send(pg_session_factory, org, emp, wfh(july)))[3] == LeaveStatus.APPROVED
-    # A request touching a month that is used up goes to the manager whole.
+    # July is still empty: its Monday alone would be approved at once ...
+    async with pg_session_factory() as db:
+        member = await resolve_member_policy(db, org, emp)
+        alone = await evaluate(db, member=member, user_id=emp, body=wfh(date(2030, 7, 1)))
+    assert alone.auto_approved and not alone.problems
+    # ... but the same Monday with June's last Friday goes to the manager whole,
+    # since June is used up.
     across = LeaveRequestCreate(
         kind=LeaveKind.WFH, start_date=date(2030, 6, 28), end_date=date(2030, 7, 1)
     )
     assert (await _send(pg_session_factory, org, emp, across))[3] == LeaveStatus.PENDING
+    # The allowance is per calendar month: an empty August starts afresh.
+    august = date(2030, 8, 6)
+    assert (await _send(pg_session_factory, org, emp, wfh(august)))[3] == LeaveStatus.APPROVED

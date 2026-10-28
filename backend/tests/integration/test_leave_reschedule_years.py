@@ -29,7 +29,12 @@ import pytest
 from httpx import AsyncClient
 
 from app.models.leave_request import LeaveStatus
-from tests.integration.leave_edge_support import days_left, freeze_today, stored
+from tests.integration.leave_edge_support import (
+    days_left,
+    freeze_today,
+    quiet_notifications,
+    stored,
+)
 from tests.integration.leave_support import Factory, as_user, give_role, setup_org, team
 
 pytestmark = pytest.mark.integration
@@ -40,6 +45,7 @@ LEAVE = "/api/v1/leave/requests"
 @pytest.fixture(autouse=True)
 def _frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     freeze_today(monkeypatch, date(2030, 12, 2))
+    quiet_notifications(monkeypatch)
 
 
 async def _approved(
@@ -68,13 +74,15 @@ async def _move(
     request_id: uuid.UUID,
     start: str,
     end: str,
-) -> int:
+) -> tuple[int, str]:
+    """``(status, detail)`` of a reschedule; detail is "" on success."""
     response = await client.post(
         f"{LEAVE}/{request_id}/reschedule",
         json={"start_date": start, "end_date": end, "note": "Moved"},
         headers=as_user(actor, org),
     )
-    return response.status_code
+    body = response.json()
+    return response.status_code, str(body.get("detail", "")) if response.is_error else ""
 
 
 async def test_moving_leave_into_next_year_pays_this_years_loss_of_pay(
@@ -84,7 +92,7 @@ async def test_moving_leave_into_next_year_pays_this_years_loss_of_pay(
     week = await _approved(client, org, p, cl, "2030-12-09", "2030-12-13")
     extra = await _approved(client, org, p, cl, "2030-12-16", "2030-12-16")
     assert (await stored(pg_session_factory, extra)).lop_days == 1
-    assert await _move(client, org, p["mgr"], week, "2031-01-06", "2031-01-10") == 200
+    assert await _move(client, org, p["mgr"], week, "2031-01-06", "2031-01-10") == (200, "")
     moved = await stored(pg_session_factory, week)
     assert (moved.status, moved.start_date, moved.days, moved.lop_days) == (
         LeaveStatus.APPROVED,
@@ -99,20 +107,29 @@ async def test_moving_leave_into_next_year_pays_this_years_loss_of_pay(
 
 
 @pytest.mark.parametrize(
-    ("start", "end"),
+    ("start", "end", "status", "detail"),
     [
-        ("2030-12-30", "2031-01-03"),  # spans both leave years
-        ("2031-01-04", "2031-01-05"),  # a weekend only
-        ("2030-11-25", "2030-11-25"),  # before today
+        (
+            "2030-12-30",
+            "2031-01-03",
+            409,
+            "Requests can't span two leave years. Split it at Tue 31 Dec.",
+        ),
+        ("2031-01-04", "2031-01-05", 409, "These dates are all weekends or holidays."),
+        ("2030-11-25", "2030-11-25", 422, "Pick dates from today on."),
     ],
 )
 async def test_a_move_that_breaks_a_rule_changes_nothing(
-    client: AsyncClient, pg_session_factory: Factory, start: str, end: str
+    client: AsyncClient,
+    pg_session_factory: Factory,
+    start: str,
+    end: str,
+    status: int,
+    detail: str,
 ) -> None:
     org, p, cl = await team(pg_session_factory)
     week = await _approved(client, org, p, cl, "2030-12-09", "2030-12-10")
-    status = await _move(client, org, p["mgr"], week, start, end)
-    assert status in (409, 422)
+    assert await _move(client, org, p["mgr"], week, start, end) == (status, detail)
     kept = await stored(pg_session_factory, week)
     assert (kept.status, kept.start_date, kept.end_date, kept.days) == (
         LeaveStatus.APPROVED,
@@ -130,7 +147,7 @@ async def test_hr_of_another_org_cannot_move_or_withdraw_leave(
     other, (outsider,), _ = await setup_org(pg_session_factory, "OutsideHr")
     await give_role(pg_session_factory, other, outsider, "hr")
     week = await _approved(client, org, p, cl, "2030-12-09", "2030-12-10")
-    assert await _move(client, other, outsider, week, "2030-12-11", "2030-12-12") == 404
+    assert (await _move(client, other, outsider, week, "2030-12-11", "2030-12-12"))[0] == 404
     withdrawn = await client.post(
         f"{LEAVE}/{week}/withdraw", json={"note": "No"}, headers=as_user(outsider, other)
     )
