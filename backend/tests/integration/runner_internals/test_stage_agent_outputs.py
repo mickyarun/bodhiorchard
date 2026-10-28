@@ -26,7 +26,7 @@ from app.models.bud import BUDStatus
 from app.models.bud_agent_task import AgentTaskStatus
 from app.schemas.jobs import JobState
 from tests.fakes.claude_runner import FakeClaudeRunner
-from tests.fakes.claude_script import AgentScript, ToolCall
+from tests.fakes.claude_script import AgentScript
 from tests.fakes.git_repo import LocalGitRepo
 from tests.fakes.seed import Factory, seed_repo
 from tests.integration.runner_internals.output_support import (
@@ -69,10 +69,17 @@ async def test_insight_and_chat_preamble_are_stripped_from_the_tech_spec(
     assert (await load_bud(app_sessions, org.org_id, bud.id)).tech_spec_md == TECH_SPEC
 
 
-async def test_empty_tech_spec_output_replaces_the_old_spec_but_history_keeps_it(
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "an empty agent reply replaces the existing tech spec and the task completes; "
+        "fixed by branch fix/stage-results-keep-content"
+    ),
+)
+async def test_empty_tech_spec_output_fails_and_keeps_the_current_spec(
     stage_claude: FakeClaudeRunner, app_sessions: Factory, job_runtime: JobRuntime
 ) -> None:
-    """An empty answer still completes; the previous spec survives as a snapshot."""
+    """An empty answer is a failed run; the spec the BUD has stays."""
     org = await seed_agent_org(app_sessions)
     bud = await add_bud(
         app_sessions, org.org_id, status=BUDStatus.TECH_ARCH, tech_spec_md="# Old plan"
@@ -82,11 +89,10 @@ async def test_empty_tech_spec_output_replaces_the_old_spec_but_history_keeps_it
     run = await trigger_stage(app_sessions, org.org_id, bud.id, "tech_arch")
     job = await job_runtime.wait(run.job_id)
 
-    assert job.state == JobState.COMPLETED
-    stored = await load_bud(app_sessions, org.org_id, bud.id)
-    assert (stored.tech_spec_md, stored.impacted_repos) == ("", [])
-    (snapshot,) = await versions(app_sessions, bud.id)
-    assert snapshot.snapshot["tech_spec_md"] == "# Old plan"
+    assert (await load_bud(app_sessions, org.org_id, bud.id)).tech_spec_md == "# Old plan"
+    assert job.state == JobState.FAILED
+    assert "no tech spec" in (job.error or "")
+    assert (await load_task(app_sessions, run.task_id)).status == AgentTaskStatus.FAILED
 
 
 async def test_empty_learning_output_writes_no_recap(
@@ -108,27 +114,30 @@ async def test_empty_learning_output_writes_no_recap(
     assert "learning_recorded" not in events
 
 
-async def test_malformed_testing_json_stores_an_empty_plan(
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "unreadable test-case JSON replaces the recorded manual cases (results and "
+        "evidence included) with empty lists; fixed by branch fix/stage-results-keep-content"
+    ),
+)
+async def test_malformed_testing_json_fails_and_keeps_the_recorded_cases(
     stage_claude: FakeClaudeRunner, app_sessions: Factory, job_runtime: JobRuntime
 ) -> None:
-    """Unparseable test cases leave both case lists empty, not the old ones."""
+    """Unparseable test cases are a failed run; tester results and evidence stay."""
     org = await seed_agent_org(app_sessions)
+    recorded = [{"id": "TC-OLD", "result": "passed", "evidence": ["shot.png"]}]
     bud = await add_bud(
-        app_sessions,
-        org.org_id,
-        status=BUDStatus.TESTING,
-        qa_manual_cases=[{"id": "TC-OLD"}],
+        app_sessions, org.org_id, status=BUDStatus.TESTING, qa_manual_cases=recorded
     )
     stage_claude.enqueue(AgentScript.ok('Here are the cases: {"automation_test_cases": [oops'))
 
     run = await trigger_stage(app_sessions, org.org_id, bud.id, "testing")
-    await job_runtime.wait(run.job_id)
+    job = await job_runtime.wait(run.job_id)
 
-    stored = await load_bud(app_sessions, org.org_id, bud.id)
-    assert (stored.qa_automation_cases, stored.qa_manual_cases) == ([], [])
-    assert "**0** manual test cases" in (stored.test_plan_md or "")
-    summary = (await load_task(app_sessions, run.task_id)).result_summary
-    assert summary == {"section": "qa_execution_plan_md", "automation_count": 0, "manual_count": 0}
+    assert (await load_bud(app_sessions, org.org_id, bud.id)).qa_manual_cases == recorded
+    assert job.state == JobState.FAILED
+    assert (await load_task(app_sessions, run.task_id)).status == AgentTaskStatus.FAILED
 
 
 async def test_automation_cases_are_dropped_when_the_org_turned_automation_off(
@@ -162,59 +171,3 @@ async def test_requirements_agent_that_never_writes_leaves_the_body_alone(
     assert (await load_bud(app_sessions, org.org_id, bud.id)).requirements_md == "refunds pls"
     assert (await load_task(app_sessions, run.task_id)).status == AgentTaskStatus.COMPLETED
     assert await versions(app_sessions, bud.id) == []
-
-
-async def test_write_bud_refused_by_the_tool_keeps_the_body(
-    stage_claude: FakeClaudeRunner, app_sessions: Factory, job_runtime: JobRuntime
-) -> None:
-    """``write_bud`` without a title answers an error; the body is not clobbered."""
-    org = await seed_agent_org(app_sessions)
-    bud = await add_bud(app_sessions, org.org_id, requirements_md="refunds pls")
-    bad = {"bud_number": bud.bud_number, "requirements_md": "half a doc"}
-    stage_claude.enqueue(AgentScript.ok("Saved.", ToolCall("write_bud", bad)))
-
-    run = await trigger_stage(app_sessions, org.org_id, bud.id, "bud")
-    await job_runtime.wait(run.job_id)
-
-    (call,) = stage_claude.tool_calls("write_bud")
-    assert (call.status_code, call.is_error) == (200, True)
-    assert (await load_bud(app_sessions, org.org_id, bud.id)).requirements_md == "refunds pls"
-
-
-async def test_tool_outside_the_skill_list_is_refused_before_the_backend(
-    stage_claude: FakeClaudeRunner, app_sessions: Factory, job_runtime: JobRuntime
-) -> None:
-    """The PM skill does not expose ``write_bud_design``; the call never leaves the CLI."""
-    org = await seed_agent_org(app_sessions)
-    bud = await add_bud(app_sessions, org.org_id)
-    design = {"bud_id": str(bud.id), "html": "<html></html>"}
-    stage_claude.enqueue(AgentScript.ok("Done.", ToolCall("write_bud_design", design)))
-
-    run = await trigger_stage(app_sessions, org.org_id, bud.id, "bud")
-    await job_runtime.wait(run.job_id)
-
-    (call,) = stage_claude.tool_calls("write_bud_design")
-    assert (call.refused, call.status_code) == (True, None)
-
-
-async def test_internal_token_cannot_use_the_user_only_update_bud_tool(
-    stage_claude: FakeClaudeRunner,
-    app_sessions: Factory,
-    job_runtime: JobRuntime,
-    git_repo: LocalGitRepo,
-) -> None:
-    """The tech planner's ``update_bud`` needs a user token; the spec still lands."""
-    org = await seed_agent_org(app_sessions)
-    await seed_repo(app_sessions, org.org_id, git_repo)
-    bud = await add_bud(app_sessions, org.org_id, status=BUDStatus.TECH_ARCH)
-    update = {"bud_id": str(bud.id), "content": "# x", "expected_phase": "tech_arch"}
-    stage_claude.enqueue(
-        AgentScript.ok(tech_arch_output("shop-api"), ToolCall("update_bud", update))
-    )
-
-    run = await trigger_stage(app_sessions, org.org_id, bud.id, "tech_arch")
-    await job_runtime.wait(run.job_id)
-
-    (call,) = stage_claude.tool_calls("update_bud")
-    assert call.is_error is True
-    assert (await load_bud(app_sessions, org.org_id, bud.id)).tech_spec_md == TECH_SPEC

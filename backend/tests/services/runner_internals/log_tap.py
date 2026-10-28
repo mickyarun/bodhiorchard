@@ -20,6 +20,12 @@ longer sees it, and whether it was used first depends on test order. The
 tap sidesteps that: it replaces the module-level ``logger`` of each listed
 module with a recorder for one test, so every event and every keyword those
 modules log is captured whatever ran before.
+
+The tap only covers the listed modules. Tests pair it with pytest's stdlib
+capture (``caplog``) and stream capture (``capsys``), which see whatever the
+rest of the app logs through structlog's stdlib or print loggers, and assert
+the secret is in none of the three. ``claude_provider`` and
+``subprocess_env`` sit on the path too but log nothing.
 """
 
 from __future__ import annotations
@@ -37,11 +43,14 @@ from app.services import (
     agent_activity_logger,
     ai_runner,
     bud_agent_handler,
+    bud_agent_retry,
     claude_env,
     claude_runner,
     job_queue,
+    job_utils,
+    notification_service,
 )
-from app.services.ai_runner import capability_gate
+from app.services.ai_runner import capability_gate, cli_exec
 
 # Every credential variable ``claude_env`` manages, across providers.
 CRED_VARS = (
@@ -58,11 +67,15 @@ CREDENTIAL_PATH: tuple[ModuleType, ...] = (
     agent_activity_logger,
     ai_runner,
     bud_agent_handler,
+    bud_agent_retry,
     capability_gate,
     claude_env,
     claude_runner,
+    cli_exec,
     encryption,
     job_queue,
+    job_utils,
+    notification_service,
 )
 
 
@@ -103,3 +116,27 @@ class _Recorder:
             self._tap.records.append({**record, **keywords})
 
         return log
+
+
+def everything_logged(
+    tap: LogTap, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> str:
+    """The tapped records, the stdlib log records and the captured streams, as one text."""
+    streams = capsys.readouterr()
+    return "\n".join([tap.dump(), caplog.text, streams.out, streams.err])
+
+
+def reset_cred_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unset every credential var for one test and forget earlier injections.
+
+    ``setenv`` before ``delenv`` makes teardown restore (or remove) each var
+    even when the code under test writes ``os.environ`` directly. The
+    ``claude_env`` bookkeeping of what the app injected is emptied too (it
+    exists once the host-mode fix lands; ``raising=False`` tolerates its
+    absence).
+    """
+    for var in CRED_VARS:
+        monkeypatch.setenv(var, "placeholder")
+        monkeypatch.delenv(var)
+    for name in ("_app_left", "_host_value"):
+        monkeypatch.setattr(claude_env, name, {}, raising=False)

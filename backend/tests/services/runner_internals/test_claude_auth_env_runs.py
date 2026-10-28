@@ -21,6 +21,7 @@ is the environment the child process was handed after the guard's filter.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any, cast
@@ -39,7 +40,7 @@ from app.services.claude_env import (
 from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
 from tests.fakes.claude_runner import FakeClaudeRunner
 from tests.fakes.claude_script import AgentScript
-from tests.services.runner_internals.log_tap import LogTap
+from tests.services.runner_internals.log_tap import LogTap, everything_logged
 
 API_KEY = "sk-ant-api03-runner-internals-secret"
 OAUTH = "sk-ant-oat01-runner-internals-token"
@@ -65,8 +66,11 @@ async def test_api_key_mode_reaches_the_cli_and_no_log_line(
     clean_cred_env: LogTap,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The child gets the key and none of the backend's own secrets; logs never see it."""
+    """The child gets the key and none of the backend's own secrets; no captured log has it."""
+    caplog.set_level(logging.DEBUG)
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:dbpass@db/app")
     apply_claude_auth_to_env(_org("api_key", API_KEY))
 
@@ -78,13 +82,18 @@ async def test_api_key_mode_reaches_the_cli_and_no_log_line(
     assert not any(API_KEY in arg for arg in fake_claude.runs[0].argv)
     events = clean_cred_env.events()
     assert {"ai_env_credential_applied", "claude_run_start", "claude_run_complete"} <= set(events)
-    assert API_KEY not in clean_cred_env.dump()
+    assert API_KEY not in everything_logged(clean_cred_env, caplog, capsys)
 
 
 async def test_switching_to_subscription_swaps_the_credential_between_runs(
-    fake_claude: FakeClaudeRunner, clean_cred_env: LogTap, tmp_path: Path
+    fake_claude: FakeClaudeRunner,
+    clean_cred_env: LogTap,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """api_key → subscription: the second run sees only the OAuth token."""
+    caplog.set_level(logging.DEBUG)
     apply_claude_auth_to_env(_org("api_key", API_KEY))
     first = await _run(fake_claude, tmp_path)
     apply_claude_auth_to_env(_org("subscription", OAUTH))
@@ -98,12 +107,13 @@ async def test_switching_to_subscription_swaps_the_credential_between_runs(
         None,
         OAUTH,
     )
-    dump = clean_cred_env.dump()
-    assert API_KEY not in dump and OAUTH not in dump
+    logged = everything_logged(clean_cred_env, caplog, capsys)
+    assert API_KEY not in logged and OAUTH not in logged
 
 
+@pytest.mark.usefixtures("clean_cred_env")
 async def test_switching_provider_clears_the_claude_key_and_hides_the_new_one(
-    fake_claude: FakeClaudeRunner, clean_cred_env: LogTap, tmp_path: Path
+    fake_claude: FakeClaudeRunner, tmp_path: Path
 ) -> None:
     """Claude → Codex: the Anthropic key is gone and the OpenAI key never reaches ``claude``."""
     apply_claude_auth_to_env(_org("api_key", API_KEY))

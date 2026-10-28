@@ -38,7 +38,7 @@ from tests.fakes.fixtures_db import app_sessions, mcp_claude
 from tests.fakes.seed import Factory
 from tests.integration.runner_internals.runtime_support import JobRuntime
 from tests.integration.runner_internals.stage_support import ESTIMATE_MARKER
-from tests.services.runner_internals.log_tap import CRED_VARS, CREDENTIAL_PATH, LogTap
+from tests.services.runner_internals.log_tap import CREDENTIAL_PATH, LogTap, reset_cred_env
 
 __all__ = [
     "app_sessions",
@@ -71,11 +71,7 @@ def stage_claude(mcp_claude: FakeClaudeRunner, app_sessions: Factory) -> FakeCla
 @pytest.fixture
 def cred_tap(monkeypatch: pytest.MonkeyPatch) -> LogTap:
     """Unset the credential env vars (restored after) and tap the credential-path loggers."""
-    for var in CRED_VARS:
-        # setenv first so teardown restores (or removes) the var even when the
-        # code under test sets it directly in ``os.environ``.
-        monkeypatch.setenv(var, "placeholder")
-        monkeypatch.delenv(var)
+    reset_cred_env(monkeypatch)
     tap = LogTap()
     tap.install(monkeypatch, *CREDENTIAL_PATH, settings_claude)
     return tap

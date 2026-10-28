@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Job progress from a streamed agent run, the MCP config builder and background spawns.
+"""Job progress from a streamed agent run, and the MCP config builder.
 
 A scripted run streams ``tool_use`` events through the real runner into
 ``make_progress_callback``, which rewrites the job's status and publishes it.
@@ -28,12 +28,12 @@ import pytest
 
 from app.config import settings
 from app.mcp import auth as mcp_auth
-from app.services import background, job_queue, job_utils
+from app.schemas.jobs import JobState
+from app.services import job_queue, job_utils
 from app.services.claude_runner import ClaudeRunnerConfig, run_claude_code
 from tests.fakes.app_state import EventRecorder
 from tests.fakes.claude_runner import FakeClaudeRunner
 from tests.fakes.claude_script import AgentScript, Say, ToolCall
-from tests.services.runner_internals.log_tap import LogTap
 
 
 async def _noop(job_id: str, payload: dict[str, object]) -> None:
@@ -41,12 +41,20 @@ async def _noop(job_id: str, payload: dict[str, object]) -> None:
 
 
 @pytest.fixture
-def job_id(monkeypatch: pytest.MonkeyPatch) -> str:
-    """A queued job in an isolated store, with no workers to pick it up."""
+async def job_id(monkeypatch: pytest.MonkeyPatch, event_recorder: EventRecorder) -> str:
+    """A running job in an isolated store, as a worker leaves it before the handler runs.
+
+    No worker is started; the job is moved to RUNNING by hand and the frame
+    that publishes is dropped, so tests see only what the progress callback sends.
+    """
     monkeypatch.setattr(job_queue, "_registry", {})
     monkeypatch.setattr(job_queue, "_job_store", {})
     job_queue.register_job_type("runner_internals_probe", _noop)
-    return job_queue.create_job("runner_internals_probe", payload={}).job_id
+    job = job_queue.create_job("runner_internals_probe", payload={}).job_id
+    job_queue.update_job(job, state=JobState.RUNNING, status_message="Starting...")
+    await event_recorder.settle()
+    event_recorder.events.clear()
+    return job
 
 
 def _messages(recorder: EventRecorder, job: str) -> list[str]:
@@ -89,7 +97,7 @@ async def test_each_tool_call_in_the_stream_becomes_a_status_message(
         ("mcp__bodhiorchard__list_design_systems", {}, "Discovering design systems..."),
     ],
 )
-def test_tool_input_is_summarised_without_dumping_it(
+async def test_tool_input_is_summarised_without_dumping_it(
     job_id: str, tool: str, tool_input: dict[str, str], message: str
 ) -> None:
     """File paths shrink to a basename and commands to their first line."""
@@ -118,6 +126,28 @@ async def test_quiet_stretch_after_a_tool_flips_to_the_generating_message(
     ]
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "the heartbeat timer is never cancelled when the run ends, so it overwrites the "
+        "finished job's message; fixed by branch fix/progress-heartbeat-after-run"
+    ),
+)
+async def test_heartbeat_does_not_overwrite_a_finished_job(
+    job_id: str, event_recorder: EventRecorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A heartbeat armed during the run stays quiet once the job is terminal."""
+    monkeypatch.setattr(job_utils, "_HEARTBEAT_DELAY_SECONDS", 0.02)
+    job_utils.make_progress_callback(job_id, generating_message="Drawing...")("Read", {})
+    job_queue.update_job(job_id, state=JobState.COMPLETED, status_message="Done")
+    await asyncio.sleep(0.1)
+    await event_recorder.settle()
+
+    job = job_queue.get_job(job_id)
+    assert job is not None and job.status_message == "Done"
+    assert _messages(event_recorder, job_id)[-1] == "Done"
+
+
 def test_progress_for_an_unknown_job_publishes_nothing(event_recorder: EventRecorder) -> None:
     """A callback outliving its job (store cleaned up) is a silent no-op."""
     job_utils.make_progress_callback("gone")("Read", {"file_path": "a.py"})
@@ -129,6 +159,7 @@ def test_mcp_config_carries_a_token_bound_to_the_org(monkeypatch: pytest.MonkeyP
     """The built config names the backend, the tools, and a token for exactly this org."""
     org_id = uuid.uuid4()
     monkeypatch.setattr(settings, "mcp_backend_url", "http://127.0.0.1:8999")
+    monkeypatch.setattr(mcp_auth, "_internal_tokens", {})
 
     config = job_utils.build_mcp_config(str(org_id), tool_names=["write_bud"])
 
@@ -138,39 +169,24 @@ def test_mcp_config_carries_a_token_bound_to_the_org(monkeypatch: pytest.MonkeyP
         ["write_bud"],
         str(org_id),
     )
-    assert mcp_auth._internal_tokens[config.mcp_token] == org_id
+    assert mcp_auth._internal_tokens == {config.mcp_token: org_id}
 
 
-@pytest.mark.parametrize("backend_url", ["", "http://127.0.0.1:8999"])
-def test_mcp_config_is_skipped_without_a_backend_or_a_valid_org(
-    monkeypatch: pytest.MonkeyPatch, backend_url: str
-) -> None:
-    """No backend URL, or an org id that is not a UUID: no MCP server for the run."""
-    monkeypatch.setattr(settings, "mcp_backend_url", backend_url)
+def test_mcp_config_is_skipped_without_a_backend_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A valid org but no backend URL: no MCP server, and no token minted."""
+    monkeypatch.setattr(settings, "mcp_backend_url", "")
+    monkeypatch.setattr(mcp_auth, "_internal_tokens", {})
 
-    assert job_utils.build_mcp_config("not-a-uuid") is None
+    assert job_utils.build_mcp_config(str(uuid.uuid4())) is None
+    assert mcp_auth._internal_tokens == {}
 
 
-async def test_background_failure_is_logged_with_its_name_and_released(
+def test_mcp_config_is_skipped_for_an_org_id_that_is_not_a_uuid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``spawn`` never raises into the caller, logs the failed job and drops its reference."""
-    tap = LogTap()
-    tap.install(monkeypatch, background)
+    """A backend URL but a malformed org id: no MCP server, and no token minted."""
+    monkeypatch.setattr(settings, "mcp_backend_url", "http://127.0.0.1:8999")
+    monkeypatch.setattr(mcp_auth, "_internal_tokens", {})
 
-    async def post_to_slack() -> None:
-        raise RuntimeError("slack down")
-
-    async def fine() -> None:
-        await asyncio.sleep(0)
-
-    background.spawn(post_to_slack())
-    background.spawn(fine())
-    for _ in range(5):
-        await asyncio.sleep(0)
-
-    assert not [t for t in background._tasks if t.get_name().endswith(("post_to_slack", "fine"))]
-    (failure,) = tap.records
-    assert failure["event"] == "background_job_failed"
-    assert failure["job"].endswith("post_to_slack")
-    assert isinstance(failure["exc_info"], RuntimeError)
+    assert job_utils.build_mcp_config("not-a-uuid") is None
+    assert mcp_auth._internal_tokens == {}

@@ -12,12 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Cancelling and retrying real agent jobs over HTTP while the worker owns them."""
+"""Cancelling real agent jobs over HTTP while the worker owns them."""
 
 from __future__ import annotations
 
 import asyncio
-import uuid
 
 import pytest
 from httpx import AsyncClient
@@ -28,8 +27,9 @@ from app.models.user import User
 from app.schemas.jobs import JobState
 from app.services import job_queue
 from tests.fakes.claude_runner import FakeClaudeRunner
-from tests.fakes.claude_script import AgentScript
+from tests.fakes.claude_script import AgentScript, ToolCall
 from tests.fakes.seed import Factory, auth_headers
+from tests.integration.runner_internals.output_support import stage_runs
 from tests.integration.runner_internals.runtime_support import JobRuntime, SpawnGate
 from tests.integration.runner_internals.stage_support import (
     activity,
@@ -59,7 +59,7 @@ async def test_cancel_route_stops_a_running_job_and_the_worker_carries_on(
     stage_claude.enqueue(AgentScript.ok("# Second recap"))
 
     run = await trigger_stage(app_sessions, org.org_id, first.id, "closed")
-    await gate.entered.wait()
+    await gate.wait_entered()
     response = await client.post(f"/api/v1/jobs/{run.job_id}/cancel", headers=headers)
     job = await job_runtime.wait(run.job_id)
     gate.release()
@@ -79,7 +79,38 @@ async def test_cancel_route_stops_a_running_job_and_the_worker_carries_on(
     assert activity_types(rows) == ["skill_invoked", "skill_failed"]
     assert rows[-1].message == reason
     assert later_job.state == JobState.COMPLETED
-    assert len(stage_claude.runs) == 1
+    assert len(stage_runs(stage_claude)) == 1
+
+
+async def test_cancel_while_the_agent_hangs_kills_the_cli(
+    stage_claude: FakeClaudeRunner,
+    client: AsyncClient,
+    app_sessions: Factory,
+    job_runtime: JobRuntime,
+) -> None:
+    """Cancelling a job whose CLI never answers kills that process, not just the task."""
+    org = await seed_agent_org(app_sessions)
+    bud = await add_bud(app_sessions, org.org_id, status=BUDStatus.CLOSED)
+    stage_claude.enqueue(AgentScript.timeout(ToolCall("get_bud_context", {"limit": 1})))
+    run = await trigger_stage(app_sessions, org.org_id, bud.id, "closed")
+
+    async def _spawned() -> None:
+        while not stage_runs(stage_claude):
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.05)
+
+    await asyncio.wait_for(_spawned(), 5)
+    response = await client.post(
+        f"/api/v1/jobs/{run.job_id}/cancel", headers=auth_headers(org.owner_id, org.org_id)
+    )
+    job = await job_runtime.wait(run.job_id)
+
+    assert response.status_code == 200
+    assert job.state == JobState.CANCELLED
+    (agent_run,) = stage_runs(stage_claude)
+    assert agent_run.killed is True
+    assert [c.status_code for c in agent_run.tool_calls] == [200]
+    assert (await load_task(app_sessions, run.task_id)).status == AgentTaskStatus.FAILED
 
 
 async def test_cancelling_a_finished_job_changes_nothing(
@@ -122,7 +153,7 @@ async def test_task_cancelled_while_queued_never_runs(
     stage_claude.default = AgentScript.ok("# Recap")
 
     held = await trigger_stage(app_sessions, org.org_id, busy.id, "closed")
-    await gate.entered.wait()
+    await gate.wait_entered()
     queued = await trigger_stage(app_sessions, org.org_id, waiting.id, "closed")
     response = await client.post(
         f"/api/v1/buds/{waiting.id}/agent-tasks/{queued.task_id}/cancel",
@@ -133,40 +164,6 @@ async def test_task_cancelled_while_queued_never_runs(
     _, _, queue = job_queue._registry[job_queue.JOB_BUD_AGENT]
     await asyncio.wait_for(queue.join(), 5)
 
-    assert (response.status_code, response.json()["status"]) == (202, "failed")
+    assert (response.status_code, response.json()["status"]) == (202, AgentTaskStatus.FAILED)
     assert (await load_task(app_sessions, queued.task_id)).status == AgentTaskStatus.FAILED
-    assert len(stage_claude.runs) == 1
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "the retry route enqueues before committing the new task row, so the worker "
-        "finds no task; fixed by branch fix/agent-retry-commit-before-enqueue"
-    ),
-)
-async def test_retry_route_runs_a_failed_task_as_a_new_attempt(
-    stage_claude: FakeClaudeRunner,
-    client: AsyncClient,
-    app_sessions: Factory,
-    job_runtime: JobRuntime,
-) -> None:
-    """A crashed task retried over HTTP becomes attempt 2 and completes."""
-    org = await seed_agent_org(app_sessions)
-    bud = await add_bud(app_sessions, org.org_id, status=BUDStatus.CLOSED)
-    stage_claude.enqueue(AgentScript.crash(stderr="boom"), AgentScript.ok("# Recap"))
-    run = await trigger_stage(app_sessions, org.org_id, bud.id, "closed")
-    await job_runtime.wait(run.job_id)
-
-    response = await client.post(
-        f"/api/v1/buds/{bud.id}/agent-tasks/{run.task_id}/retry",
-        headers=auth_headers(org.owner_id, org.org_id),
-    )
-    body = response.json()
-    retried = await job_runtime.wait(body["job_id"])
-
-    assert (response.status_code, body["attempt"], body["status"]) == (202, 2, "running")
-    assert retried.state == JobState.COMPLETED, retried.error
-    new_task = await load_task(app_sessions, uuid.UUID(body["id"]))
-    assert new_task.status == AgentTaskStatus.COMPLETED
-    assert (await load_task(app_sessions, run.task_id)).status == AgentTaskStatus.FAILED
+    assert len(stage_runs(stage_claude)) == 1

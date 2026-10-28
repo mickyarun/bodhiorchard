@@ -34,6 +34,7 @@ from app.services import job_queue
 from app.services.bud_agent_handler import handle_bud_agent_job
 from app.services.job_agents import handle_triage_job
 from app.services.job_design import handle_design_agent_job
+from tests.fakes.app_state import EventRecorder
 from tests.fakes.claude_process import FakeProcess
 from tests.fakes.claude_runner import FakeClaudeRunner
 
@@ -78,15 +79,6 @@ class JobRuntime:
 
         return await asyncio.wait_for(_poll(), timeout)
 
-    async def wait_running(self, job_id: str, timeout: float = 5.0) -> None:
-        """Poll until a handler task for ``job_id`` is in flight."""
-
-        async def _poll() -> None:
-            while not job_queue.is_job_running(job_id):
-                await asyncio.sleep(0.01)
-
-        await asyncio.wait_for(_poll(), timeout)
-
 
 class SpawnGate:
     """Hold every scripted ``claude`` spawn until :meth:`release` is called."""
@@ -103,6 +95,24 @@ class SpawnGate:
 
         monkeypatch.setattr(fake, "spawn", gated)
 
+    async def wait_entered(self, timeout: float = 5.0) -> None:
+        """Wait (bounded) until a spawn is being held."""
+        await asyncio.wait_for(self.entered.wait(), timeout)
+
     def release(self) -> None:
         """Let held and future spawns through."""
         self._open.set()
+
+
+async def wait_for_event(
+    recorder: EventRecorder, topic: str, timeout: float = 5.0
+) -> list[dict[str, Any]]:
+    """Wait (bounded) until ``topic`` has been published; return its payloads."""
+
+    async def _poll() -> list[dict[str, Any]]:
+        while not recorder.payloads(topic):
+            await recorder.settle()
+            await asyncio.sleep(0.01)
+        return recorder.payloads(topic)
+
+    return await asyncio.wait_for(_poll(), timeout)

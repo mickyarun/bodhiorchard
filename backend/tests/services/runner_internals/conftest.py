@@ -19,7 +19,7 @@ from __future__ import annotations
 import pytest
 
 from tests.fakes.fixtures import event_recorder, external_guard, fake_claude, fake_embeddings
-from tests.services.runner_internals.log_tap import CRED_VARS, LogTap
+from tests.services.runner_internals.log_tap import LogTap, reset_cred_env
 
 __all__ = ["clean_cred_env", "event_recorder", "external_guard", "fake_claude", "fake_embeddings"]
 
@@ -27,11 +27,7 @@ __all__ = ["clean_cred_env", "event_recorder", "external_guard", "fake_claude", 
 @pytest.fixture
 def clean_cred_env(monkeypatch: pytest.MonkeyPatch) -> LogTap:
     """Unset the credential vars (restored after the test) and tap the credential loggers."""
-    for var in CRED_VARS:
-        # setenv first so teardown restores (or removes) the var even when the
-        # code under test sets it directly in ``os.environ``.
-        monkeypatch.setenv(var, "placeholder")
-        monkeypatch.delenv(var)
+    reset_cred_env(monkeypatch)
     tap = LogTap()
     tap.install(monkeypatch)
     return tap

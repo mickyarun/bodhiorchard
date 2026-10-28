@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pytest
@@ -26,9 +27,10 @@ from app.repositories.organization import OrganizationRepository
 from tests.fakes.claude_runner import FakeClaudeRunner
 from tests.fakes.claude_script import AgentScript
 from tests.fakes.seed import Factory, SeededOrg, auth_headers
+from tests.integration.runner_internals.output_support import stage_runs
 from tests.integration.runner_internals.runtime_support import JobRuntime
 from tests.integration.runner_internals.stage_support import add_bud, seed_agent_org, trigger_stage
-from tests.services.runner_internals.log_tap import LogTap
+from tests.services.runner_internals.log_tap import LogTap, everything_logged
 
 pytestmark = pytest.mark.integration
 
@@ -54,7 +56,7 @@ async def _agent_env(
     fake.enqueue(AgentScript.ok("# Recap"))
     run = await trigger_stage(factory, org.org_id, bud.id, "closed")
     await runtime.wait(run.job_id)
-    return fake.runs[-1].env
+    return stage_runs(fake)[-1].env
 
 
 async def test_api_key_saved_in_settings_reaches_the_job_but_no_log_or_column(
@@ -63,8 +65,11 @@ async def test_api_key_saved_in_settings_reaches_the_job_but_no_log_or_column(
     app_sessions: Factory,
     job_runtime: JobRuntime,
     cred_tap: LogTap,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The key is stored encrypted, handed to the CLI, and absent from every log record."""
+    """The key is stored encrypted, handed to the CLI, and in no captured log output."""
+    caplog.set_level(logging.DEBUG)
     org = await seed_agent_org(app_sessions)
 
     await _save(client, org, auth_mode="api_key", api_key=API_KEY)
@@ -80,7 +85,10 @@ async def test_api_key_saved_in_settings_reaches_the_job_but_no_log_or_column(
     events = set(cred_tap.events())
     assert {"ai_settings_updated", "ai_env_credential_applied", "claude_run_start"} <= events
     assert {"bud_agent_phase", "job_created"} <= events
-    assert API_KEY not in cred_tap.dump()
+    logged = everything_logged(cred_tap, caplog, capsys)
+    # A module outside the tap (the learning result handler) is captured too.
+    assert "learning_result_metrics_missing" in logged
+    assert API_KEY not in logged
 
 
 async def test_switching_to_subscription_hands_the_next_job_only_the_token(
@@ -89,8 +97,11 @@ async def test_switching_to_subscription_hands_the_next_job_only_the_token(
     app_sessions: Factory,
     job_runtime: JobRuntime,
     cred_tap: LogTap,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """api_key → subscription over HTTP: the Anthropic key is cleared before the next run."""
+    caplog.set_level(logging.DEBUG)
     org = await seed_agent_org(app_sessions)
     await _save(client, org, auth_mode="api_key", api_key=API_KEY)
     first = await _agent_env(app_sessions, job_runtime, stage_claude, org)
@@ -103,8 +114,8 @@ async def test_switching_to_subscription_hands_the_next_job_only_the_token(
         None,
         OAUTH,
     )
-    dump = cred_tap.dump()
-    assert API_KEY not in dump and OAUTH not in dump
+    logged = everything_logged(cred_tap, caplog, capsys)
+    assert API_KEY not in logged and OAUTH not in logged
 
 
 @pytest.mark.xfail(
@@ -115,12 +126,12 @@ async def test_switching_to_subscription_hands_the_next_job_only_the_token(
         "fix/host-mode-drops-injected-key"
     ),
 )
+@pytest.mark.usefixtures("cred_tap")
 async def test_switching_back_to_host_stops_using_the_saved_key(
     stage_claude: FakeClaudeRunner,
     client: AsyncClient,
     app_sessions: Factory,
     job_runtime: JobRuntime,
-    cred_tap: LogTap,
 ) -> None:
     """After choosing host mode the CLI must fall back to the host's own login."""
     org = await seed_agent_org(app_sessions)

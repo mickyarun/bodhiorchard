@@ -131,8 +131,8 @@ async def test_owner_deactivated_without_revocation_loses_the_stream(
         assert user is not None
         user.is_active = False
         await db.commit()
-    seen_at_deactivation = checks.count
     done, _ = await asyncio.wait({stream}, timeout=0.5)
+    closed_by_itself = bool(done)
     if not done:
         # Still open: end it by removing the token so the test can finish.
         async with app_sessions() as db:
@@ -142,4 +142,5 @@ async def test_owner_deactivated_without_revocation_loses_the_stream(
             await db.commit()
     body = await closed_body(stream)
 
-    assert body.count(PING) <= seen_at_deactivation
+    assert closed_by_itself
+    assert body.count(PING) == checks.count - 1

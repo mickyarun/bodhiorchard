@@ -33,6 +33,7 @@ from app.repositories.notification import NotificationRepository
 from app.services.feature_lifecycle import create_planned_feature
 from tests.fakes.claude_runner import FakeClaudeRunner
 from tests.fakes.claude_script import AgentRun
+from tests.fakes.git_repo import LocalGitRepo, git
 from tests.fakes.seed import Factory
 from tests.integration.runner_internals.stage_support import ESTIMATE_MARKER
 
@@ -63,6 +64,11 @@ def qa_output(*, automation: int, manual: int) -> str:
         "test_execution_plan": "Run unit tests, then manual checks.",
     }
     return json.dumps(payload)
+
+
+def origin_url(repo: LocalGitRepo) -> str:
+    """The ``origin`` URL of the repo's working clone."""
+    return git(repo.work, "remote", "get-url", "origin")
 
 
 def stage_runs(fake: FakeClaudeRunner) -> list[AgentRun]:
