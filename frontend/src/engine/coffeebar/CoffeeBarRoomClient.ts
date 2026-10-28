@@ -26,7 +26,7 @@
  */
 import type { Room } from '@colyseus/sdk'
 import { ColyseusClient } from '../../multiplayer'
-import type { PlayerData } from '../../multiplayer/ColyseusClient'
+import type { PlayerData, RoomJoinUser } from '../../multiplayer/ColyseusClient'
 
 export interface CoffeeActionSnapshot {
   userId: string
@@ -68,10 +68,7 @@ export class CoffeeBarRoomClient {
   /** Remote-player snapshots, keyed by sessionId. Refreshed on every state sync. */
   private playersBySession = new Map<string, PlayerData>()
 
-  async connect(
-    orgId: string,
-    user: { userId: string; name: string; characterModel?: string },
-  ): Promise<void> {
+  async connect(orgId: string, user: RoomJoinUser): Promise<void> {
     const client = ColyseusClient.getInstance()
     this.room = await client.joinCoffeeBarRoom(orgId, user)
     this.room.onStateChange((state: unknown) => this.onStateChange(state as RawCoffeeState))

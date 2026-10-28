@@ -71,6 +71,8 @@ export interface CafeteriaVisitor {
   name: string
   characterModel: string | null
   orgId: string
+  /** The user's JWT; the room server takes the visitor's identity from it. */
+  token: string
 }
 
 export class CafeteriaManager {
@@ -177,6 +179,7 @@ export class CafeteriaManager {
         userId: visitor.userId,
         name: visitor.name,
         characterModel: visitor.characterModel ?? '',
+        token: visitor.token,
       })
       .catch((err) => console.warn('[CafeteriaManager] Multiplayer unavailable:', err))
   }
