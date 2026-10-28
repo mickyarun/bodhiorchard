@@ -44,6 +44,9 @@ class UserRead(BaseModel):
     slack_id: str | None = None
     github_username: str | None = None
     character_model: str | None = None
+    # As stored: a Slack CDN URL, or a root-relative path to a photo
+    # uploaded here (see ``services.avatars``). The browser loads either.
+    avatar_url: str | None = None
     created_at: datetime
     updated_at: datetime
 

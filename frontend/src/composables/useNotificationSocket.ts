@@ -21,10 +21,9 @@
  *
  * Accepts a *getter* (not a snapshot) so the subscription can
  * re-target when ``authStore.user.id`` hydrates after the host
- * component (NotificationBell) has already mounted. The host uses
- * ``v-show`` rather than ``v-if`` to keep the bell mounted across
- * the rail collapse — that means setup runs once at the very first
- * render, and the userId at that moment may be empty. Without the
+ * component (NotificationBell) has already mounted. Setup runs once
+ * when the bell first renders, and the userId at that moment may be
+ * empty. Without the
  * getter + watcher, the subscription would be wedged on
  * ``notifications:`` forever and WS pushes would never reach the
  * store; only ``fetchAll`` on tab refresh / visibility change
