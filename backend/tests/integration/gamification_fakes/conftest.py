@@ -23,11 +23,13 @@ from tests.fakes.fixtures import (
     http_router,
 )
 from tests.fakes.fixtures_db import app_sessions
+from tests.integration.gamification_fakes.log_tap import failure_log_tap
 
 __all__ = [
     "app_sessions",
     "event_recorder",
     "external_guard",
+    "failure_log_tap",
     "fake_claude",
     "fake_embeddings",
     "fake_slack",

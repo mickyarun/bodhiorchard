@@ -70,6 +70,18 @@ def _opened_for(slack: FakeSlack) -> list[str]:
     return sorted(str(call.args["users"]) for call in slack.calls_to("conversations.open"))
 
 
+def _delivered_to(slack: FakeSlack) -> set[str]:
+    """DM channels holding at least one delivered message."""
+    return {channel for channel in slack.threads if channel.startswith("D")}
+
+
+def _first_target(slack: FakeSlack, failure: str) -> str:
+    """The DM channel of the member whose Slack call was made to fail."""
+    if failure == "open-fails":
+        return f"D{slack.calls_to('conversations.open')[0].args['users']}"
+    return str(slack.calls_to("chat.postMessage")[0].args["channel"])
+
+
 async def test_opening_dms_every_reachable_member_with_the_prize(
     app_sessions: Factory, fake_slack: FakeSlack
 ) -> None:
@@ -100,8 +112,10 @@ async def test_a_slack_failure_never_stops_the_quiz_or_the_other_dms(
 
     assert [q.status for q in await quizzes(app_sessions, org_id)] == [QuizStatus.OPEN]
     assert _opened_for(fake_slack) == reachable
-    delivered = {m["ts"] for thread in fake_slack.threads.values() for m in thread}
-    assert len(delivered) == 1
+    everyone = {f"D{slack_id}" for slack_id in reachable}
+    others = everyone - {_first_target(fake_slack, failure)}
+    assert len(others) == 1
+    assert others <= _delivered_to(fake_slack) <= everyone
 
 
 async def test_an_org_without_a_slack_token_opens_silently(
@@ -128,6 +142,7 @@ async def test_several_quizzes_revealed_in_one_tick_send_one_reveal_dm_each(
     await _reveal_pass(org_id, SETTINGS, FIRE)
     await _reveal_pass(org_id, SETTINGS, FIRE + timedelta(minutes=1))
 
+    assert [q.status for q in await quizzes(app_sessions, org_id)] == [QuizStatus.REVEALED] * 3
     assert _opened_for(fake_slack) == reachable
     texts = fake_slack.posted_texts()
     assert len(texts) == 2

@@ -32,9 +32,8 @@ from httpx import AsyncClient
 from app.models.dev_activity import DevActivityLog
 from app.services import xp_service
 from tests.fakes.seed import Factory, auth_headers, seed_member, seed_org
+from tests.integration.gamification_fakes.frozen_clock import FrozenClock, install_clock
 from tests.integration.gamification_fakes.streak_support import (
-    FrozenClock,
-    install_clock,
     rewards,
     streak_row,
     tick,
@@ -84,10 +83,15 @@ async def test_local_midnight_east_of_utc_is_still_one_streak_day(
     assert await _streak_after(app_sessions, clock, late, early) == (1, 1)
 
 
-async def test_one_local_working_day_west_of_utc_can_count_as_two_streak_days(
+async def test_current_behaviour_one_pacific_working_day_counts_as_two_streak_days(
     app_sessions: Factory, clock: type[FrozenClock]
 ) -> None:
-    """09:00 and 17:30 Pacific on one local day fall either side of UTC midnight."""
+    """09:00 and 17:30 Pacific on one local day fall either side of UTC midnight.
+
+    This pins today's UTC-day rule, not the intended one: whether a streak day
+    should follow the member's or the org's local day is an open product
+    question. Change this test when that is decided.
+    """
     morning = datetime(2026, 3, 2, 9, 0, tzinfo=LOS_ANGELES)
     evening = datetime(2026, 3, 2, 17, 30, tzinfo=LOS_ANGELES)
 

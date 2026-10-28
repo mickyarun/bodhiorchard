@@ -27,7 +27,7 @@ from app.services.sp_developer import award_developer_sp_on_close
 from tests.fakes.claude_runner import FakeClaudeRunner
 from tests.fakes.claude_script import AgentScript
 from tests.fakes.seed import Factory, seed_member, seed_org
-from tests.integration.gamification_fakes.ledger_support import sp_ledger
+from tests.integration.gamification_fakes.ledger_support import sp_balance, sp_ledger
 from tests.integration.gamification_fakes.sp_support import (
     add_todo,
     new_bud,
@@ -75,6 +75,7 @@ async def test_the_judge_strips_a_rubber_stamp_review_but_pays_the_real_one(
     ledger = await sp_ledger(app_sessions, org.org_id)
     assert ledger[f"sp_review:5:{lead}"] == 0.25
     assert f"sp_review:5:{peer}" not in ledger
+    assert await sp_balance(app_sessions, org.org_id, peer) == 0.0
     assert peer_login in fake_claude.runs[0].prompt
 
 

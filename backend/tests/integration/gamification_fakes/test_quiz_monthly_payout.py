@@ -25,13 +25,17 @@ from app.repositories.organization import OrganizationRepository
 from app.services import quiz_monthly_rollup
 from app.services.quiz_monthly_rollup import finalize_org_month, sweep_once
 from tests.fakes.seed import Factory, seed_member, seed_org
-from tests.integration.gamification_fakes.ledger_support import sp_ledger, xp_event_count
+from tests.integration.gamification_fakes.frozen_clock import install_clock
+from tests.integration.gamification_fakes.ledger_support import (
+    assert_nobody_paid,
+    sp_ledger,
+    xp_event_count,
+)
 from tests.integration.gamification_fakes.quiz_fake_support import (
     deactivate,
     enable_quiz,
     seed_score,
 )
-from tests.integration.gamification_fakes.streak_support import install_clock
 
 pytestmark = pytest.mark.integration
 
@@ -114,7 +118,7 @@ async def test_no_payout_without_a_positive_score_or_a_prize(
         await seed_score(app_sessions, org_id, ana, FEB, points=points, correct=0)
 
     assert await finalize_org_month(org_id, period_month=FEB, amount=amount) == 0
-    assert await sp_ledger(app_sessions, org_id) == {}
+    await assert_nobody_paid(app_sessions, org_id)
 
 
 @pytest.mark.parametrize(
@@ -148,4 +152,4 @@ async def test_the_daily_sweep_pays_the_month_that_just_ended(
 
     ledger = await sp_ledger(app_sessions, org_id)
     assert ledger == {f"sp_quiz_monthly:{org_id}:{paid_month}:{ana}": 1.0}
-    assert await sp_ledger(app_sessions, disabled_id) == {}
+    await assert_nobody_paid(app_sessions, disabled_id)

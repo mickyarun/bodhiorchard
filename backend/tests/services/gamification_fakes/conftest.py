@@ -15,5 +15,6 @@
 """Gamification unit tests with the agent CLI faked; no database."""
 
 from tests.fakes.fixtures import external_guard, fake_claude, fake_embeddings
+from tests.integration.gamification_fakes.log_tap import failure_log_tap
 
-__all__ = ["external_guard", "fake_claude", "fake_embeddings"]
+__all__ = ["external_guard", "failure_log_tap", "fake_claude", "fake_embeddings"]

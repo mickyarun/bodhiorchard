@@ -27,7 +27,11 @@ from app.models.bug import BugStatus
 from app.services.sp_pm import award_pm_sp_on_close
 from app.services.sp_qa import award_qa_sp_on_close
 from tests.fakes.seed import Factory, seed_member, seed_org
-from tests.integration.gamification_fakes.ledger_support import sp_ledger
+from tests.integration.gamification_fakes.ledger_support import (
+    assert_nobody_paid,
+    org_sp_total,
+    sp_ledger,
+)
 from tests.integration.gamification_fakes.sp_support import (
     add_bugs,
     add_event,
@@ -74,7 +78,7 @@ async def test_bugs_at_the_budget_or_padded_with_rejects_earn_no_over_budget_cre
 
     await run_close_step(app_sessions, org.org_id, bud_id, _qa_close)
 
-    assert await sp_ledger(app_sessions, org.org_id) == {}
+    await assert_nobody_paid(app_sessions, org.org_id)
 
 
 async def test_qa_rules_skip_members_without_the_qa_role(app_sessions: Factory) -> None:
@@ -86,7 +90,7 @@ async def test_qa_rules_skip_members_without_the_qa_role(app_sessions: Factory) 
 
     await run_close_step(app_sessions, org.org_id, bud_id, _qa_close)
 
-    assert await sp_ledger(app_sessions, org.org_id) == {}
+    await assert_nobody_paid(app_sessions, org.org_id)
 
 
 async def test_a_custom_org_budget_decides_the_over_budget_credit(app_sessions: Factory) -> None:
@@ -138,8 +142,9 @@ async def test_the_pm_credit_tapers_with_the_overrun_and_techspec_needs_drift_at
 
     await run_close_step(app_sessions, org.org_id, bud_id, award_pm_sp_on_close)
 
-    ledger = await sp_ledger(app_sessions, org.org_id)
-    assert {ref.split(":")[0]: amount for ref, amount in ledger.items()} == expected
+    refs = {f"{rule}:15:{pm}": amount for rule, amount in expected.items()}
+    assert await sp_ledger(app_sessions, org.org_id) == refs
+    assert await org_sp_total(app_sessions, org.org_id) == sum(expected.values())
 
 
 @pytest.mark.parametrize("mover_role", ["developer", None], ids=["developer", "system"])
@@ -157,4 +162,4 @@ async def test_no_pm_credit_when_a_non_pm_or_the_system_moved_it_to_design(
 
     await run_close_step(app_sessions, org.org_id, bud_id, award_pm_sp_on_close)
 
-    assert await sp_ledger(app_sessions, org.org_id) == {}
+    await assert_nobody_paid(app_sessions, org.org_id)

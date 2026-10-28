@@ -12,27 +12,35 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Readers for the reward ledger: SP events, SP balances and the XP event count."""
+"""Readers for the reward ledger: SP events, SP balances and XP event counts."""
 
 from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models.developer_xp import DeveloperXP, RewardEvent, RewardType
 from tests.fakes.seed import Factory
 
 
 async def sp_ledger(factory: Factory, org_id: uuid.UUID) -> dict[str, float]:
-    """``source_ref -> amount`` for every SP reward event in the org."""
+    """``source_ref -> amount`` for every SP reward event in the org.
+
+    Every SP award is keyed by a ``source_ref``; an event without one would be
+    invisible here, so it fails the test instead of being dropped.
+    """
     async with factory() as db:
-        rows = await db.scalars(
-            select(RewardEvent).where(
-                RewardEvent.org_id == org_id, RewardEvent.type == RewardType.SP
+        rows = list(
+            await db.scalars(
+                select(RewardEvent).where(
+                    RewardEvent.org_id == org_id, RewardEvent.type == RewardType.SP
+                )
             )
         )
-        return {r.source_ref: float(r.amount) for r in rows if r.source_ref}
+    unkeyed = [r.source for r in rows if not r.source_ref]
+    assert not unkeyed, f"SP events without a source_ref: {unkeyed}"
+    return {str(r.source_ref): float(r.amount) for r in rows}
 
 
 async def sp_balance(factory: Factory, org_id: uuid.UUID, user_id: uuid.UUID) -> float:
@@ -49,9 +57,26 @@ async def sp_balance(factory: Factory, org_id: uuid.UUID, user_id: uuid.UUID) ->
 async def xp_event_count(factory: Factory, org_id: uuid.UUID) -> int:
     """How many XP reward events the org has; games must keep this at zero."""
     async with factory() as db:
-        rows = await db.scalars(
-            select(RewardEvent.id).where(
+        count = await db.scalar(
+            select(func.count(RewardEvent.id)).where(
                 RewardEvent.org_id == org_id, RewardEvent.type == RewardType.XP
             )
         )
-        return len(list(rows))
+        return int(count or 0)
+
+
+async def org_sp_total(factory: Factory, org_id: uuid.UUID) -> float:
+    """Sum of every member's SP balance in the org."""
+    async with factory() as db:
+        total = await db.scalar(
+            select(func.coalesce(func.sum(DeveloperXP.skill_points), 0)).where(
+                DeveloperXP.org_id == org_id
+            )
+        )
+        return float(total or 0)
+
+
+async def assert_nobody_paid(factory: Factory, org_id: uuid.UUID) -> None:
+    """No SP event was written and no member of the org holds any SP."""
+    assert await sp_ledger(factory, org_id) == {}
+    assert await org_sp_total(factory, org_id) == 0.0

@@ -27,9 +27,8 @@ import pytest
 
 from app.services import xp_service
 from tests.fakes.seed import Factory, seed_member, seed_org
+from tests.integration.gamification_fakes.frozen_clock import FrozenClock, install_clock
 from tests.integration.gamification_fakes.streak_support import (
-    FrozenClock,
-    install_clock,
     rewards,
     seed_streak,
     streak_row,

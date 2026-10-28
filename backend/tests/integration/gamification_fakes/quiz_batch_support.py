@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -26,7 +27,8 @@ from sqlalchemy import select
 
 from app.models.quiz_question import QuizQuestion
 from app.schemas.jobs import JobState
-from app.services import quiz_batch_generation
+from app.services import job_queue, quiz_batch_generation
+from app.services.job_handlers import setup_job_handlers
 from app.services.quiz_batch_generation import handle_quiz_batch_job
 from tests.fakes.seed import Factory
 
@@ -69,21 +71,43 @@ def batch(*questions: object) -> str:
     return json.dumps({"questions": list(questions)})
 
 
+@dataclass(frozen=True)
+class CreatedJob:
+    """One job the code under test enqueued."""
+
+    job_type: str
+    payload: dict[str, Any]
+
+
 @dataclass
 class JobRecorder:
-    """Every ``update_job`` the generation handler made, and every job it enqueued."""
+    """Every ``update_job`` the generation handler made, and every job it enqueued.
+
+    Each call is bound against the real ``job_queue`` signature, so a call the
+    real queue would reject fails here too, and the quiz job type must be
+    registered by the app's own ``setup_job_handlers``.
+    """
 
     updates: list[dict[str, Any]] = field(default_factory=list)
-    created: list[dict[str, Any]] = field(default_factory=list)
+    created: list[CreatedJob] = field(default_factory=list)
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Record instead of touching the in-memory job store."""
+        monkeypatch.setattr(job_queue, "_registry", {})
+        setup_job_handlers()
+        handler = job_queue._registry[job_queue.JOB_QUIZ_BATCH][0]
+        assert handler is handle_quiz_batch_job
+        update_sig = inspect.signature(job_queue.update_job)
+        create_sig = inspect.signature(job_queue.create_job)
 
-        def update(job_id: str, **changes: Any) -> None:
-            self.updates.append({"job_id": job_id, **changes})
+        def update(*args: Any, **kwargs: Any) -> None:
+            bound = update_sig.bind(*args, **kwargs)
+            self.updates.append(dict(bound.arguments))
 
-        def create(job_type: str, *, payload: dict[str, Any], **_: Any) -> None:
-            self.created.append({"job_type": job_type, **payload})
+        def create(*args: Any, **kwargs: Any) -> None:
+            bound = create_sig.bind(*args, **kwargs)
+            job = CreatedJob(bound.arguments["job_type"], bound.arguments["payload"])
+            self.created.append(job)
 
         monkeypatch.setattr(quiz_batch_generation, "update_job", update)
         monkeypatch.setattr(quiz_batch_generation, "create_job", create)

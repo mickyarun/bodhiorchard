@@ -31,7 +31,12 @@ from app.models.dev_activity import DevActivityLog
 from app.services.dev_quality_sp import award_quality_and_threshold_sp
 from app.services.xp_service import award_quality_bonus
 from tests.fakes.seed import Factory, seed_member, seed_org
-from tests.integration.gamification_fakes.ledger_support import sp_balance, sp_ledger
+from tests.integration.gamification_fakes.ledger_support import (
+    assert_nobody_paid,
+    org_sp_total,
+    sp_balance,
+    sp_ledger,
+)
 from tests.integration.gamification_fakes.sp_support import (
     CloseStep,
     add_bugs,
@@ -82,8 +87,9 @@ async def test_bonus_needs_bugs_within_budget_and_an_on_time_finish(
 
     await run_close_step(app_sessions, org_id, bud_id, _for(dev))
 
-    ledger = await sp_ledger(app_sessions, org_id)
-    assert {ref.split(":")[0]: amount for ref, amount in ledger.items()} == expected
+    refs = {f"{rule}:{BUD_NUMBER}:{dev}": amount for rule, amount in expected.items()}
+    assert await sp_ledger(app_sessions, org_id) == refs
+    assert await org_sp_total(app_sessions, org_id) == max(0.0, sum(expected.values()))
 
 
 async def test_production_and_rejected_bugs_do_not_eat_the_budget(app_sessions: Factory) -> None:
@@ -121,7 +127,7 @@ async def test_no_developers_means_no_bonus_and_no_penalty(app_sessions: Factory
 
     await run_close_step(app_sessions, org_id, bud_id, _for())
 
-    assert await sp_ledger(app_sessions, org_id) == {}
+    await assert_nobody_paid(app_sessions, org_id)
 
 
 async def _activity(

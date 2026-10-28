@@ -26,9 +26,9 @@ from app.repositories.quiz_score import QuizScoreRepository
 from app.services import quiz_scoring
 from app.services.quiz_scoring import QuizWindowClosedError, SubmitResult, submit_answer
 from tests.fakes.seed import Factory, seed_member, seed_org
+from tests.integration.gamification_fakes.frozen_clock import FrozenClock, install_clock
 from tests.integration.gamification_fakes.ledger_support import xp_event_count
 from tests.integration.gamification_fakes.quiz_fake_support import open_quiz
-from tests.integration.gamification_fakes.streak_support import FrozenClock, install_clock
 
 pytestmark = pytest.mark.integration
 

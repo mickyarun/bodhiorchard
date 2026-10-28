@@ -22,10 +22,11 @@ import pytest
 
 from app.models.quiz_question import QuizQuestionStatus as S
 from app.schemas.settings import QuizGameSettings
+from app.services.job_queue import JOB_QUIZ_BATCH
 from app.services.quiz_batch_generation import _topup_org
 from app.services.quiz_scheduler import _open_pass
 from tests.fakes.seed import Factory, seed_org
-from tests.integration.gamification_fakes.quiz_batch_support import JobRecorder
+from tests.integration.gamification_fakes.quiz_batch_support import CreatedJob, JobRecorder
 from tests.integration.gamification_fakes.quiz_fake_support import add_question, enable_quiz
 
 pytestmark = pytest.mark.integration
@@ -50,13 +51,15 @@ async def test_an_empty_pool_asks_for_a_full_week_plus_the_buffer(
     assert await _topup_org(org.org_id) == 7
 
     assert jobs.created == [
-        {
-            "job_type": "quiz_batch",
-            "org_id": str(org.org_id),
-            "count": 7,
-            "difficulty": "hard",
-            "enabled_types": ["scramble"],
-        }
+        CreatedJob(
+            JOB_QUIZ_BATCH,
+            {
+                "org_id": str(org.org_id),
+                "count": 7,
+                "difficulty": "hard",
+                "enabled_types": ["scramble"],
+            },
+        )
     ]
 
 
@@ -70,7 +73,7 @@ async def test_only_drafts_and_approved_count_toward_the_target(
             await add_question(app_sessions, org.org_id, status)
 
     assert await _topup_org(org.org_id) == 2
-    assert [job["count"] for job in jobs.created] == [2]
+    assert [job.payload["count"] for job in jobs.created] == [2]
 
 
 @pytest.mark.parametrize(
@@ -103,4 +106,4 @@ async def test_after_a_quiz_runs_the_next_top_up_replaces_the_question_it_used(
     await _open_pass(org.org_id, settings, datetime(2026, 3, 2, 10, 0, tzinfo=UTC))
 
     assert await _topup_org(org.org_id) == 1
-    assert [job["count"] for job in jobs.created] == [1]
+    assert [job.payload["count"] for job in jobs.created] == [1]

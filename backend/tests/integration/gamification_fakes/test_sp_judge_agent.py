@@ -31,7 +31,7 @@ from app.services.sp_developer import award_developer_sp_on_close
 from tests.fakes.claude_runner import FakeClaudeRunner
 from tests.fakes.claude_script import AgentScript
 from tests.fakes.seed import Factory, seed_member, seed_org
-from tests.integration.gamification_fakes.ledger_support import sp_ledger
+from tests.integration.gamification_fakes.ledger_support import sp_balance, sp_ledger
 from tests.integration.gamification_fakes.sp_support import (
     add_learning,
     add_todo,
@@ -106,6 +106,7 @@ async def test_a_todo_judged_trivial_earns_no_share_and_no_quality_bonus(
     assert _shipped(ledger, bud.ana) == 1.0
     assert ledger[f"sp_quality:{BUD_NUMBER}:{bud.ana}"] == 0.5
     assert not any(str(bud.ben) in ref for ref in ledger)
+    assert await sp_balance(app_sessions, bud.org_id, bud.ben) == 0.0
 
 
 async def test_out_of_range_weights_are_clamped_and_unknown_ids_ignored(

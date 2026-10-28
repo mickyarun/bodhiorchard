@@ -21,7 +21,11 @@ import pytest
 from app.services.sp_designer import award_designer_sp_on_close
 from app.services.sp_tech_arch import award_tech_arch_sp_on_close
 from tests.fakes.seed import Factory, seed_member, seed_org
-from tests.integration.gamification_fakes.ledger_support import sp_ledger
+from tests.integration.gamification_fakes.ledger_support import (
+    assert_nobody_paid,
+    org_sp_total,
+    sp_ledger,
+)
 from tests.integration.gamification_fakes.sp_support import (
     add_event,
     add_learning,
@@ -54,6 +58,7 @@ async def test_designer_pay_follows_the_complexity_tier_and_the_design_drift(
     if on_time_amount is not None:
         expected[f"sp_designer_ontime:21:{des}"] = on_time_amount
     assert await sp_ledger(app_sessions, org.org_id) == expected
+    assert await org_sp_total(app_sessions, org.org_id) == sum(expected.values())
 
 
 async def test_only_designers_are_paid_and_repeated_edits_pay_once(
@@ -92,6 +97,7 @@ async def test_tech_lead_is_paid_only_for_landing_tech_arch_within_estimate(
 
     expected = {f"sp_tl_techarch:23:{lead}": 0.25} if paid else {}
     assert await sp_ledger(app_sessions, org.org_id) == expected
+    assert await org_sp_total(app_sessions, org.org_id) == sum(expected.values())
 
 
 async def test_a_pm_moving_the_bud_to_development_earns_no_tech_lead_credit(
@@ -108,4 +114,4 @@ async def test_a_pm_moving_the_bud_to_development_earns_no_tech_lead_credit(
 
     await run_close_step(app_sessions, org.org_id, bud_id, award_tech_arch_sp_on_close)
 
-    assert await sp_ledger(app_sessions, org.org_id) == {}
+    await assert_nobody_paid(app_sessions, org.org_id)

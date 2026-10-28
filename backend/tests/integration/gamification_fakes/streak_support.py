@@ -12,45 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""A settable clock for one module's ``datetime``, and helpers to seed and read a streak."""
+"""Helpers to seed and read a member's activity streak."""
 
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, date, datetime, tzinfo
-from types import ModuleType
+from datetime import date
 
-import pytest
 from sqlalchemy import select
 
 from app.models.developer_xp import DeveloperXP, RewardEvent
 from app.services.xp_service import check_and_award_streak
 from tests.fakes.seed import Factory
-
-
-class FrozenClock:
-    """Stands in for a module's ``datetime``; ``instant`` is an aware UTC time."""
-
-    instant = datetime(2026, 3, 2, 12, 0, tzinfo=UTC)
-
-    @classmethod
-    def now(cls, tz: tzinfo | None = None) -> datetime:
-        """The frozen instant, in ``tz`` like the real ``datetime.now``."""
-        return cls.instant.astimezone(tz) if tz is not None else cls.instant
-
-    @classmethod
-    def set_local(cls, local: datetime) -> None:
-        """Move the clock to an aware local wall time (any zone)."""
-        cls.instant = local.astimezone(UTC)
-
-
-def install_clock(
-    monkeypatch: pytest.MonkeyPatch, module: ModuleType, start: datetime
-) -> type[FrozenClock]:
-    """Swap ``module.datetime`` for the clock, starting at ``start``; both undone at teardown."""
-    monkeypatch.setattr(FrozenClock, "instant", start.astimezone(UTC))
-    monkeypatch.setattr(module, "datetime", FrozenClock)
-    return FrozenClock
 
 
 async def seed_streak(
