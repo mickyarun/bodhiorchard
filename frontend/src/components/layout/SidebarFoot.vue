@@ -15,10 +15,11 @@
  -->
 
 <!-- Bottom of the sidebar: the theme switch and, on wide screens, the
-     collapse / expand toggle. Stacked when the rail is collapsed. -->
+     collapse / expand toggle. One row in every state, so the rows above
+     it don't move when a rail opens under the pointer. -->
 <template>
-  <div class="sidebar-foot" :class="{ 'sidebar-foot--collapsed': collapsed }">
-    <ThemeToggleButton />
+  <div class="sidebar-foot">
+    <ThemeToggleButton :size="canRail ? 'small' : 'default'" />
     <v-btn
       v-if="canRail"
       :icon="rail ? 'mdi-chevron-right' : 'mdi-chevron-left'"
@@ -37,8 +38,6 @@ import { computed } from 'vue'
 import ThemeToggleButton from './ThemeToggleButton.vue'
 
 const props = defineProps<{
-  /** The rail as drawn (a rail nobody is hovering). */
-  collapsed: boolean
   /** The rail preference, which the toggle flips. */
   rail: boolean
   /** False on phones, where the sidebar is an overlay with no rail. */
@@ -51,13 +50,11 @@ const toggleLabel = computed(() => (props.rail ? 'Expand sidebar' : 'Collapse si
 
 <style scoped>
 .sidebar-foot {
+  /* Same spacing in every state: both buttons stay where the pointer
+     found them when a rail opens under it. */
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 4px 8px;
-}
-.sidebar-foot--collapsed {
-  flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+  padding: 4px;
 }
 </style>

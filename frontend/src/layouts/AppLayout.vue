@@ -37,6 +37,8 @@
       <SidebarHead v-if="!compact" :collapsed="collapsed" />
 
       <v-list density="compact" nav class="px-2">
+        <!-- Phones have the bell in the top bar. -->
+        <NotificationBell v-if="!compact && authStore.user?.id" :user-id="authStore.user.id" variant="nav" />
         <EngineeringNav v-if="canAccessEngineering" :rail="collapsed" />
         <PeopleNav :rail="collapsed" :show-heading="canAccessEngineering" />
       </v-list>
@@ -57,7 +59,7 @@
         <UserMenu :rail="collapsed" />
 
         <v-divider />
-        <SidebarFoot :collapsed="collapsed" :rail="rail" :can-rail="!compact" @toggle-rail="toggleRail" />
+        <SidebarFoot :rail="rail" :can-rail="!compact" @toggle-rail="toggleRail" />
       </template>
     </v-navigation-drawer>
 
@@ -89,6 +91,7 @@ import { useAuthStore } from '@/stores/auth'
 import EngineeringNav from '@/components/layout/EngineeringNav.vue'
 import EngineeringOverlays from '@/components/layout/EngineeringOverlays.vue'
 import MobileTopBar from '@/components/layout/MobileTopBar.vue'
+import NotificationBell from '@/components/common/NotificationBell.vue'
 import PeopleNav from '@/components/layout/PeopleNav.vue'
 import SettingsNav from '@/components/layout/SettingsNav.vue'
 import SidebarFoot from '@/components/layout/SidebarFoot.vue'

@@ -43,6 +43,9 @@ export function useAppDrawer() {
   const collapsed = computed(() => rail.value && !hovered.value)
 
   watch(railPreference, v => localStorage.setItem(RAIL_KEY, String(v)))
+  // Vuetify stops reporting hover while the drawer is an overlay, so a
+  // hover from before a switch to phone width can't be trusted after it.
+  watch(compact, () => { hovered.value = false })
   watch(() => route.fullPath, () => { overlayOpen.value = false })
 
   function toggleRail(): void {

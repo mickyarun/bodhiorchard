@@ -20,10 +20,12 @@
 <div class="px-3 pb-3" :class="{ 'd-flex justify-center': rail }">
   <v-menu location="top start" :offset="[0, 4]">
     <template #activator="{ props }">
-      <div
+      <button
         v-bind="props"
-        class="user-menu d-flex align-center ga-2 pa-2 rounded-lg cursor-pointer"
+        type="button"
+        class="user-menu d-flex align-center ga-2 pa-2 rounded-lg"
         :class="{ 'user-menu--rail': rail }"
+        :aria-label="`Account menu for ${authStore.user?.name || 'you'}`"
       >
         <v-avatar size="32" color="primary" variant="tonal">
           <span class="text-caption font-weight-bold">{{ userInitials }}</span>
@@ -39,7 +41,7 @@
           </div>
           <v-icon icon="mdi-chevron-up" size="16" class="text-medium-emphasis" />
         </template>
-      </div>
+      </button>
     </template>
 
     <v-list density="compact" min-width="244">
@@ -143,6 +145,16 @@ function handleLogout(): void {
 
 <style scoped>
 .user-menu {
+  /* The name-and-email height in both states, so the rows above it don't
+     move when a rail opens under the pointer. */
+  min-height: 56px;
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
   transition: background-color 0.15s ease;
 }
 

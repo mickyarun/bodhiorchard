@@ -20,7 +20,7 @@
   <v-btn
     :icon="isDark ? 'mdi-white-balance-sunny' : 'mdi-weather-night'"
     variant="text"
-    size="small"
+    :size="size"
     density="comfortable"
     :aria-label="label"
     :title="label"
@@ -31,6 +31,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useThemePreference } from '@/composables/useThemePreference'
+
+// Phones get the default size: a comfortable touch target.
+withDefaults(defineProps<{ size?: 'small' | 'default' }>(), { size: 'small' })
 
 const { isDark, toggle } = useThemePreference()
 const label = computed(() => (isDark.value ? 'Switch to light theme' : 'Switch to dark theme'))

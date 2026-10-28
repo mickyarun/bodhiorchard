@@ -19,7 +19,7 @@
 // Both Vuetify themes (and the matching tokens.css overrides) already exist;
 // this just decides which is active and remembers the user's choice.
 
-import { computed, onScopeDispose, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useTheme } from 'vuetify'
 
 export const THEME_DARK = 'glideshipDark'
@@ -58,15 +58,18 @@ export function resolveInitialThemeName(): string {
   return preferenceToThemeName(readStoredPreference())
 }
 
+// One preference for the whole app, so every control that shows it (the
+// sidebar switch, the user menu) agrees.
+const preference = ref<ThemePreference>(readStoredPreference())
+// The OS colour-scheme listener is app-wide too: added once, by the first
+// caller, and kept for the life of the page.
+let followingSystem = false
+
 /**
  * Reactive theme control. `preference` is the user's choice (system / light /
  * dark); setting it persists and applies. While the preference is 'system'
  * the active theme tracks the OS colour-scheme live.
  */
-// One preference for the whole app, so every control that shows it (the
-// sidebar switch, the user menu) agrees.
-const preference = ref<ThemePreference>(readStoredPreference())
-
 export function useThemePreference() {
   const theme = useTheme()
 
@@ -77,19 +80,15 @@ export function useThemePreference() {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(STORAGE_KEY, pref)
     }
-    theme.global.name.value = preferenceToThemeName(pref)
+    theme.change(preferenceToThemeName(pref))
   }
 
   // Live-follow the OS while the preference is 'system'.
-  if (typeof window !== 'undefined' && window.matchMedia) {
-    const mq = window.matchMedia(SYSTEM_LIGHT_QUERY)
-    const onSystemChange = (): void => {
-      if (preference.value === 'system') {
-        theme.global.name.value = systemThemeName()
-      }
-    }
-    mq.addEventListener?.('change', onSystemChange)
-    onScopeDispose(() => mq.removeEventListener?.('change', onSystemChange))
+  if (!followingSystem && typeof window !== 'undefined' && window.matchMedia) {
+    followingSystem = true
+    window.matchMedia(SYSTEM_LIGHT_QUERY).addEventListener?.('change', () => {
+      if (preference.value === 'system') theme.change(systemThemeName())
+    })
   }
 
   /** Flip between light and dark, leaving "follow the system" behind. */

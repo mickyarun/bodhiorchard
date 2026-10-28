@@ -14,40 +14,32 @@
  * limitations under the License.
  -->
 
-<!-- Top of the sidebar. Collapsed rail: the mark with the bell under it,
-     both centred. Open (or hovered) sidebar: logo and wordmark, bell at
-     the end. The bell shows in both, so its menu keeps its trigger when
-     the pointer leaves a hovered rail to reach the dropdown. -->
+<!-- Top of the sidebar: the mark, centred, on a collapsed rail; logo and
+     wordmark when open or hovered. One fixed height in both, so nothing
+     below it moves when a rail opens under the pointer. -->
 <template>
   <div class="sidebar-head" :class="{ 'sidebar-head--collapsed': collapsed }">
     <BrandLogo :size="28" :show-text="!collapsed" />
-    <NotificationBell v-if="auth.user?.id" :user-id="auth.user.id" />
   </div>
 </template>
 
 <script setup lang="ts">
 import BrandLogo from '@/components/common/BrandLogo.vue'
-import NotificationBell from '@/components/common/NotificationBell.vue'
-import { useAuthStore } from '@/stores/auth'
 
 defineProps<{ collapsed: boolean }>()
-const auth = useAuthStore()
 </script>
 
 <style scoped>
 .sidebar-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 64px;
-  padding: 12px 12px 8px 16px;
+  height: 64px;
+  padding: 0 16px;
   border-bottom: 1px solid rgb(var(--v-theme-rule));
   margin-bottom: 4px;
 }
 .sidebar-head--collapsed {
-  flex-direction: column;
   justify-content: center;
-  padding: 12px 0 8px;
+  padding: 0;
 }
 </style>
