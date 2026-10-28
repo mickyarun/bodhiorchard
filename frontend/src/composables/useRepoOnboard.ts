@@ -95,8 +95,22 @@ export function useRepoOnboard(options: UseRepoOnboardOptions = {}) {
     }
   }
 
+  /** Pre-pick the default branch (and a literal develop) unless the user has picked already. */
+  function pickDefaults(fullName: string, branches: string[]): void {
+    const repo = installableByName.value.get(fullName)
+    if (branchesByRepo.has(fullName) || !repo || !branches.includes(repo.defaultBranch)) return
+    const develop = detectDevelopBranch(branches, repo.defaultBranch)
+    branchesByRepo.set(fullName, { main: repo.defaultBranch, develop })
+  }
+
   async function loadBranchesFor(fullName: string, force = false): Promise<void> {
-    if (!force && branchOptions.has(fullName)) return
+    const cached = branchOptions.get(fullName)
+    // Unticking a repo drops its picks but keeps its branches cached, so a
+    // repo picked again gets its defaults from the cache.
+    if (!force && cached) {
+      pickDefaults(fullName, cached)
+      return
+    }
     if (loadingBranchesFor.has(fullName)) return
     loadingBranchesFor.add(fullName)
     try {
@@ -106,15 +120,7 @@ export function useRepoOnboard(options: UseRepoOnboardOptions = {}) {
         return
       }
       branchOptions.set(fullName, branches)
-      const repo = installableByName.value.get(fullName)
-      const existing = branchesByRepo.get(fullName)
-      if (!existing && repo && branches.includes(repo.defaultBranch)) {
-        const detectedDevelop = detectDevelopBranch(branches, repo.defaultBranch)
-        branchesByRepo.set(fullName, {
-          main: repo.defaultBranch,
-          develop: detectedDevelop,
-        })
-      }
+      pickDefaults(fullName, branches)
     } finally {
       loadingBranchesFor.delete(fullName)
     }

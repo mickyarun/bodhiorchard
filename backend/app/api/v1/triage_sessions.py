@@ -30,7 +30,7 @@ from app.models.user import User
 from app.repositories.bud import BUDRepository
 from app.repositories.organization import OrganizationRepository
 from app.repositories.triage_session import TriageSessionRepository
-from app.repositories.user import UserRepository
+from app.repositories.user import PersonCard, UserRepository
 from app.schemas.triage_session import TriageApprovalRequest, TriageSessionRead
 from app.services import slack_client
 from app.services.bud_agent_trigger import create_agent_task_for_stage
@@ -87,31 +87,27 @@ async def list_triage_sessions(
 
     # Resolve Slack IDs to user display names from the users table
     slack_ids = {s.requester_slack_id for s in sessions if s.requester_slack_id}
-    slack_to_name = await _resolve_slack_names(db, current_user.org_id, slack_ids)
-
-    results: list[TriageSessionRead] = []
-    for session in sessions:
-        data = TriageSessionRead.model_validate(session)
-        data.requester_display_name = slack_to_name.get(session.requester_slack_id)
-        results.append(data)
-
-    return results
+    people = await UserRepository(db).get_people_by_slack_ids(current_user.org_id, slack_ids)
+    return [_with_requester(session, people) for session in sessions]
 
 
-async def _resolve_slack_names(
-    db: AsyncSession, org_id: uuid.UUID, slack_ids: set[str]
-) -> dict[str, str]:
-    """Look up Glideship user names by their Slack IDs.
+def _with_requester(session: TriageSession, people: dict[str, PersonCard]) -> TriageSessionRead:
+    """Serialise ``session`` with the linked member's name and photo, when there is one.
 
     Args:
-        db: Async database session.
-        org_id: Organization UUID for scoping.
-        slack_ids: Set of Slack user IDs to resolve.
+        session: The triage session ORM object.
+        people: Slack ID → member, from ``get_people_by_slack_ids``.
 
     Returns:
-        Mapping of slack_id → user display name.
+        The response, with ``requester_display_name`` and
+        ``requester_avatar_url`` left empty for a Slack-only requester.
     """
-    return await UserRepository(db).get_slack_id_to_name(org_id, slack_ids)
+    data = TriageSessionRead.model_validate(session)
+    person = people.get(session.requester_slack_id)
+    if person is not None:
+        data.requester_display_name = person.name
+        data.requester_avatar_url = person.avatar_url
+    return data
 
 
 @router.post(
@@ -140,7 +136,7 @@ async def approve_triage_session(
         HTTPException: If the session is not found or not in awaiting_pm status.
     """
     repo = TriageSessionRepository(db, org_id=current_user.org_id)
-    session = await repo.get_by_id(session_id)
+    session = await repo.get_by_id_for_update(session_id)
 
     if session is None:
         raise HTTPException(
@@ -284,7 +280,7 @@ async def reject_triage_session(
         HTTPException: If the session is not found or not in awaiting_pm status.
     """
     repo = TriageSessionRepository(db, org_id=current_user.org_id)
-    session = await repo.get_by_id(session_id)
+    session = await repo.get_by_id_for_update(session_id)
 
     if session is None:
         raise HTTPException(
@@ -326,11 +322,10 @@ async def _session_to_read(
 ) -> TriageSessionRead:
     """Convert a TriageSession ORM object to the response schema."""
     await db.refresh(session)
-    data = TriageSessionRead.model_validate(session)
-    if session.requester_slack_id:
-        names = await _resolve_slack_names(db, user.org_id, {session.requester_slack_id})
-        data.requester_display_name = names.get(session.requester_slack_id)
-    return data
+    people = await UserRepository(db).get_people_by_slack_ids(
+        user.org_id, {session.requester_slack_id} if session.requester_slack_id else set()
+    )
+    return _with_requester(session, people)
 
 
 def _get_bot_token(org: Organization) -> str | None:

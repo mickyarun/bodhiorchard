@@ -18,6 +18,15 @@
 <template>
   <AppPage title="Employees" :subtitle="subtitle">
     <template #actions>
+      <v-btn
+        v-if="canImportSlackPhotos"
+        variant="text"
+        prepend-icon="mdi-account-box-outline"
+        :loading="photos.importing.value"
+        @click="importPhotos"
+      >
+        Import photos from Slack
+      </v-btn>
       <v-btn v-if="canInviteMembers" variant="outlined" prepend-icon="mdi-account-plus-outline" @click="inviting = true">
         Invite new hire
       </v-btn>
@@ -37,6 +46,9 @@
     />
 
     <AppCallout v-if="store.error" variant="error">{{ store.error }}</AppCallout>
+    <AppCallout v-if="photos.outcome.value" :variant="photos.outcome.value.variant">
+      {{ photos.outcome.value.text }}
+    </AppCallout>
 
     <DirectoryTable
       :rows="rows"
@@ -61,6 +73,7 @@ import DirectoryTable from '@/components/people/directory/DirectoryTable.vue'
 import InviteNewHireDialog from '@/components/people/InviteNewHireDialog.vue'
 import { useDebounced } from '@/composables/useDebounced'
 import { usePermissions } from '@/composables/usePermissions'
+import { useSlackPhotoImport } from '@/composables/useSlackPhotoImport'
 import { useEmployeesStore } from '@/stores/employees'
 import type { EmployeeStatus } from '@/types/employee'
 import { STATUS_LABELS } from '@/utils/employee'
@@ -72,7 +85,7 @@ import {
 } from '@/utils/employeeDirectory'
 
 const store = useEmployeesStore()
-const { canManageEmployees, canInviteMembers } = usePermissions()
+const { canManageEmployees, canInviteMembers, canImportSlackPhotos } = usePermissions()
 const inviting = ref(false)
 const adding = ref(false)
 const preselect = ref<string | null>(null)
@@ -133,6 +146,11 @@ const emptyLabel = computed(() => {
 const debouncedSearch = useDebounced(search)
 function load(): void {
   void store.fetchDirectory({ q: debouncedSearch.value ?? '', status: status.value })
+}
+
+const photos = useSlackPhotoImport()
+async function importPhotos(): Promise<void> {
+  if (await photos.run()) load()
 }
 watch([debouncedSearch, status], load)
 onMounted(load)
