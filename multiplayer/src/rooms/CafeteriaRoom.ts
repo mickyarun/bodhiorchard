@@ -34,9 +34,17 @@
  * `onActiveChanged`). Cafeteria V1 is player-only; OrgRoom does not
  * enqueue simulated diners. Add the bridge when NPC diners are needed.
  */
-import { Room, Client } from "colyseus"
+import { Room, Client, type RoomException, type RoomMethodName } from "colyseus"
+import { reportRoomException } from "./roomExceptions"
 import { PlayerState } from "../schema/PlayerState"
 import { CafeteriaState } from "../schema/CafeteriaState"
+import {
+  requireJoinIdentity,
+  verifyJoin,
+  type JoinCredentials,
+  type JoinIdentity,
+} from "../auth/verifyJoin"
+import { requireRoomKey } from "./roomKeys"
 import { isCafeteriaMeal } from "../sim/CafeteriaMenu"
 import {
   advancePhase,
@@ -58,9 +66,7 @@ const VALID_ANIMS = new Set([
   "sleep",
 ])
 
-interface CafeteriaJoinOptions {
-  userId: string
-  name: string
+interface CafeteriaJoinOptions extends JoinCredentials {
   characterModel?: string
 }
 
@@ -87,9 +93,9 @@ export class CafeteriaRoom extends Room<{ state: CafeteriaState }> {
   /** userId → sessionId lookup for "queue your own userId" validation. */
   private sessionByUserId = new Map<string, string>()
 
-  onCreate(options: { orgId?: string }) {
+  onCreate(options: unknown) {
     const state = new CafeteriaState()
-    if (options.orgId) state.orgId = options.orgId
+    state.orgId = requireRoomKey(options, "orgId")
     this.setState(state)
 
     this.onMessage("move", (client, data: MoveMessage) => {
@@ -132,11 +138,17 @@ export class CafeteriaRoom extends Room<{ state: CafeteriaState }> {
     this.setSimulationInterval((_dt) => this.tick(), SIM_TICK_MS)
   }
 
-  onJoin(client: Client, options: CafeteriaJoinOptions) {
+  /** Only a verified member of this room's org may join (see verifyJoin). */
+  async onAuth(_client: Client, options: CafeteriaJoinOptions): Promise<JoinIdentity> {
+    return verifyJoin(options, this.state.orgId)
+  }
+
+  onJoin(client: Client, options: CafeteriaJoinOptions, auth?: JoinIdentity) {
+    const identity = requireJoinIdentity(auth)
     const player = new PlayerState()
-    player.userId = options.userId || client.sessionId
-    player.name = options.name || "Visitor"
-    player.characterModel = options.characterModel || ""
+    player.userId = identity.userId
+    player.name = identity.name
+    player.characterModel = typeof options.characterModel === "string" ? options.characterModel : ""
     player.connected = true
     this.state.players.set(client.sessionId, player)
     this.sessionByUserId.set(player.userId, client.sessionId)
@@ -154,6 +166,11 @@ export class CafeteriaRoom extends Room<{ state: CafeteriaState }> {
     }
     this.state.players.delete(client.sessionId)
     this.lastMoveMs.delete(client.sessionId)
+  }
+
+  /** Report a throwing handler or timer instead of letting it exit the process. */
+  onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
+    reportRoomException(this, error, methodName)
   }
 
   onDispose() {

@@ -214,11 +214,7 @@
         <div v-for="dev in contributors" :key="dev.user_id || dev.author_email || 'unknown'" class="contributor-block">
           <!-- Contributor header -->
           <div class="contributor-header">
-            <v-avatar size="24" color="surface-variant">
-              <span class="text-caption font-weight-bold">
-                {{ (dev.user_name || dev.author_name || '?')[0].toUpperCase() }}
-              </span>
-            </v-avatar>
+            <AppMonogram :name="dev.user_name || dev.author_name" :src="dev.avatar_url" :size="24" />
             <span class="text-body-2 font-weight-medium">
               {{ dev.user_name || dev.author_name || dev.author_email || 'Unknown' }}
             </span>
@@ -294,6 +290,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import BUDImpactedReposDialog from '@/components/buds/BUDImpactedReposDialog.vue'
+import AppMonogram from '@/components/common/AppMonogram.vue'
 import { useBudActivity } from '@/composables/useBudActivity'
 import { useSettingsStore } from '@/stores/settings'
 import { branchPrefix } from '@/utils/budDetail'

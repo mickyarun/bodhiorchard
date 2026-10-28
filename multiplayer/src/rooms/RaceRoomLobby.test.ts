@@ -19,6 +19,7 @@
 import type { Client } from "colyseus"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { COUNTDOWN_MS, LOBBY_MAX_MS, MAX_RACERS } from "../../../shared/race/RaceConstants"
+import { issueRaceCreateTicket } from "../bridge/RaceCreateTickets"
 import { RaceRoom } from "./RaceRoom"
 
 interface LobbyHandlers {
@@ -63,6 +64,7 @@ beforeEach(() => {
   room = new RaceRoom()
   room.roomId = "race-lobby-test"
   room.onCreate({
+    createTicket: issueRaceCreateTicket(),
     orgId: "org-a",
     hostUserId: "host",
     hostName: "Host",
@@ -93,12 +95,13 @@ describe("race_join", () => {
     ["missing name", { userId: "x" }],
     ["empty user id", { userId: "", name: "x" }],
     ["non-string user id", { userId: 9, name: "x" }],
-  ])("ignores a join with %s", (_label, raw) => {
+  ])("ignores a join from a client with no verified identity, sending %s", (_label, raw) => {
     h.handleJoin(client("s-x"), raw)
     expect(room.state.racers.size).toBe(0)
   })
 
   it("closes the roster at MAX_RACERS", () => {
+    for (let i = 0; i < MAX_RACERS + 2; i++) room.state.invitedUserIds.push(`racer-${i}`)
     for (let i = 0; i < MAX_RACERS + 2; i++) join(`s-${i}`, `racer-${i}`)
     expect(room.state.racers.size).toBe(MAX_RACERS)
   })
@@ -107,6 +110,7 @@ describe("race_join", () => {
     const host = join("s-host", "host")
     join("s-guest", "guest")
     h.handleStart(host)
+    room.state.invitedUserIds.push("late")
     join("s-late", "late")
     expect(room.state.racers.has("late")).toBe(false)
   })

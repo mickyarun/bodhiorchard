@@ -21,7 +21,12 @@
  *   NetworkedPlayer  — remote player avatar entity
  *   PlayerSyncAdapter — throttled position broadcaster
  */
-export { ColyseusClient, type PlayerData, type MultiplayerCallbacks } from './ColyseusClient'
+export {
+  ColyseusClient,
+  type PlayerData,
+  type MultiplayerCallbacks,
+  type RoomJoinUser,
+} from './ColyseusClient'
 export { NetworkedPlayer } from './NetworkedPlayer'
 export { PlayerSyncAdapter } from './PlayerSyncAdapter'
 export {

@@ -34,6 +34,7 @@ from app.schemas.bud_todos import (
 )
 from app.services.bud_timeline import record_event
 from app.services.event_bus import publish
+from app.services.org_members import assert_new_assignee_in_org
 from app.services.pr_auto_transition import check_all_repos_have_prs
 from app.services.todo_sync import sync_todos_for_bud
 
@@ -151,6 +152,7 @@ async def update_todo(
         new_status = body.validated_status()
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    await assert_new_assignee_in_org(db, current_user.org_id, body.assignee_id, todo.assignee_id)
 
     became_completed = (
         new_status == BUDTodoStatus.COMPLETED.value

@@ -38,6 +38,7 @@ from app.schemas.quiz import (
 from app.services.job_queue import JOB_QUIZ_BATCH, create_job
 from app.services.org_settings import get_quiz_settings
 from app.services.quiz_review import (
+    QuizQuestionAlreadyUsedError,
     QuizQuestionNotFoundError,
     approve_question,
     edit_question,
@@ -97,6 +98,8 @@ async def edit_review_question(
         )
     except QuizQuestionNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Question not found") from exc
+    except QuizQuestionAlreadyUsedError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
     await db.commit()
@@ -121,6 +124,8 @@ async def approve_review_question(
         )
     except QuizQuestionNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Question not found") from exc
+    except QuizQuestionAlreadyUsedError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     await db.commit()
     return _review_item(question)
 
@@ -136,6 +141,8 @@ async def reject_review_question(
         question = await reject_question(db, org_id=current_user.org_id, question_id=question_id)
     except QuizQuestionNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Question not found") from exc
+    except QuizQuestionAlreadyUsedError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     await db.commit()
     return _review_item(question)
 

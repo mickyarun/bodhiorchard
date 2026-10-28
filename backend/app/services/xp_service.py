@@ -294,7 +294,8 @@ async def award_quality_bonus(
 ) -> int:
     """Award quality bonus XP based on BUD effectiveness metrics.
 
-    Returns the XP awarded (0-30).
+    XP only: the quality skill points are awarded at close by
+    ``dev_quality_sp``. Returns the XP awarded (0-30).
     """
     from sqlalchemy import select
 
@@ -337,23 +338,9 @@ async def award_quality_bonus(
         metadata={"effectiveness_score": score},
     )
 
-    # SP bonus for high-quality work (score > 80)
-    if score > 80:
-        try:
-            from app.services.sp_rules import SP_DEV_QUALITY_HIGH
-            from app.services.sp_service import award_sp
-
-            await award_sp(
-                db,
-                user_id=user_id,
-                org_id=org_id,
-                amount=SP_DEV_QUALITY_HIGH,
-                source="sp_quality",
-                source_ref=f"sp_quality:{user_id}:{bud_id}",
-            )
-        except Exception:
-            logger.warning("sp_award_failed_quality", exc_info=True)
-
+    # The quality SP is paid once, at close, by
+    # ``dev_quality_sp.award_quality_and_threshold_sp`` to every developer who
+    # did the work. Paying it here as well gave the assignee the bonus twice.
     return bonus_xp
 
 

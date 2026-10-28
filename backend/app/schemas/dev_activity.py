@@ -86,6 +86,7 @@ class ContributorRead(BaseModel):
 
     user_id: str | None = None
     user_name: str | None = None
+    avatar_url: str | None = None
     author_name: str | None = None
     author_email: str | None = None
     commit_count: int = 0

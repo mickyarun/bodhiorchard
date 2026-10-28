@@ -67,7 +67,7 @@
         :class="['results__row', { 'results__row--dnf': !row.finished }]"
       >
         <span class="results__place">{{ row.finished ? row.place : 'DNF' }}</span>
-        <span class="results__avatar">{{ initialsOf(nameOf(row.racerId)) }}</span>
+        <AppMonogram class="results__avatar" :name="nameOf(row.racerId)" :src="photoFor(row.racerId)" :size="28" />
         <span class="results__name">{{ nameOf(row.racerId) }}</span>
         <span class="results__time">
           {{ row.finished ? formatRaceTime(row.finishTimeMs) : `${row.distanceM.toFixed(1)}m` }}
@@ -87,7 +87,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import type { RaceStateSnapshot } from '@/multiplayer/RaceRoomClient'
 import { formatRaceTime } from '@/engine/race/formatTime'
 import { lapLabel } from '@shared/race/RaceConstants'
@@ -95,7 +95,8 @@ import { parseCharacterModel, type CharacterConfig } from '@/engine/characters/C
 import CharacterPreview from '@/components/character/CharacterPreview.vue'
 import RaceThemeBackdrop from '@/components/race/RaceThemeBackdrop.vue'
 import CheckerFlagIcon from '@/components/race/CheckerFlagIcon.vue'
-import { initialsOf } from '@/utils/avatar'
+import AppMonogram from '@/components/common/AppMonogram.vue'
+import { useMemberDirectory } from '@/composables/useMemberDirectory'
 import RaceLeaderboardSection from './RaceLeaderboardSection.vue'
 
 const props = defineProps<{
@@ -129,6 +130,11 @@ const configByUserId = computed(() => {
   }
   return m
 })
+
+// Racers' photos come from the shared member directory; the race state
+// carries names and characters only.
+const { ensureLoaded, photoFor } = useMemberDirectory()
+onMounted(() => void ensureLoaded())
 
 function nameOf(userId: string): string {
   return nameByUserId.value.get(userId) ?? userId
@@ -465,13 +471,9 @@ function confettiStyle(i: number): Record<string, string> {
   letter-spacing: 0.08em;
   color: rgba(255, 120, 120, 0.85);
 }
-.results__avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+/* The race palette for initials; a photo covers it. Scoped under the row
+   so it outranks the monogram's own wash. */
+.results__row .results__avatar {
   background: linear-gradient(135deg, #3b5478, #2a3c58);
   color: #fff;
   font-size: 10px;

@@ -71,6 +71,8 @@ export interface CoffeeBarVisitor {
   name: string
   characterModel: string | null
   orgId: string
+  /** The user's JWT; the room server takes the visitor's identity from it. */
+  token: string
 }
 
 export class CoffeeBarManager {
@@ -191,6 +193,7 @@ export class CoffeeBarManager {
         userId: visitor.userId,
         name: visitor.name,
         characterModel: visitor.characterModel ?? '',
+        token: visitor.token,
       })
       .catch((err) => console.warn('[CoffeeBarManager] Multiplayer unavailable:', err))
   }
