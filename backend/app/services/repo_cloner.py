@@ -63,8 +63,9 @@ def _clone_root() -> Path:
 
 # Conservative GitHub repo-slug shape: letters, digits, hyphens, underscores,
 # dots. Everything we match here becomes a directory name under the clone
-# root, so the pattern also rejects path traversal.
-_SAFE_SEG = re.compile(r"^[A-Za-z0-9._-]+$")
+# root, so the pattern also rejects path traversal — including a segment
+# made only of dots, which is ``.`` or ``..`` once joined to a path.
+_SAFE_SEG = re.compile(r"^(?!\.+$)[A-Za-z0-9._-]+$")
 
 # Matches an HTTPS-with-credentials URL in any form git might echo back,
 # including truncated output. Used to scrub tokens from error messages
