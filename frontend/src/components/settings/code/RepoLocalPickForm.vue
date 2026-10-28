@@ -16,19 +16,12 @@
 
 <!--
   Local-pick body of the Add dialog. Owns just the picker invocation
-  and the staged-paths list, or a callout for members who can't add
-  local folders. Submit + cancel live in the dialog footer
-  (single source of truth) — this form is purely presentational.
+  and the staged-paths list. Submit + cancel live in the dialog footer
+  (single source of truth) — this form is purely presentational. The
+  dialog only mounts it for members allowed to change repositories.
 -->
 <template>
-  <AppCallout
-    v-if="!canAddLocalRepos"
-    variant="warning"
-    title="Adding folders needs the Edit Project Settings permission"
-  >
-    Ask an org admin to add these folders for you, or clone the repository from GitHub instead.
-  </AppCallout>
-  <div v-else>
+  <div>
     <div class="d-flex align-center ga-3 mb-3">
       <div class="flex-grow-1 min-w-0">
         <div class="text-body-2 font-weight-medium">Pick folders on this machine</div>
@@ -97,18 +90,13 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import AppCallout from '@/components/common/AppCallout.vue'
 import DirectoryPicker from '@/components/setup/DirectoryPicker.vue'
-import { usePermissions } from '@/composables/usePermissions'
 import type { useRepoImport, ImportItemStatus } from '@/composables/useRepoImport'
 
 defineProps<{
   imp: ReturnType<typeof useRepoImport>
 }>()
 
-// The picker and the add both 403 without settings:edit, so say so up
-// front instead of letting the member stage folders that can't be added.
-const { canAddLocalRepos } = usePermissions()
 const picker = ref<InstanceType<typeof DirectoryPicker> | null>(null)
 
 function openPicker(): void {

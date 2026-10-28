@@ -122,7 +122,7 @@
           <code>{{ repo.repo_path }}</code> · {{ repo.commit_count }} commit{{ repo.commit_count !== 1 ? 's' : '' }}
           <template #actions>
             <v-btn
-              v-if="canAddLocalRepos"
+              v-if="canManageRepos"
               size="small"
               variant="outlined"
               prepend-icon="mdi-plus"
@@ -342,7 +342,7 @@ const {
 
 const settingsStore = useSettingsStore()
 // Tracking a repo by path needs settings:edit; QA testers usually lack it.
-const { canAddLocalRepos } = usePermissions()
+const { canManageRepos } = usePermissions()
 
 // ── UI state ──────────────────────────────────────────────────────────
 

@@ -208,7 +208,11 @@ class CloneRepoBody(BaseModel):
     )
 
 
-@router.post("/repos/clone", response_model=RepoInfo)
+@router.post(
+    "/repos/clone",
+    response_model=RepoInfo,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
 async def clone_and_add_repo(
     body: CloneRepoBody,
     current_user: User = Depends(get_current_user),
@@ -282,7 +286,11 @@ async def get_repos_deploy_key(
     }
 
 
-@router.delete("/repos", status_code=status.HTTP_200_OK)
+@router.delete(
+    "/repos",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
 async def remove_repo(
     body: AddRepoRequest,
     current_user: User = Depends(get_current_user),
@@ -323,7 +331,11 @@ async def remove_repo(
     return {"removed": body.path, "deactivated": deactivated_count}
 
 
-@router.patch("/repos/{repo_id}/status", response_model=RepoInfo)
+@router.patch(
+    "/repos/{repo_id}/status",
+    response_model=RepoInfo,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
 async def update_repo_status(
     repo_id: uuid.UUID,
     body: RepoStatusRequest,
@@ -376,7 +388,11 @@ async def get_repo_branches(
     )
 
 
-@router.post("/repos/{repo_id}/classify", response_model=RepoInfo)
+@router.post(
+    "/repos/{repo_id}/classify",
+    response_model=RepoInfo,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
 async def classify_repo_endpoint(
     repo_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -413,7 +429,11 @@ async def classify_repo_endpoint(
     return build_repo_info(repo, include_classification=True)
 
 
-@router.post("/repos/{repo_id}/extract-routes", response_model=RepoInfo)
+@router.post(
+    "/repos/{repo_id}/extract-routes",
+    response_model=RepoInfo,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
 async def extract_routes_endpoint(
     repo_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -451,7 +471,11 @@ async def extract_routes_endpoint(
     return build_repo_info(repo, include_classification=True)
 
 
-@router.patch("/repos/{repo_id}/branches", response_model=RepoInfo)
+@router.patch(
+    "/repos/{repo_id}/branches",
+    response_model=RepoInfo,
+    dependencies=[Depends(require_permissions("settings:edit"))],
+)
 async def update_repo_branches(
     repo_id: uuid.UUID,
     body: RepoBranchUpdate,
@@ -567,6 +591,7 @@ async def list_installable_repo_branches(
     "/repos/bulk-onboard",
     response_model=JobCreatedResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_permissions("settings:edit"))],
 )
 async def bulk_onboard_repos(
     body: BulkOnboardRequest,

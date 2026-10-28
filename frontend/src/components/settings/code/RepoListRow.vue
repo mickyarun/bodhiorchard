@@ -22,6 +22,8 @@
   During an active scan: the branch-chip strip is replaced with the
   per-repo phase track, the row checkbox is locked, and the action
   menu is hidden — every edit path is gated by RepoList's `isLocked`.
+  Members without settings:edit get the same read-only row: no action
+  menu, and branch chips that don't open the mapping dialog.
 -->
 <template>
   <div
@@ -71,7 +73,7 @@
             icon="mdi-source-branch"
             :label="repo.mainBranch"
             fallback="Set main"
-            :disabled="isLocked"
+            :disabled="!editable"
             @click="onEditBranches"
           />
           <v-icon icon="mdi-arrow-right" size="12" class="text-medium-emphasis" />
@@ -79,7 +81,7 @@
             icon="mdi-source-branch"
             :label="repo.developBranch"
             fallback="Set develop"
-            :disabled="isLocked"
+            :disabled="!editable"
             @click="onEditBranches"
           />
           <template v-if="uatEnabled">
@@ -89,7 +91,7 @@
               :label="repo.uatBranch"
               fallback="Set UAT"
               muted
-              :disabled="isLocked"
+              :disabled="!editable"
               @click="onEditBranches"
             />
           </template>
@@ -130,7 +132,7 @@
         {{ repo.featureCount }}
       </div>
       <RepoRowMenu
-        v-if="!isLocked"
+        v-if="editable"
         :status="repo.status"
         :disabled="busy"
         @select="onMenuSelect"
@@ -147,6 +149,7 @@ import RepoClassificationChips from './RepoClassificationChips.vue'
 import RepoRowMenu, { type RepoRowMenuId } from './RepoRowMenu.vue'
 import RepoSetupStatusChip from './RepoSetupStatusChip.vue'
 import ScanRowTrack from './ScanRowTrack.vue'
+import { usePermissions } from '@/composables/usePermissions'
 import {
   type LastScanSummary,
   STATUS_PRESENTATION,
@@ -173,6 +176,11 @@ const emit = defineEmits<{
   'request-remove': [repo: RepoInfo]
 }>()
 
+const { canManageRepos } = usePermissions()
+// Branch edits, ignore/activate and remove all need settings:edit and an
+// idle scan.
+const editable = computed(() => !props.isLocked && canManageRepos.value)
+
 /** Render-ready summary of the most recent ScanRepoRun for this repo.
  *  Falls back to `null` when the repo has never been scanned, in which
  *  case the row only shows the branch chips. */
@@ -193,7 +201,7 @@ const lastScan = computed<LastScanSummary | null>(() => {
 })
 
 function onEditBranches(): void {
-  if (props.isLocked) return
+  if (!editable.value) return
   emit('edit-branches', props.repo)
 }
 
