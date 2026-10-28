@@ -113,6 +113,18 @@ def use_test_db(monkeypatch: pytest.MonkeyPatch, factory: Factory) -> None:
     monkeypatch.setattr(quiz_notify, "AsyncSessionLocal", factory)
 
 
+def capture_dms(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Collect the quiz Slack messages instead of sending them."""
+    sent: list[str] = []
+
+    async def capture(org_id: uuid.UUID, message: str, *, event: str) -> int:
+        sent.append(message)
+        return 1
+
+    monkeypatch.setattr(quiz_notify, "_dm_all_members", capture)
+    return sent
+
+
 async def reveal_pass(org: uuid.UUID, *, notify_reveal: bool = False) -> None:
     """One scheduler reveal pass for ``org`` (call :func:`use_test_db` first)."""
     settings = QuizGameSettings(slack_notify_reveal=notify_reveal)

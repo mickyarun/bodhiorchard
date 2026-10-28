@@ -28,12 +28,13 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from app.models.developer_xp import DeveloperXP
-from app.services import quiz_monthly_rollup, quiz_notify
+from app.services import quiz_monthly_rollup
 from tests.integration.leave_support import Factory, give_role, setup_org
 from tests.integration.quiz_support import (
     RIGHT,
     WRONG,
     answer,
+    capture_dms,
     close_quiz,
     open_quiz,
     points_for,
@@ -44,22 +45,28 @@ from tests.integration.quiz_support import (
 pytestmark = pytest.mark.integration
 
 
+@pytest.mark.parametrize(
+    "quiz_date",
+    [datetime.now(UTC).date(), date(2026, 1, 31)],
+    ids=["this month", "a month already over"],
+)
 async def test_the_reveal_dm_ranks_the_points_just_revealed(
-    client: AsyncClient, pg_session_factory: Factory, monkeypatch: pytest.MonkeyPatch
+    client: AsyncClient,
+    pg_session_factory: Factory,
+    monkeypatch: pytest.MonkeyPatch,
+    quiz_date: date,
 ) -> None:
-    """The reveal message lists the player who answered right, with this quiz's points."""
+    """The reveal message lists the player who answered right, with this quiz's points.
+
+    The standings come from the quiz's own month, so a quiz that ran on the
+    last day of a month and is revealed in the next one still shows its points.
+    """
     use_test_db(monkeypatch, pg_session_factory)
-    sent: list[str] = []
-
-    async def capture(org_id: uuid.UUID, message: str, *, event: str) -> int:
-        sent.append(message)
-        return 1
-
-    monkeypatch.setattr(quiz_notify, "_dm_all_members", capture)
+    sent = capture_dms(monkeypatch)
     org, (ada, bob), _ = await setup_org(pg_session_factory, "Ada", "Bob")
     for user in (ada, bob):
         await give_role(pg_session_factory, org, user, "developer")
-    quiz_id = await open_quiz(pg_session_factory, org, quiz_date=datetime.now(UTC).date())
+    quiz_id = await open_quiz(pg_session_factory, org, quiz_date=quiz_date)
     await answer(client, org, ada, quiz_id, RIGHT)
     await answer(client, org, bob, quiz_id, WRONG)
 

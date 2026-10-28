@@ -75,6 +75,17 @@ def month_bounds(period_month: str) -> tuple[date, date]:
     return start, end
 
 
+def month_settles_at(period_month: str, *, zone: tzinfo, window_minutes: int) -> datetime:
+    """The UTC instant after which no quiz of ``period_month`` can still be open.
+
+    The month's last quiz opens before local midnight at the month's end and
+    stays open for at most ``window_minutes``, so its reveal lands by then.
+    """
+    _, month_end = month_bounds(period_month)
+    local_end = datetime.combine(month_end, time(0, 0), tzinfo=zone)
+    return local_end.astimezone(UTC) + timedelta(minutes=window_minutes)
+
+
 def next_quiz_at(
     *,
     now_utc: datetime,

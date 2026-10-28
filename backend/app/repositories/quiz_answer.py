@@ -139,16 +139,8 @@ class QuizAnswerRepository:
                 QuizAnswer.answered_at,
             )
         )
-        claimed = [
-            ClaimedAnswer(
-                user_id=r.user_id,
-                is_correct=r.is_correct,
-                points=r.points_awarded,
-                latency_ms=r.latency_ms,
-                answered_at=r.answered_at,
-            )
-            for r in (await self._db.execute(stmt)).all()
-        ]
+        # RETURNING columns are listed in ClaimedAnswer's field order.
+        claimed = [ClaimedAnswer(*r) for r in (await self._db.execute(stmt)).all()]
         return sorted(claimed, key=lambda a: a.answered_at)
 
     async def list_for_user_quiz(
