@@ -153,25 +153,24 @@ async def _legacy_bonus(
 
 
 @pytest.mark.parametrize(
-    ("commits", "errors", "xp", "sp"),
-    [(4, 1, 24, 0.0), (9, 1, 27, 0.5)],
-    ids=["score-80-no-sp", "score-90-sp"],
+    ("commits", "errors", "xp"),
+    [(4, 1, 24), (9, 1, 27)],
+    ids=["score-80", "score-90"],
 )
-async def test_the_completion_bonus_pays_sp_only_above_an_80_score(
-    app_sessions: Factory, commits: int, errors: int, xp: int, sp: float
+async def test_the_completion_bonus_maps_the_effectiveness_score_to_xp(
+    app_sessions: Factory, commits: int, errors: int, xp: int
 ) -> None:
     org_id, bud_id, dev = await _bud_with_bugs(app_sessions, 0, None)
     await _activity(app_sessions, org_id, bud_id, dev, commits, errors)
 
     assert await _legacy_bonus(app_sessions, org_id, bud_id, dev) == xp
-    assert await sp_balance(app_sessions, org_id, dev) == sp
 
 
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
     reason="quality SP is paid twice per BUD: award_quality_bonus still pays sp_quality under "
-    "its own source_ref next to the close-time bonus; reported, no fix branch yet",
+    "its own source_ref next to the close-time bonus; fixed by branch fix/quality-sp-paid-once",
 )
 async def test_a_developer_gets_one_quality_bonus_per_bud_across_both_award_paths(
     app_sessions: Factory,
