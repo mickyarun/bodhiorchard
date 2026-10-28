@@ -20,6 +20,10 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Production behaviour is the image default, whichever compose file starts
+# it: tokenless joins and Colyseus dev mode stay off (src/auth/verifyJoin.ts).
+ENV NODE_ENV=production
+
 COPY multiplayer/package.json multiplayer/package-lock.json* ./
 RUN npm ci --omit=dev --no-audit --no-fund
 

@@ -19,7 +19,7 @@
  */
 import type { Room } from '@colyseus/sdk'
 import { ColyseusClient } from '../../multiplayer'
-import type { PlayerData } from '../../multiplayer/ColyseusClient'
+import type { PlayerData, RoomJoinUser } from '../../multiplayer/ColyseusClient'
 
 export interface CafeteriaActionSnapshot {
   userId: string
@@ -60,10 +60,7 @@ export class CafeteriaRoomClient {
   }
   private playersBySession = new Map<string, PlayerData>()
 
-  async connect(
-    orgId: string,
-    user: { userId: string; name: string; characterModel?: string },
-  ): Promise<void> {
+  async connect(orgId: string, user: RoomJoinUser): Promise<void> {
     const client = ColyseusClient.getInstance()
     this.room = await client.joinCafeteriaRoom(orgId, user)
     this.room.onStateChange((state: unknown) => this.onStateChange(state as RawCafeteriaState))
