@@ -12,13 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""A repo run that fails inside the workflow must get its soft-deleted features back.
+"""A repo run that fails before synthesis finishes must get its soft-deleted features back.
 
 The workflow catches a failing stage (e.g. synthesis writing zero features),
 marks the run FAILED and returns normally, so the fanout only learns about
 the failure from the returned run's status. Before the fix only an exception
 escaping ``start_run`` triggered the restore, which never happens for a stage
-failure: a failed rescan left every feature of the repo deactivated.
+failure: a failed rescan left every feature of the repo deactivated. A stage
+failing *after* synthesis must not restore: the reconciler has already
+settled the features, and reviving the old slice would bring back features
+for code that was removed.
 """
 
 from __future__ import annotations
@@ -53,7 +56,9 @@ async def _noop(**_: Any) -> None:
     return None
 
 
-def _wire(monkeypatch: pytest.MonkeyPatch, run_status: str | None) -> list[dict[str, Any]]:
+def _wire(
+    monkeypatch: pytest.MonkeyPatch, run_status: str | None, completed: list[str] | None = None
+) -> list[dict[str, Any]]:
     """Stub the fanout's collaborators; return the restore calls it makes."""
     restored: list[dict[str, Any]] = []
     _Observer.failures = []
@@ -75,6 +80,7 @@ def _wire(monkeypatch: pytest.MonkeyPatch, run_status: str | None) -> list[dict[
             status=run_status,
             started_at=datetime.now(UTC),
             error="synthesis produced 0 features" if run_status == "failed" else None,
+            completed_stages=list(completed or ["repo_setup", "ingest"]),
         )
 
     async def scan_cfg(_org: uuid.UUID) -> dict[str, Any]:
@@ -117,6 +123,17 @@ async def test_failed_run_restores_the_repos_soft_deleted_features(
     assert len(restored) == 1
     assert restored[0]["repo_id"] == REPO_ID
     assert restored[0]["feature_ids"] == FEATURE_IDS
+    assert _Observer.failures == []
+
+
+async def test_failure_after_synthesis_keeps_the_reconciled_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    restored = _wire(monkeypatch, "failed", ["ingest", "synthesize", "extract_routes"])
+
+    await _scan()
+
+    assert restored == []
 
 
 async def test_successful_run_keeps_the_soft_delete(monkeypatch: pytest.MonkeyPatch) -> None:

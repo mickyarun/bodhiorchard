@@ -54,6 +54,9 @@ logger = structlog.get_logger(__name__)
 # in-flight task instead of just flipping the DB row.
 _BACKGROUND_SCANS: dict[uuid.UUID, asyncio.Task[None]] = {}
 
+# The stage whose reconcile settles the repo's features for this SHA.
+_SYNTHESIS_STAGE = "synthesize"
+
 
 def cancel_background_task(scan_id: uuid.UUID) -> bool:
     """Cancel the in-flight asyncio task for ``scan_id`` if any.
@@ -254,15 +257,18 @@ async def _execute_scan(
                 scan_id=str(scan_id),
                 repo_id=str(descriptor.repo_id),
             )
-            # The orchestration-level rollback below remains as a
-            # backstop for cancellation paths that skip this handler.
+            # Nothing tells us how far the run got, so restore.
             await _restore_slice(descriptor)
             await observer.on_run_failed(error=f"{type(exc).__name__}: {exc}"[:500])
         else:
             # A failing stage does not raise out of ``start_run``: the
-            # workflow catches it, stamps the run row FAILED and returns.
-            # The run's status is the only signal, so restore here too.
-            if run.status == "failed":
+            # workflow catches it, stamps the run row FAILED and returns,
+            # so the run's status is the only signal. Restore only when
+            # synthesis never finished: once it has, the reconciler has
+            # already written the fresh rows and deliberately left
+            # features for removed code inactive, and a later stage
+            # failing (skill extraction, routes) must not revive them.
+            if run.status == "failed" and _SYNTHESIS_STAGE not in run.completed_stages:
                 logger.warning(
                     "scan_repo_run_failed_restoring_features",
                     scan_id=str(scan_id),

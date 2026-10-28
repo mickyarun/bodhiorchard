@@ -215,6 +215,7 @@ async def _execute_run(
                 if "worktree_path" in output.extras:
                     cumulative_config["ingest_worktree_path"] = output.extras["worktree_path"]
 
+            run.completed_stages.append(stage_name)
             upstream = output.communities
 
             # Phase-boundary check: peek the next stage. If its phase
