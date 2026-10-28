@@ -73,7 +73,12 @@
       </p>
     </div>
 
-    <div class="ai-panel__actions">
+    <!-- Saving and testing both need integrations:configure on the backend;
+         the test calls the provider host with the org's stored credential. -->
+    <p v-if="!canConfigure" class="ai-panel__hint">
+      Changing or testing the AI provider needs the Configure Integrations permission.
+    </p>
+    <div v-else class="ai-panel__actions">
       <v-btn color="primary" variant="flat" :loading="ai.saving.value" :disabled="!ai.canSave.value" @click="ai.save()">Save</v-btn>
       <v-btn variant="outlined" prepend-icon="mdi-connection" :loading="ai.test.value === 'checking'" @click="ai.runTest()">
         {{ ai.test.value === 'idle' ? 'Test connection' : 'Test again' }}
@@ -95,6 +100,7 @@ import PasswordField from '@/components/common/PasswordField.vue'
 import AiHostFields from '@/components/settings/ai/AiHostFields.vue'
 import ChoiceTiles from '@/components/settings/ai/ChoiceTiles.vue'
 import { useAiProviderSettings } from '@/composables/useAiProviderSettings'
+import { usePermissions } from '@/composables/usePermissions'
 import { providerLimitations, providerTitle } from '@/constants/aiProviders'
 import { credentialPlaceholder, providerSummary, providerTiles } from '@/utils/aiProviderOptions'
 import type { ProviderTest } from '@/utils/integrations'
@@ -102,6 +108,8 @@ import type { ProviderTest } from '@/utils/integrations'
 const emit = defineEmits<{ test: [ProviderTest]; summary: [string] }>()
 
 const ai = useAiProviderSettings()
+const { hasPermission } = usePermissions()
+const canConfigure = computed(() => hasPermission('integrations:configure'))
 const limitations = computed(() => providerLimitations(ai.caps.value))
 
 watch(ai.test, t => emit('test', t), { immediate: true })
