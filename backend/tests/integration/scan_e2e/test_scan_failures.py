@@ -19,8 +19,8 @@ synthesis can reuse their titles. If synthesis then writes nothing or times
 out, the run fails and the soft-deleted features have to come back. If a
 later stage fails after synthesis finished, the reconciled result stands.
 
-The preconditions use :func:`require` (``pytest.fail``) rather than ``assert``
-so a strict xfail on the final restore check can never hide an earlier break.
+The preconditions use :func:`require` (``pytest.fail``) so a broken setup step
+reads as such rather than as a failed restore.
 """
 
 from __future__ import annotations
@@ -56,15 +56,6 @@ from tests.integration.scan_e2e.scan_support import (
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
-# The workflow marks a failing run FAILED without raising, and the fanout only
-# restored the soft-deleted slice on an exception. Remove once the fix lands.
-FEATURES_NOT_RESTORED = pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="failed repo run leaves its features soft-deleted; "
-    "fixed by branch fix/scan-failed-run-restores-features",
-)
-
 
 async def _rescan(client: AsyncClient, s: Scanned, *, full_rescan: bool = False) -> uuid.UUID:
     return await start_scan_over_http(
@@ -72,7 +63,6 @@ async def _rescan(client: AsyncClient, s: Scanned, *, full_rescan: bool = False)
     )
 
 
-@FEATURES_NOT_RESTORED
 async def test_agent_writing_nothing_fails_the_run_and_restores_features(
     client: AsyncClient,
     app_sessions: Factory,
@@ -96,7 +86,6 @@ async def test_agent_writing_nothing_fails_the_run_and_restores_features(
     assert await active_feature_titles(app_sessions, s.org_id, s.repo_id) == s.titles
 
 
-@FEATURES_NOT_RESTORED
 async def test_timeout_discards_partial_writes_and_restores_features(
     client: AsyncClient,
     app_sessions: Factory,

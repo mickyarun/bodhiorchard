@@ -15,8 +15,9 @@
 """Two orgs scanning code by the same git author.
 
 Skill extraction turns each git author into a member of the scanning org,
-and user emails are unique across orgs, so the second org's scan used to
-fail outright on the author the first org already owns.
+and user emails are unique across orgs. The second org's scan must still
+complete, leaving the author unmatched rather than pulling the first org's
+account into the second org.
 """
 
 from __future__ import annotations
@@ -57,12 +58,6 @@ async def _scan_in_new_org(
     return outcome.run.status, steps.get(ScanPhase.SKILL_EXTRACTION), outcome.run.error, org.org_id
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="author owned by another org fails skill extraction; "
-    "fixed by branch fix/scan-author-in-another-org",
-)
 async def test_second_org_scanning_the_same_author_still_completes(
     client: AsyncClient,
     app_sessions: Factory,
