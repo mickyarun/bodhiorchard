@@ -87,7 +87,8 @@ export const useSetupStore = defineStore('setup', () => {
       .replace(/[^a-z0-9\s-]/g, '')
       .replace(/\s+/g, '-')
       .replace(/-+/g, '-')
-      .trim()
+      // Spaces at either end became hyphens above; a slug can't start or end with one.
+      .replace(/^-|-$/g, '')
   }
 
   function validateOrganization(): boolean {

@@ -49,9 +49,10 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     app.include_router(streamable.router)
     app.dependency_overrides[verify_mcp_token] = _bypass_auth
 
-    # Stub the request-scoped session — we never hit the DB in these tests.
+    # Stub the request-scoped session — we never hit the DB in these tests;
+    # the error path rolls it back, so rollback must be awaitable.
     async def _fake_db() -> Any:
-        yield MagicMock()
+        yield MagicMock(rollback=AsyncMock())
 
     app.dependency_overrides[get_db] = _fake_db
     # Rate limit is fail-open by design; stub it anyway so a missing

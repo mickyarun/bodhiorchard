@@ -22,7 +22,7 @@
     </div>
     <ol v-else class="contrib__list">
       <li v-for="(c, i) in contributors" :key="(c.userId ?? c.actorName) + '-' + i" class="contrib__row">
-        <AppMonogram :name="c.actorName" :size="28" />
+        <AppMonogram :name="c.actorName" :src="c.avatarUrl" :size="28" />
         <span class="contrib__body">
           <span class="contrib__name">{{ c.actorName }}</span>
           <span class="contrib__stats">
