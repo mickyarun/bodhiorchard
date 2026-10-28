@@ -64,43 +64,55 @@ _MANAGED_CRED_VARS = frozenset(
 )
 
 
-# What the app itself last wrote to each credential var, and the value the var
-# held just before the app wrote it. Host mode preserves a host- or
-# compose-supplied credential, but it must not preserve one the app injected
-# for a mode the org has since left — otherwise switching api_key → host keeps
-# running on the old key until a restart.
-_injected: dict[str, str] = {}
-_before_injection: dict[str, str | None] = {}
+# For each credential var the app has touched: what the app last left there
+# (the injected value, or ``None`` after clearing it) and what the host had
+# there before the app's first touch. Host mode preserves a host- or
+# compose-supplied credential; with this it can also tell that credential
+# apart from one the app injected for a mode the org has since left, and bring
+# back a host value an earlier mode had to clear or overwrite. Without it,
+# switching api_key → host kept running on the old key until a restart.
+_app_left: dict[str, str | None] = {}
+_host_value: dict[str, str | None] = {}
+
+
+def _touch(var: str) -> None:
+    """Record the host's value of ``var`` before the app changes it."""
+    current = os.environ.get(var)
+    if var not in _app_left or _app_left[var] != current:
+        # First touch, or the env changed since the app's last write: what is
+        # there now belongs to the host.
+        _host_value[var] = current
 
 
 def _inject(var: str, value: str) -> None:
-    """Set ``var`` to an app-managed credential, remembering what it replaced."""
-    current = os.environ.get(var)
-    if _injected.get(var) != current:
-        # First write, or the env changed since our last one: what is there
-        # now is the host's own value.
-        _before_injection[var] = current
+    """Set ``var`` to an app-managed credential."""
+    _touch(var)
     os.environ[var] = value
-    _injected[var] = value
+    _app_left[var] = value
 
 
 def _clear(var: str) -> None:
-    """Remove ``var`` from the process env and forget any injection of it."""
+    """Remove ``var`` for the active mode, remembering a host value it hid."""
+    _touch(var)
     os.environ.pop(var, None)
-    _injected.pop(var, None)
-    _before_injection.pop(var, None)
+    _app_left[var] = None
 
 
 def _withdraw(var: str) -> None:
-    """Undo the app's own injection of ``var``, leaving a host value alone."""
-    injected = _injected.pop(var, None)
-    before = _before_injection.pop(var, None)
-    if injected is None or os.environ.get(var) != injected:
+    """Undo the app's changes to ``var``: put the host's value back.
+
+    A value someone else set after the app's last write is left alone.
+    """
+    if var not in _app_left:
         return
-    if before is None:
+    left = _app_left.pop(var)
+    host = _host_value.pop(var, None)
+    if os.environ.get(var) != left:
+        return
+    if host is None:
         os.environ.pop(var, None)
     else:
-        os.environ[var] = before
+        os.environ[var] = host
 
 
 def _provider_of(org: Organization) -> AIProvider:
