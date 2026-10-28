@@ -15,7 +15,7 @@
  -->
 
 <!-- One-click light/dark switch for the sidebar footer. The icon shows the
-     theme it switches to. "Follow the system" stays in the user menu. -->
+     theme it switches to. "Follow the system" stays in the account menu. -->
 <template>
   <v-btn
     :icon="isDark ? 'mdi-white-balance-sunny' : 'mdi-weather-night'"
