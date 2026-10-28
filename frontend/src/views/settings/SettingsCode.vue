@@ -22,27 +22,17 @@
   the branch-mapping dialog.
 -->
 <template>
-  <div class="settings-page">
-    <div class="settings-header pa-6 pb-4">
-      <div class="d-flex align-center justify-space-between">
-        <div>
-          <div class="text-h5 font-weight-bold bo-display">Code</div>
-          <div class="text-body-2 text-medium-emphasis">
-            Connect repositories so Glideship can scan, embed, and synthesize
-            features across them.
-          </div>
-        </div>
-      </div>
-
-      <AppCallout v-if="settingsStore.error" variant="error" class="mt-4">
-        {{ settingsStore.error }}
-        <template #actions>
-          <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="settingsStore.error = null" />
-        </template>
-      </AppCallout>
-    </div>
-
-    <div class="settings-content px-6 pb-6">
+  <AppPage
+    title="Code"
+    subtitle="Connect repositories so Glideship can scan, embed, and synthesize features across them."
+  >
+    <AppCallout v-if="settingsStore.error" variant="error" class="mb-4">
+      {{ settingsStore.error }}
+      <template #actions>
+        <v-btn icon="mdi-close" variant="text" size="small" aria-label="Dismiss" @click="settingsStore.error = null" />
+      </template>
+    </AppCallout>
+    <div>
       <div v-if="settingsStore.reposLoading" class="d-flex justify-center py-12">
         <v-progress-circular indeterminate color="primary" />
       </div>
@@ -73,11 +63,12 @@
     >
       Branch mapping saved.
     </v-snackbar>
-  </div>
+  </AppPage>
 </template>
 
 <script setup lang="ts">
 import AppCallout from '@/components/common/AppCallout.vue'
+import AppPage from '@/components/common/AppPage.vue'
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useReposcanV2ScansStore } from '@/stores/reposcanv2Scans'
@@ -118,20 +109,3 @@ function onEditBranches(repo: RepoInfo): void {
 }
 </script>
 
-<style scoped>
-.settings-page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.settings-header {
-  flex-shrink: 0;
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.06);
-}
-
-.settings-content {
-  overflow-y: auto;
-  flex-grow: 1;
-}
-</style>
