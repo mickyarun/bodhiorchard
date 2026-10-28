@@ -133,7 +133,9 @@ async def save_wireframe_from_output(
         logger.exception("design_output_fallback_failed", design_id=design_id)
         return False
 
-    if not result.get("success"):
+    # ``write_bud_design`` answers ``{"saved": True, ...}`` on success and
+    # ``{"success": False, "error": ...}`` on a refusal.
+    if result.get("saved") is not True:
         logger.warning(
             "design_output_fallback_rejected",
             design_id=design_id,
