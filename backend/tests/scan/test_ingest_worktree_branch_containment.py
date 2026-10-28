@@ -29,6 +29,7 @@ import pytest
 
 from app.config import settings as app_settings
 from app.services.scan.stages import ingest_worktree as mod
+from app.services.scan.stages._worktree_location import scan_worktree_parent
 
 
 @pytest.fixture
@@ -46,7 +47,7 @@ def git_calls(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         calls.append(list(args))
         if args[:2] == ["rev-parse", "--abbrev-ref"]:
             return ("feature-x", "", 0)
-        if "--is-inside-work-tree" in args:
+        if args == ["rev-parse", "--git-common-dir"]:
             return ("", "fatal: not a git repository", 128)
         return ("", "", 0)
 
@@ -78,7 +79,8 @@ async def test_a_valid_branch_still_rebuilds_its_own_worktree(
     data_dir: Path, git_calls: list[list[str]]
 ) -> None:
     keep = _other_worktree(data_dir)
-    stale = data_dir / "scan-worktrees" / "widgets" / "release-uat"
+    parent = scan_worktree_parent("/srv/repos/acme/widgets", org_id=None, repo_id=None)
+    stale = parent / "release-uat"
     (stale / "old.txt").parent.mkdir(parents=True)
     (stale / "old.txt").write_text("stale\n")
 

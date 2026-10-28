@@ -19,8 +19,9 @@ so ingest behaves the same way the live scan does, just under a
 distinct parent dir so the two pipelines don't share state.
 
 The sandbox worktree lives at
-``<data_dir>/scan-worktrees/<repo-slug>/<branch>`` — **outside** the
-tracked repo. Earlier iterations parked it at
+``<data_dir>/scan-worktrees/<org_id>/<repo_id>/<branch>`` (see
+:mod:`._worktree_location`) — **outside** the tracked repo. Earlier
+iterations parked it at
 ``<repo>/.bodhiorchard/scan-test/<branch>`` for "everything-in-one-tree"
 ergonomics, but graphify's file collector filters out any path with a
 component starting with ``.`` (its dotfile rule), so the leading
@@ -30,42 +31,25 @@ indexer → empty file list → ``"no source files found in repo"``.
 
 from __future__ import annotations
 
-import re
+import os.path
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
 
-from app.config import settings
 from app.core.paths import is_strictly_under, rmtree_strictly_under
 from app.services.git_operations import run_git
 from app.services.scan.stages._origin_auth import (
     build_app_https_url_for_origin,
     refresh_origin_auth,
 )
+from app.services.scan.stages._worktree_location import scan_worktree_parent
 
 if TYPE_CHECKING:
     from app.models.organization import Organization
 
 logger = structlog.get_logger(__name__)
-
-# Slug helper for the repo-disambiguating dir name. Strips anything that
-# isn't a safe filesystem character; collisions between repos with the
-# same basename are vanishingly rare for typical orgs and tolerable for
-# a sandbox worktree (worst case: one extra ``git worktree add`` fails
-# because the branch is already checked out, then the caller resets).
-_SLUG_UNSAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
-
-
-def _scan_worktree_parent(repo_path: str) -> Path:
-    """Return the dot-free parent dir for this repo's sandbox worktrees.
-
-    ``<data_dir>/scan-worktrees/<basename>``. The data_dir is resolved
-    at call time so tests overriding ``BODHIORCHARD_DATA_DIR`` take
-    effect without a module reload.
-    """
-    repo_slug = _SLUG_UNSAFE_RE.sub("-", Path(repo_path).name) or "repo"
-    return Path(settings.storage.data_dir) / "scan-worktrees" / repo_slug
 
 
 async def _has_origin_remote(repo_path: str) -> bool:
@@ -74,18 +58,30 @@ async def _has_origin_remote(repo_path: str) -> bool:
     return rc == 0
 
 
-async def _worktree_is_healthy(worktree_path: str) -> bool:
-    """True iff ``worktree_path`` is a usable git worktree.
+async def _git_common_dir(path: str) -> str | None:
+    """Resolved ``git rev-parse --git-common-dir`` for ``path``, or ``None``.
 
-    A leftover directory whose ``.git`` gitdir link dangles — e.g. the base
-    repo was moved/renamed, or a *different* repo with the same basename (the
-    worktree slug is the basename) left a stale worktree here — still passes
-    ``Path.exists()`` but fails every git command with
-    ``fatal: not a git repository``. Detecting it lets the caller rebuild the
-    worktree instead of resetting into a broken tree.
+    Git may print the directory relative to ``path``; joining and
+    resolving it gives one comparable absolute path.
     """
-    _, _, rc = await run_git(["rev-parse", "--is-inside-work-tree"], cwd=worktree_path)
-    return rc == 0
+    out, _, rc = await run_git(["rev-parse", "--git-common-dir"], cwd=path)
+    if rc != 0 or not out.strip():
+        return None
+    return os.path.realpath(os.path.join(path, out.strip()))
+
+
+async def _worktree_belongs_to_repo(worktree_path: str, repo_path: str) -> bool:
+    """True iff ``worktree_path`` is a usable worktree of ``repo_path`` itself.
+
+    A leftover folder can fail this in several ways: its ``.git`` link
+    dangles (the base repo moved), it is a worktree of a different repo,
+    or it isn't a worktree at all and git finds whatever repo encloses
+    it. Only a folder sharing the repo's own git directory may be reset
+    and indexed; anything else is rebuilt so no other repo's code leaks
+    into this repo's index.
+    """
+    own = await _git_common_dir(repo_path)
+    return own is not None and own == await _git_common_dir(worktree_path)
 
 
 async def ensure_scan_test_worktree(
@@ -94,6 +90,8 @@ async def ensure_scan_test_worktree(
     *,
     skip_fetch: bool,
     org: Organization | None = None,
+    org_id: uuid.UUID | None = None,
+    repo_id: uuid.UUID | None = None,
 ) -> str:
     """Create or refresh the sandbox worktree.
 
@@ -104,12 +102,17 @@ async def ensure_scan_test_worktree(
       that's already checked out elsewhere, so materialising a separate
       worktree would fail.
     * Otherwise, materialise (or adopt)
-      ``<data_dir>/scan-worktrees/<repo-slug>/<branch>``, then fetch +
+      ``<data_dir>/scan-worktrees/<org_id>/<repo_id>/<branch>``, then fetch +
       hard-reset it to ``origin/<main_branch>`` (or the local branch ref
       if there's no ``origin`` remote — e.g. local-path imports). The
       worktree path lives outside the repo and outside any dot-prefixed
       directory so graphify's dotfile filter doesn't skip every file.
     * If a stale registration points to a missing dir, prune and recreate.
+    * An existing folder that isn't a worktree of this very repo is
+      deleted (only inside its parent) and recreated, never reused.
+
+    ``org_id`` and ``repo_id`` key the worktree folder; sandbox runs
+    without them get a folder keyed by the repo's resolved path.
 
     Returns the absolute path of the worktree to operate on.
     """
@@ -125,7 +128,7 @@ async def ensure_scan_test_worktree(
             await fetch_and_reset(repo_path, main_branch, has_origin=has_origin, org=org)
         return repo_path
 
-    parent = _scan_worktree_parent(repo_path)
+    parent = scan_worktree_parent(repo_path, org_id=org_id, repo_id=repo_id)
     parent.mkdir(parents=True, exist_ok=True)
     wt_path = parent / main_branch.replace("/", "-")
     wt_str = str(wt_path)
@@ -144,13 +147,12 @@ async def ensure_scan_test_worktree(
     # "branch already used elsewhere".
     await _remove_conflicting_worktree(repo_path, main_branch, keep=wt_str)
 
-    # An existing dir may be a *dangling* worktree — its gitdir points at a
-    # base repo that was moved/renamed, or at a same-basename repo's now-gone
-    # worktree admin dir. Such a dir passes ``exists()`` but breaks
-    # ``git reset`` with "not a git repository". Remove it so the ``worktree
-    # add`` below rebuilds it cleanly against the current ``repo_path``.
-    if wt_path.exists() and not await _worktree_is_healthy(wt_str):
-        logger.info("scan_ingest_rebuilding_dangling_worktree", path=wt_str, repo=repo_path)
+    # An existing dir may be a *dangling* worktree (its gitdir points at a
+    # base repo that was moved/renamed) or belong to another repo entirely.
+    # Reusing either would reset and index the wrong tree, so remove it and
+    # let the ``worktree add`` below rebuild it against ``repo_path``.
+    if wt_path.exists() and not await _worktree_belongs_to_repo(wt_str, repo_path):
+        logger.info("scan_ingest_rebuilding_foreign_worktree", path=wt_str, repo=repo_path)
         if not rmtree_strictly_under(wt_path, parent):
             raise RuntimeError(f"refusing to delete {wt_str}: not inside {parent}")
         await run_git(["worktree", "prune"], cwd=repo_path)
@@ -268,12 +270,14 @@ async def _remove_conflicting_worktree(repo_path: str, main_branch: str, *, keep
     """Drop any worktree on ``main_branch`` whose path isn't ``keep``.
 
     Git refuses ``worktree add`` for a branch that's already checked out
-    elsewhere. This commonly happens after the dot-prefix fix: the old
-    ``<repo>/.bodhiorchard/scan-test/main`` worktree still registers
-    ``main`` even though we're trying to materialise the new
-    ``<data_dir>/scan-worktrees/<slug>/main``. Without this cleanup the
-    new ``worktree add`` fails on every webhook until the operator
-    removes the stale registration by hand.
+    elsewhere. This happens whenever the worktree layout moves: an old
+    ``<repo>/.bodhiorchard/scan-test/main`` or basename-keyed
+    ``<data_dir>/scan-worktrees/<repo-name>/main`` worktree still
+    registers ``main`` while we materialise the new
+    ``<data_dir>/scan-worktrees/<org_id>/<repo_id>/main``. Removing it
+    here also clears this repo's folder from the old layout. Without this
+    cleanup the new ``worktree add`` fails on every webhook until the
+    operator removes the stale registration by hand.
     """
     stdout, _, rc = await run_git(
         ["worktree", "list", "--porcelain"],

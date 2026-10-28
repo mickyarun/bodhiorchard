@@ -18,7 +18,7 @@
 """Stage 0 — Ingest. Refresh a sandbox worktree and run the code indexer.
 
 Side-effectful: creates a worktree at
-``<data_dir>/scan-worktrees/<repo-slug>/<branch>`` (outside the tracked
+``<data_dir>/scan-worktrees/<org_id>/<repo_id>/<branch>`` (outside the tracked
 repo so graphify's dotfile filter doesn't skip every file under it),
 force-resets it to ``origin/<main_branch>``, then runs
 ``app.services.code_indexer.index_repo`` against it.
@@ -119,11 +119,16 @@ async def run(
         async with with_session(runtime.org_id) as db:
             org = await OrganizationRepository(db).get_by_id(runtime.org_id)
 
+    repo_id_raw = config.get("repo_id")
+    repo_id = uuid.UUID(str(repo_id_raw)) if repo_id_raw is not None else None
+
     worktree_path = await ensure_scan_test_worktree(
         ctx.repo_path,
         main_branch,
         skip_fetch=bool(config.get("skip_fetch", False)),
         org=org,
+        org_id=runtime.org_id if runtime is not None else None,
+        repo_id=repo_id,
     )
 
     head_sha = ""
@@ -132,10 +137,7 @@ async def run(
         if rc == 0:
             head_sha = stdout.strip()
 
-    repo_id_raw = config.get("repo_id")
-
-    if runtime is not None and repo_id_raw is not None:
-        repo_id = uuid.UUID(str(repo_id_raw))
+    if runtime is not None and repo_id is not None:
         async with with_session(runtime.org_id) as db:
             decision = await should_skip_indexing(
                 db,
@@ -200,8 +202,7 @@ async def run(
     graph_written = False
     cluster_cache_error: str | None = None
     graph_cache_error: str | None = None
-    if runtime is not None and repo_id_raw is not None and head_sha:
-        repo_id = uuid.UUID(str(repo_id_raw))
+    if runtime is not None and repo_id is not None and head_sha:
         (
             cache_written,
             graph_written,
