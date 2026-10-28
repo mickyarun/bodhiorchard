@@ -6,7 +6,7 @@ uvicorn[standard]>=0.24.0
 # 38 files on an unchanged tree. Both were unbounded, so CI silently
 # picked them up and turned red with no code change. Lift these only as
 # part of an intentional migration, not by accident.
-sqlalchemy[asyncio]>=2.0.23,<2.1
+sqlalchemy[asyncio]>=2.0.23,<2.2
 asyncpg>=0.29.0
 alembic>=1.13.0
 pydantic>=2.5.0
