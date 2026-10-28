@@ -23,6 +23,12 @@
 
 Commits use a fixed author and fixed dates and the builder ignores the
 developer's global git config, so the same tree always gets the same SHAs.
+
+The app may rewrite the clone's ``origin`` URL (a GitHub-App org gets an
+``https://github.com/...`` remote before agent runs), so the builder pushes
+to the bare repository's path and reads branch heads from it, never through
+the ``origin`` remote, and its own git commands may only use local
+transports.
 """
 
 from __future__ import annotations
@@ -44,24 +50,29 @@ _GIT_ENV = {
     "GIT_CONFIG_NOSYSTEM": "1",
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_TERMINAL_PROMPT": "0",
+    "GIT_ALLOW_PROTOCOL": "file",
 }
+# Set by a git hook that runs pytest; they would aim these commands at the real repo.
+_REPO_LOCATING_VARS = frozenset(
+    {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR"}
+)
 
 
 def git(cwd: Path, *args: str, author_email: str = DEFAULT_AUTHOR_EMAIL) -> str:
     """Run ``git args`` in ``cwd`` with the fixture identity; return stdout."""
     identity = {"GIT_AUTHOR_EMAIL": author_email, "GIT_COMMITTER_EMAIL": author_email}
-    # Drop inherited GIT_* (a git hook running pytest sets GIT_DIR and
-    # GIT_INDEX_FILE, which would point these commands at the real repo).
-    inherited = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    inherited = {k: v for k, v in os.environ.items() if k not in _REPO_LOCATING_VARS}
     env = {**inherited, **_GIT_ENV, **identity}
     done = subprocess.run(
         ["git", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main", *args],
         cwd=cwd,
         env=env,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
+    if done.returncode != 0:
+        raise RuntimeError(f"git {args} failed: {done.stderr.strip()}")
     return done.stdout.strip()
 
 
@@ -80,8 +91,8 @@ class LocalGitRepo:
         return str(self.work)
 
     def head(self, branch: str = "main") -> str:
-        """Commit SHA of ``origin/<branch>``."""
-        return git(self.work, "rev-parse", f"origin/{branch}")
+        """Commit SHA of ``branch`` in the bare origin."""
+        return git(self.origin, "rev-parse", branch)
 
     def commit(self, files: dict[str, str], message: str, branch: str = "main") -> str:
         """Write ``files`` on ``branch``, commit, push to origin; return the SHA."""
@@ -93,7 +104,7 @@ class LocalGitRepo:
             target.write_text(text)
         git(self.work, "add", "-A")
         git(self.work, "commit", "-q", "-m", message, author_email=self.author_email)
-        git(self.work, "push", "-q", "origin", branch)
+        git(self.work, "push", "-q", str(self.origin), branch)
         return git(self.work, "rev-parse", "HEAD")
 
 
@@ -124,8 +135,9 @@ def build_git_repo(
     repo.commit(first, "Start the service")
     repo.commit(tree, "Add the remaining modules")
     git(work, "checkout", "-q", "-b", "develop")
-    git(work, "push", "-q", "origin", "develop")
+    git(work, "push", "-q", str(origin), "develop")
     git(work, "checkout", "-q", "main")
     git(origin, "symbolic-ref", "HEAD", "refs/heads/main")
+    git(work, "fetch", "-q", "origin")
     git(work, "remote", "set-head", "origin", "main")
     return repo
