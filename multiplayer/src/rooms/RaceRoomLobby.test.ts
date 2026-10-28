@@ -19,7 +19,7 @@
 import type { Client } from "colyseus"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { COUNTDOWN_MS, LOBBY_MAX_MS, MAX_RACERS } from "../../../shared/race/RaceConstants"
-import { issueRaceCreateTicket } from "../bridge/RaceCreateTickets"
+import { issueRoomCreateTicket } from "../bridge/RoomCreateTickets"
 import { RaceRoom } from "./RaceRoom"
 
 interface LobbyHandlers {
@@ -64,7 +64,7 @@ beforeEach(() => {
   room = new RaceRoom()
   room.roomId = "race-lobby-test"
   room.onCreate({
-    createTicket: issueRaceCreateTicket(),
+    createTicket: issueRoomCreateTicket("race"),
     orgId: "org-a",
     hostUserId: "host",
     hostName: "Host",

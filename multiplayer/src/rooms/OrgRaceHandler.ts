@@ -29,7 +29,7 @@
  *     but don't roll back the race-room creation (a missed toast is
  *     recoverable; the invite still sits in the bell dropdown).
  */
-import type { Client, Room } from "colyseus"
+import { matchMaker, type Client, type Room } from "colyseus"
 import type { OrgRoomState } from "../schema/OrgRoomState"
 import { ArraySchema } from "@colyseus/schema"
 import { ActiveRaceSummary } from "../schema/ActiveRaceSummary"
@@ -102,7 +102,6 @@ async function handleRaceCreate(
 
   const orgId = room.state.orgId
   try {
-    const matchMakerMod = await import("colyseus")
     // RaceRoom.onCreate refuses any create without a ticket from this
     // process, so a client cannot open a race of its own with
     // `create("race", ...)` (see RoomCreateTickets).
@@ -145,7 +144,7 @@ async function handleRaceCreate(
         // is always false. Resolve the instance via `getLocalRoomById`,
         // which is the single-process Colyseus API for "give me the actual
         // Room object that's running right here."
-        const instance = matchMakerMod.matchMaker.getLocalRoomById(newRoom.roomId)
+        const instance = matchMaker.getLocalRoomById(newRoom.roomId)
         if (instance instanceof RaceRoom) instance.removeInvitee(userId)
       },
     })

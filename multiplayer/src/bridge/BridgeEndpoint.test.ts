@@ -63,6 +63,14 @@ function fakeOrgRoom(impl?: (type: string, data: unknown) => void) {
   return { room: { handleBridgeEvent } as unknown as OrgRoom, handleBridgeEvent }
 }
 
+/** Rooms registered by a test, released afterwards (only the holder can release a slot). */
+const registered: Array<[string, OrgRoom]> = []
+
+function register(orgId: string, room: OrgRoom): void {
+  registerOrgRoom(orgId, room)
+  registered.push([orgId, room])
+}
+
 let logSpy: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
@@ -71,8 +79,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  unregisterOrgRoom("org-a")
-  unregisterOrgRoom("org-b")
+  for (const [orgId, room] of registered.splice(0)) unregisterOrgRoom(orgId, room)
   fireRaceDispose("race-1")
   unregisterBacklashDeclineHandler("bl-1")
   vi.restoreAllMocks()
@@ -132,8 +139,8 @@ describe("org-scoped delivery", () => {
   it("delivers the event to the registered room for that org only", () => {
     const a = fakeOrgRoom()
     const b = fakeOrgRoom()
-    registerOrgRoom("org-a", a.room)
-    registerOrgRoom("org-b", b.room)
+    register("org-a", a.room)
+    register("org-b", b.room)
     const data = { user_id: "u1", presence: "on_break" }
 
     const res = authed({ orgId: "org-a", type: "member_presence", data })
@@ -145,7 +152,7 @@ describe("org-scoped delivery", () => {
 
   it("reports delivered=false when no room is live for the org", () => {
     const a = fakeOrgRoom()
-    registerOrgRoom("org-a", a.room)
+    register("org-a", a.room)
 
     const res = authed({ orgId: "org-b", type: "dev_activity", data: {} })
 
@@ -155,8 +162,8 @@ describe("org-scoped delivery", () => {
 
   it("stops delivering once the room is unregistered", () => {
     const a = fakeOrgRoom()
-    registerOrgRoom("org-a", a.room)
-    unregisterOrgRoom("org-a")
+    register("org-a", a.room)
+    unregisterOrgRoom("org-a", a.room)
 
     expect(authed({ orgId: "org-a", type: "dev_activity", data: {} }).body)
       .toMatchObject({ delivered: false })
@@ -166,7 +173,7 @@ describe("org-scoped delivery", () => {
     const a = fakeOrgRoom(() => {
       throw new Error("boom with internals")
     })
-    registerOrgRoom("org-a", a.room)
+    register("org-a", a.room)
 
     expect(authed({ orgId: "org-a", type: "dev_activity", data: {} })).toEqual({
       statusCode: 500,

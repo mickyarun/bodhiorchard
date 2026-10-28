@@ -31,10 +31,14 @@
  * `client.auth` and as `onJoin`'s third argument, and skips any instance
  * `onAuth`, so a join costs one backend call.
  *
- * The static hook does not know which room the client will land in. A
- * verified member of org B can name org B and still ask to `joinById` a room
- * of org A, so each room's `onJoin` calls `requireRoomIdentity` with its own
- * org before it acts on the identity.
+ * The static hook does not know which room the client will land in. For
+ * `joinOrCreate`, `join` and `create` that is the org it named (the shared
+ * rooms filter on `orgId`). For `joinById`, Colyseus gives the hook no room
+ * id, so a verified member of org B who names org B and knows the id of an
+ * org A room (ids are only published inside org A's garden state) is still
+ * granted a seat reservation there. Each room's `onJoin` therefore calls
+ * `requireRoomIdentity` with its own org and refuses that join before it acts
+ * on the identity; the reserved seat is released when the reservation lapses.
  *
  * The token travels in the join options (`options.token`), which is what the
  * frontend sends; the `Authorization` header token Colyseus also offers is
@@ -56,7 +60,7 @@ import {
  */
 export async function authenticateJoin(
   _headerToken: string | undefined,
-  options: JoinCredentials | undefined,
+  options: (JoinCredentials & Record<string, unknown>) | undefined,
   _context?: AuthContext,
 ): Promise<JoinIdentity> {
   const claimedOrg = options?.orgId

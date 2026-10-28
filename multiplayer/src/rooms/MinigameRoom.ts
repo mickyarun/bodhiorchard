@@ -85,7 +85,10 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
       return
     }
     // `options` are the raw client join options; `auth` is what the static
-    // onAuth returned from the verified token. The score is posted for this identity.
+    // onAuth returned from the verified token. The score is posted for this
+    // identity. Unlike the other rooms there is no room org to compare it
+    // with: a play room has one seat (`maxClients = 1`) and takes its org
+    // from the one verified player, so `requireRoomIdentity` does not apply.
     const identity = requireJoinIdentity(auth)
     this.state.userId = identity.userId
     this.state.orgId = identity.orgId
