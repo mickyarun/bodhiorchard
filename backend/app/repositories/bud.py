@@ -16,7 +16,7 @@
 
 import uuid
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -492,8 +492,29 @@ class BUDRepository(BaseRepository[BUDDocument]):
         return {row.id: {"number": row.bud_number, "title": row.title} for row in result.all()}
 
 
+class DesignTargetNotInOrgError(LookupError):
+    """A design write named a BUD or tracked repo outside the repository's org.
+
+    ``bud_designs.bud_id`` and ``bud_designs.repo_id`` are plain foreign keys
+    with no composite org constraint, so the org scope has to be checked
+    before a row is written. ``kind`` says which target failed (``"bud"`` or
+    ``"repo"``) so callers can map it onto their own error shape.
+    """
+
+    def __init__(self, kind: Literal["bud", "repo"], target_id: uuid.UUID) -> None:
+        self.kind = kind
+        self.target_id = target_id
+        label = "BUD" if kind == "bud" else "tracked repository"
+        super().__init__(f"No {label} with id {target_id} in this organization")
+
+
 class BUDDesignRepository(BaseRepository[BUDDesign]):
-    """Repository for per-repo BUD design wireframes."""
+    """Repository for per-repo BUD design wireframes.
+
+    Every write that can create a row or point it at a BUD/repo goes through
+    :meth:`_assert_targets_in_org`, so a caller holding one org's scope can't
+    attach a design to another org's BUD or repository.
+    """
 
     def __init__(self, db: AsyncSession, *, org_id: uuid.UUID) -> None:
         """Initialize with async session and organization scope."""
@@ -625,7 +646,12 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
         ``job_utils.section_locks`` only covers the same Python process,
         which is not enough once multiple workers run. The lock is
         released when the surrounding transaction commits.
+
+        Raises:
+            DesignTargetNotInOrgError: ``bud_id`` or ``repo_id`` is not in
+                this repository's org. Nothing is written.
         """
+        await self._assert_targets_in_org(bud_id, repo_id)
         stmt = self._scoped(
             select(BUDDesign)
             .where(BUDDesign.bud_id == bud_id)
@@ -661,6 +687,61 @@ class BUDDesignRepository(BaseRepository[BUDDesign]):
             notes=notes,
         )
         return await self.create(design)
+
+    async def write_ready_html(
+        self,
+        design_id: uuid.UUID,
+        bud_id: uuid.UUID,
+        *,
+        design_html: str,
+        notes: str | None = None,
+    ) -> BUDDesign | None:
+        """Store finished HTML on one existing design row and mark it ready.
+
+        The row must be in this org and belong to ``bud_id``; otherwise
+        returns None and writes nothing. The BUD and repo the row points at
+        are re-checked too, so a row left pointing at another org's BUD can't
+        be used to write onto it.
+
+        Raises:
+            DesignTargetNotInOrgError: the row's BUD or repo is not in this
+                repository's org. Nothing is written.
+        """
+        stmt = self._scoped(
+            select(BUDDesign)
+            .where(BUDDesign.id == design_id)
+            .where(BUDDesign.bud_id == bud_id)
+            .with_for_update()
+        )
+        design = (await self._db.execute(stmt)).scalar_one_or_none()
+        if design is None:
+            return None
+        await self._assert_targets_in_org(design.bud_id, design.repo_id)
+        design.design_html = design_html
+        design.status = BUDDesignStatus.READY
+        if notes is not None:
+            design.notes = notes
+        await self._db.flush()
+        return design
+
+    async def _assert_targets_in_org(self, bud_id: uuid.UUID, repo_id: uuid.UUID | None) -> None:
+        """Raise unless the BUD (and the repo, when given) are in this org."""
+        bud_found = await self._db.execute(
+            select(BUDDocument.id)
+            .where(BUDDocument.id == bud_id)
+            .where(BUDDocument.org_id == self._org_id)
+        )
+        if bud_found.scalar_one_or_none() is None:
+            raise DesignTargetNotInOrgError("bud", bud_id)
+        if repo_id is None:
+            return
+        repo_found = await self._db.execute(
+            select(TrackedRepository.id)
+            .where(TrackedRepository.id == repo_id)
+            .where(TrackedRepository.org_id == self._org_id)
+        )
+        if repo_found.scalar_one_or_none() is None:
+            raise DesignTargetNotInOrgError("repo", repo_id)
 
 
 class BUDChatMessageRepository(BaseRepository[BUDChatMessage]):

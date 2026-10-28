@@ -16,7 +16,9 @@
 
 A token for one org used to be able to create design rows (and a
 ``design_updated`` timeline event) on another org's BUD by passing that
-BUD's UUID, with or without that org's repo id.
+BUD's UUID, with or without that org's repo id. The design repository now
+refuses those targets itself, and an update that names another org's design
+row by ``design_id`` is refused too.
 """
 
 from __future__ import annotations
@@ -29,7 +31,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.mcp.auth import MCPAuthResult
 from app.mcp.handlers_bud_design import handle_write_bud_design
-from app.models.bud import BUDDesign, BUDDocument, BUDStatus, BUDTimelineEvent
+from app.models.bud import (
+    BUDDesign,
+    BUDDesignStatus,
+    BUDDocument,
+    BUDStatus,
+    BUDTimelineEvent,
+)
 from app.models.organization import Organization
 from app.models.tracked_repository import TrackedRepository
 
@@ -116,3 +124,63 @@ async def test_own_bud_and_repo_still_saves(pg_session_factory: Factory) -> None
 
     assert result["saved"] is True
     assert await _rows_on(pg_session_factory, a_bud) == (1, 1)
+
+
+async def _seed_design(factory: Factory, org_id: uuid.UUID, bud_id: uuid.UUID) -> uuid.UUID:
+    async with factory() as db:
+        design = BUDDesign(
+            org_id=org_id,
+            bud_id=bud_id,
+            design_html="<p>original</p>",
+            status=BUDDesignStatus.READY,
+        )
+        db.add(design)
+        await db.commit()
+        return design.id
+
+
+async def _design_html(factory: Factory, design_id: uuid.UUID) -> tuple[str | None, int]:
+    """The row's HTML and the number of timeline events on its BUD."""
+    async with factory() as db:
+        design = await db.get(BUDDesign, design_id)
+        assert design is not None
+        _, events = await _rows_on(factory, design.bud_id)
+        return design.design_html, events
+
+
+async def test_other_org_design_id_is_refused_and_untouched(pg_session_factory: Factory) -> None:
+    """Org A naming org B's design row (with B's BUD, or its own) changes nothing."""
+    org_a, a_bud, _ = await _org_with_bud_and_repo(pg_session_factory)
+    org_b, b_bud, _ = await _org_with_bud_and_repo(pg_session_factory)
+    b_design = await _seed_design(pg_session_factory, org_b, b_bud)
+
+    with_b_bud = await _write(
+        pg_session_factory,
+        org_a,
+        {"bud_id": str(b_bud), "design_id": str(b_design), "html": "<p>pwned</p>"},
+    )
+    with_own_bud = await _write(
+        pg_session_factory,
+        org_a,
+        {"bud_id": str(a_bud), "design_id": str(b_design), "html": "<p>pwned</p>"},
+    )
+
+    assert with_b_bud["success"] is False
+    assert with_own_bud["success"] is False
+    assert await _design_html(pg_session_factory, b_design) == ("<p>original</p>", 0)
+    assert await _rows_on(pg_session_factory, a_bud) == (0, 0)
+
+
+async def test_own_design_id_still_saves(pg_session_factory: Factory) -> None:
+    """Chat iteration on the caller's own design row keeps working."""
+    org_a, a_bud, _ = await _org_with_bud_and_repo(pg_session_factory)
+    a_design = await _seed_design(pg_session_factory, org_a, a_bud)
+
+    result = await _write(
+        pg_session_factory,
+        org_a,
+        {"bud_id": str(a_bud), "design_id": str(a_design), "html": "<p>v2</p>"},
+    )
+
+    assert result["saved"] is True
+    assert await _design_html(pg_session_factory, a_design) == ("<p>v2</p>", 1)

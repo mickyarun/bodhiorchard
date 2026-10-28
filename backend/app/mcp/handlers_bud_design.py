@@ -30,8 +30,7 @@ from app.mcp.auth import MCPAuthResult
 from app.mcp.handler_utils import require_non_empty
 from app.models.bud import BUDDesignStatus
 from app.models.organization import Organization
-from app.repositories.bud import BUDDesignRepository, BUDRepository
-from app.repositories.tracked_repository import TrackedRepoRepository
+from app.repositories.bud import BUDDesignRepository, DesignTargetNotInOrgError
 from app.services.bud_timeline import record_event
 from app.services.html_sanitizer import sanitize_design_html
 
@@ -173,54 +172,54 @@ async def handle_write_bud_design(
         except (ValueError, TypeError):
             return {"success": False, "error": "design_id is not a valid UUID"}
 
-    scope_error = await _check_org_scope(db, org.id, bud_uuid, repo_uuid)
-    if scope_error:
-        return scope_error
-
     raw_html = params["html"]
     safe_html = sanitize_design_html(raw_html)
     notes = params.get("notes")
 
     repo = BUDDesignRepository(db, org_id=org.id)
 
-    if design_uuid is not None:
-        # Direct-update path. Verify the row belongs to the caller's
-        # org and the claimed BUD before mutating — the org_id scope on
-        # ``BUDDesignRepository`` already filters cross-org reads, but
-        # the bud_id check is explicit so a stale chat job can't
-        # silently land HTML on a different BUD's row.
-        existing = await repo.get_by_id(design_uuid)
-        if existing is None or existing.bud_id != bud_uuid:
-            logger.warning(
-                "mcp_write_bud_design_rejected",
-                org_id=str(org.id),
-                bud_id=str(bud_uuid),
-                design_id=str(design_uuid),
-                reason="design_id_not_found_or_bud_mismatch",
-                row_exists=existing is not None,
+    # Both writes check that the BUD and repo are in the caller's org, so a
+    # token for one org can't land design rows (or the timeline event below)
+    # on another org's BUD.
+    try:
+        if design_uuid is not None:
+            # Chat iteration names the row directly so a stale prompt can't
+            # insert a fresh one; the row must be in this org and on this BUD.
+            design = await repo.write_ready_html(
+                design_uuid, bud_uuid, design_html=safe_html, notes=notes
             )
-            return {
-                "success": False,
-                "error": (
-                    f"design_id {design_uuid} not found for bud_id {bud_uuid}. "
-                    "The row may have been deleted; ask the user to retry."
-                ),
-            }
-        existing.design_html = safe_html
-        existing.status = BUDDesignStatus.READY
-        if notes is not None:
-            existing.notes = notes
-        await db.commit()
-        design = existing
-    else:
-        design = await repo.upsert(
-            bud_uuid,
-            repo_uuid,
-            design_html=safe_html,
-            status=BUDDesignStatus.READY,
-            notes=notes,
+        else:
+            design = await repo.upsert(
+                bud_uuid,
+                repo_uuid,
+                design_html=safe_html,
+                status=BUDDesignStatus.READY,
+                notes=notes,
+            )
+    except DesignTargetNotInOrgError as exc:
+        logger.warning(
+            "mcp_write_bud_design_rejected",
+            org_id=str(org.id),
+            bud_id=str(bud_uuid),
+            reason=f"{exc.kind}_not_in_org",
         )
-        await db.commit()
+        return {"success": False, "error": str(exc)}
+    if design is None:
+        logger.warning(
+            "mcp_write_bud_design_rejected",
+            org_id=str(org.id),
+            bud_id=str(bud_uuid),
+            design_id=str(design_uuid),
+            reason="design_id_not_found_or_bud_mismatch",
+        )
+        return {
+            "success": False,
+            "error": (
+                f"design_id {design_uuid} not found for bud_id {bud_uuid}. "
+                "The row may have been deleted; ask the user to retry."
+            ),
+        }
+    await db.commit()
 
     # Credit the human who iterated the design (NULL for agent-driven writes).
     await record_event(
@@ -248,28 +247,3 @@ async def handle_write_bud_design(
         "design_id": str(design.id),
         "length": len(safe_html),
     }
-
-
-async def _check_org_scope(
-    db: AsyncSession,
-    org_id: uuid_mod.UUID,
-    bud_id: uuid_mod.UUID,
-    repo_id: uuid_mod.UUID | None,
-) -> dict[str, Any] | None:
-    """Refuse a write whose BUD or repo belongs to another org.
-
-    ``BUDDesignRepository.upsert`` stamps the caller's ``org_id`` on a new
-    row but takes ``bud_id`` and ``repo_id`` as given, so without this check
-    a token for one org could attach design rows (and a timeline event) to
-    another org's BUD.
-    """
-    if not await BUDRepository(db, org_id=org_id).exists(bud_id):
-        return {"success": False, "error": f"No BUD with id {bud_id} in this organization"}
-    if repo_id is None:
-        return None
-    if await TrackedRepoRepository(db, org_id=org_id).get_by_id(repo_id) is None:
-        return {
-            "success": False,
-            "error": f"No tracked repository with id {repo_id} in this organization",
-        }
-    return None
