@@ -29,11 +29,12 @@ from typing import Any
 
 import pytest
 from fastapi import FastAPI
-from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from jose import jwt
 
 from app.api.router import api_router
+from app.api.v1.ws import router as ws_router
 from app.config import settings
 from app.core.auth_deps import oauth2_scheme
 from app.core.deps import get_db
@@ -56,8 +57,6 @@ PUBLIC_ROUTES = frozenset(
         "/api/setup/initialize",
         "/api/v1/auth/login",
         "/api/v1/auth/refresh",
-        # Authenticates with ``?token=`` inside the handler.
-        "/api/v1/ws",
         # Pre-commit hook; rate-limited, answers only "exists or not".
         "/api/v1/public/{org_id}/bud-check/{bud_number}",
         # ``<img>`` tags and Slack's unfurler send no Authorization header.
@@ -99,11 +98,29 @@ def _call_name(call: Any) -> str:
     return str(getattr(call, "__name__", ""))
 
 
+def _http_routes() -> list[ServedRoute]:
+    routes = [r for r in served_routes(api_router) if r.methods]
+    # Hundreds today; a walk that finds none would let every check pass.
+    assert len(routes) > 300, f"only {len(routes)} HTTP routes found"
+    return routes
+
+
 def test_only_the_pinned_routes_skip_the_user_token() -> None:
-    routes = served_routes(api_router)
-    assert len(routes) > 300, f"only {len(routes)} routes found"
-    public = {r.path for r in routes if not _needs_user_token(r)}
+    public = {r.path for r in _http_routes() if not _needs_user_token(r)}
     assert public == PUBLIC_ROUTES
+
+
+def test_the_websocket_rejects_a_missing_or_forged_token() -> None:
+    """``/api/v1/ws`` checks ``?token=`` in the handler, before any database work."""
+    paths = {getattr(r, "path", "") for r in ws_router.routes}
+    assert paths == {"/ws"}
+    app = FastAPI()
+    app.include_router(api_router)
+    forged = _bad_tokens()["forged signature"]["Authorization"].removeprefix("Bearer ")
+    with TestClient(app) as http:
+        for query in ("", f"?token={forged}"):
+            with http.websocket_connect(f"/api/v1/ws{query}") as socket:
+                assert socket.receive_json() == {"error": "unauthorized"}
 
 
 @pytest.mark.parametrize(("prefix", "checker"), sorted(OWN_CREDENTIAL.items()))
@@ -139,10 +156,10 @@ def _bad_tokens() -> dict[str, dict[str, str]]:
     }
 
 
-def _protected_calls(app: FastAPI) -> list[tuple[str, str]]:
+def _protected_calls() -> list[tuple[str, str]]:
     calls = []
-    for route in app.routes:
-        if not isinstance(route, APIRoute) or route.path in PUBLIC_ROUTES:
+    for route in _http_routes():
+        if route.path in PUBLIC_ROUTES:
             continue
         concrete = re.sub(r"\{[^}]+\}", str(uuid.uuid4()), route.path)
         calls.extend((method, concrete) for method in sorted(route.methods - {"HEAD"}))
@@ -154,7 +171,7 @@ async def test_every_protected_route_rejects_callers_without_a_valid_access_toke
     app.include_router(api_router)
     app.dependency_overrides[get_db] = _inert_db
     app.dependency_overrides[database_get_db] = _inert_db
-    calls = _protected_calls(app)
+    calls = _protected_calls()
     assert len(calls) > 300, f"only {len(calls)} protected calls found"
 
     let_through = []
