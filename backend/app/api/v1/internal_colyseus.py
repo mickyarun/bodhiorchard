@@ -52,6 +52,7 @@ from app.services.minigame_service import (
     MinigameValidationError,
     get_leaderboard,
     submit_score,
+    validate_play,
 )
 from app.services.org_settings import get_presence_settings
 from app.services.presence_cache import get_presence_state
@@ -399,6 +400,15 @@ async def post_minigame_results(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User is not a member of the specified organization",
         )
+
+    # Validate before claiming: the session row stores the score, and an
+    # invalid play must not consume the session id.
+    try:
+        validate_play(body.game, body.score)
+    except MinigameValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
 
     repo = MinigameRepository(db, org_id=body.org_id)
     claimed = await repo.try_claim_session(
