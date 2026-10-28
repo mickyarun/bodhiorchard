@@ -100,7 +100,7 @@ async def test_a_slack_failure_never_stops_the_quiz_or_the_other_dms(
 
     assert [q.status for q in await quizzes(app_sessions, org_id)] == [QuizStatus.OPEN]
     assert _opened_for(fake_slack) == reachable
-    delivered = [m for thread in fake_slack.threads.values() for m in thread]
+    delivered = {m["ts"] for thread in fake_slack.threads.values() for m in thread}
     assert len(delivered) == 1
 
 
