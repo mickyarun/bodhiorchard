@@ -22,7 +22,7 @@ turn leave already taken in it into loss of pay.
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -36,6 +36,8 @@ from tests.integration.leave_support import Factory, add_request, setup_org
 
 pytestmark = pytest.mark.integration
 D = Decimal
+# Types count as set up long before the years carried, whatever today's real date.
+SET_UP = datetime(2028, 1, 1, tzinfo=UTC)
 
 
 async def _carried(factory: Factory, user: uuid.UUID) -> list[tuple[int, Decimal]]:
@@ -54,7 +56,7 @@ async def test_an_april_policy_carries_in_the_first_week_of_april(
 ) -> None:
     org, (emp,), _ = await setup_org(pg_session_factory, "Emp")
     policy, cl = await add_policy(pg_session_factory, org, "India", quota="18", year_start_month=4)
-    await set_type(pg_session_factory, cl, carry_forward_days=D(5))
+    await set_type(pg_session_factory, cl, carry_forward_days=D(5), created_at=SET_UP)
     await place(pg_session_factory, org, emp, policy)
     # Ten days in May 2029: the leave year running April 2029 to March 2030.
     await add_request(
@@ -78,9 +80,9 @@ async def test_an_april_policy_carries_in_the_first_week_of_april(
 
 async def test_each_policy_carries_on_its_own_new_year(pg_session_factory: Factory) -> None:
     org, (jan_emp, apr_emp), casual = await setup_org(pg_session_factory, "Jan", "Apr")
-    await set_type(pg_session_factory, casual, carry_forward_days=D(2))
+    await set_type(pg_session_factory, casual, carry_forward_days=D(2), created_at=SET_UP)
     policy, cl = await add_policy(pg_session_factory, org, "April", year_start_month=4)
-    await set_type(pg_session_factory, cl, carry_forward_days=D(2))
+    await set_type(pg_session_factory, cl, carry_forward_days=D(2), created_at=SET_UP)
     await place(pg_session_factory, org, apr_emp, policy)
     # 1 Jan: only the calendar-year policy is due.
     assert await run(pg_session_factory, org, date(2030, 1, 2)) == 1
