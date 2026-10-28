@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import os.path
 import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
@@ -59,13 +58,13 @@ async def _has_origin_remote(repo_path: str) -> bool:
     return rc == 0
 
 
-async def _git_common_dir(path: str) -> str | None:
-    """Resolved ``git rev-parse --git-common-dir`` for ``path``, or ``None``.
+async def _rev_parse_path(path: str, flag: str) -> str | None:
+    """Resolved output of ``git rev-parse <flag>`` run in ``path``, or ``None``.
 
-    Git may print the directory relative to ``path``; joining and
-    resolving it gives one comparable absolute path.
+    Git may print a path relative to ``path``; joining and resolving it
+    gives one comparable absolute path.
     """
-    out, _, rc = await run_git(["rev-parse", "--git-common-dir"], cwd=path)
+    out, _, rc = await run_git(["rev-parse", flag], cwd=path)
     if rc != 0 or not out.strip():
         return None
     return os.path.realpath(os.path.join(path, out.strip()))
@@ -77,12 +76,16 @@ async def _worktree_belongs_to_repo(worktree_path: str, repo_path: str) -> bool:
     A leftover folder can fail this in several ways: its ``.git`` link
     dangles (the base repo moved), it is a worktree of a different repo,
     or it isn't a worktree at all and git finds whatever repo encloses
-    it. Only a folder sharing the repo's own git directory may be reset
-    and indexed; anything else is rebuilt so no other repo's code leaks
-    into this repo's index.
+    it. That enclosing repo can be ``repo_path`` itself when the data dir
+    sits inside the checkout, so the folder must also be the top of its
+    own work tree; otherwise a reset there would move the user's branch.
+    Only a folder that passes both checks is reset and indexed; anything
+    else is rebuilt.
     """
-    own = await _git_common_dir(repo_path)
-    return own is not None and own == await _git_common_dir(worktree_path)
+    if await _rev_parse_path(worktree_path, "--show-toplevel") != os.path.realpath(worktree_path):
+        return False
+    own = await _rev_parse_path(repo_path, "--git-common-dir")
+    return own is not None and own == await _rev_parse_path(worktree_path, "--git-common-dir")
 
 
 async def ensure_scan_test_worktree(
@@ -296,7 +299,10 @@ async def _remove_conflicting_worktree(repo_path: str, main_branch: str, *, keep
     #   worktree /abs/path
     #   HEAD <sha>
     #   branch refs/heads/<name>
-    keep_norm = str(Path(keep))
+    # Git records worktree paths resolved, so compare resolved paths: a
+    # symlink in the data dir would otherwise make our own worktree look
+    # foreign and get force-removed on every run.
+    keep_norm = os.path.realpath(keep)
     branch_ref = f"refs/heads/{main_branch}"
     for block in stdout.split("\n\n"):
         path_line: str | None = None
@@ -308,7 +314,7 @@ async def _remove_conflicting_worktree(repo_path: str, main_branch: str, *, keep
                 branch_line = line[len("branch ") :].strip()
         if not path_line or branch_line != branch_ref:
             continue
-        if str(Path(path_line)) == keep_norm:
+        if os.path.realpath(path_line) == keep_norm:
             continue
         logger.info(
             "scan_ingest_removing_stale_worktree",

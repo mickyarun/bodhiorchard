@@ -109,9 +109,10 @@ async def test_reset_success_returns_silently(_patched: dict[str, Any]) -> None:
 def _worktree_run_git(monkeypatch: pytest.MonkeyPatch, *, healthy: bool, calls: list[list[str]]):
     """Stub ``run_git`` for ``ensure_scan_test_worktree`` on the worktree path.
 
-    ``rev-parse --git-common-dir`` (the ownership probe) reports the repo's
-    own git dir from the worktree when ``healthy``, else fails there like a
-    dangling worktree does. Everything else (branch probe on a non-main
+    The ownership probes (``rev-parse --show-toplevel`` and
+    ``--git-common-dir``) report the worktree as its own top level sharing
+    the repo's git dir when ``healthy``, else fail there like a dangling
+    worktree does. Everything else (branch probe on a non-main
     branch, origin lookup, worktree list/add/prune) succeeds.
     """
 
@@ -119,6 +120,8 @@ def _worktree_run_git(monkeypatch: pytest.MonkeyPatch, *, healthy: bool, calls: 
         calls.append(list(args))
         if args[:2] == ["rev-parse", "--abbrev-ref"]:
             return ("feature-x", "", 0)  # not on main → worktree path taken
+        if args == ["rev-parse", "--show-toplevel"]:
+            return (cwd, "", 0) if healthy else ("", "fatal: not a git repository", 128)
         if args == ["rev-parse", "--git-common-dir"]:
             if cwd == "/tmp/fakerepo" or healthy:
                 return ("/tmp/fakerepo/.git", "", 0)

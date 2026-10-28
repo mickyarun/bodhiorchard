@@ -35,8 +35,11 @@ from app.services.scan.stages.ingest_worktree import ensure_scan_test_worktree
 _GIT_IDENTITY = ("-c", "user.name=Test", "-c", "user.email=test@example.com")
 
 
-def _git(cwd: Path, *args: str) -> None:
-    subprocess.run(["git", *_GIT_IDENTITY, "-C", str(cwd), *args], check=True, capture_output=True)
+def _git(cwd: Path, *args: str) -> str:
+    done = subprocess.run(
+        ["git", *_GIT_IDENTITY, "-C", str(cwd), *args], check=True, capture_output=True, text=True
+    )
+    return done.stdout.strip()
 
 
 def _make_repo(path: Path, marker: str) -> Path:
@@ -113,6 +116,48 @@ async def test_a_foreign_worktree_in_the_folder_is_rebuilt_not_reused(
 
 async def test_its_own_healthy_worktree_is_reused(two_orgs: tuple[Path, Path]) -> None:
     _, repo_b = two_orgs
+    ids = {"org_id": uuid.uuid4(), "repo_id": uuid.uuid4()}
+    first = await ensure_scan_test_worktree(str(repo_b), "main", skip_fetch=True, **ids)
+    Path(first, "untracked.txt").write_text("kept\n")
+
+    again = await ensure_scan_test_worktree(str(repo_b), "main", skip_fetch=True, **ids)
+
+    assert again == first
+    assert Path(again, "untracked.txt").read_text() == "kept\n"
+
+
+async def test_a_plain_folder_inside_the_repo_itself_is_rebuilt_not_reset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A data dir inside the tracked checkout must never reset the user's branch."""
+    repo = _make_repo(tmp_path / "checkout", "mine\n")
+    (repo / "wip.txt").write_text("feature work\n")
+    _git(repo, "add", "wip.txt")
+    _git(repo, "commit", "-q", "-m", "feature work")
+    feature_head = _git(repo, "rev-parse", "HEAD")
+    monkeypatch.setattr(app_settings.storage, "data_dir", str(repo / "data"))
+    ids = {"org_id": uuid.uuid4(), "repo_id": uuid.uuid4()}
+    first = await ensure_scan_test_worktree(str(repo), "main", skip_fetch=True, **ids)
+    # Leave a plain folder (no ``.git`` link) where the worktree was.
+    _git(repo, "worktree", "remove", "--force", first)
+    Path(first).mkdir(parents=True)
+
+    again = await ensure_scan_test_worktree(str(repo), "main", skip_fetch=False, **ids)
+
+    assert _git(repo, "rev-parse", "HEAD") == feature_head
+    assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "feature"
+    assert Path(again, ".git").is_file()
+    assert not Path(again, "wip.txt").exists()
+
+
+async def test_its_own_worktree_is_reused_through_a_symlinked_data_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, two_orgs: tuple[Path, Path]
+) -> None:
+    """Git records resolved paths; a symlinked data dir must still match ours."""
+    _, repo_b = two_orgs
+    (tmp_path / "real").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "real", target_is_directory=True)
+    monkeypatch.setattr(app_settings.storage, "data_dir", str(tmp_path / "link" / "data"))
     ids = {"org_id": uuid.uuid4(), "repo_id": uuid.uuid4()}
     first = await ensure_scan_test_worktree(str(repo_b), "main", skip_fetch=True, **ids)
     Path(first, "untracked.txt").write_text("kept\n")
