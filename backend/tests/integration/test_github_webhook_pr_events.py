@@ -22,6 +22,8 @@ replaced by a recorder; nothing talks to GitHub.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import uuid
 from typing import Any
@@ -209,10 +211,10 @@ async def test_an_org_without_a_webhook_secret_never_processes_deliveries(
     assert calls.handled == 0
 
 
-def test_the_payload_builder_matches_what_the_signature_covers() -> None:
-    """Guard: the helper signs the exact bytes it returns."""
+def test_the_helper_signs_exactly_the_bytes_it_sends() -> None:
+    """Guard the fixture: the header is the HMAC of the body under the org secret."""
     body = merged_pr_payload("o/r")
     parsed: dict[str, Any] = json.loads(body)
+    expected = hmac.new(SECRET.encode(), body, hashlib.sha256).hexdigest()
     assert parsed["pull_request"]["merged"] is True
-    assert signed_headers(body, "d")["X-Hub-Signature-256"].startswith("sha256=")
-    assert SECRET
+    assert signed_headers(body, "d")["X-Hub-Signature-256"] == f"sha256={expected}"
