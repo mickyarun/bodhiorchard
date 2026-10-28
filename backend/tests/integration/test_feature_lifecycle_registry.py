@@ -151,7 +151,10 @@ async def test_a_transition_only_touches_the_callers_org(pg_session_factory: Fac
     await _move(pg_session_factory, mine, BUDStatus.DEVELOPMENT)
     await _move(pg_session_factory, mine, BUDStatus.DISCARDED)
 
+    moved = await _row(pg_session_factory, mine)
     untouched = await _row(pg_session_factory, theirs)
+    assert moved is not None
+    assert moved.feature_status == "in_progress" and moved.is_active is False
     assert untouched is not None
     assert untouched.feature_status == "planned" and untouched.is_active is True
 

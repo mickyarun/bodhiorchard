@@ -27,6 +27,7 @@ from typing import Any
 import pytest
 
 from app.core.encryption import encrypt_secret
+from app.models.webhook_log import WebhookLog
 from tests.integration.scan_features_bugs_support import Factory, new_org, new_repo
 
 SECRET = "webhook-secret-for-tests"
@@ -39,10 +40,11 @@ def merged_pr_payload(
     base: str = "main",
     merged: bool = True,
     bud_ref: str = "feature/login",
+    action: str = "closed",
 ) -> bytes:
-    """A ``pull_request.closed`` body for ``full_name`` as GitHub serialises it."""
+    """A ``pull_request`` body (closed and merged by default) as GitHub serialises it."""
     payload = {
-        "action": "closed",
+        "action": action,
         "repository": {"full_name": full_name},
         "pull_request": {
             "id": 900_000 + number,
@@ -61,12 +63,14 @@ def merged_pr_payload(
     return json.dumps(payload).encode()
 
 
-def signed_headers(body: bytes, delivery: str, *, secret: str = SECRET) -> dict[str, str]:
+def signed_headers(
+    body: bytes, delivery: str, *, secret: str = SECRET, event: str = "pull_request"
+) -> dict[str, str]:
     """Headers GitHub sends with ``body`` signed under ``secret``."""
     digest = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     return {
         "X-Hub-Signature-256": f"sha256={digest}",
-        "X-GitHub-Event": "pull_request",
+        "X-GitHub-Event": event,
         "X-GitHub-Delivery": delivery,
         "Content-Type": "application/json",
     }
@@ -119,3 +123,9 @@ class WebhookCalls:
         monkeypatch.setattr(module, "handle_github_event", _handle)
         monkeypatch.setattr(module, "publish_pr_merge_delivery", _publish)
         return calls
+
+
+async def delivery_row(factory: Factory, delivery: str) -> WebhookLog | None:
+    """The ledger row recorded for ``delivery``, if any."""
+    async with factory() as db:
+        return await db.get(WebhookLog, delivery)

@@ -16,16 +16,21 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from sqlalchemy import select
 
-from app.models.bud import BUDDocument, BUDStatus
+from app.models.bud import BUDDocument, BUDStatus, BUDTimelineEvent
 from app.models.dev_activity import DevActivityLog
 from app.models.pull_request import PRState, PullRequest
+from app.models.tracked_repository import TrackedRepository
 from app.services import bud_closure, release_detection
+from app.services.github_webhook_handler import handle_github_event
+from tests.integration.github_webhook_support import merged_pr_payload
 from tests.integration.scan_features_bugs_support import Factory, new_bud, new_org, new_repo
 
 BRANCHES = {"main_branch": "main", "develop_branch": "develop", "uat_branch": "release/uat"}
@@ -166,3 +171,33 @@ def stub_close_side_effects(monkeypatch: pytest.MonkeyPatch) -> list[uuid.UUID]:
 
     monkeypatch.setattr(bud_closure, "on_bud_closed", _on_closed)
     return closed
+
+
+async def deliver(world: ReleaseWorld, *, number: int, base: str) -> None:
+    """Run a merged ``pull_request.closed`` for PR ``number`` through the handler."""
+    payload = json.loads(merged_pr_payload(world.full_name, number=number, base=base))
+    async with world.factory() as db:
+        repo = await db.get(TrackedRepository, world.repo)
+        assert repo is not None
+        await handle_github_event(
+            org_id=world.org, repo=repo, event_type="pull_request", payload=payload, db=db
+        )
+
+
+async def timeline(factory: Factory, bud: uuid.UUID, kind: str) -> list[dict[str, Any]]:
+    """Every ``kind`` event recorded for ``bud``, read without any org filter."""
+    async with factory() as db:
+        rows = await db.scalars(
+            select(BUDTimelineEvent).where(
+                BUDTimelineEvent.bud_id == bud, BUDTimelineEvent.event_type == kind
+            )
+        )
+        return [row.detail or {} for row in rows]
+
+
+async def bud_status(factory: Factory, bud: uuid.UUID) -> BUDStatus:
+    """The BUD's status as stored."""
+    async with factory() as db:
+        row = await db.get(BUDDocument, bud)
+        assert row is not None
+        return row.status
