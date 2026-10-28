@@ -110,7 +110,8 @@ async def test_clone_on_another_branch_is_scanned_through_a_sandbox_worktree(
 
     outcome = await load_outcome(app_sessions, org.org_id, scan_id)
     assert outcome.run.status is RepoRunStatus.DONE, outcome.run.error
-    worktree = data_dir / "scan-worktrees" / shop_repo.name / "main"
+    worktree = _sandbox_worktree(shop_repo)
+    assert worktree.is_relative_to(data_dir.resolve())
     assert git(worktree, "rev-parse", "HEAD") == newer
     assert git(shop_repo.work, "rev-parse", "--abbrev-ref", "HEAD") == "develop"
     (agent_run,) = mcp_claude.runs
@@ -140,6 +141,14 @@ async def test_rescan_at_the_same_sha_reuses_the_caches_and_skips_the_agent(
     assert by_phase[ScanPhase.FEATURE_SYNTHESIS] is StepStatus.SKIPPED_CACHE
     assert len(mcp_claude.runs) == 1
     assert await active_feature_titles(app_sessions, org.org_id, repo_id) == before
+
+
+def _sandbox_worktree(repo: LocalGitRepo) -> Path:
+    """The clone's worktree on ``main`` (the scan's sandbox), wherever the layout puts it."""
+    blocks = git(repo.work, "worktree", "list", "--porcelain").split("\n\n")
+    on_main = [b.split("\n") for b in blocks if "branch refs/heads/main" in b.split("\n")]
+    (sandbox,) = [Path(lines[0].removeprefix("worktree ")) for lines in on_main]
+    return sandbox.resolve()
 
 
 def _push_from_elsewhere(repo: LocalGitRepo, tmp_path: Path) -> str:
