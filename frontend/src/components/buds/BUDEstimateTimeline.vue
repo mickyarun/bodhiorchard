@@ -75,7 +75,7 @@
         {{ estimates.trigger }}
       </v-chip>
       <span v-if="estimates.generated_at" class="text-caption text-medium-emphasis">
-        Updated {{ timeAgo(estimates.generated_at) }}
+        Updated {{ relativeTime(estimates.generated_at, new Date(), SHORT_AGO) }}
       </span>
     </div>
 
@@ -145,6 +145,7 @@ import { computed } from 'vue'
 import type { BUDEstimates } from '@/types'
 import { BUD_STATUS_ORDER, BUD_STATUS_LABELS } from '@/types'
 import type { BUDStatus } from '@/types'
+import { SHORT_AGO, relativeTime } from '@/utils/date'
 
 const props = defineProps<{
   estimates: BUDEstimates | null
@@ -195,15 +196,6 @@ const rangeFillStyle = computed(() => ({
 function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return '—'
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  return `${Math.floor(hrs / 24)}d ago`
 }
 
 function deadlineClass(dateStr: string | null | undefined): string {

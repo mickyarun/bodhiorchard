@@ -159,7 +159,7 @@
               {{ notif.message }}
             </v-list-item-subtitle>
             <v-list-item-subtitle class="text-caption text-medium-emphasis mt-1">
-              {{ relativeTime(notif.createdAt) }}
+              {{ relativeTime(notif.createdAt, new Date(), SHORT_AGO) }}
             </v-list-item-subtitle>
 
             <template #append>
@@ -263,6 +263,7 @@ import { useMembersStore } from '@/stores/members'
 import { usePermissions } from '@/composables/usePermissions'
 import type { AppNotification, BacklashInviteMeta, RaceInviteMeta, YieldOffer } from '@/types'
 import { isInviteUnexpired } from '@/utils/inviteExpiry'
+import { SHORT_AGO, relativeTime } from '@/utils/date'
 
 const props = defineProps<{ userId: string }>()
 
@@ -420,19 +421,6 @@ function notifColor(type: string): string {
   }
 }
 
-function relativeTime(isoString: string): string {
-  const now = Date.now()
-  const then = new Date(isoString).getTime()
-  const diffSec = Math.floor((now - then) / 1000)
-
-  if (diffSec < 60) return 'just now'
-  const diffMin = Math.floor(diffSec / 60)
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}h ago`
-  const diffDay = Math.floor(diffHr / 24)
-  return `${diffDay}d ago`
-}
 </script>
 
 <style scoped>

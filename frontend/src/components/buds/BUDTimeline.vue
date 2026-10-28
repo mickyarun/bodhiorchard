@@ -319,7 +319,7 @@
             </template>
           </div>
 
-          <span class="tl-time" :title="fullTime(event.created_at)">{{ formatTime(event.created_at) }}</span>
+          <span class="tl-time" :title="fullTime(event.created_at)">{{ relativeTime(event.created_at, new Date(), { style: 'short' }) }}</span>
         </div>
       </v-timeline-item>
     </v-timeline>
@@ -329,6 +329,7 @@
 <script setup lang="ts">
 import type { TimelineEvent, BUDStatus } from '@/types'
 import { BUD_STATUS_LABELS, BUD_STATUS_COLORS } from '@/types'
+import { relativeTime } from '@/utils/date'
 
 defineProps<{
   events: TimelineEvent[]
@@ -458,21 +459,6 @@ function formatSingleFeatureTitle(detail: Record<string, unknown> | undefined | 
 function formatShortDate(dateStr: string | undefined | null): string {
   if (!dateStr) return '—'
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
-function formatTime(dateStr: string): string {
-  const d = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.getTime() - d.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
-
-  if (diffMins < 1) return 'just now'
-  if (diffMins < 60) return `${diffMins}m ago`
-  const diffHrs = Math.floor(diffMins / 60)
-  if (diffHrs < 24) return `${diffHrs}h ago`
-  const diffDays = Math.floor(diffHrs / 24)
-  if (diffDays < 7) return `${diffDays}d ago`
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
 function fullTime(dateStr: string): string {

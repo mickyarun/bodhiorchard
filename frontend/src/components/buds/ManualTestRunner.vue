@@ -158,7 +158,7 @@
             <span v-if="tc.tester_name && tc.result !== 'pending'" class="tester-attribution">
               <v-icon icon="mdi-account-outline" size="12" />
               {{ tc.tester_name }}
-              <span v-if="tc.tested_at" class="text-medium-emphasis">· {{ relativeTime(tc.tested_at) }}</span>
+              <span v-if="tc.tested_at" class="text-medium-emphasis">· {{ relativeTime(tc.tested_at, new Date(), { style: 'short' }) }}</span>
             </span>
             <v-chip size="x-small" variant="outlined" class="category-chip">
               {{ tc.category }}
@@ -369,6 +369,7 @@ import type { ComponentPublicInstance } from 'vue'
 import type { ManualTestCase, TestEvidence } from '@/types'
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '@/composables/useQATestCases'
 import EvidenceTile from './EvidenceTile.vue'
+import { relativeTime } from '@/utils/date'
 
 type ManualResult = ManualTestCase['result']
 // ``SetResult`` covers every result the UI can write to a case — the
@@ -583,21 +584,6 @@ function bulkMarkRemaining(result: SetResult): void {
 function clearFilters(): void {
   activeFilter.value = 'all'
   search.value = ''
-}
-
-function relativeTime(iso: string): string {
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return ''
-  const diffMs = Date.now() - then
-  const sec = Math.round(diffMs / 1000)
-  if (sec < 60) return 'just now'
-  const min = Math.round(sec / 60)
-  if (min < 60) return `${min}m ago`
-  const hr = Math.round(min / 60)
-  if (hr < 24) return `${hr}h ago`
-  const day = Math.round(hr / 24)
-  if (day < 7) return `${day}d ago`
-  return new Date(iso).toLocaleDateString()
 }
 
 // ── Evidence upload (click + drag-drop share the same flow) ───────────

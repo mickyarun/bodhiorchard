@@ -52,7 +52,7 @@
         </v-list-item-title>
 
         <v-list-item-subtitle class="text-caption">
-          {{ timeAgo(event.created_at) }}
+          {{ relativeTime(event.created_at, new Date(), SHORT_AGO) }}
         </v-list-item-subtitle>
 
         <template #append>
@@ -76,6 +76,7 @@
 import { onMounted, ref } from 'vue'
 import type { RewardEvent } from '@/types'
 import { useXPStore } from '@/stores/xp'
+import { SHORT_AGO, relativeTime } from '@/utils/date'
 import { getSourceLabel, getSourceIcon } from '@/composables/useXPSocket'
 
 const xpStore = useXPStore()
@@ -85,17 +86,6 @@ const events = ref<RewardEvent[]>([])
 function formatAmount(n: number): string {
   // Show 2 decimals only for fractional amounts (SP), whole numbers for XP.
   return Number.isInteger(n) ? String(n) : n.toFixed(2)
-}
-
-function timeAgo(isoDate: string): string {
-  const diff = Date.now() - new Date(isoDate).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
 }
 
 onMounted(async () => {

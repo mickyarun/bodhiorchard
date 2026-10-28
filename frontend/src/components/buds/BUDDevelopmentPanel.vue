@@ -237,7 +237,7 @@
               <div class="commit-header">
                 <code class="commit-sha">{{ c.commit_sha.slice(0, 7) }}</code>
                 <span class="commit-msg text-body-2">{{ c.commit_message }}</span>
-                <span class="text-caption text-medium-emphasis text-no-wrap ml-auto">{{ timeAgo(c.created_at) }}</span>
+                <span class="text-caption text-medium-emphasis text-no-wrap ml-auto">{{ relativeTime(c.created_at, new Date(), SHORT_AGO) }}</span>
               </div>
               <!-- Files for this commit -->
               <div v-if="parseFiles(c.files_changed).length > 0" class="commit-files">
@@ -272,7 +272,7 @@
                   <div class="text-caption text-medium-emphasis">
                     {{ a.event_type }}
                     <span v-if="a.actor_name"> &middot; {{ a.actor_name }}</span>
-                    &middot; {{ timeAgo(a.created_at) }}
+                    &middot; {{ relativeTime(a.created_at, new Date(), SHORT_AGO) }}
                   </div>
                 </div>
               </div>
@@ -298,7 +298,8 @@ import { useBudActivity } from '@/composables/useBudActivity'
 import { useSettingsStore } from '@/stores/settings'
 import { branchPrefix } from '@/utils/budDetail'
 import { copyText } from '@/utils/clipboard'
-import { fileColor, fileIcon, parseFiles, timeAgo } from '@/utils/dev-activity-helpers'
+import { SHORT_AGO, relativeTime } from '@/utils/date'
+import { fileColor, fileIcon, parseFiles } from '@/utils/dev-activity-helpers'
 import type { DevActivity } from '@/types'
 import MCPSetupHint from './MCPSetupHint.vue'
 
