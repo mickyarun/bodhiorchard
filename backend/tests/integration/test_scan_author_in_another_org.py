@@ -87,7 +87,7 @@ async def test_author_with_an_account_in_another_org_is_left_unmatched(
         await db.commit()
 
     assert unmatched == [shared]
-    assert count >= 1
+    assert count == 1
     assert set(email_map) == {fresh}
     async with pg_session_factory() as db:
         repo = UserRepository(db)
