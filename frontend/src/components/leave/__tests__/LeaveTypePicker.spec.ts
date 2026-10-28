@@ -16,7 +16,7 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
 import LeaveTypePicker from '../LeaveTypePicker.vue'
-import type { Balance } from '@/types/leave'
+import type { Balance, LeavePreview } from '@/types/leave'
 
 function balance(id: string, name: string, available: string | null): Balance {
   return {
@@ -26,6 +26,7 @@ function balance(id: string, name: string, available: string | null): Balance {
     allocated: available === null ? null : '12',
     earned: available === null ? null : '12',
     adjustments: '0',
+    added: '0',
     used: '0',
     pending: '0',
     available,
@@ -63,5 +64,12 @@ describe('LeaveTypePicker', () => {
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['sl'])
     expect(wrapper.props('modelValue')).toBe('sl')
     expect(wrapper.findAll('label')[1].classes()).toContain('types__option--on')
+  })
+
+  it('shows what is left on the start date once the preview has priced the dates', () => {
+    const preview = { balances_on_start: { cl: '4' } } as unknown as LeavePreview
+    const wrapper = mount(LeaveTypePicker, { props: { balances: BALANCES, modelValue: null, preview } })
+    const labels = wrapper.findAll('label').map(l => l.text())
+    expect(labels).toEqual(['Casual leave4 days left', 'Sick leaveNo limit'])
   })
 })
