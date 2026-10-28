@@ -31,6 +31,7 @@ import { OrgRoom } from "./OrgRoom"
 import { RaceRoom } from "./RaceRoom"
 
 const BAD_PAYLOADS: unknown[] = [undefined, null]
+const ORG_ID = "6d0c6e2a-3f1b-4f7e-9a55-0f2d8c1b7a44"
 const fetchMock = vi.fn()
 let errorSpy: ReturnType<typeof vi.spyOn>
 
@@ -65,13 +66,13 @@ describe("OrgRoom messages without a payload", () => {
   beforeEach(async () => {
     fetchMock.mockResolvedValue(
       Response.json({
-        orgId: "org-a",
+        orgId: ORG_ID,
         members: [{ user_id: "alice", name: "Alice", character_model: null, presence: "active" }],
         repos: [],
       }),
     )
     room = new OrgRoom()
-    await room.onCreate({ orgId: "org-a" })
+    await room.onCreate({ orgId: ORG_ID })
     await (room as unknown as { snapshotReady: Promise<void> }).snapshotReady
     alice = fakeClient("s-alice", "alice")
     send(room, alice, "takeover_start", { userId: "alice" })
