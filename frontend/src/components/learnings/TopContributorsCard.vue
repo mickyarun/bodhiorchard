@@ -23,7 +23,7 @@
     </p>
     <ol v-else class="contribs">
       <li v-for="row in contributors" :key="row.user_id" class="contrib">
-        <AppMonogram :name="row.name" />
+        <AppMonogram :name="row.name" :src="row.avatar_url" />
         <span class="contrib__who">
           <span class="contrib__name">{{ row.name }}</span>
           <span class="contrib__stats">

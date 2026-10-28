@@ -217,6 +217,7 @@ class MemberDirectoryEntry(BaseModel):
     id: uuid.UUID
     name: str
     email: EmailStr
+    avatar_url: str | None = None
 
 
 @router.get("/members/directory", response_model=list[MemberDirectoryEntry])
@@ -235,7 +236,7 @@ async def list_member_directory(
     user_repo = UserRepository(db, org_id=org.id)
     users = await user_repo.list_with_membership(org.id)
     return [
-        MemberDirectoryEntry(id=u.id, name=u.name or "", email=u.email)
+        MemberDirectoryEntry(id=u.id, name=u.name or "", email=u.email, avatar_url=u.avatar_url)
         for u in users
         if u.is_active
     ]

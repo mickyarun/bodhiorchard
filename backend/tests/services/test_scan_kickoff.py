@@ -103,3 +103,25 @@ async def test_happy_path_returns_scan_id(monkeypatch: pytest.MonkeyPatch) -> No
     assert received_kwargs["repo_ids"] == repo_ids
     # No full_rescan override — runner's per-repo SHA gate handles it.
     assert received_kwargs["config"].full_rescan is False
+
+
+async def test_repeated_repo_ids_are_scanned_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A repeated id would run two workflows on one checkout at once."""
+    first, second = uuid.uuid4(), uuid.uuid4()
+    started: list[list[uuid.UUID]] = []
+
+    async def _fake_check() -> tuple[bool, str]:
+        return True, ""
+
+    async def _fake_scan(*, repo_ids: list[uuid.UUID], **_: Any) -> uuid.UUID:
+        started.append(repo_ids)
+        return uuid.uuid4()
+
+    monkeypatch.setattr(scan_kickoff.embedding_service, "check", _fake_check)
+    monkeypatch.setattr(scan_kickoff, "start_scan", _fake_scan)
+
+    await scan_kickoff.kick_off_onboard_scan(
+        org_id=uuid.uuid4(), repo_ids=[first, second, first, second, first]
+    )
+
+    assert started == [[first, second]]

@@ -21,6 +21,8 @@ import type { LeaderboardEntry } from '@/types'
 export interface BoardEntry {
   key: string
   name: string
+  /** The stored `avatar_url`; the monogram shows initials without one. */
+  avatarUrl?: string | null
   /** The headline number, already formatted: "1,240", "0:42.1". */
   figure: string
   /** Small unit after the figure: "XP", "pts". */
@@ -71,6 +73,7 @@ export function xpBoard(rows: LeaderboardEntry[], myId: string): BoardEntry[] {
   return unique.map(e => ({
     key: e.user_id,
     name: e.name,
+    avatarUrl: e.avatar_url,
     figure: e.total_xp.toLocaleString('en-US'),
     unit: 'XP',
     note: xpNote(e),
