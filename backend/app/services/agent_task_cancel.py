@@ -78,7 +78,10 @@ async def cancel_task(
     job_id = task.job_id
     alive = job_id is not None and is_job_running(job_id)
 
-    if alive and job_id is not None:
+    # Signal whenever there is a job, not only a live one: a job still
+    # waiting in the queue must be dropped too, or a worker would run it
+    # after the rows below were already marked failed.
+    if job_id is not None:
         try:
             cancel_in_memory_job(job_id, reason=reason)
         except Exception as exc:
@@ -149,7 +152,10 @@ async def cancel_design(
     job_id = design.job_id
     alive = job_id is not None and is_job_running(job_id)
 
-    if alive and job_id is not None:
+    # Signal whenever there is a job, not only a live one: a job still
+    # waiting in the queue must be dropped too, or a worker would run it
+    # after the rows below were already marked failed.
+    if job_id is not None:
         try:
             cancel_in_memory_job(job_id, reason=reason)
         except Exception as exc:

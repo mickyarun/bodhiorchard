@@ -26,7 +26,6 @@ import type {
   CelebrationPostHistory,
   CelebrationSettings,
   CelebrationTestResult,
-  SlackAvatarSyncResult,
 } from '@/types/celebrations'
 import { extractApiError } from '@/utils/errors'
 
@@ -37,7 +36,6 @@ export const useCelebrationsStore = defineStore('celebrations', () => {
   const loading = ref(false)
   const saving = ref(false)
   const testing = ref(false)
-  const syncingAvatars = ref(false)
   const error = ref('')
 
   async function fetchSettings(): Promise<void> {
@@ -121,24 +119,6 @@ export const useCelebrationsStore = defineStore('celebrations', () => {
     }
   }
 
-  /** Pull profile photos from Slack for every linked member. */
-  async function syncSlackAvatars(overwrite = false): Promise<SlackAvatarSyncResult | null> {
-    syncingAvatars.value = true
-    error.value = ''
-    try {
-      const { data } = await api.post<SlackAvatarSyncResult>(
-        '/v1/employees/avatars/sync-slack',
-        { overwrite }
-      )
-      return data
-    } catch (err) {
-      error.value = extractApiError(err, 'Failed to sync photos from Slack')
-      return null
-    } finally {
-      syncingAvatars.value = false
-    }
-  }
-
   return {
     settings,
     audience,
@@ -146,13 +126,11 @@ export const useCelebrationsStore = defineStore('celebrations', () => {
     loading,
     saving,
     testing,
-    syncingAvatars,
     error,
     fetchSettings,
     fetchAudience,
     fetchHistory,
     saveSettings,
     sendTest,
-    syncSlackAvatars,
   }
 })

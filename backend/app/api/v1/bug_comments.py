@@ -34,7 +34,7 @@ from app.models.bug_comment import BugComment
 from app.models.user import User
 from app.repositories.bug import BugRepository
 from app.repositories.bug_comment import BugCommentRepository
-from app.repositories.user import UserRepository
+from app.repositories.user import PersonCard, UserRepository
 from app.schemas.bug import (
     BugCommentCreate,
     BugCommentListResponse,
@@ -208,24 +208,27 @@ async def _comments_to_read(
     org_id: uuid.UUID,
     comments: list[BugComment],
 ) -> list[BugCommentRead]:
-    """Batch-resolve author display names and serialise to BugCommentRead.
+    """Batch-resolve author names and photos and serialise to BugCommentRead.
 
     Soft-deleted comments come through with ``body=""`` and the original
     ``author_id`` preserved — the UI uses ``deleted_at`` to render the
     tombstone in thread position without confusing comment ordering.
     """
     author_ids = {c.author_id for c in comments}
-    names = await UserRepository(db, org_id=org_id).get_names_by_ids(author_ids)
-    return [
-        BugCommentRead(
-            id=str(c.id),
-            bug_id=str(c.bug_id),
-            author_id=str(c.author_id),
-            author_name=names.get(c.author_id),
-            body="" if c.deleted_at is not None else c.body,
-            edited_at=c.edited_at,
-            deleted_at=c.deleted_at,
-            created_at=c.created_at,
-        )
-        for c in comments
-    ]
+    people = await UserRepository(db, org_id=org_id).get_people_by_ids(author_ids)
+    return [_comment_read(c, people.get(c.author_id)) for c in comments]
+
+
+def _comment_read(comment: BugComment, author: PersonCard | None) -> BugCommentRead:
+    """One comment, with its author's name and photo when the author still exists."""
+    return BugCommentRead(
+        id=str(comment.id),
+        bug_id=str(comment.bug_id),
+        author_id=str(comment.author_id),
+        author_name=author.name if author else None,
+        author_avatar_url=author.avatar_url if author else None,
+        body="" if comment.deleted_at is not None else comment.body,
+        edited_at=comment.edited_at,
+        deleted_at=comment.deleted_at,
+        created_at=comment.created_at,
+    )

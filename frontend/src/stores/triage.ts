@@ -26,6 +26,7 @@ export interface TriageSession {
   requester_slack_id: string
   requester_name: string | null
   requester_display_name: string | null
+  requester_avatar_url?: string | null
   original_text: string | null
   status: string
   priority: string | null

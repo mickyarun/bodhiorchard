@@ -14,6 +14,7 @@
 
 """XP/gamification API endpoints."""
 
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -23,6 +24,7 @@ from app.core.deps import get_current_user, get_db
 from app.models.user import User
 from app.repositories.dev_activity import DevActivityLogRepository
 from app.repositories.developer_xp import DeveloperXPRepository, RewardEventRepository
+from app.repositories.user import UserRepository
 from app.schemas.xp import (
     HouseUpgradeRequest,
     HouseUpgradeResponse,
@@ -32,6 +34,7 @@ from app.schemas.xp import (
     VehicleUnlockResponse,
     XPProfileRead,
 )
+from app.services.sp_service import award_sp
 from app.services.xp_rules import HOUSE_TIER_COSTS, VEHICLE_UNLOCKS
 from app.services.xp_service import get_unlocked_items, xp_for_next_level
 
@@ -197,13 +200,21 @@ async def claim_greeting_bonus(
     """Award 0.25 SP for first greeting emote near each unique user.
 
     One award per (greeter, target) pair — greet 4 different people = 1 SP.
-    The source_ref unique index prevents duplicate awards per pair.
+    The source_ref unique index prevents duplicate awards per pair. The target
+    must be another member of the caller's org: otherwise any string, or your
+    own id, would mint a fresh pair and an unlimited supply of skill points.
     """
-    from app.services.sp_service import award_sp
-
-    target_user_id = body.get("target_user_id")
-    if not target_user_id:
+    raw_target = body.get("target_user_id")
+    if not raw_target:
         raise HTTPException(400, "target_user_id required")
+    try:
+        target_user_id = uuid.UUID(str(raw_target))
+    except ValueError as exc:
+        raise HTTPException(400, "target_user_id must be a user id") from exc
+    if target_user_id == current_user.id:
+        raise HTTPException(400, "You cannot greet yourself")
+    if not await UserRepository(db).is_member_of_org(target_user_id, current_user.org_id):
+        raise HTTPException(404, "No such member in this organization")
 
     source_ref = f"greeting_{current_user.id}_{target_user_id}"
     new_sp = await award_sp(

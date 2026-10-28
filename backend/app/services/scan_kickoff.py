@@ -69,6 +69,10 @@ async def kick_off_onboard_scan(
             :func:`start_scan` so the caller can map it to its own
             failure surface (HTTP 409, job FAILED, …).
     """
+    # Callers can name one repo twice (two wizard entries for one checkout,
+    # a repeated bulk item). A repeated id becomes a second workflow on the
+    # same checkout running alongside the first, so queue each once, in order.
+    repo_ids = list(dict.fromkeys(repo_ids))
     if not repo_ids:
         return None, None
 

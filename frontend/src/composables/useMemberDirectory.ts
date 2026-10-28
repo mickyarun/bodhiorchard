@@ -34,6 +34,7 @@ export interface DirectoryEntry {
   id: string
   name: string
   email: string
+  avatar_url?: string | null
 }
 
 // Module-scoped so every component instance reads the same roster and a
