@@ -281,14 +281,18 @@ async def verify_user_token(
 
 
 async def _org_room_member(db: AsyncSession, sub: Any, org_id: Any) -> User | None:
-    """The JWT subject if it is an active member with engineering access."""
+    """The JWT subject if it is an active member with engineering access.
+
+    A user who must change their password is refused, as every other
+    authenticated route refuses them (``get_current_user``) until they do.
+    """
     try:
         user_id = uuid.UUID(str(sub))
         org_uuid = uuid.UUID(str(org_id))
     except ValueError:
         return None
     user = await UserRepository(db).get_by_id(user_id)
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.must_change_password:
         return None
     if not await member_has_permission(db, user_id, org_uuid, WORKSPACE_ENGINEERING):
         return None

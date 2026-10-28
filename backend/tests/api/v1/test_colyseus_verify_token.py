@@ -41,9 +41,15 @@ def _patch(
     claims: dict[str, Any] | None,
     active: bool = True,
     engineering: bool = True,
+    must_change_password: bool = False,
 ) -> None:
     monkeypatch.setattr(mod, "verify_token", MagicMock(return_value=claims))
-    user = SimpleNamespace(id=USER_ID, name="Alice Stored", is_active=active)
+    user = SimpleNamespace(
+        id=USER_ID,
+        name="Alice Stored",
+        is_active=active,
+        must_change_password=must_change_password,
+    )
     repo = MagicMock(get_by_id=AsyncMock(return_value=user))
     monkeypatch.setattr(mod, "UserRepository", MagicMock(return_value=repo))
     monkeypatch.setattr(mod, "member_has_permission", AsyncMock(return_value=engineering))
@@ -94,5 +100,18 @@ async def test_refuses_a_member_without_engineering_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch(monkeypatch, claims={"sub": str(USER_ID), "org_id": str(ORG_ID)}, engineering=False)
+
+    assert await _verify() == {"valid": False}
+
+
+async def test_refuses_a_member_who_must_change_their_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The rest of the API refuses them until they change it, so the rooms do too."""
+    _patch(
+        monkeypatch,
+        claims={"sub": str(USER_ID), "org_id": str(ORG_ID)},
+        must_change_password=True,
+    )
 
     assert await _verify() == {"valid": False}
