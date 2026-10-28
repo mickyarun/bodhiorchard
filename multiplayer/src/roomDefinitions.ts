@@ -25,9 +25,10 @@
  *
  * The filter only routes; it is not access control. Colyseus treats a filter
  * key the client leaves out as "any value", so a join without `orgId` can be
- * matched to any org's room. Each of these rooms therefore refuses creation
- * without its keys (`roomKeys.ts`) and refuses, in `onAuth`, any token whose
- * org is not the room's own (`auth/verifyJoin.ts`).
+ * matched to any org's room. Each of these rooms therefore refuses, in
+ * `onAuth`, any token whose org is not the room's own (`auth/verifyJoin.ts`),
+ * and the house, coffee bar and cafeteria rooms also refuse creation without
+ * their keys (`rooms/roomKeys.ts`).
  */
 import { defineRoom } from "colyseus"
 import { OrgRoom } from "./rooms/OrgRoom"
