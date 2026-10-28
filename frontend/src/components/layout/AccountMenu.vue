@@ -14,35 +14,38 @@
  * limitations under the License.
  -->
 
-<!-- Signed-in user's menu: profile links, theme switch, sign out. -->
+<!-- Signed-in user's menu, opened from their avatar in the top bar:
+     profile links, theme (Auto / Light / Dark), sign out. -->
 <template>
-<!-- User menu -->
-<div class="px-3 pb-3" :class="{ 'd-flex justify-center': rail }">
-  <v-menu location="top start" :offset="[0, 4]">
+  <v-menu location="bottom end" :offset="6">
     <template #activator="{ props }">
-      <button
+      <v-btn
         v-bind="props"
-        type="button"
-        class="user-menu d-flex align-center ga-2 pa-2 rounded-lg"
-        :class="{ 'user-menu--rail': rail }"
+        icon
+        variant="text"
+        density="comfortable"
         :aria-label="`Account menu for ${authStore.user?.name || 'you'}`"
       >
-        <AppMonogram :name="authStore.user?.name" :size="32" />
-        <template v-if="!rail">
-          <div class="flex-grow-1 overflow-hidden">
-            <div class="text-body-2 font-weight-medium text-truncate">
-              {{ authStore.user?.name || 'User' }}
-            </div>
-            <div class="text-caption text-medium-emphasis text-truncate">
-              {{ authStore.user?.email || '' }}
-            </div>
-          </div>
-          <v-icon icon="mdi-chevron-up" size="16" class="text-medium-emphasis" />
-        </template>
-      </button>
+        <AppMonogram :name="authStore.user?.name" :src="authStore.user?.avatar_url" :size="32" />
+      </v-btn>
     </template>
 
-    <v-list density="compact" min-width="244">
+    <v-list density="compact" min-width="260">
+      <!-- Who you are; your photo is changed on My details, so the
+           header goes there. -->
+      <div v-if="authStore.user" role="listitem">
+        <router-link :to="{ name: 'my-details' }" class="account-menu__who">
+          <AppMonogram :name="authStore.user.name" :src="authStore.user.avatar_url" :size="44" />
+          <span class="account-menu__id">
+            <span class="account-menu__name">{{ authStore.user.name }}</span>
+            <span class="account-menu__email">{{ authStore.user.email }}</span>
+            <span class="account-menu__photo">
+              {{ authStore.user.avatar_url ? 'Change photo' : 'Add a photo' }}
+            </span>
+          </span>
+        </router-link>
+      </div>
+      <v-divider class="mb-1" />
       <!-- XP profile, garden character and MCP token are all
            engineering-workspace features. -->
       <template v-if="canAccessEngineering">
@@ -71,7 +74,7 @@
         title="Notification Settings"
         to="/profile/notifications"
       />
-      <div class="theme-pref px-3 pt-2 pb-1">
+      <div class="theme-pref px-3 pt-2 pb-1" role="listitem">
         <div class="text-caption text-medium-emphasis px-1 mb-1">Theme</div>
         <div class="theme-seg" role="radiogroup" aria-label="Theme">
           <button
@@ -98,7 +101,6 @@
       />
     </v-list>
   </v-menu>
-</div>
 </template>
 
 <script setup lang="ts">
@@ -107,8 +109,6 @@ import AppMonogram from '@/components/common/AppMonogram.vue'
 import { useAuthStore } from '@/stores/auth'
 import { usePermissions } from '@/composables/usePermissions'
 import { useThemePreference, type ThemePreference } from '@/composables/useThemePreference'
-
-defineProps<{ rail: boolean }>()
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -132,25 +132,51 @@ function handleLogout(): void {
 </script>
 
 <style scoped>
-.user-menu {
-  /* The name-and-email height in both states, so the rows above it don't
-     move when a rail opens under the pointer. */
-  min-height: 56px;
-  width: 100%;
-  border: 0;
-  background: none;
+.account-menu__who {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 280px;
+  margin: 0 4px 4px;
+  padding: 8px 12px;
+  border-radius: var(--radius-card);
   color: inherit;
-  font: inherit;
-  text-align: start;
-  cursor: pointer;
-  transition: background-color 0.15s ease;
+  text-decoration: none;
+}
+.account-menu__who:hover {
+  background: rgba(var(--v-theme-on-surface), 0.04);
+}
+.account-menu__who:focus-visible {
+  outline: 2px solid var(--color-focus, rgb(var(--v-theme-primary)));
+  outline-offset: -2px;
+}
+.account-menu__id {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.account-menu__name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-menu__photo {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgb(var(--v-theme-primary));
+}
+.account-menu__email {
+  font-size: 12px;
+  color: rgb(var(--v-theme-on-surface-variant));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.user-menu:hover {
-  background: rgb(var(--v-theme-surface-bright));
-}
-
-/* Auto / Light / Dark segmented control in the user menu. */
+/* Auto / Light / Dark segmented control in the account menu. */
 .theme-seg {
   display: flex;
   gap: 2px;
@@ -179,9 +205,9 @@ function handleLogout(): void {
   color: rgb(var(--v-theme-on-surface));
 }
 .theme-seg__btn--active {
-  background: rgb(var(--v-theme-surface));
-  color: rgb(var(--v-theme-primary));
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  /* The accent wash reads as selected on the track in both themes. */
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
 }
 .theme-seg__btn:focus-visible {
   outline: 2px solid var(--color-focus, rgb(var(--v-theme-primary)));

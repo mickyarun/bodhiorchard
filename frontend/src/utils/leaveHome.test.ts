@@ -57,6 +57,17 @@ describe('outSoon', () => {
     expect(rows[1]).toMatchObject({ label: 'Leave', pending: false, name: 'Tom' })
   })
 
+  it('carries each person\'s photo onto their row', () => {
+    const photo = '/api/v1/employees/avatars/u2'
+    const { rows } = outSoon(
+      [entry({ request_id: 'a' }), entry({ request_id: 'b', user: { user_id: 'u2', name: 'Tom', avatar_url: photo } })],
+      today,
+      7,
+      5,
+    )
+    expect(rows.map(r => r.avatarUrl ?? null)).toEqual([null, photo])
+  })
+
   it('includes leave already under way, caps the list and counts the rest', () => {
     const { rows, more } = outSoon(
       [entry({ request_id: 'x', start_date: '2026-10-26', end_date: '2026-10-30' }), entry({ request_id: 'y' })],
