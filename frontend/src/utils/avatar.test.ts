@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { initialsOf, resolveAvatarUrl } from './avatar'
+import { initialsOf, photoImportSummary, resolveAvatarUrl } from './avatar'
 
 describe('resolveAvatarUrl', () => {
   const hosted = '/api/v1/employees/avatars/abc'
@@ -54,5 +54,22 @@ describe('initialsOf', () => {
     expect(initialsOf('38ca3fde…')).toBe('3')
     expect(initialsOf('…')).toBe('?')
     expect(initialsOf('Alice\tKim')).toBe('AK')
+  })
+})
+
+describe('photoImportSummary', () => {
+  const base = { updated: 0, skipped_no_photo: 0, skipped_has_photo: 0, skipped_shared: 0 }
+
+  it('says what was imported and what was left alone', () => {
+    expect(photoImportSummary({ ...base, updated: 1, skipped_has_photo: 4, skipped_no_photo: 2 })).toBe(
+      '1 photo imported, 4 already had one, 2 have no Slack photo.',
+    )
+  })
+
+  it('mentions people shared with another org only when there are some', () => {
+    expect(photoImportSummary({ ...base, updated: 3, skipped_shared: 1 })).toBe(
+      '3 photos imported, 0 already had one, 0 have no Slack photo, ' +
+        '1 also belong to another org, so only they can change theirs.',
+    )
   })
 })

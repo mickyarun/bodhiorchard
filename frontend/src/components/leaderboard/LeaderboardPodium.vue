@@ -20,7 +20,7 @@
   <ol class="podium" aria-label="Top three">
     <li v-for="e in entries" :key="e.key" class="podium__card" :class="{ 'podium__card--first': e.rank === 1, 'podium__card--me': e.isMe }">
       <span class="podium__rank">{{ ordinal(e.rank) }}</span>
-      <AppMonogram :name="e.name" :size="xs ? 40 : 56" />
+      <AppMonogram :name="e.name" :src="e.avatarUrl" :size="xs ? 40 : 56" />
       <span class="podium__name">{{ e.name }}<span v-if="e.isMe" class="podium__you"> (you)</span></span>
       <span class="podium__figure">{{ e.figure }} <span v-if="e.unit" class="podium__unit">{{ e.unit }}</span></span>
       <span v-if="e.note" class="podium__note">{{ e.note }}</span>

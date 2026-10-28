@@ -46,6 +46,7 @@ const entries = computed<BoardEntry[]>(() =>
     ? store.monthly.map(e => ({
         key: e.userId,
         name: e.userName,
+        avatarUrl: e.avatarUrl,
         figure: e.totalPoints.toLocaleString('en-US'),
         unit: 'pts',
         note: `${e.correctCount} correct`,
