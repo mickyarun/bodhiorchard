@@ -20,25 +20,11 @@ import {
   lastLeaveLine,
   otherYearBalanceAfter,
   queueSummary,
-  timeAgo,
   timestampAgo,
 } from '@/utils/approvalFacts'
 
 // Wednesday 21 October 2026, mid-morning local time.
 const TODAY = new Date(2026, 9, 21, 10, 30)
-
-describe('timeAgo', () => {
-  it.each([
-    ['2026-10-21', 'today'],
-    ['2026-10-20', 'yesterday'],
-    ['2026-10-16', '5 days ago'],
-    ['2026-09-02', '7 weeks ago'],
-    ['2026-06-01', '4 months ago'],
-    ['2024-01-10', '2 years ago'],
-  ])('%s → %s', (iso, label) => {
-    expect(timeAgo(iso, TODAY)).toBe(label)
-  })
-})
 
 describe('lastLeaveLine', () => {
   it('names the type, dates, length and how long ago it ended', () => {

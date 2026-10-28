@@ -117,7 +117,7 @@
                 CUSTOMISED
               </v-chip>
               <span class="text-caption text-medium-emphasis flex-shrink-0">
-                {{ formatRelative(ds.extracted_at) }}
+                {{ relativeTime(ds.extracted_at, new Date(), { granularity: 'day', older: 'span' }) }}
               </span>
             </div>
 
@@ -271,6 +271,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useDesignSystemStore, type DesignSystemItem } from '@/stores/designSystem'
 import { useSettingsStore } from '@/stores/settings'
 import { useJobSocket } from '@/composables/useJobSocket'
+import { relativeTime } from '@/utils/date'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import SettingsDesignSystemCustomiseDialog from './SettingsDesignSystemCustomiseDialog.vue'
@@ -390,14 +391,6 @@ async function doDelete(): Promise<void> {
 function openCustomise(ds: DesignSystemItem): void {
   customiseTarget.value = ds
   customiseDialog.value = true
-}
-
-function formatRelative(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const days = Math.floor(diff / 86400000)
-  if (days === 0) return 'today'
-  if (days === 1) return '1 day ago'
-  return `${days}d ago`
 }
 
 function extractSummary(content: string): string {
