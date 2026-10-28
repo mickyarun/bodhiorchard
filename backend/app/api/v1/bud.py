@@ -103,6 +103,7 @@ from app.services.bud_learning_alias_resolver import resolve_aliased_contributor
 from app.services.bud_metrics import compute_and_persist as compute_bud_metrics
 from app.services.bud_timeline import record_event
 from app.services.job_queue import JOB_BUD_AGENT, create_job
+from app.services.org_members import assert_new_assignee_in_org
 
 logger = structlog.get_logger(__name__)
 
@@ -645,6 +646,9 @@ async def update_bud(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="priority cannot be null; omit the field to leave it unchanged",
         )
+    await assert_new_assignee_in_org(
+        db, current_user.org_id, update_data.get("assignee_id"), bud.assignee_id
+    )
 
     # Capture the pre-edit snapshot AS A DICT here, before any of the
     # auto_generate_phases / assignee / status mutations below. The
