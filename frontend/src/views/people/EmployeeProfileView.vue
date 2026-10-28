@@ -27,9 +27,12 @@
 
     <v-progress-linear v-if="store.loading" indeterminate color="primary" />
 
-    <AppCallout v-else-if="store.error" :variant="isOwn && store.errorStatus === 404 ? 'info' : 'error'">
-      {{ store.error }}
-    </AppCallout>
+    <template v-else-if="store.error">
+      <AppCallout :variant="isOwn && store.errorStatus === 404 ? 'info' : 'error'">
+        {{ store.error }}
+      </AppCallout>
+      <OwnPhotoCard v-if="isOwn && store.errorStatus === 404" />
+    </template>
 
     <template v-else-if="record">
       <AppCallout v-if="avatarError" variant="error">{{ avatarError }}</AppCallout>
@@ -99,6 +102,7 @@ import EmployeeHeaderCard from '@/components/people/EmployeeHeaderCard.vue'
 import EmployeePasswordButton from '@/components/people/EmployeePasswordButton.vue'
 import EmploymentTab from '@/components/people/EmploymentTab.vue'
 import PersonalTab from '@/components/people/PersonalTab.vue'
+import OwnPhotoCard from '@/components/people/profile/OwnPhotoCard.vue'
 import ProfileAside from '@/components/people/profile/ProfileAside.vue'
 import { usePermissions } from '@/composables/usePermissions'
 import { useProfileAccess } from '@/composables/useProfileAccess'

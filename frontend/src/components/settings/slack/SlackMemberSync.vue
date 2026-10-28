@@ -24,6 +24,7 @@
         <!-- Linking and importing bring photos in already; this catches
              up members linked before that, or who added a photo since. -->
         <v-btn
+          v-if="canImportSlackPhotos"
           variant="text"
           size="small"
           prepend-icon="mdi-account-box-outline"
@@ -112,6 +113,7 @@ import AppCallout from '@/components/common/AppCallout.vue'
 import AppMonogram from '@/components/common/AppMonogram.vue'
 import AppPillToggle from '@/components/common/AppPillToggle.vue'
 import { useSlackMemberSync, type SlackAction } from '@/composables/useSlackMemberSync'
+import { usePermissions } from '@/composables/usePermissions'
 import { useSlackPhotoImport } from '@/composables/useSlackPhotoImport'
 import { useMembersStore } from '@/stores/members'
 import { plural } from '@/utils/format'
@@ -125,6 +127,7 @@ const ACTION_OPTIONS: { label: string; value: SlackAction }[] = [
 
 const s = useSlackMemberSync()
 const photos = useSlackPhotoImport()
+const { canImportSlackPhotos } = usePermissions()
 const membersStore = useMembersStore()
 </script>
 

@@ -33,21 +33,18 @@
     <v-list density="compact" min-width="260">
       <!-- Who you are; your photo is changed on My details, so the
            header goes there. -->
-      <router-link
-        v-if="authStore.user"
-        :to="{ name: 'my-details' }"
-        class="account-menu__who"
-        role="listitem"
-      >
-        <AppMonogram :name="authStore.user.name" :src="authStore.user.avatar_url" :size="44" />
-        <span class="account-menu__id">
-          <span class="account-menu__name">{{ authStore.user.name }}</span>
-          <span class="account-menu__email">{{ authStore.user.email }}</span>
-          <span class="account-menu__photo">
-            {{ authStore.user.avatar_url ? 'Change photo' : 'Add a photo' }}
+      <div v-if="authStore.user" role="listitem">
+        <router-link :to="{ name: 'my-details' }" class="account-menu__who">
+          <AppMonogram :name="authStore.user.name" :src="authStore.user.avatar_url" :size="44" />
+          <span class="account-menu__id">
+            <span class="account-menu__name">{{ authStore.user.name }}</span>
+            <span class="account-menu__email">{{ authStore.user.email }}</span>
+            <span class="account-menu__photo">
+              {{ authStore.user.avatar_url ? 'Change photo' : 'Add a photo' }}
+            </span>
           </span>
-        </span>
-      </router-link>
+        </router-link>
+      </div>
       <v-divider class="mb-1" />
       <!-- XP profile, garden character and MCP token are all
            engineering-workspace features. -->

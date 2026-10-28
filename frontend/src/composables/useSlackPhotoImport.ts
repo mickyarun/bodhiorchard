@@ -14,6 +14,7 @@
 
 import { ref } from 'vue'
 import api from '@/services/api'
+import { useAuthStore } from '@/stores/auth'
 import type { SlackAvatarSyncResult } from '@/types/celebrations'
 import { photoImportSummary } from '@/utils/avatar'
 import { extractApiError } from '@/utils/errors'
@@ -30,6 +31,7 @@ export interface PhotoImportOutcome {
  * (admins); the server allows HR and admins alike.
  */
 export function useSlackPhotoImport() {
+  const auth = useAuthStore()
   const importing = ref(false)
   const outcome = ref<PhotoImportOutcome | null>(null)
 
@@ -41,6 +43,8 @@ export function useSlackPhotoImport() {
         overwrite: false,
       })
       outcome.value = { variant: data.updated ? 'success' : 'info', text: photoImportSummary(data) }
+      // The importer may be among those who just got a photo.
+      if (data.updated) await auth.fetchUser().catch(() => undefined)
       return data.updated > 0
     } catch (err) {
       outcome.value = { variant: 'error', text: extractApiError(err, 'Failed to import photos from Slack') }

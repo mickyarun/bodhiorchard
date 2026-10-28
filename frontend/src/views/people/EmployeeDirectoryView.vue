@@ -19,7 +19,7 @@
   <AppPage title="Employees" :subtitle="subtitle">
     <template #actions>
       <v-btn
-        v-if="canManageEmployees"
+        v-if="canImportSlackPhotos"
         variant="text"
         prepend-icon="mdi-account-box-outline"
         :loading="photos.importing.value"
@@ -85,7 +85,7 @@ import {
 } from '@/utils/employeeDirectory'
 
 const store = useEmployeesStore()
-const { canManageEmployees, canInviteMembers } = usePermissions()
+const { canManageEmployees, canInviteMembers, canImportSlackPhotos } = usePermissions()
 const inviting = ref(false)
 const adding = ref(false)
 const preselect = ref<string | null>(null)

@@ -154,3 +154,10 @@ async def test_slacks_generated_letter_tile_is_not_imported(
     member = _member_with_photo(None)
     assert await link_own_account(FakeDb(), ORG, member, SLACK_ID) is True  # type: ignore[arg-type]
     assert member.avatar_url is None
+
+
+async def test_a_malformed_slack_profile_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    _world(monkeypatch, slack_user={"id": SLACK_ID, "profile": "not-a-profile"})
+    member = _member_with_photo(None)
+    assert await link_own_account(FakeDb(), ORG, member, SLACK_ID) is False  # type: ignore[arg-type]
+    assert member.slack_id is None
