@@ -31,38 +31,23 @@
     </template>
 
     <v-list density="compact" min-width="260">
-      <!-- Your own photo is yours to change. Clicks stay in here: the menu
-           would otherwise close and unmount the file input before the
-           picked photo arrives. -->
-      <div v-if="authStore.user" class="account-menu__who" role="listitem" @click.stop>
+      <!-- Who you are; your photo is changed on My details, so the
+           header goes there. -->
+      <router-link
+        v-if="authStore.user"
+        :to="{ name: 'my-details' }"
+        class="account-menu__who"
+        role="listitem"
+      >
         <AppMonogram :name="authStore.user.name" :src="authStore.user.avatar_url" :size="44" />
-        <div class="account-menu__id">
+        <span class="account-menu__id">
           <span class="account-menu__name">{{ authStore.user.name }}</span>
           <span class="account-menu__email">{{ authStore.user.email }}</span>
-          <div class="account-menu__photo">
-            <input ref="fileInput" type="file" :accept="AVATAR_ACCEPT" class="d-none" @change="photo.onPick" />
-            <v-btn
-              variant="text"
-              size="small"
-              color="primary"
-              :loading="photo.busy.value"
-              @click="fileInput?.click()"
-            >
-              {{ authStore.user.avatar_url ? 'Change photo' : 'Add photo' }}
-            </v-btn>
-            <v-btn
-              v-if="authStore.user.avatar_url"
-              variant="text"
-              size="small"
-              :disabled="photo.busy.value"
-              @click="photo.remove()"
-            >
-              Remove
-            </v-btn>
-          </div>
-        </div>
-      </div>
-      <AppCallout v-if="photoError" variant="error" class="mx-3 mb-2">{{ photoError }}</AppCallout>
+          <span class="account-menu__photo">
+            {{ authStore.user.avatar_url ? 'Change photo' : 'Add a photo' }}
+          </span>
+        </span>
+      </router-link>
       <v-divider class="mb-1" />
       <!-- XP profile, garden character and MCP token are all
            engineering-workspace features. -->
@@ -122,12 +107,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import AppCallout from '@/components/common/AppCallout.vue'
 import AppMonogram from '@/components/common/AppMonogram.vue'
 import { useAuthStore } from '@/stores/auth'
-import { AVATAR_ACCEPT, useAvatarEditor } from '@/composables/useAvatarEditor'
 import { usePermissions } from '@/composables/usePermissions'
 import { useThemePreference, type ThemePreference } from '@/composables/useThemePreference'
 
@@ -142,16 +124,6 @@ const THEME_OPTIONS: { value: ThemePreference; label: string; icon: string; hint
   { value: 'light', label: 'Light', icon: 'mdi-weather-sunny', hint: 'Light theme' },
   { value: 'dark', label: 'Dark', icon: 'mdi-weather-night', hint: 'Dark theme' },
 ]
-
-const fileInput = ref<HTMLInputElement | null>(null)
-const photoError = ref('')
-const photo = useAvatarEditor(() => authStore.user?.id ?? '', {
-  updated(avatarUrl) {
-    photoError.value = ''
-    authStore.setAvatarUrl(avatarUrl)
-  },
-  error: message => (photoError.value = message),
-})
 
 function handleLogout(): void {
   authStore.logout()
@@ -168,7 +140,18 @@ function handleLogout(): void {
   align-items: center;
   gap: 12px;
   max-width: 280px;
-  padding: 8px 16px 12px;
+  margin: 0 4px 4px;
+  padding: 8px 12px;
+  border-radius: var(--radius-card);
+  color: inherit;
+  text-decoration: none;
+}
+.account-menu__who:hover {
+  background: rgba(var(--v-theme-on-surface), 0.04);
+}
+.account-menu__who:focus-visible {
+  outline: 2px solid var(--color-focus, rgb(var(--v-theme-primary)));
+  outline-offset: -2px;
 }
 .account-menu__id {
   display: flex;
@@ -183,9 +166,10 @@ function handleLogout(): void {
   white-space: nowrap;
 }
 .account-menu__photo {
-  display: flex;
-  gap: 4px;
-  margin: 2px 0 0 -8px;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgb(var(--v-theme-primary));
 }
 .account-menu__email {
   font-size: 12px;
