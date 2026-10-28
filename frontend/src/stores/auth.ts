@@ -89,6 +89,11 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = response.data
   }
 
+  /** Show a new (or removed) photo of the signed-in user straight away. */
+  function setAvatarUrl(avatarUrl: string | null): void {
+    if (user.value) user.value = { ...user.value, avatar_url: avatarUrl }
+  }
+
   async function changePassword(newPassword: string): Promise<string | null> {
     try {
       await api.post('/v1/auth/change-password', { new_password: newPassword })
@@ -111,6 +116,7 @@ export const useAuthStore = defineStore('auth', () => {
     login,
     logout,
     fetchUser,
+    setAvatarUrl,
     changePassword,
   }
 })

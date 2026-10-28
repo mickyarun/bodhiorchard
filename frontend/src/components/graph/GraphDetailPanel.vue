@@ -199,7 +199,7 @@
               @click="emit('developer-highlight', member.user_id)"
             >
               <template #prepend>
-                <AppMonogram :name="member.name" :size="28" class="mr-2" />
+                <AppMonogram :name="member.name" :src="member.avatar_url" :size="28" class="mr-2" />
               </template>
               <v-list-item-title class="text-body-2">
                 {{ member.name }}
@@ -227,6 +227,7 @@ import type { TreeData, FeatureItem } from '@/types/dashboard'
 interface SkilledMember {
   user_id: string
   name: string
+  avatar_url: string | null
   matchingModules: string[]
 }
 
@@ -345,6 +346,7 @@ const members = computed<SkilledMember[]>(() => {
         return {
           user_id: uid,
           name: m.name,
+          avatar_url: m.avatar_url,
           matchingModules: m.top_modules.slice(0, 3),
         }
       })
@@ -378,6 +380,7 @@ const members = computed<SkilledMember[]>(() => {
       result.push({
         user_id: m.user_id,
         name: m.name,
+        avatar_url: m.avatar_url,
         matchingModules,
       })
     }
