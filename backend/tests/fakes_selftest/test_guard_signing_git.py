@@ -45,7 +45,7 @@ def test_guard_refuses_dns_for_a_public_host(external_guard: ExternalCallGuard) 
 
 def test_guard_refuses_the_dev_database_port() -> None:
     guard = ExternalCallGuard()
-    guard._blocked_ports = {5432}
+    guard.blocked_ports = {5432}
 
     with pytest.raises(ExternalCallBlockedError):
         guard.check_address(socket.AF_INET, ("127.0.0.1", 5432))

@@ -66,6 +66,7 @@ async def test_jwt_signed_with_another_key_is_refused(fake_github: FakeGitHub) -
 
 async def test_branches_follow_link_pagination(fake_github: FakeGitHub) -> None:
     fake_github.add_repo("acme/shop", "main", "develop", "release", "hotfix")
+    fake_github.max_page_size = 2
 
     branches = await list_remote_branches_via_api(_app_org(fake_github), "acme/shop")
 
@@ -85,8 +86,7 @@ async def test_rate_limit_401_and_404_reach_the_client(fake_github: FakeGitHub) 
     assert await client.list_pr_files("acme/shop", 5) == ["a.py"]
     assert await client.list_pr_files("acme/missing", 5) == []
     assert await GitHubClient("revoked").list_pr_files("acme/shop", 5) == []
-    statuses = [r.url.path for r in fake_github.requests]
-    assert len(statuses) == 4
+    assert [status for _, status in fake_github.responses] == [403, 200, 404, 401]
 
 
 async def test_slack_posts_are_recorded_and_threaded(fake_slack: FakeSlack) -> None:
@@ -102,7 +102,7 @@ async def test_slack_posts_are_recorded_and_threaded(fake_slack: FakeSlack) -> N
 
 
 async def test_slack_errors_and_rate_limits(fake_slack: FakeSlack) -> None:
-    fake_slack.add_user("U1", "Ada", "ada@acme.dev")
+    fake_slack.add_user("U1", "Ada", "ada@example.test")
     fake_slack.fail("users.info", "missing_scope")
     fake_slack.rate_limit("chat.postMessage")
 

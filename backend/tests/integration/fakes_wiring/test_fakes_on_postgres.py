@@ -83,6 +83,7 @@ async def test_installable_repos_page_through_the_fake_and_mark_tracked(
 ) -> None:
     for name in ("shop-api", "billing", "web"):
         fake_github.add_repo(f"acme/{name}")
+    fake_github.max_page_size = 2
     org = await seed_org(app_sessions, github=fake_github)
     await seed_repo(app_sessions, org.org_id, git_repo, full_name="acme/shop-api")
 

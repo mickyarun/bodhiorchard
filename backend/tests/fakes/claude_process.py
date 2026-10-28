@@ -24,13 +24,13 @@ unchanged.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 from typing import Any
 
+from tests.fakes.claude_contract import MCP_PREFIX
 from tests.fakes.claude_script import AgentRun, AgentScript, Say, ToolCallRecord
-
-MCP_PREFIX = "mcp__bodhiorchard__"
 
 
 def _result_event(script: AgentScript) -> dict[str, Any]:
@@ -89,15 +89,15 @@ def render_stdout(run: AgentRun, script: AgentScript) -> bytes:
 class FakeStream:
     """The subset of ``asyncio.StreamReader`` the runner uses."""
 
-    def __init__(self, data: bytes, *, times_out: bool = False) -> None:
+    def __init__(self, data: bytes, *, hang_until: asyncio.Event | None = None) -> None:
         self._buffer = io.BytesIO(data)
-        self._times_out = times_out
+        self._hang_until = hang_until
 
     async def readline(self) -> bytes:
-        """Next line, or a deadline error once a hanging script runs dry."""
+        """Next line; a hanging script blocks at the end until it is killed."""
         line = self._buffer.readline()
-        if not line and self._times_out:
-            raise TimeoutError("scripted agent never finished")
+        if not line and self._hang_until is not None:
+            await self._hang_until.wait()
         return line
 
     async def read(self, size: int = -1) -> bytes:
@@ -115,16 +115,23 @@ class FakeProcess:
         self.pid = FakeProcess._next_pid
         self._run = run
         self._script = script
+        self._killed = asyncio.Event()
         stdout = render_stdout(run, script)
-        self.stdout = FakeStream(stdout, times_out=script.times_out)
+        hang = self._killed if script.times_out else None
+        self.stdout = FakeStream(stdout, hang_until=hang)
         self.stderr = FakeStream(script.stderr.encode())
         self._stdout_bytes = stdout
         self.returncode: int | None = None
 
     async def communicate(self, stdin: bytes | None = None) -> tuple[bytes, bytes]:
-        """All of stdout and stderr, or a deadline error for a hanging script."""
+        """All of stdout and stderr; a hanging script blocks until it is killed.
+
+        Only the runner's own ``asyncio.wait_for`` deadline gets it unstuck, so
+        a runner that lost its timeout would hang the test instead of passing.
+        """
         if self._script.times_out:
-            raise TimeoutError("scripted agent never finished")
+            await self._killed.wait()
+            return b"", b""
         self.returncode = self._script.exit_code
         return self._stdout_bytes, self._script.stderr.encode()
 
@@ -138,5 +145,6 @@ class FakeProcess:
         """Record the kill the runner issues on timeout or cancellation."""
         self._run.killed = True
         self.returncode = -9
+        self._killed.set()
 
     terminate = kill
