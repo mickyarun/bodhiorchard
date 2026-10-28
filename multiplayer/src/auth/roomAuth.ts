@@ -23,8 +23,10 @@
  * inside the matchmaker instead, before it looks for a room, creates one or
  * reserves a seat, for every `joinOrCreate`, `create`, `join` and `joinById`.
  *
- * So every room class sets `static onAuth = authenticateJoin` (the room
- * registry test holds every registered room to it). It verifies the join
+ * So every room class sets `static onAuth = authenticateJoin`, or for the
+ * mini-game room a wrapper that also caps the games a player holds open
+ * (`rooms/minigameSlots.ts`); the room registry test holds every registered
+ * room to it. It verifies the join
  * token against the org the client names in its options (`orgId`, which must
  * be a canonical lowercase UUID) with the shared `verifyJoin`, and refuses
  * anything else. Colyseus hands the identity it returns to the room as
@@ -32,13 +34,13 @@
  * `onAuth`, so a join costs one backend call.
  *
  * The static hook does not know which room the client will land in. For
- * `joinOrCreate`, `join` and `create` that is the org it named (the shared
- * rooms filter on `orgId`). For `joinById`, Colyseus gives the hook no room
- * id, so a verified member of org B who names org B and knows the id of an
- * org A room (ids are only published inside org A's garden state) is still
- * granted a seat reservation there. Each room's `onJoin` therefore calls
- * `requireRoomIdentity` with its own org and refuses that join before it acts
- * on the identity; the reserved seat is released when the reservation lapses.
+ * `joinOrCreate`, `join` and `create` that is a room of the org it named
+ * (every room definition filters on `orgId`). For `joinById`, Colyseus gives
+ * the hook no room id, so the matchmaking entry point checks it first
+ * (`joinByIdOrg.ts`): the org the client names must be the org the room is
+ * listed under, or the join is refused before any seat is reserved. Each
+ * room's `onJoin` still calls `requireRoomIdentity` with its own org, so an
+ * identity from another org is never acted on whichever way it arrived.
  *
  * The token travels in the join options (`options.token`), which is what the
  * frontend sends; the `Authorization` header token Colyseus also offers is

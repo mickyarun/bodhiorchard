@@ -17,8 +17,10 @@
  * definitions. `POST /matchmake/<method>/<room>` is a thin wrapper over the
  * matchmaker calls used here (`joinOrCreate`, `create`, `join`, `joinById`):
  * they run the static onAuth, find or create the room and reserve the seat,
- * exactly as for an HTTP client. Only the WebSocket connect that follows a
- * seat reservation is not replayed.
+ * exactly as for an HTTP client. `matchmakeOverHttp` goes one step further
+ * out, through the controller the HTTP route calls, so it also runs the
+ * checks installed there (`installJoinByIdOrgCheck`). Only the WebSocket
+ * connect that follows a seat reservation is not replayed.
  */
 import {
   LocalDriver,
@@ -29,6 +31,7 @@ import {
   type AuthContext,
   type Room,
 } from "colyseus"
+import { installJoinByIdOrgCheck } from "../auth/joinByIdOrg"
 import { roomDefinitions } from "../roomDefinitions"
 
 /** What the HTTP route passes when the request carries no Authorization header. */
@@ -38,6 +41,16 @@ export const NO_HEADER_AUTH: AuthContext = { headers: new Headers(), ip: "127.0.
 export async function startMatchMaker(): Promise<void> {
   await matchMaker.setup(new LocalPresence(), new LocalDriver())
   registerRoomDefinitions(roomDefinitions)
+  installJoinByIdOrgCheck()
+}
+
+/** A matchmaking request as `POST /matchmake/<method>/<roomName>` runs it. */
+export function matchmakeOverHttp(
+  method: "joinOrCreate" | "create" | "join" | "joinById",
+  roomName: string,
+  options: Record<string, unknown>,
+): Promise<matchMaker.ISeatReservation> {
+  return matchMaker.controller.invokeMethod(method, roomName, options, NO_HEADER_AUTH)
 }
 
 /** Every room the matchmaker has listed, as live instances. */

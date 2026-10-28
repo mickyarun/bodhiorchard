@@ -36,6 +36,12 @@ import { safeLog } from "../bridge/logSanitize"
 export const TOKENLESS_JOIN_FLAG = "MULTIPLAYER_ALLOW_TOKENLESS_JOIN"
 /** Prefix on every tokenless identity, so it never collides with a real user id. */
 export const TOKENLESS_USER_PREFIX = "dev:"
+/**
+ * Longest join token forwarded to the backend. A session JWT is well under
+ * 1 KB; anything past this is refused before any backend call, so a client
+ * cannot make the server relay megabytes per join attempt.
+ */
+export const MAX_JOIN_TOKEN_LENGTH = 8 * 1024
 
 /** What a client sends when joining. Only `token` is trusted, after verification. */
 export interface JoinCredentials {
@@ -63,6 +69,7 @@ export async function verifyJoin(
   if (!roomOrgId) throw refuseJoin("room has no org", roomOrgId)
   const token = nonEmpty(options?.token)
   if (!token) return tokenlessIdentity(options, roomOrgId)
+  if (token.length > MAX_JOIN_TOKEN_LENGTH) throw refuseJoin("auth token too long", roomOrgId)
 
   const result = await verifyUserToken(token, roomOrgId)
   if (!result.valid) throw refuseJoin(refusalMessage(result.reason), roomOrgId)

@@ -13,7 +13,12 @@
 // limitations under the License.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { requireJoinIdentity, TOKENLESS_JOIN_FLAG, verifyJoin } from "./verifyJoin"
+import {
+  MAX_JOIN_TOKEN_LENGTH,
+  requireJoinIdentity,
+  TOKENLESS_JOIN_FLAG,
+  verifyJoin,
+} from "./verifyJoin"
 
 const fetchMock = vi.fn()
 
@@ -91,6 +96,26 @@ describe("verifyJoin with a token", () => {
     const identity = await verifyJoin({ token: "jwt", name: "Bob" }, "org-a")
 
     expect(identity.name).toBe("alice")
+  })
+
+  it("refuses an oversized token without forwarding it to the backend", async () => {
+    backendAnswers({ valid: true, user_id: "alice", org_id: "org-a", name: "Alice" })
+    const token = "x".repeat(MAX_JOIN_TOKEN_LENGTH + 1)
+
+    await expect(verifyJoin({ token, orgId: "org-a" }, "org-a")).rejects.toThrow(
+      "auth token too long",
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("still forwards a token of the longest allowed length", async () => {
+    backendAnswers({ valid: true, user_id: "alice", org_id: "org-a", name: "Alice" })
+    const token = "x".repeat(MAX_JOIN_TOKEN_LENGTH)
+
+    await expect(verifyJoin({ token, orgId: "org-a" }, "org-a")).resolves.toMatchObject({
+      userId: "alice",
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
 

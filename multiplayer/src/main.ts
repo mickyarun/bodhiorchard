@@ -37,8 +37,12 @@ import { json as expressJson } from "express"
 import type { Request, Response } from "express"
 import { roomDefinitions } from "./roomDefinitions"
 import { handleBridgePublish } from "./bridge/BridgeEndpoint"
+import { installJoinByIdOrgCheck } from "./auth/joinByIdOrg"
 
 const port = parseInt(process.env.PORT || "2567", 10)
+
+// A client's joinById must name the org of the room it targets (see auth/joinByIdOrg).
+installJoinByIdOrgCheck()
 
 const server = defineServer({
   rooms: roomDefinitions,

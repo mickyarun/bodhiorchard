@@ -20,6 +20,7 @@ import { LocalDriver, Room } from "colyseus"
 import { describe, expect, it } from "vitest"
 import { authenticateJoin } from "./auth/roomAuth"
 import { roomDefinitions } from "./roomDefinitions"
+import { authenticateMinigameJoin } from "./rooms/minigameSlots"
 import { createListing, findOpenRoom } from "./testing/matchmaking"
 
 describe("shared room matchmaking", () => {
@@ -86,10 +87,18 @@ describe("shared room matchmaking", () => {
     ).toEqual({ orgId: "org-a", ownerId: "alice" })
   })
 
-  it.each(["race", "minigame", "backlash"] as const)(
-    "leaves per-match %s rooms unfiltered (they are joined by id)",
+  // A room's listing records its org from this filter, and a joinById is
+  // checked against it (auth/joinByIdOrg.ts).
+  it.each(Object.keys(roomDefinitions) as Array<keyof typeof roomDefinitions>)(
+    "files every %s room under the org it was created for",
     (name) => {
-      expect(roomDefinitions[name].getFilterOptions({ orgId: "org-a", userId: "u1" })).toEqual({})
+      const handler = roomDefinitions[name]
+      const options = { orgId: "org-a", ownerId: "alice", userId: "u1", token: "secret" }
+
+      expect(handler.getFilterOptions(options)).toMatchObject({ orgId: "org-a" })
+      expect(handler.getMetadataFromOptions(options)).toMatchObject({
+        metadata: { orgId: "org-a" },
+      })
     },
   )
 })
@@ -98,11 +107,16 @@ describe("join checks for every registered room", () => {
   // Colyseus runs the static onAuth inside the matchmaker, before it creates
   // a room or reserves a seat; an instance onAuth would run only at
   // WebSocket connect, after the seat is held (see auth/roomAuth.ts).
+  const staticOnAuth: Partial<Record<keyof typeof roomDefinitions, unknown>> = {
+    minigame: authenticateMinigameJoin,
+  }
+
   it.each(Object.entries(roomDefinitions))(
     "%s verifies the join before matchmaking and has no instance onAuth",
-    (_name, handler) => {
+    (name, handler) => {
       const klass = handler.klass as unknown as typeof Room
-      expect(klass.onAuth).toBe(authenticateJoin)
+      const expected = staticOnAuth[name as keyof typeof roomDefinitions] ?? authenticateJoin
+      expect(klass.onAuth).toBe(expected)
       expect(klass.prototype.onAuth).toBe(Room.prototype.onAuth)
     },
   )

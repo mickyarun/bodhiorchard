@@ -21,8 +21,11 @@
  * Lifecycle:
  *   onCreate: pick the engine from `options.game`, thin state, message handler.
  *   onAuth:   static, before matchmaking: verify the JWT for the org the
- *             client names (trust boundary) → authoritative userId/orgId.
- *   onJoin:   start the engine + (for timed games) the 20Hz sim loop.
+ *             client names (trust boundary) → authoritative userId/orgId,
+ *             and take one of the player's open-game slots (minigameSlots).
+ *   onJoin:   bind the slot, start the engine + (for timed games) the 20Hz
+ *             sim loop.
+ *   onDispose: release the slot.
  *   finish:   POST the server-computed score via the bridge, relay the outcome.
  */
 import { Room, Client, type RoomException, type RoomMethodName } from "colyseus"
@@ -39,8 +42,13 @@ import {
   type JoinCredentials,
   type JoinIdentity,
 } from "../auth/verifyJoin"
-import { authenticateJoin } from "../auth/roomAuth"
 import { safeError, safeLog } from "../bridge/logSanitize"
+import {
+  authenticateMinigameJoin,
+  bindMinigameSlot,
+  MINIGAME_SEAT_SECONDS,
+  releaseMinigameSlot,
+} from "./minigameSlots"
 
 const SIM_TICK_MS = 50
 /** Reap an abandoned room (player left a game open) after this long. */
@@ -53,13 +61,16 @@ interface JoinOptions extends JoinCredentials {
 
 export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements MinigameHost {
   maxClients = 1
+  /** A pending open-game slot lapses with this reservation (see minigameSlots). */
+  seatReservationTimeout = MINIGAME_SEAT_SECONDS
 
   /**
    * Verify every join before matchmaking creates the room (see auth/roomAuth).
    * A play room belongs to the org its creator names; the token must be for
-   * exactly that org, and the score is posted for the token's user.
+   * exactly that org, and the score is posted for the token's user. The
+   * player must also have an open-game slot left.
    */
-  static onAuth = authenticateJoin
+  static onAuth = authenticateMinigameJoin
 
   private engine: MinigameEngine | null = null
   private simHandle: Delayed | null = null
@@ -90,6 +101,7 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
     // with: a play room has one seat (`maxClients = 1`) and takes its org
     // from the one verified player, so `requireRoomIdentity` does not apply.
     const identity = requireJoinIdentity(auth)
+    bindMinigameSlot(identity.userId, this.roomId)
     this.state.userId = identity.userId
     this.state.orgId = identity.orgId
     this.userName = identity.name
@@ -127,6 +139,7 @@ export class MinigameRoom extends Room<{ state: MinigameRoomState }> implements 
 
   onDispose(): void {
     this.stopSim()
+    releaseMinigameSlot(this.roomId)
   }
 
   // ─── MinigameHost ────────────────────────
