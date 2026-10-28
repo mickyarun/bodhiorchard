@@ -33,68 +33,17 @@
     </div>
 
     <div v-else class="d-flex flex-column ga-2 mb-3">
-      <div
+      <BugCommentItem
         v-for="comment in bugsStore.comments"
         :key="comment.id"
-        class="comment-row pa-2"
-        :class="{ 'comment-tombstone': !!comment.deletedAt }"
-      >
-        <div class="d-flex align-center ga-2 mb-1">
-          <v-avatar size="20" color="primary" variant="tonal">
-            <span style="font-size: 9px;">{{ initials(comment.authorName) }}</span>
-          </v-avatar>
-          <span class="text-caption font-weight-medium">{{ comment.authorName || 'Unknown' }}</span>
-          <span class="text-caption text-medium-emphasis">{{ formatDateTime(comment.createdAt) }}</span>
-          <span v-if="comment.editedAt && !comment.deletedAt" class="text-caption text-medium-emphasis">
-            (edited)
-          </span>
-          <v-spacer />
-          <template v-if="canModify(comment)">
-            <v-btn
-              v-if="editingId !== comment.id"
-              icon="mdi-pencil"
-              size="x-small"
-              variant="text"
-              density="compact"
-              aria-label="Edit comment"
-              @click="startEdit(comment)"
-            />
-            <v-btn
-              icon="mdi-delete-outline"
-              size="x-small"
-              variant="text"
-              density="compact"
-              color="error"
-              aria-label="Delete comment"
-              @click="onDelete(comment.id)"
-            />
-          </template>
-        </div>
-
-        <div v-if="comment.deletedAt" class="text-caption text-medium-emphasis fst-italic">
-          [deleted]
-        </div>
-        <div v-else-if="editingId === comment.id" class="d-flex flex-column ga-2">
-          <v-textarea
-            v-model="editDraft"
-            variant="outlined"
-            density="compact"
-            rows="2"
-            hide-details
-            autofocus
-          />
-          <div class="d-flex ga-2 justify-end">
-            <v-btn variant="text" size="small" @click="cancelEdit">Cancel</v-btn>
-            <v-btn
-              variant="outlined"
-              size="small"
-              :disabled="!editDraft.trim() || editDraft === comment.body"
-              @click="saveEdit(comment.id)"
-            >Save</v-btn>
-          </div>
-        </div>
-        <div v-else class="text-body-2" style="white-space: pre-wrap;">{{ comment.body }}</div>
-      </div>
+        :comment="comment"
+        :editing="editingId === comment.id"
+        :can-modify="canModify(comment)"
+        @edit="editingId = comment.id"
+        @cancel="editingId = null"
+        @save="saveEdit(comment.id, $event)"
+        @delete="onDelete(comment.id)"
+      />
     </div>
 
     <v-textarea
@@ -128,8 +77,8 @@ import { computed, ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useBugsStore } from '@/stores/bugs'
 import { usePermissions } from '@/composables/usePermissions'
-import { formatDateTime } from '@/utils/date'
 import type { BugComment } from '@/types'
+import BugCommentItem from './BugCommentItem.vue'
 
 const props = defineProps<{
   bugId: string | null
@@ -142,7 +91,6 @@ const { canCommentOnBugs, canEditBugs } = usePermissions()
 const newBody = ref('')
 const posting = ref(false)
 const editingId = ref<string | null>(null)
-const editDraft = ref('')
 
 const canComment = computed(() => canCommentOnBugs.value)
 
@@ -164,16 +112,6 @@ watch(
   { immediate: true },
 )
 
-function initials(name: string | null | undefined): string {
-  if (!name) return '?'
-  return name
-    .split(' ')
-    .map((n) => n[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase()
-}
-
 function canModify(comment: BugComment): boolean {
   if (comment.deletedAt) return false
   if (!authStore.user) return false
@@ -181,20 +119,10 @@ function canModify(comment: BugComment): boolean {
   return canEditBugs.value
 }
 
-function startEdit(comment: BugComment): void {
-  editingId.value = comment.id
-  editDraft.value = comment.body
-}
-
-function cancelEdit(): void {
-  editingId.value = null
-  editDraft.value = ''
-}
-
-async function saveEdit(commentId: string): Promise<void> {
-  if (!props.bugId || !editDraft.value.trim()) return
-  const updated = await bugsStore.editComment(props.bugId, commentId, editDraft.value.trim())
-  if (updated) cancelEdit()
+async function saveEdit(commentId: string, body: string): Promise<void> {
+  if (!props.bugId || !body) return
+  const updated = await bugsStore.editComment(props.bugId, commentId, body)
+  if (updated) editingId.value = null
 }
 
 async function onDelete(commentId: string): Promise<void> {
@@ -210,15 +138,3 @@ async function onPost(): Promise<void> {
   if (added) newBody.value = ''
 }
 </script>
-
-<style scoped>
-.comment-row {
-  border-radius: 6px;
-  background: rgb(var(--v-theme-surface-bright));
-}
-.comment-tombstone {
-  background: rgb(var(--v-theme-surface-bright));
-  opacity: 0.7;
-}
-.fst-italic { font-style: italic; }
-</style>

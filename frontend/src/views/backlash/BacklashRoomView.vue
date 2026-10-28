@@ -49,7 +49,7 @@
     <section v-else-if="state" class="game-layout">
       <aside class="player-card" :class="playerCardClass(topPlayer)">
         <div class="player-card__token" :class="pieceColorClass(topPlayer?.color)">
-          {{ initials(topPlayer?.name) }}
+          {{ initialsOf(topPlayer?.name ?? '?') }}
         </div>
         <div class="player-card__copy">
           <span class="player-card__label">{{ isViewer ? topColorLabel : 'Opponent' }}</span>
@@ -230,7 +230,7 @@
 
       <aside class="player-card player-card--me" :class="playerCardClass(bottomPlayer)">
         <div class="player-card__token" :class="pieceColorClass(bottomPlayer?.color)">
-          {{ initials(bottomPlayer?.name) }}
+          {{ initialsOf(bottomPlayer?.name ?? '?') }}
         </div>
         <div class="player-card__copy">
           <span class="player-card__label">{{ isViewer ? bottomColorLabel : `You · ${bottomPlayerColorLabel}` }}</span>
@@ -295,6 +295,7 @@ import {
   type BacklashEncouragement,
 } from '@shared/minigames/backlashSocial'
 import { useAuthStore } from '@/stores/auth'
+import { initialsOf } from '@/utils/avatar'
 import { useMinigamesStore } from '@/stores/minigames'
 import BacklashCrowdPanel from '@/components/backlash/BacklashCrowdPanel.vue'
 import {
@@ -593,11 +594,6 @@ function playerCardClass(player: BacklashPlayerSnapshot | undefined): Record<str
 
 function pieceColorClass(color: BacklashColor | null | undefined): string {
   return color === 'black' ? 'token--black' : 'token--white'
-}
-
-function initials(name: string | undefined): string {
-  const parts = (name ?? '?').trim().split(/\s+/).filter(Boolean)
-  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || '?'
 }
 
 function capitalize(value: string): string {

@@ -51,7 +51,15 @@ function project(environment: 'node' | 'jsdom', include: string[]) {
   return {
     plugins: [vue()],
     resolve: { alias },
-    test: { name: environment, environment, globals: false, include },
+    test: {
+      name: environment,
+      environment,
+      globals: false,
+      include,
+      // Vuetify ships its components with CSS imports; inlining lets a
+      // spec mount a real Vuetify component instead of failing to load it.
+      server: { deps: { inline: ['vuetify'] } },
+    },
   }
 }
 

@@ -43,7 +43,7 @@
         </v-list-item>
         <v-list-item v-for="m in matches" :key="m.id" :active="assigneeId === m.id" @click="pick(m.id)">
           <template #prepend>
-            <span class="assignee-menu__avatar" aria-hidden="true">{{ initialsOf(m.name || '?') }}</span>
+            <AppMonogram class="assignee-menu__avatar" :name="m.name" :size="28" />
           </template>
           <v-list-item-title>{{ m.name }}</v-list-item-title>
           <v-list-item-subtitle>{{ m.email }}</v-list-item-subtitle>
@@ -56,7 +56,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useMemberDirectory } from '@/composables/useMemberDirectory'
-import { initialsOf } from '@/utils/avatar'
+import AppMonogram from '@/components/common/AppMonogram.vue'
 
 defineProps<{ assigneeId: string | null }>()
 const emit = defineEmits<{ change: [memberId: string | null] }>()
@@ -82,16 +82,6 @@ function pick(memberId: string | null): void {
   padding: 8px;
 }
 .assignee-menu__avatar {
-  width: 28px;
-  height: 28px;
   margin-right: 10px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-accent-text);
-  background: var(--color-accent-soft);
 }
 </style>

@@ -15,22 +15,12 @@
 /** Plain-text facts on an approval card: the last leave, and the balance
  *  after approval when the request falls in another leave year. */
 import type { ApprovalItem, LastLeave } from '@/types/leave'
+import { type RelativeTimeOptions, relativeTime } from '@/utils/date'
 import { pluralDays, toNumber, toNumberOrNull } from '@/utils/leave'
-import { formatDayRange, parseIsoDate, toIsoDate } from '@/utils/leaveDates'
+import { formatDayRange, parseIsoDate } from '@/utils/leaveDates'
 
-const DAY_MS = 86_400_000
-
-/** "today", "yesterday", "5 days ago", "3 weeks ago", "4 months ago". */
-export function timeAgo(iso: string, today: Date): string {
-  const midnight = new Date(today.getFullYear(), today.getMonth(), today.getDate())
-  const days = Math.round((midnight.getTime() - parseIsoDate(iso).getTime()) / DAY_MS)
-  if (days <= 0) return 'today'
-  if (days === 1) return 'yesterday'
-  if (days < 14) return `${days} days ago`
-  if (days < 63) return `${Math.floor(days / 7)} weeks ago`
-  const months = Math.floor(days / 30.44)
-  return months < 24 ? `${months} months ago` : `${Math.floor(months / 12)} years ago`
-}
+/** Leave ages count whole local days: "today", "yesterday", "3 weeks ago". */
+const DAYS_AGO: RelativeTimeOptions = { granularity: 'day', older: 'span' }
 
 /** "Sick leave · Wed 2 – Thu 3 Sep · 2 days · 7 weeks ago"; "on leave now" if it hasn't ended. */
 export function lastLeaveLine(last: LastLeave, today: Date): string {
@@ -39,7 +29,7 @@ export function lastLeaveLine(last: LastLeave, today: Date): string {
     last.leave_type ?? 'Leave',
     formatDayRange(last.start_date, last.end_date),
     pluralDays(toNumber(last.days)),
-    ended ? timeAgo(last.end_date, today) : 'on leave now',
+    ended ? relativeTime(parseIsoDate(last.end_date), today, DAYS_AGO) : 'on leave now',
   ].join(' · ')
 }
 
@@ -58,7 +48,7 @@ export function otherYearBalanceAfter(item: ApprovalItem): number | null {
 
 /** How long ago an API timestamp was, counted in local days: "2 days ago". */
 export function timestampAgo(timestamp: string, today: Date): string {
-  return timeAgo(toIsoDate(new Date(timestamp)), today)
+  return relativeTime(timestamp, today, DAYS_AGO)
 }
 
 /**
