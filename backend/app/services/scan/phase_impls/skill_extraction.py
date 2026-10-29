@@ -19,14 +19,13 @@ this module is the bridge between that analyser and the database.
 
 Two responsibilities:
 
-1. **Optional member auto-creation.** When ``scan.auto_create_members``
-   is on (default), every unique git-author email that is not already
-   a ``User`` row triggers an INSERT + ``OrgToUser`` membership (an
-   email already owned by an account in another org is left unmatched). The
-   defaulted password is a placeholder — these accounts can't log in
-   until the operator resets the password from Settings → Team. With
-   the flag off, unknown authors are skipped and surface in
-   ``UnmatchedAuthorsError`` from the orchestrator.
+1. **Placing unknown authors.** Every git-author email missing from the
+   org's email map goes through ``author_resolution.place_new_authors``:
+   a GitHub noreply address links to the member with that login, a
+   machine's default identity and an address owned by another org stay
+   unmatched, and anyone else becomes a member when
+   ``scan.auto_create_members`` is on (default). Unmatched authors are
+   returned so the stage can surface them.
 
 2. **Mutating the caller's email map in place.** The map flows from
    ``scan_pipeline.run_scan_pipeline`` into every per-repo iteration
@@ -38,19 +37,15 @@ Two responsibilities:
 
 from __future__ import annotations
 
-import secrets
 import uuid
 from typing import Any
 
-import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import hash_password
-from app.models.user import OrgToUser, User
+from app.models.user import User
 from app.repositories.user import UserRepository
+from app.services.scan.author_resolution import auto_create_enabled, place_new_authors
 from app.services.scan_helpers import upsert_skill_profiles
-
-logger = structlog.get_logger(__name__)
 
 
 async def phase_e_skills(
@@ -61,7 +56,7 @@ async def phase_e_skills(
     email_to_user: dict[str, User],
     scan_cfg: dict[str, Any],
 ) -> tuple[int, list[str]]:
-    """Phase E: Git skill analysis — optionally auto-create members, then upsert profiles.
+    """Git skill analysis — place unknown authors, then upsert profiles.
 
     ``email_to_user`` is mutated in-place so the caller's reference stays
     valid for later repos in the same scan. Rebinding would detach the
@@ -74,50 +69,24 @@ async def phase_e_skills(
         repo_path: Absolute path to the repository.
         skill_entries: Skill entries from ``analyze_repo_skills()``.
         email_to_user: Lowercase email → User map, mutated in place so
-            the caller sees freshly-created users (when auto-create is
-            on) in subsequent iterations.
+            the caller sees linked and freshly-created members in
+            subsequent iterations.
         scan_cfg: Scan configuration dict from org config.
 
     Returns:
         Tuple of (profiles_count, unmatched_emails).
     """
     del repo_path  # accepted for the legacy signature; analysis happens upstream
-    user_repo = UserRepository(db)
-
-    # Auto-create members from git authors if enabled. When disabled, the
-    # passed-in ``email_to_user`` is used as-is — existing members still
-    # get their skills linked; only unknown authors are skipped.
-    auto_create = scan_cfg.get("auto_create_members", True)
-    if auto_create and skill_entries:
+    if skill_entries:
+        user_repo = UserRepository(db)
         _refresh_email_map(email_to_user, await user_repo.get_email_map(org_id))
-        seen_emails: set[str] = set()
-        for entry in skill_entries:
-            email_lower = entry.email.lower()
-            if email_lower in email_to_user or email_lower in seen_emails:
-                continue
-            seen_emails.add(email_lower)
-            if await user_repo.get_by_email(entry.email) is not None:
-                # The address already belongs to an account in another
-                # org. Emails are unique across orgs, so inserting would
-                # fail the whole stage, and adding that account to this
-                # org would hand it access here. Leave the author
-                # unmatched instead.
-                logger.info("scan_author_belongs_to_another_org", org_id=str(org_id))
-                continue
-            new_user = User(
-                email=entry.email,
-                name=entry.author_name,
-                # Random and never shown: scan-created contributors can't sign
-                # in until an admin sets a password or merges them.
-                password_hash=hash_password(secrets.token_urlsafe(24)),
-                is_active=True,
-            )
-            db.add(new_user)
-            await db.flush()
-            # Create org membership for the auto-created user
-            membership = OrgToUser(user_id=new_user.id, org_id=org_id)
-            db.add(membership)
-        await db.flush()
+        await place_new_authors(
+            db,
+            org_id,
+            ((entry.email, entry.author_name) for entry in skill_entries),
+            email_to_user,
+            auto_create=auto_create_enabled(scan_cfg),
+        )
         _refresh_email_map(email_to_user, await user_repo.get_email_map(org_id))
 
     count, unmatched = await upsert_skill_profiles(db, org_id, skill_entries, email_to_user)

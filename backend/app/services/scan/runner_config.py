@@ -31,6 +31,7 @@ from app.config import settings as app_settings
 from app.mcp.auth import create_internal_mcp_token
 from app.repositories.organization import OrganizationRepository
 from app.scan.session import with_session
+from app.services.scan.author_resolution import auto_create_enabled
 
 logger = structlog.get_logger(__name__)
 
@@ -63,8 +64,8 @@ def mint_mcp_credentials(*, org_id: uuid.UUID) -> dict[str, str]:
 async def load_scan_cfg(org_id: uuid.UUID) -> dict[str, Any]:
     """Read the Scan-tuning section of the org config.
 
-    Returns the keys the synthesize stage cares about with safe
-    fallbacks. Pre-loaded once at fanout setup so the per-repo workers
+    Returns the keys the synthesize and skill-extraction stages care
+    about with safe fallbacks. Pre-loaded once at fanout setup so the per-repo workers
     don't each hit the DB just to learn the same numbers.
     """
     try:
@@ -77,4 +78,5 @@ async def load_scan_cfg(org_id: uuid.UUID) -> dict[str, Any]:
     return {
         "timeout_seconds": int(scan_cfg.get("timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS),
         "max_turns": int(scan_cfg.get("max_turns") or _DEFAULT_MAX_TURNS),
+        "auto_create_members": auto_create_enabled(scan_cfg),
     }

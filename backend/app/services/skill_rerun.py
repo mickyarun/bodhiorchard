@@ -37,6 +37,7 @@ from app.repositories.skill_profile import SkillProfileRepository
 from app.repositories.tracked_repository import TrackedRepoRepository
 from app.repositories.user import UserRepository
 from app.services.git_analyzer import analyze_repo_skills
+from app.services.scan.author_resolution import org_auto_creates_members
 from app.services.scan.phase_impls.skill_extraction import phase_e_skills
 from app.services.scan_helpers import load_feature_map
 
@@ -87,6 +88,7 @@ async def rerun_skill_profiles(
     # Alias-aware. Loaded once, mutated in place by phase_e_skills as
     # new members get auto-created — must NOT be rebound below.
     email_to_user = await UserRepository(db).get_email_map(org_id)
+    scan_cfg = {"auto_create_members": await org_auto_creates_members(db, org_id)}
 
     repos = await TrackedRepoRepository(db, org_id=org_id).list_active()
     total_profiles = 0
@@ -101,7 +103,7 @@ async def rerun_skill_profiles(
             repo_path=repo.path,
             skill_entries=entries,
             email_to_user=email_to_user,
-            scan_cfg={"auto_create_members": True},
+            scan_cfg=scan_cfg,
         )
         await db.flush()
         total_profiles += count
