@@ -17,17 +17,17 @@ import { MCP_TOKEN_PLACEHOLDER, exportLine, shellSnippets } from './mcpEnvSnippe
 
 describe('exportLine', () => {
   it('uses the token, or a placeholder before one exists', () => {
-    expect(exportLine('abc')).toBe('export BODHIORCHARD_MCP_TOKEN="abc"')
-    expect(exportLine('')).toBe(`export BODHIORCHARD_MCP_TOKEN="${MCP_TOKEN_PLACEHOLDER}"`)
+    expect(exportLine('abc')).toBe('export GLIDESHIP_MCP_TOKEN="abc"')
+    expect(exportLine('')).toBe(`export GLIDESHIP_MCP_TOKEN="${MCP_TOKEN_PLACEHOLDER}"`)
   })
 })
 
 describe('shellSnippets', () => {
   it('writes the variable for each shell', () => {
     const [mac, linux, windows] = shellSnippets('tok')
-    expect(mac.code).toContain(`echo 'export BODHIORCHARD_MCP_TOKEN="tok"' >> ~/.zshrc`)
+    expect(mac.code).toContain(`echo 'export GLIDESHIP_MCP_TOKEN="tok"' >> ~/.zshrc`)
     expect(linux.code).toContain('>> ~/.bashrc')
-    expect(windows.code).toContain('setx BODHIORCHARD_MCP_TOKEN "tok"')
-    expect(windows.code).toContain('SetEnvironmentVariable("BODHIORCHARD_MCP_TOKEN", "tok", "User")')
+    expect(windows.code).toContain('setx GLIDESHIP_MCP_TOKEN "tok"')
+    expect(windows.code).toContain('SetEnvironmentVariable("GLIDESHIP_MCP_TOKEN", "tok", "User")')
   })
 })

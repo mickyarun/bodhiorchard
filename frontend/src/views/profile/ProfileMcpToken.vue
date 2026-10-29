@@ -155,23 +155,29 @@
         <li class="mb-2">
           In the <strong>same terminal</strong>, launch Claude Code:
           <div class="inline-cmd mt-1"><code>claude</code></div>
-          Hooks will inherit <code>BODHIORCHARD_MCP_TOKEN</code> from the shell
+          Hooks will inherit <code>{{ MCP_TOKEN_ENV }}</code> from the shell
           and start pushing activity.
         </li>
         <li>
           <strong>Verify it's set</strong> in the shell that launched Claude
           Code:
-          <div class="inline-cmd mt-1"><code>echo $BODHIORCHARD_MCP_TOKEN</code></div>
+          <div class="inline-cmd mt-1"><code>echo ${{ MCP_TOKEN_ENV }}</code></div>
           If this is empty, the hooks will silently do nothing.
         </li>
       </ol>
 
       <AppCallout variant="warning" eyebrow="Common gotcha" class="mt-4">
-        If you have an <strong>old</strong> <code>BODHIORCHARD_MCP_TOKEN</code>
+        If you have an <strong>old</strong> <code>{{ MCP_TOKEN_ENV }}</code>
         exported in <code>~/.zshrc</code> or <code>~/.bashrc</code>, every
         new terminal will re-export the stale value and override what you
         just set. Remove or comment out the old line, then open a fresh
         terminal.
+      </AppCallout>
+
+      <AppCallout variant="info" eyebrow="Repos set up before the rename" class="mt-3">
+        Until a repo merges its latest Glideship setup PR, its hooks read
+        <code>{{ LEGACY_MCP_TOKEN_ENV }}</code> instead. Export the same token
+        under that name too, or merge the setup PR.
       </AppCallout>
     </v-card>
   </v-container>
@@ -182,6 +188,7 @@ import { computed, onMounted, ref } from 'vue'
 import api from '@/services/api'
 import { extractApiError } from '@/utils/errors'
 import AppCallout from '@/components/common/AppCallout.vue'
+import { LEGACY_MCP_TOKEN_ENV, MCP_TOKEN_ENV, exportLine as buildExportLine } from '@/utils/mcpEnvSnippets'
 
 const statusLoading = ref(true)
 const hasToken = ref(false)
@@ -192,9 +199,7 @@ const error = ref<string | null>(null)
 const tokenCopied = ref(false)
 const exportCopied = ref(false)
 
-const exportLine = computed(() =>
-  newToken.value ? `export BODHIORCHARD_MCP_TOKEN="${newToken.value}"` : '',
-)
+const exportLine = computed(() => (newToken.value ? buildExportLine(newToken.value) : ''))
 
 async function loadStatus(): Promise<void> {
   statusLoading.value = true

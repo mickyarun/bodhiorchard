@@ -18,6 +18,7 @@ import json
 import os
 from unittest.mock import AsyncMock, patch
 
+from app.mcp.bridge_env import MCP_TOKEN_ENV, MCP_TOOLS_ENV
 from app.models.organization import AIProvider, Organization
 from app.services.ai_runner import copilot_provider as cp
 from app.services.ai_runner.claude_provider import ClaudeProvider
@@ -74,8 +75,8 @@ def test_build_copilot_mcp_writes_file_and_flag() -> None:
             data = json.load(fh)
         server = data["mcpServers"][SERVER_NAME]
         assert server["type"] == "local"
-        assert server["env"]["BODHIORCHARD_MCP_TOKEN"] == "tok"
-        assert server["env"]["BODHIORCHARD_MCP_TOOLS"] == "code_query"
+        assert server["env"][MCP_TOKEN_ENV] == "tok"
+        assert server["env"][MCP_TOOLS_ENV] == "code_query"
     finally:
         for p in inv.cleanup_paths:
             os.unlink(p)

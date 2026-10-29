@@ -115,7 +115,7 @@
           </li>
           <li class="mb-1">
             In a fresh terminal, <code>cd</code> to the repo and run
-            <code>export BODHIORCHARD_MCP_TOKEN="your-token"</code>
+            <code>export {{ MCP_TOKEN_ENV }}="your-token"</code>
           </li>
           <li class="mb-1">
             Run <code>claude</code> in the <strong>same terminal</strong> —
@@ -131,8 +131,10 @@
         <div class="stale-zshrc-warning mt-2">
           <v-icon icon="mdi-alert-outline" size="12" color="warning" class="mr-1" />
           <span class="text-caption">
-            Watch out for old <code>BODHIORCHARD_MCP_TOKEN</code> exports in
+            Watch out for old <code>{{ MCP_TOKEN_ENV }}</code> exports in
             <code>~/.zshrc</code> — they override new ones on every shell.
+            Repos that haven't merged their latest setup PR read
+            <code>{{ LEGACY_MCP_TOKEN_ENV }}</code> instead.
           </span>
         </div>
       </div>
@@ -145,6 +147,7 @@ import AppCallout from '@/components/common/AppCallout.vue'
 import { computed, ref } from 'vue'
 import api from '@/services/api'
 import { extractApiError } from '@/utils/errors'
+import { LEGACY_MCP_TOKEN_ENV, MCP_TOKEN_ENV, exportLine as buildExportLine } from '@/utils/mcpEnvSnippets'
 
 const props = withDefaults(
   defineProps<{
@@ -175,9 +178,7 @@ const introText = computed(() =>
     : 'Connect Claude Code in your development repo so commits flow back to this BUD.',
 )
 
-const exportLine = computed(() =>
-  newToken.value ? `export BODHIORCHARD_MCP_TOKEN="${newToken.value}"` : '',
-)
+const exportLine = computed(() => (newToken.value ? buildExportLine(newToken.value) : ''))
 
 // ── Actions ─────────────────────────────────────────────────────────
 

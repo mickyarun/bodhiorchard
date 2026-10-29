@@ -48,7 +48,8 @@ from collections.abc import Mapping
 #   protection here is that *nothing else* leaks alongside it.
 # * ``CLAUDE_CODE_*`` / ``DISABLE_AUTOUPDATER`` — knobs the CLI itself reads.
 #
-# Note: ``BODHIORCHARD_MCP_TOKEN`` and friends are intentionally absent.
+# Note: ``GLIDESHIP_MCP_TOKEN`` (and its legacy ``BODHIORCHARD_`` name) and
+# friends are intentionally absent.
 # The MCP bridge receives its token via the per-call MCP JSON config's
 # ``env`` block (see ``claude_runner._build_mcp_config_file``), not via
 # parent-process env inheritance, so dropping them here is safe.

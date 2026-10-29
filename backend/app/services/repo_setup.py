@@ -32,6 +32,7 @@ from typing import Any
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.mcp.bridge_env import LEGACY_MCP_TOKEN_ENV, MCP_TOKEN_ENV
 from app.models.organization import Organization
 from app.models.tracked_repository import SetupPrState, TrackedRepository
 from app.services.git_operations import (
@@ -44,6 +45,14 @@ from app.services.github_app_auth import (
     get_installation_token,
 )
 from app.services.github_client import GitHubClient
+from app.services.repo_setup_names import (
+    BRIDGE_PATH,
+    HOOKS_DIR,
+    LEGACY_MCP_SERVER_KEY,
+    MCP_SERVER_KEY,
+    REPO_DIR,
+    mcp_server_entry,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -63,12 +72,26 @@ _SETUP_BRANCH = "bodhiorchard/init-setup"
 # without an identity. The ``@users.noreply.github.com`` form keeps any
 # real email out of the commit history. Keep this in sync with the
 # bot account that owns the GitHub App installation token.
-_SETUP_COMMIT_AUTHOR_NAME = "Bodhigroove"
-_SETUP_COMMIT_AUTHOR_EMAIL = "bodhigroove@users.noreply.github.com"
+_SETUP_COMMIT_AUTHOR_NAME = "Glideship"
+_SETUP_COMMIT_AUTHOR_EMAIL = "glideship@users.noreply.github.com"
+_SETUP_COMMIT_MESSAGE = (
+    "chore(glideship): add MCP tools, git hooks, and config\n\n"
+    "Auto-committed by Glideship scan pipeline.\n"
+    "- .mcp.json + .claude/settings.json: Glideship MCP server config\n"
+    "- .githooks/: pre-commit (BUD validation) + post-commit (tracking)\n"
+    "- package.json: prepare script sets core.hooksPath on npm install\n"
+    "- .gitignore: exclude the server-managed .bodhiorchard/ worktrees\n"
+    f"- {BRIDGE_PATH}: stdio bridge spawned by .mcp.json\n"
+    "- CLAUDE.md: Glideship code-intelligence MCP guidance\n"
+    "- .claude/skills/: Glideship agent skill definitions"
+)
+
+# The ``bodhiorchard`` markers predate the rename and stay as-is: they are
+# how a re-run finds the section it wrote before, in repos old and new.
 _BG_START = "<!-- bodhiorchard:start -->"
 _BG_END = "<!-- bodhiorchard:end -->"
 
-_BODHIORCHARD_CLAUDE_SECTION = """\
+_BODHIORCHARD_CLAUDE_SECTION = f"""\
 <!-- bodhiorchard:start -->
 ---
 
@@ -83,8 +106,9 @@ Before starting any BUD work, verify Glideship MCP is connected:
 2. If NOT available, set up your token:
    - Go to Glideship Settings → Integrations → MCP Token
    - Copy your token
-   - Run: `export BODHIORCHARD_MCP_TOKEN="your-token"` in your shell profile
+   - Run: `export {MCP_TOKEN_ENV}="your-token"` in your shell profile
    - Restart Claude Code
+   - An older `{LEGACY_MCP_TOKEN_ENV}` export still works, but the new name wins
 
 ### Always Do
 
@@ -107,7 +131,7 @@ Before starting any BUD work, verify Glideship MCP is connected:
 
 ### Code Intelligence
 
-This repo is indexed by bodhiorchard's own code-graph indexer (graphify
+This repo is indexed by Glideship's own code-graph indexer (graphify
 under the hood). **Always run `code_impact` before editing any function,
 class, or method.** It returns the upstream callers + downstream callees
 so you can see the blast radius of a change. Pair with `code_context`
@@ -151,7 +175,7 @@ Claude Code hooks in `.claude/hooks/` run automatically — no developer action 
 - **Stop**: Reports activity summaries after each Claude response
 - **UserPromptSubmit**: Detects BUD references in your prompts
 
-These hooks use your `BODHIORCHARD_MCP_TOKEN` for authentication.
+These hooks use your `{MCP_TOKEN_ENV}` for authentication.
 If the token is not set, hooks silently do nothing.
 <!-- bodhiorchard:end -->
 """
@@ -181,37 +205,36 @@ _SETUP_FILES = [
     "package.json",
     "CLAUDE.md",
     ".claude/skills/",
-    ".bodhiorchard/mcp_bridge.py",
+    BRIDGE_PATH,
     # Provider-aware setup (Codex / Copilot). ``commit_and_push_setup_worktree``
     # stages only files that EXIST, so a Claude org skips these and a
     # Codex/Copilot org skips the ``.claude/*`` + ``.mcp.json`` + ``CLAUDE.md``
-    # set above. The shared hook scripts live under ``.bodhiorchard/hooks/``
-    # (force-added past .gitignore) and are wired per-provider by
+    # set above. The shared hook scripts live under ``HOOKS_DIR`` and are
+    # wired per-provider by
     # ``agent_repo_config``. See that module for the event maps.
     "AGENTS.md",
     ".codex/hooks.json",
     ".codex/config.toml",
     ".github/hooks/copilot-cli-policy.json",
     ".github/copilot/mcp-config.json",
-    ".bodhiorchard/hooks/_common.sh",
-    ".bodhiorchard/hooks/session-start.sh",
-    ".bodhiorchard/hooks/session-end.sh",
-    ".bodhiorchard/hooks/post-commit-track.sh",
-    ".bodhiorchard/hooks/file-change-track.sh",
-    ".bodhiorchard/hooks/tool-error-track.sh",
-    ".bodhiorchard/hooks/api-error-track.sh",
-    ".bodhiorchard/hooks/activity-report.sh",
-    ".bodhiorchard/hooks/detect-bud-prompt.sh",
-    ".bodhiorchard/hooks/subagent-start.sh",
-    ".bodhiorchard/hooks/subagent-stop.sh",
+    f"{HOOKS_DIR}/_common.sh",
+    f"{HOOKS_DIR}/session-start.sh",
+    f"{HOOKS_DIR}/session-end.sh",
+    f"{HOOKS_DIR}/post-commit-track.sh",
+    f"{HOOKS_DIR}/file-change-track.sh",
+    f"{HOOKS_DIR}/tool-error-track.sh",
+    f"{HOOKS_DIR}/api-error-track.sh",
+    f"{HOOKS_DIR}/activity-report.sh",
+    f"{HOOKS_DIR}/detect-bud-prompt.sh",
+    f"{HOOKS_DIR}/subagent-start.sh",
+    f"{HOOKS_DIR}/subagent-stop.sh",
 ]
 
-# Paths in ``_SETUP_FILES`` whose parent directory is in ``.gitignore``.
+# Paths in ``_SETUP_FILES`` whose parent directory may be in ``.gitignore``.
 # ``git add`` silently skips ignored files, so these need ``-f`` on first
-# stage. Once tracked, git tracks them regardless of .gitignore on every
-# subsequent scan, so the force flag is only load-bearing for the initial
-# bootstrap PR.
-_FORCE_ADD_PREFIXES = (".bodhiorchard/",)
+# stage. Glideship never ignores ``REPO_DIR`` itself, but a team's own
+# ignore rules might; once tracked, git tracks the files regardless.
+_FORCE_ADD_PREFIXES = (f"{REPO_DIR}/",)
 
 
 def _stage_file_args(filepath: str) -> list[str]:
@@ -382,15 +405,7 @@ async def commit_and_push_setup_worktree(work_path: str) -> str | None:
             f"user.name={_SETUP_COMMIT_AUTHOR_NAME}",
             "commit",
             "-m",
-            "chore(bodhiorchard): add MCP tools, git hooks, and config\n\n"
-            "Auto-committed by Glideship scan pipeline.\n"
-            "- .claude/settings.json: Glideship MCP server config\n"
-            "- .githooks/: pre-commit (BUD validation) + post-commit (tracking)\n"
-            "- package.json: prepare script sets core.hooksPath on npm install\n"
-            "- .gitignore: exclude .bodhiorchard/ worktrees\n"
-            "- .bodhiorchard/mcp_bridge.py: stdio bridge spawned by .mcp.json\n"
-            "- CLAUDE.md: bodhi code-intelligence MCP guidance\n"
-            "- .claude/skills/: bodhi agent skill definitions",
+            _SETUP_COMMIT_MESSAGE,
         ],
         cwd=work_path,
     )
@@ -618,9 +633,14 @@ def _same_path(a: Path, b: Path) -> bool:
 async def init_bodhiorchard_mcp_in_repo(repo_path: str, backend_url: str) -> bool:
     """Write .mcp.json and .claude/settings.json with Glideship MCP config.
 
-    Copies the MCP bridge script into the repo at .bodhiorchard/mcp_bridge.py
-    and writes config with a relative path. Token is NOT included — developers
-    set BODHIORCHARD_MCP_TOKEN env var themselves.
+    Copies the MCP bridge script into the repo at ``BRIDGE_PATH`` and writes
+    config with a relative path. Token is NOT included — developers set
+    GLIDESHIP_MCP_TOKEN env var themselves.
+
+    A repo set up before the rename has a ``bodhiorchard`` server entry; it is
+    replaced by the ``glideship`` one so the tools aren't registered twice.
+    The old ``.bodhiorchard/mcp_bridge.py`` is left in place, so a checkout
+    that hasn't merged the new setup PR keeps a working bridge.
 
     Args:
         repo_path: Absolute path to the git repository.
@@ -633,22 +653,13 @@ async def init_bodhiorchard_mcp_in_repo(repo_path: str, backend_url: str) -> boo
 
     repo = Path(repo_path)
     source_bridge = Path(__file__).resolve().parents[1] / "mcp" / "stdio_bridge.py"
-    dest_dir = repo / ".bodhiorchard"
-    dest_bridge = dest_dir / "mcp_bridge.py"
+    dest_bridge = repo / BRIDGE_PATH
+    dest_dir = dest_bridge.parent
 
     # Build config (token NOT included — developer sets env var)
     mcp_json_path = repo / ".mcp.json"
-    mcp_config = {
-        "mcpServers": {
-            "bodhiorchard": {
-                "command": "python3",
-                "args": [".bodhiorchard/mcp_bridge.py"],
-                "env": {
-                    "BODHIORCHARD_BACKEND_URL": backend_url,
-                },
-            },
-        },
-    }
+    server_entry = mcp_server_entry(backend_url)
+    mcp_config = {"mcpServers": {MCP_SERVER_KEY: server_entry}}
 
     # Check if config matches exactly (catches stale tokens, format changes)
     expected_json = json.dumps(mcp_config, indent=2)
@@ -675,9 +686,10 @@ async def init_bodhiorchard_mcp_in_repo(repo_path: str, backend_url: str) -> boo
         with contextlib.suppress(json.JSONDecodeError, OSError):
             settings = json.loads(settings_path.read_text(encoding="utf-8", errors="replace"))
 
-    settings.setdefault("mcpServers", {})
+    servers = settings.setdefault("mcpServers", {})
     # Overwrite with token-free config (replaces any stale token from old setups)
-    settings["mcpServers"]["bodhiorchard"] = mcp_config["mcpServers"]["bodhiorchard"]
+    servers.pop(LEGACY_MCP_SERVER_KEY, None)
+    servers[MCP_SERVER_KEY] = server_entry
     settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
     logger.info("bodhiorchard_mcp_written", repo=repo_path)
@@ -841,7 +853,8 @@ def _build_common_sh(backend_url: str) -> str:
         # Sourced by individual hook scripts — not executed directly.
 
         BACKEND_URL="{url}"
-        TOKEN="${{BODHIORCHARD_MCP_TOKEN:-}}"
+        # {token_env} wins when set; the pre-rename name still works.
+        TOKEN="${{{token_env}-${{{legacy_token_env}:-}}}}"
 
         escape_json() {{
           printf '%s' "$1" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | tr '\\n\\r\\t' '   '
@@ -937,7 +950,12 @@ def _build_common_sh(backend_url: str) -> str:
             rm -f "$TMP"
           fi
         }}
-    """).format(marker=_CLAUDE_HOOK_MARKER, url=backend_url)
+    """).format(
+        marker=_CLAUDE_HOOK_MARKER,
+        url=backend_url,
+        token_env=MCP_TOKEN_ENV,
+        legacy_token_env=LEGACY_MCP_TOKEN_ENV,
+    )
 
 
 def _build_session_start_sh() -> str:
@@ -1314,8 +1332,8 @@ async def install_claude_hooks(repo_path: str, backend_url: str) -> bool:
     """Install Claude Code hook scripts in a repository.
 
     Writes hooks to ``.claude/hooks/`` and configures them in
-    ``.claude/settings.json``. Scripts use ``$BODHIORCHARD_MCP_TOKEN``
-    for auth — no org_id baked in.
+    ``.claude/settings.json``. Scripts use ``$GLIDESHIP_MCP_TOKEN`` (or the
+    legacy ``$BODHIORCHARD_MCP_TOKEN``) for auth — no org_id baked in.
 
     Idempotent: checks for marker string before writing.
 
@@ -1705,15 +1723,7 @@ async def commit_and_push_bodhiorchard_setup(repo_path: str, base_branch: str) -
             [
                 "commit",
                 "-m",
-                "chore(bodhiorchard): add MCP tools, git hooks, and config\n\n"
-                "Auto-committed by Glideship scan pipeline.\n"
-                "- .claude/settings.json: Glideship MCP server config\n"
-                "- .githooks/: pre-commit (BUD validation) + post-commit (tracking)\n"
-                "- package.json: prepare script sets core.hooksPath on npm install\n"
-                "- .gitignore: exclude .bodhiorchard/ worktrees\n"
-                "- .bodhiorchard/mcp_bridge.py: stdio bridge spawned by .mcp.json\n"
-                "- CLAUDE.md: bodhi code-intelligence MCP guidance\n"
-                "- .claude/skills/: bodhi agent skill definitions",
+                _SETUP_COMMIT_MESSAGE,
             ],
             cwd=repo_path,
         )
@@ -1776,12 +1786,13 @@ _SETUP_PR_TITLE = "chore: add Glideship MCP tools, git hooks, and config"
 _SETUP_PR_BODY = (
     "## Summary\n\n"
     "Auto-generated by Glideship scan pipeline.\n\n"
-    "- `.claude/settings.json` — Glideship MCP server config\n"
+    "- `.mcp.json` + `.claude/settings.json` — Glideship MCP server config\n"
     "- `.githooks/` — pre-commit (BUD validation) + post-commit (tracking)\n"
     "- `package.json` — prepare script sets `core.hooksPath`\n"
-    "- `.gitignore` — exclude `.bodhiorchard/` worktrees\n"
-    "- `CLAUDE.md` — bodhi code-intelligence MCP guidance\n"
-    "- `.claude/skills/` — bodhi agent skill definitions\n"
+    "- `.gitignore` — exclude the server-managed `.bodhiorchard/` worktrees\n"
+    f"- `{BRIDGE_PATH}` — stdio bridge spawned by `.mcp.json`\n"
+    "- `CLAUDE.md` — Glideship code-intelligence MCP guidance\n"
+    "- `.claude/skills/` — Glideship agent skill definitions\n"
 )
 
 

@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from app.mcp.bridge_env import BACKEND_URL_ENV, MCP_TOKEN_ENV, MCP_TOOLS_ENV
 from tests.fakes.claude_script import AgentRun
 
 MCP_SERVER = "bodhiorchard"
@@ -44,9 +45,9 @@ def parse_argv(argv: list[str], cwd: str | None, env: dict[str, str]) -> AgentRu
     if config_path:
         run.mcp_config = json.loads(Path(config_path).read_text())
         server_env = run.mcp_config["mcpServers"][MCP_SERVER]["env"]
-        run.mcp_backend_url = server_env.get("BODHIORCHARD_BACKEND_URL")
-        run.mcp_token = server_env.get("BODHIORCHARD_MCP_TOKEN")
-        tools = server_env.get("BODHIORCHARD_MCP_TOOLS", "")
+        run.mcp_backend_url = server_env.get(BACKEND_URL_ENV)
+        run.mcp_token = server_env.get(MCP_TOKEN_ENV)
+        tools = server_env.get(MCP_TOOLS_ENV, "")
         run.mcp_tools = [t for t in tools.split(",") if t]
     return run
 

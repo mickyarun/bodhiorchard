@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Per-provider MCP wiring for the bodhiorchard stdio bridge.
+"""Per-provider MCP wiring for the Glideship stdio bridge.
 
 Claude handles its own ``--mcp-config`` inside ``claude_runner``; this module
 serves Copilot and Codex, which take the bridge via a per-invocation flag
@@ -33,6 +33,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.mcp.bridge_env import BACKEND_URL_ENV, MCP_TOKEN_ENV, MCP_TOKEN_FILE_ENV, MCP_TOOLS_ENV
 from app.services.claude_runner import MCPServerConfig
 
 # The MCP server label the CLIs use. Copilot namespaces tools as
@@ -54,9 +55,10 @@ class McpInvocation:
 def _bridge_env(mcp: MCPServerConfig) -> dict[str, str]:
     """Env the bridge subprocess needs to reach the backend (see stdio_bridge)."""
     return {
-        "BODHIORCHARD_BACKEND_URL": mcp.backend_url,
-        "BODHIORCHARD_MCP_TOKEN": mcp.mcp_token,
-        "BODHIORCHARD_MCP_TOOLS": ",".join(mcp.tool_names),
+        BACKEND_URL_ENV: mcp.backend_url,
+        MCP_TOKEN_ENV: mcp.mcp_token,
+        MCP_TOKEN_FILE_ENV: "",
+        MCP_TOOLS_ENV: ",".join(mcp.tool_names),
     }
 
 
