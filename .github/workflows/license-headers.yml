@@ -8,6 +8,7 @@ on:
       - "frontend/src/**/*.vue"
       - "multiplayer/src/**/*.ts"
       - "shared/**/*.ts"
+      - "e2e/**/*.ts"
       - ".github/workflows/license-headers.yml"
 
 permissions:
@@ -32,7 +33,7 @@ jobs:
           set -euo pipefail
           # Source files only; skip generated/vendored trees.
           mapfile -t files < <(git diff --name-only --diff-filter=AM "$BASE_SHA" "$HEAD_SHA" \
-            | grep -E '^(backend/.*\.py|frontend/src/.*\.(ts|vue)|multiplayer/src/.*\.ts|shared/.*\.ts)$' \
+            | grep -E '^(backend/.*\.py|frontend/src/.*\.(ts|vue)|multiplayer/src/.*\.ts|shared/.*\.ts|e2e/.*\.ts)$' \
             | grep -v -E '(__pycache__|node_modules|dist|build|alembic/versions)' \
             || true)
           printf '%s\n' "${files[@]}" > changed_files.txt
