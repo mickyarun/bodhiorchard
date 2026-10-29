@@ -68,7 +68,7 @@ Then, in another terminal, `npx playwright test` from `e2e/` reuses it (CI never
    - `main` serves every spec;
    - `wizard` serves only the setup wizard, which needs an empty database. Giving it its own
      backend means no spec waits for it.
-4. The multiplayer server.
+4. A multiplayer server for each backend.
 5. A Vite dev server in front of each backend. The main one starts last, so "the main frontend
    answers" means everything is up. Each Vite has its own dependency cache under `.stack/`, so a
    dev server running in the same checkout is never touched. Each starts on a cold cache
@@ -77,10 +77,10 @@ Then, in another terminal, `npx playwright test` from `e2e/` reuses it (CI never
 
 It never touches your own stack:
 
-- The e2e ports default to 13000, 14000, 15000, 16000 and 17000. Each is offset by a hash of the
-  checkout's path, so two worktrees never share a stack. Move them with `E2E_FRONTEND_PORT`,
-  `E2E_BACKEND_PORT`, `E2E_MULTIPLAYER_PORT`, `E2E_WIZARD_FRONTEND_PORT` and
-  `E2E_WIZARD_BACKEND_PORT`.
+- The e2e ports default to 13000 to 18000 (frontend, backend and multiplayer for each stack).
+  Each is offset by a hash of the checkout's path, so two worktrees never share a stack. Move
+  them with `E2E_FRONTEND_PORT`, `E2E_BACKEND_PORT` and `E2E_MULTIPLAYER_PORT`, or the
+  `E2E_WIZARD_*` versions of the same.
 - Each child process gets a short allowlist of environment variables, not your shell's.
 - The backends run from `e2e/.stack/` with their own `HOME`, so they never read `backend/.env` or
   your home directory.
@@ -107,8 +107,8 @@ Before uvicorn starts, `serve.py` installs the same fakes as the backend integra
 
 The backends run on the stdlib asyncio loop. uvloop connects in native code, where the guard
 can't see it. Slack, GitHub, Jira, Giphy and Google are never configured, so their code paths stay
-off. The one expected refusal is the local Ollama probe in the AI settings, which reads as "not
-installed".
+off. The one expected refusal is the local Ollama probe (the AI settings and the setup wizard look for
+one on its default port), which reads as "not installed".
 
 Every request carries an `x-e2e-test` header with the test's id. Through it, each refusal is
 tagged with the test whose request caused it, including background work that request started, and

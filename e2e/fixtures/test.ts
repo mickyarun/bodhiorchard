@@ -30,6 +30,7 @@ import { test as base, expect, type BrowserContext, type Page } from '@playwrigh
 import { MAIN_STACK, type StackTarget } from '../stack/config.ts'
 import { keepInsideStack, newBrowserLog, type BrowserLog } from './browser.ts'
 import { StackClient, TEST_HEADER } from './client.ts'
+import { runId } from './run.ts'
 import type { Member } from './types.ts'
 
 export const TOKEN_KEY = 'bodhiorchard_token'
@@ -50,9 +51,9 @@ interface Fixtures {
 export const test = base.extend<Options & Fixtures>({
   stackTarget: [MAIN_STACK, { option: true }],
 
-  // Unique per run of a test, repeats and retries included.
+  // Unique per run of a test: this Playwright run, repeats and retries included.
   testTag: async ({}, use, testInfo) => {
-    await use(`${testInfo.testId}#${testInfo.repeatEachIndex}#${testInfo.retry}`)
+    await use(`${runId()}#${testInfo.testId}#${testInfo.repeatEachIndex}#${testInfo.retry}`)
   },
 
   stack: async ({ stackTarget, testTag }, use) => {

@@ -69,13 +69,14 @@ def install_fakes(backend_port: int, log_path: Path) -> None:
 
 
 async def _serve(port: int) -> None:
-    asyncio.get_running_loop().set_default_executor(ContextThreadPool())
-    # loop="asyncio", never uvloop: uvloop resolves and connects in native
-    # code, past the patched ``socket`` functions, which would leave the
-    # guard watching nothing.
-    config = uvicorn.Config(
-        app, host="127.0.0.1", port=port, log_level="warning", workers=1, loop="asyncio"
-    )
+    loop = asyncio.get_running_loop()
+    # The stdlib loop, from asyncio.run, never uvloop: uvloop resolves and
+    # connects in native code, past the patched ``socket`` functions, which
+    # would leave the guard watching nothing. Fail rather than run blind.
+    if not type(loop).__module__.startswith("asyncio"):
+        raise SystemExit(f"e2e stack: needs the asyncio event loop, got {type(loop)!r}")
+    loop.set_default_executor(ContextThreadPool())
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
     await uvicorn.Server(config).serve()
 
 

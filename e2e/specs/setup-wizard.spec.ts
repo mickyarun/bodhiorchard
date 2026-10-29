@@ -20,6 +20,7 @@
 import type { Page } from '@playwright/test'
 import { makeGitRepo } from '../fixtures/git.ts'
 import { expect, test } from '../fixtures/test.ts'
+import { liveRoomAnswers } from '../screens/shell.ts'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -82,9 +83,11 @@ test('a fresh install walks through the wizard to the dashboard', async ({ page 
   await next(page).click()
 
   await expect(page.getByRole('heading', { name: 'Ready to launch' })).toBeVisible()
+  const live = liveRoomAnswers(page)
   await page.getByRole('button', { name: 'Launch Glideship' }).click()
-  // A new engineer picks an avatar first, then reaches the dashboard.
-  await expect(page).toHaveURL(/\/(dashboard|character-select)/)
+  await expect(page).toHaveURL(/\/dashboard/)
+  // The new org's dashboard joins its live room on the wizard's own server.
+  await live
 
   // The install is set up now: the wizard is gone and the admin can sign in.
   await page.goto('/setup')

@@ -15,7 +15,7 @@
 /**
  * End-of-run checks, on each backend and frontend of the stack:
  *
- * - nothing the fakes refused at any point, including what a test's
+ * - nothing the fakes refused during this run, including what a test's
  *   background work caused after its own check ran, and what job workers
  *   or scheduler loops did outside any test;
  * - the dev server never re-optimised its dependencies mid-run. Vite then
@@ -24,9 +24,9 @@
  *   so a dependency the startup pass misses always shows here.
  */
 import { readFileSync } from 'node:fs'
-import path from 'node:path'
 import { request } from '@playwright/test'
-import { STACK_DIR, STACKS, type StackTarget } from '../stack/config.ts'
+import { STACKS, type StackTarget } from '../stack/config.ts'
+import { startPoint, viteLogPath } from './run.ts'
 import type { GuardReport } from './types.ts'
 
 const RELOAD = /optimized dependencies changed\. reloading/
@@ -34,7 +34,8 @@ const RELOAD = /optimized dependencies changed\. reloading/
 function viteReloads(target: StackTarget): string[] {
   let log: string
   try {
-    log = readFileSync(path.join(STACK_DIR, 'logs', `frontend-${target.name}.log`), 'utf8')
+    // Only this run's part of the log: a reused stack keeps appending to it.
+    log = readFileSync(viteLogPath(target)).subarray(startPoint(target).viteLogBytes).toString('utf8')
   } catch {
     return [] // A stack this run didn't start, from another tool: nothing to check.
   }
@@ -46,7 +47,10 @@ function viteReloads(target: StackTarget): string[] {
 async function refusals(target: StackTarget): Promise<string[]> {
   const api = await request.newContext({ baseURL: target.backendUrl })
   try {
-    const response = await api.get('/__e2e/guard', { params: { all: 'true' } })
+    const since = startPoint(target)
+    const response = await api.get('/__e2e/guard', {
+      params: { all: 'true', sinceViolations: since.violations, sinceAgentProblems: since.agentProblems },
+    })
     if (!response.ok()) return [`could not read the ${target.name} guard report (${response.status()})`]
     const report = (await response.json()) as GuardReport
     return [...report.violations, ...report.agentProblems].map((line) => `${target.name}: ${line}`)

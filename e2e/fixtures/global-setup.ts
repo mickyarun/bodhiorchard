@@ -16,7 +16,8 @@
  * Runs once the stack answers:
  *
  * 1. checks each backend is this checkout's (a reused stack could belong to
- *    another worktree, if ports were moved by hand);
+ *    another worktree, if ports were moved by hand), and notes where its
+ *    guard and Vite logs stand, so this run answers only for what follows;
  * 2. creates the main stack's first org before any test can. The login page
  *    signs in to the oldest org, so it has to be fixed before tests seed
  *    orgs in parallel; the login tests add their people to it;
@@ -27,6 +28,8 @@ import { randomBytes } from 'node:crypto'
 import { chromium, request } from '@playwright/test'
 import { MAIN_STACK, REPO_ROOT, STACKS, type StackTarget } from '../stack/config.ts'
 import { stackOrigins } from './browser.ts'
+import { saveStartPoint, startRun, viteLogBytes } from './run.ts'
+import type { GuardReport } from './types.ts'
 
 async function createLoginOrg(): Promise<void> {
   const api = await request.newContext({ baseURL: MAIN_STACK.backendUrl })
@@ -40,7 +43,7 @@ async function createLoginOrg(): Promise<void> {
   }
 }
 
-async function checkIdentity(target: StackTarget): Promise<void> {
+async function checkAndMark(target: StackTarget): Promise<void> {
   const api = await request.newContext({ baseURL: target.backendUrl })
   try {
     const response = await api.get('/__e2e/identity')
@@ -48,13 +51,16 @@ async function checkIdentity(target: StackTarget): Promise<void> {
     if (root !== REPO_ROOT) {
       throw new Error(`the stack on ${target.backendUrl} is not this checkout's (it serves ${root ?? 'no e2e routes'})`)
     }
+    const guard = (await (await api.get('/__e2e/guard', { params: { all: 'true' } })).json()) as GuardReport
+    saveStartPoint(target, { ...guard.cursor, viteLogBytes: viteLogBytes(target) })
   } finally {
     await api.dispose()
   }
 }
 
 export default async function globalSetup(): Promise<void> {
-  await Promise.all(STACKS.map(checkIdentity))
+  startRun()
+  await Promise.all(STACKS.map(checkAndMark))
   await createLoginOrg()
   const browser = await chromium.launch()
   try {

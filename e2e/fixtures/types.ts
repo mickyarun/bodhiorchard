@@ -74,4 +74,6 @@ export interface GuardReport {
   violations: string[]
   /** Agent runs the real CLI would have rejected, or that had no script. */
   agentProblems: string[]
+  /** How many entries each log holds now. */
+  cursor: { violations: number, agentProblems: number }
 }

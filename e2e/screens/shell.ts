@@ -17,7 +17,7 @@
  * account menu. Names are matched exactly: role names match substrings
  * otherwise, and "Board" would also find "Dashboard" and "Leaderboard".
  */
-import type { Locator, Page } from '@playwright/test'
+import { expect, type Locator, type Page } from '@playwright/test'
 
 export function sidebar(page: Page): Locator {
   return page.getByRole('navigation').first()
@@ -29,14 +29,23 @@ export function navLink(page: Page, name: string): Locator {
 
 /** Expands the sidebar's Settings group, which lists only links the member may open. */
 export async function openSettingsGroup(page: Page): Promise<void> {
-  await sidebar(page).getByRole('option', { name: 'Settings' })
-    .or(sidebar(page).getByText('Settings', { exact: true }))
-    .first()
-    .click()
+  const opener = sidebar(page).getByRole('button', { name: 'Settings', exact: true })
+  await opener.click()
+  await expect(opener).toHaveAttribute('aria-expanded', 'true')
 }
 
 export async function signOut(page: Page, name: string): Promise<void> {
   await page.getByRole('button', { name: `Account menu for ${name}` }).click()
   // The menu's items render as list items, not menu items.
   await page.getByRole('listitem').filter({ hasText: 'Sign out' }).click()
+}
+
+/**
+ * Resolves once the page's live room has sent it something: the
+ * multiplayer socket (through the dev proxy) is open and answering. Start
+ * it before the navigation that opens the room.
+ */
+export async function liveRoomAnswers(page: Page): Promise<void> {
+  const socket = await page.waitForEvent('websocket', (ws) => ws.url().includes('/colyseus/'))
+  await socket.waitForEvent('framereceived')
 }

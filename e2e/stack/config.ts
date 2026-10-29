@@ -43,46 +43,57 @@ function port(name: string, base: number): number {
 export const STACK_DIR = path.join(REPO_ROOT, 'e2e', '.stack')
 
 /**
- * One backend, its database and the Vite server in front of it. `main`
- * serves every spec; `wizard` serves only the setup wizard, which needs an
- * empty database, so no spec has to wait for it or run in its shadow.
+ * One backend, its database, its multiplayer server and the Vite server in
+ * front of them. `main` serves every spec; `wizard` serves only the setup
+ * wizard, which needs an empty database, so no spec has to wait for it or
+ * run in its shadow.
  */
 export interface StackTarget {
   name: 'main' | 'wizard'
   frontendPort: number
   backendPort: number
+  multiplayerPort: number
   frontendUrl: string
   backendUrl: string
+  multiplayerUrl: string
   database: string
   guardLog: string
   /** Its own dependency cache, never the one a dev server in this checkout uses. */
   viteCacheDir: string
 }
 
-function target(name: StackTarget['name'], frontendPort: number, backendPort: number, database: string): StackTarget {
+interface Ports {
+  frontend: number
+  backend: number
+  multiplayer: number
+}
+
+function target(name: StackTarget['name'], ports: Ports, database: string): StackTarget {
   return {
     name,
-    frontendPort,
-    backendPort,
-    frontendUrl: `http://127.0.0.1:${frontendPort}`,
-    backendUrl: `http://127.0.0.1:${backendPort}`,
+    frontendPort: ports.frontend,
+    backendPort: ports.backend,
+    multiplayerPort: ports.multiplayer,
+    frontendUrl: `http://127.0.0.1:${ports.frontend}`,
+    backendUrl: `http://127.0.0.1:${ports.backend}`,
+    multiplayerUrl: `http://127.0.0.1:${ports.multiplayer}`,
     database,
     guardLog: path.join(STACK_DIR, `guard-${name}.log`),
     viteCacheDir: path.join(STACK_DIR, `vite-${name}`),
   }
 }
 
-export const MAIN_STACK = target(
-  'main', port('E2E_FRONTEND_PORT', 13000), port('E2E_BACKEND_PORT', 14000), 'glideship_e2e',
-)
-export const WIZARD_STACK = target(
-  'wizard', port('E2E_WIZARD_FRONTEND_PORT', 16000), port('E2E_WIZARD_BACKEND_PORT', 17000),
-  'glideship_e2e_wizard',
-)
+export const MAIN_STACK = target('main', {
+  frontend: port('E2E_FRONTEND_PORT', 13000),
+  backend: port('E2E_BACKEND_PORT', 14000),
+  multiplayer: port('E2E_MULTIPLAYER_PORT', 15000),
+}, 'glideship_e2e')
+export const WIZARD_STACK = target('wizard', {
+  frontend: port('E2E_WIZARD_FRONTEND_PORT', 16000),
+  backend: port('E2E_WIZARD_BACKEND_PORT', 17000),
+  multiplayer: port('E2E_WIZARD_MULTIPLAYER_PORT', 18000),
+}, 'glideship_e2e_wizard')
 export const STACKS: readonly StackTarget[] = [MAIN_STACK, WIZARD_STACK]
-
-export const MULTIPLAYER_PORT = port('E2E_MULTIPLAYER_PORT', 15000)
-export const MULTIPLAYER_URL = `http://127.0.0.1:${MULTIPLAYER_PORT}`
 
 /**
  * The backend's home directory. The repo picker only accepts paths under

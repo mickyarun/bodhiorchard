@@ -16,17 +16,8 @@
  * Smoke checks for the dashboard. The 3D garden is checked only for loading
  * cleanly: its rendering is the engine's own business, not a browser flow.
  */
-import type { Page } from '@playwright/test'
 import { expect, test } from '../fixtures/test.ts'
-
-/**
- * Resolves once the page's live room has sent it something: the
- * multiplayer socket (through the dev proxy) is open and answering.
- */
-async function liveRoomAnswers(page: Page): Promise<void> {
-  const socket = await page.waitForEvent('websocket', (ws) => ws.url().includes('/colyseus/'))
-  await socket.waitForEvent('framereceived')
-}
+import { liveRoomAnswers } from '../screens/shell.ts'
 
 test('the overview dashboard loads without console errors', async ({ signedIn, stack, browserLog }) => {
   const org = await stack.seedOrg({ members: [{ key: 'dev', role: 'developer', name: 'Gale Overview' }] })

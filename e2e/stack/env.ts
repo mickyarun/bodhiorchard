@@ -21,8 +21,7 @@
 import { randomBytes } from 'node:crypto'
 import path from 'node:path'
 import {
-  MAIN_STACK, MULTIPLAYER_PORT, MULTIPLAYER_URL, REPO_ROOT, STACK_DIR, STACK_HOME,
-  type StackTarget,
+  MAIN_STACK, REPO_ROOT, STACK_DIR, STACK_HOME, type StackTarget,
 } from './config.ts'
 import { PG_DB, PG_PASSWORD, PG_USER } from './docker.ts'
 
@@ -63,7 +62,7 @@ export function backendEnv(ports: StackPorts, target: StackTarget): NodeJS.Proce
     SECRET_KEY: secret(),
     ENCRYPTION_KEY: secret(),
     HR_ENCRYPTION_KEYS: `e2e:${randomBytes(32).toString('base64')}`,
-    COLYSEUS_URL: MULTIPLAYER_URL,
+    COLYSEUS_URL: target.multiplayerUrl,
     COLYSEUS_BRIDGE_SECRET: BRIDGE_SECRET,
     PUBLIC_URL: target.backendUrl,
     MCP_BACKEND_URL: target.backendUrl,
@@ -86,11 +85,11 @@ export function migrateEnv(ports: StackPorts, target: StackTarget): NodeJS.Proce
   return { ...base(), DATABASE_URL: databaseUrl(ports, target.database), PYTHONUNBUFFERED: '1' }
 }
 
-export function multiplayerEnv(): NodeJS.ProcessEnv {
+export function multiplayerEnv(target: StackTarget): NodeJS.ProcessEnv {
   return {
     ...base(),
-    PORT: String(MULTIPLAYER_PORT),
-    BACKEND_URL: MAIN_STACK.backendUrl,
+    PORT: String(target.multiplayerPort),
+    BACKEND_URL: target.backendUrl,
     COLYSEUS_BRIDGE_SECRET: BRIDGE_SECRET,
     NODE_ENV: 'development',
   }
@@ -101,7 +100,7 @@ export function frontendEnv(target: StackTarget): NodeJS.ProcessEnv {
     ...base(),
     VITE_API_TARGET: target.backendUrl,
     VITE_CACHE_DIR: target.viteCacheDir,
-    VITE_COLYSEUS_TARGET: MULTIPLAYER_URL,
+    VITE_COLYSEUS_TARGET: target.multiplayerUrl,
     // Same-origin paths through the dev proxy, as in local development. Vite
     // lets these beat a frontend/.env that points at a developer's servers.
     VITE_API_BASE_URL: '/api',

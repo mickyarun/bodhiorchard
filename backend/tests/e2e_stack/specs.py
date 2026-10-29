@@ -115,6 +115,13 @@ class SeededOrg(_Wire):
     leave_types: dict[str, uuid.UUID]
 
 
+class GuardCursor(_Wire):
+    """How many entries each log held, so a later read can skip them."""
+
+    violations: int
+    agent_problems: int
+
+
 class GuardReport(_Wire):
     """What the fakes refused while serving one test (or no test at all)."""
 
@@ -122,6 +129,7 @@ class GuardReport(_Wire):
     # Agent CLI runs the real ``claude`` would have rejected, or that no
     # script answered (see FakeClaudeRunner.assert_all_scripted).
     agent_problems: list[str]
+    cursor: GuardCursor
 
 
 class Identity(_Wire):

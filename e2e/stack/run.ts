@@ -25,7 +25,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdirSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import {
-  MAIN_STACK, MULTIPLAYER_URL, PYTHON, REPO_ROOT, STACK_DIR, STACKS, WIZARD_STACK, type StackTarget,
+  MAIN_STACK, PYTHON, REPO_ROOT, STACK_DIR, STACKS, WIZARD_STACK, type StackTarget,
 } from './config.ts'
 import { removeCheckoutContainers, startPostgres, startRedis } from './docker.ts'
 import { backendEnv, frontendEnv, migrateEnv, multiplayerEnv, type StackPorts } from './env.ts'
@@ -109,6 +109,13 @@ function startBackend(ports: StackPorts, target: StackTarget): Promise<void> {
   return waitForHttp(`backend-${target.name}`, `${target.backendUrl}/health/`)
 }
 
+function startMultiplayer(target: StackTarget): Promise<void> {
+  launch(`multiplayer-${target.name}`, path.join(BIN, 'ts-node'), ['--transpile-only', 'src/main.ts'], {
+    cwd: path.join(REPO_ROOT, 'multiplayer'), env: multiplayerEnv(target),
+  })
+  return waitForHttp(`multiplayer-${target.name}`, target.multiplayerUrl)
+}
+
 function startFrontend(target: StackTarget): Promise<void> {
   // --force: a cold dependency cache on every start, so a screen that makes
   // Vite re-optimise mid-run shows up (see fixtures/global-teardown.ts).
@@ -132,13 +139,7 @@ async function main(): Promise<void> {
   console.log(`[stack] postgres on :${ports.postgres}, redis on :${ports.redis}`)
 
   await Promise.all(STACKS.map((target) => migrate(ports, target)))
-  const multiplayer = launch('multiplayer', path.join(BIN, 'ts-node'), ['--transpile-only', 'src/main.ts'], {
-    cwd: path.join(REPO_ROOT, 'multiplayer'), env: multiplayerEnv(),
-  })
-  await Promise.all([
-    ...STACKS.map((target) => startBackend(ports, target)),
-    waitForHttp(multiplayer.name, MULTIPLAYER_URL),
-  ])
+  await Promise.all(STACKS.flatMap((target) => [startBackend(ports, target), startMultiplayer(target)]))
   stillStarting()
   // The main Vite starts last: Playwright (and a reused stack) treats "the
   // main frontend answers" as "the whole stack is up".

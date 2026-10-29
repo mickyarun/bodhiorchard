@@ -85,8 +85,8 @@ class TaggedLog:
     def for_test(self, test_id: str | None) -> list[str]:
         return [what for test, what in self.entries if test == test_id]
 
-    def everything(self) -> list[str]:
-        return [f"[{test or 'no test'}] {what}" for test, what in self.entries]
+    def everything(self, since: int = 0) -> list[str]:
+        return [f"[{test or 'no test'}] {what}" for test, what in self.entries[since:]]
 
 
 class TaggingList(list[T]):

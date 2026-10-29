@@ -27,7 +27,7 @@ from sqlalchemy import text
 
 from app.database import AsyncSessionLocal
 from app.services.permission_seeder import seed_permissions
-from tests.e2e_stack.specs import GuardReport, Identity
+from tests.e2e_stack.specs import GuardCursor, GuardReport, Identity
 from tests.e2e_stack.state import STATE
 
 router = APIRouter(prefix="/__e2e", tags=["e2e"])
@@ -56,22 +56,28 @@ async def reset() -> Response:
 
 @router.get("/guard", response_model=GuardReport, response_model_by_alias=True)
 async def guard_report(
-    test: str | None = Query(None), every: bool = Query(False, alias="all")
+    test: str | None = Query(None),
+    every: bool = Query(False, alias="all"),
+    since_violations: int = Query(0, alias="sinceViolations", ge=0),
+    since_agent_problems: int = Query(0, alias="sinceAgentProblems", ge=0),
 ) -> GuardReport:
     """What the fakes refused while serving ``test``.
 
     No ``test``: what happened outside any test (job workers, scheduler
-    loops). ``all``: everything, tagged with its test, for the end-of-run
-    check that also catches what a test caused after its own check ran.
+    loops). ``all``: everything after the ``since`` cursor, tagged with its
+    test, for the end-of-run check. It also catches what a test caused after
+    its own check ran, and on a reused stack it skips earlier runs.
     """
+    refusals, problems = STATE.refusals, STATE.agent_problems
+    cursor = GuardCursor(violations=len(refusals.entries), agent_problems=len(problems.entries))
     if every:
         return GuardReport(
-            violations=STATE.refusals.everything(),
-            agent_problems=STATE.agent_problems.everything(),
+            violations=refusals.everything(since_violations),
+            agent_problems=problems.everything(since_agent_problems),
+            cursor=cursor,
         )
     return GuardReport(
-        violations=STATE.refusals.for_test(test),
-        agent_problems=STATE.agent_problems.for_test(test),
+        violations=refusals.for_test(test), agent_problems=problems.for_test(test), cursor=cursor
     )
 
 

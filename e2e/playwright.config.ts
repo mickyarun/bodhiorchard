@@ -59,6 +59,8 @@ export default defineConfig<{ stackTarget: StackTarget }>({
     {
       name: 'setup-wizard',
       testMatch: /setup-wizard\.spec\.ts/,
+      // One database: repeats (--repeat-each, burn-in) must not run side by side.
+      workers: 1,
       use: { ...devices['Desktop Chrome'], baseURL: WIZARD_STACK.frontendUrl, stackTarget: WIZARD_STACK },
     },
     {
