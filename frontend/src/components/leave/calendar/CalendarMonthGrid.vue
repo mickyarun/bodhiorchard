@@ -118,7 +118,8 @@ function cellLabel(iso: string): string {
   border-bottom: 1px solid var(--color-rule-2);
   min-width: 0;
 }
-.grid__cell:nth-child(7n) {
+/* The last day of each week row (cells sit one per gridcell slot). */
+.grid__slot:nth-child(7n) > .grid__cell {
   border-right: none;
 }
 .grid__cell:hover {
