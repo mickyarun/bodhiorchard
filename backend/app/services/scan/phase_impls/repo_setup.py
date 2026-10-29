@@ -22,7 +22,7 @@ subsequent scans):
 2. ``main_branch`` / ``develop_branch`` detection if the row was added
    without explicit values (legacy ``Add Repo`` UX).
 3. MCP server config so the org's agent CLI (Claude → ``.mcp.json``;
-   Codex → ``.codex/config.toml``; Copilot → ``.github/copilot/``)
+   Codex → ``.codex/config.toml``; Copilot → ``.mcp.json``, shared with Claude)
    launched inside the repo can talk back to Glideship.
 4. Git hooks (``.githooks/`` + ``core.hooksPath``) and the org's
    agent-CLI hooks (Claude → ``.claude/``; Codex → ``.codex/hooks.json``;

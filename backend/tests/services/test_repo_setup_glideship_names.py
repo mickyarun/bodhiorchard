@@ -99,6 +99,38 @@ async def test_legacy_install_is_migrated_in_place(tmp_path: Path) -> None:
     assert legacy_bridge.read_text() == "# old bridge\n"
 
 
+async def test_claude_setup_keeps_the_repos_own_servers(tmp_path: Path) -> None:
+    other_server = {"command": "npx", "args": ["some-other-mcp"]}
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"other": other_server}}))
+
+    assert await init_bodhiorchard_mcp_in_repo(str(tmp_path), _URL) is True
+
+    mcp_servers = _read_json(tmp_path / ".mcp.json")["mcpServers"]
+    assert isinstance(mcp_servers, dict)
+    assert set(mcp_servers) == {"other", "glideship"}
+    assert mcp_servers["other"] == other_server
+    assert await init_bodhiorchard_mcp_in_repo(str(tmp_path), _URL) is False
+
+
+async def test_missing_bridge_is_restored_when_config_is_current(tmp_path: Path) -> None:
+    assert await init_bodhiorchard_mcp_in_repo(str(tmp_path), _URL) is True
+    bridge = tmp_path / ".glideship" / "mcp_bridge.py"
+    bridge.unlink()
+
+    assert await init_bodhiorchard_mcp_in_repo(str(tmp_path), _URL) is True
+    assert bridge.is_file()
+
+
+async def test_unparseable_mcp_json_is_left_alone(tmp_path: Path) -> None:
+    """No bridge or settings entry ships when nothing would point Claude at it."""
+    (tmp_path / ".mcp.json").write_text("{ not json")
+
+    assert await init_bodhiorchard_mcp_in_repo(str(tmp_path), _URL) is False
+    assert (tmp_path / ".mcp.json").read_text() == "{ not json"
+    assert not (tmp_path / ".glideship").exists()
+    assert not (tmp_path / ".claude").exists()
+
+
 def test_glideship_folder_is_force_added() -> None:
     bridge = ".glideship/mcp_bridge.py"
     assert _stage_file_args(bridge) == ["add", "-f", bridge]

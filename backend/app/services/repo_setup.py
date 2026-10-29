@@ -20,6 +20,7 @@ updating ``.gitignore``, adding a ``prepare`` script to ``package.json``,
 and committing + pushing the result as a PR-ready branch.
 """
 
+import contextlib
 import json
 import shutil
 import textwrap
@@ -45,6 +46,13 @@ from app.services.github_app_auth import (
     get_installation_token,
 )
 from app.services.github_client import GitHubClient
+from app.services.repo_mcp_json import (
+    GITHUB_MCP_JSON,
+    MCP_JSON,
+    McpJsonMerge,
+    copy_mcp_bridge,
+    merge_glideship_server,
+)
 from app.services.repo_setup_names import (
     BRIDGE_PATH,
     HOOKS_DIR,
@@ -187,7 +195,7 @@ _CLAUDE_HOOK_MARKER = "# bodhiorchard-claude-hook"
 
 _SETUP_FILES = [
     ".claude/settings.json",
-    ".mcp.json",
+    MCP_JSON,
     ".gitignore",
     ".githooks/pre-commit",
     ".githooks/post-commit",
@@ -208,15 +216,15 @@ _SETUP_FILES = [
     BRIDGE_PATH,
     # Provider-aware setup (Codex / Copilot). ``commit_and_push_setup_worktree``
     # stages only files that EXIST, so a Claude org skips these and a
-    # Codex/Copilot org skips the ``.claude/*`` + ``.mcp.json`` + ``CLAUDE.md``
-    # set above. The shared hook scripts live under ``HOOKS_DIR`` and are
-    # wired per-provider by
-    # ``agent_repo_config``. See that module for the event maps.
+    # Codex/Copilot org skips the ``.claude/*`` + ``CLAUDE.md`` set above.
+    # ``.mcp.json`` is shared: Claude and Copilot orgs both write it. The
+    # shared hook scripts live under ``HOOKS_DIR`` and are wired per-provider
+    # by ``agent_repo_config``. See that module for the event maps.
     "AGENTS.md",
     ".codex/hooks.json",
     ".codex/config.toml",
     ".github/hooks/copilot-cli-policy.json",
-    ".github/copilot/mcp-config.json",
+    GITHUB_MCP_JSON,
     f"{HOOKS_DIR}/_common.sh",
     f"{HOOKS_DIR}/session-start.sh",
     f"{HOOKS_DIR}/session-end.sh",
@@ -633,8 +641,9 @@ def _same_path(a: Path, b: Path) -> bool:
 async def init_bodhiorchard_mcp_in_repo(repo_path: str, backend_url: str) -> bool:
     """Write .mcp.json and .claude/settings.json with Glideship MCP config.
 
-    Copies the MCP bridge script into the repo at ``BRIDGE_PATH`` and writes
-    config with a relative path. Token is NOT included — developers set
+    Copies the MCP bridge script into the repo at ``BRIDGE_PATH`` and merges
+    the server into ``.mcp.json`` with a relative path, keeping any servers
+    the repo already lists. Token is NOT included — developers set
     GLIDESHIP_MCP_TOKEN env var themselves.
 
     A repo set up before the rename has a ``bodhiorchard`` server entry; it is
@@ -647,34 +656,20 @@ async def init_bodhiorchard_mcp_in_repo(repo_path: str, backend_url: str) -> boo
         backend_url: URL of the Glideship backend.
 
     Returns:
-        True if the file was written (changed), False if already up to date.
+        True if anything was written (changed), False if already up to date
+        or ``.mcp.json`` can't be parsed (it is left as it was).
     """
-    import contextlib
-
     repo = Path(repo_path)
-    source_bridge = Path(__file__).resolve().parents[1] / "mcp" / "stdio_bridge.py"
-    dest_bridge = repo / BRIDGE_PATH
-    dest_dir = dest_bridge.parent
+    bridge_missing = not (repo / BRIDGE_PATH).exists()
+    merge = merge_glideship_server(repo / MCP_JSON, backend_url)
+    if merge is McpJsonMerge.UNUSABLE:
+        # Nothing would point Claude at the bridge, so don't ship it either.
+        return False
+    if merge is McpJsonMerge.UNCHANGED and not bridge_missing:
+        logger.debug("bodhiorchard_mcp_already_configured", repo=repo_path)
+        return False
 
-    # Build config (token NOT included — developer sets env var)
-    mcp_json_path = repo / ".mcp.json"
-    server_entry = mcp_server_entry(backend_url)
-    mcp_config = {"mcpServers": {MCP_SERVER_KEY: server_entry}}
-
-    # Check if config matches exactly (catches stale tokens, format changes)
-    expected_json = json.dumps(mcp_config, indent=2)
-    if mcp_json_path.exists() and dest_bridge.exists():
-        with contextlib.suppress(json.JSONDecodeError, OSError):
-            existing_mcp = mcp_json_path.read_text(encoding="utf-8", errors="replace")
-            if existing_mcp.strip() == expected_json.strip():
-                logger.debug("bodhiorchard_mcp_already_configured", repo=repo_path)
-                return False
-
-    # Copy bridge script (after early-return check)
-    dest_dir.mkdir(exist_ok=True)
-    shutil.copy2(source_bridge, dest_bridge)
-
-    mcp_json_path.write_text(json.dumps(mcp_config, indent=2), encoding="utf-8")
+    copy_mcp_bridge(repo)
 
     # Also keep .claude/settings.json for backward compatibility
     claude_dir = repo / ".claude"
@@ -689,7 +684,7 @@ async def init_bodhiorchard_mcp_in_repo(repo_path: str, backend_url: str) -> boo
     servers = settings.setdefault("mcpServers", {})
     # Overwrite with token-free config (replaces any stale token from old setups)
     servers.pop(LEGACY_MCP_SERVER_KEY, None)
-    servers[MCP_SERVER_KEY] = server_entry
+    servers[MCP_SERVER_KEY] = mcp_server_entry(backend_url)
     settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
     logger.info("bodhiorchard_mcp_written", repo=repo_path)

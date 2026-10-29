@@ -92,6 +92,39 @@ def test_codex_mcp_config_points_at_bridge(tmp_path: Path) -> None:
     assert write_agent_mcp_config(str(tmp_path), "http://backend", AIProvider.codex) is False
 
 
+def test_copilot_mcp_goes_into_the_shared_mcp_json(tmp_path: Path) -> None:
+    """Copilot reads the repo-root ``.mcp.json``, never ``.github/copilot/``."""
+    other_server = {"command": "npx", "args": ["some-other-mcp"]}
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"other": other_server}}))
+
+    changed = write_agent_mcp_config(str(tmp_path), "http://backend", AIProvider.copilot)
+    assert changed is True
+
+    servers = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]
+    assert servers["other"] == other_server
+    assert servers["glideship"]["args"] == [".glideship/mcp_bridge.py"]
+    assert servers["glideship"]["env"] == {"GLIDESHIP_BACKEND_URL": "http://backend"}
+    assert "type" not in servers["glideship"]  # Claude reads stdio, Copilot local
+    assert not (tmp_path / ".github" / "copilot").exists()
+    assert (tmp_path / ".glideship" / "mcp_bridge.py").exists()
+
+    assert write_agent_mcp_config(str(tmp_path), "http://backend", AIProvider.copilot) is False
+
+
+def test_copilot_mcp_uses_an_existing_github_mcp_json(tmp_path: Path) -> None:
+    """A new ``.mcp.json`` would hide the repo's ``.github/mcp.json`` servers."""
+    other_server = {"command": "npx", "args": ["some-other-mcp"]}
+    github_mcp = tmp_path / ".github" / "mcp.json"
+    github_mcp.parent.mkdir()
+    github_mcp.write_text(json.dumps({"mcpServers": {"other": other_server}}))
+
+    assert write_agent_mcp_config(str(tmp_path), "http://backend", AIProvider.copilot) is True
+
+    servers = json.loads(github_mcp.read_text())["mcpServers"]
+    assert set(servers) == {"other", "glideship"}
+    assert not (tmp_path / ".mcp.json").exists()
+
+
 def test_agents_md_is_provider_neutral_and_idempotent(tmp_path: Path) -> None:
     changed = append_agent_instructions(str(tmp_path), AIProvider.codex)
     assert changed is True
