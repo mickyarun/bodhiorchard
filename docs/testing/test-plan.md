@@ -945,10 +945,11 @@ remaining settings screens, reports, and the mini-games.
 ## Bugs found and fixed
 
 Each fix is its own pull request with the regression test that caught it. Every regression
-test fails on main and passes with its fix. The four fixes the browser suite found ship as
-separate commits inside the Playwright pull request. The login one has an integration test,
-the two accessibility ones are caught by the specs that find those controls by name, and the
-Vite one by the suite's end-of-run check for dev-server reloads (it fails on main).
+test fails on main and passes with its fix. The five fixes the browser suite found ship as
+separate commits inside the Playwright pull request. The login one has an integration test
+and the New BUD switches one a Vitest test, the two accessibility ones are caught by the
+specs that find those controls by name, and the Vite one by the suite's end-of-run check for
+dev-server reloads (it fails on main).
 
 | Area | Bug | PR |
 | --- | --- | --- |
@@ -992,6 +993,7 @@ Vite one by the suite's end-of-run check for dev-server reloads (it fails on mai
 | Frontend | Each newly visited screen made the dev server re-optimise and fully reload the page (Vuetify auto-imports the startup crawl missed) | Playwright PR (own commit) |
 | Frontend | The MCP token revoke button had no accessible name | Playwright PR (own commit) |
 | Frontend | The quiz's answer tiles didn't expose which answer was picked | Playwright PR (own commit) |
+| Frontend | New BUD's agent switches showed "off" until the skills loaded, then turned on by themselves, so an agent ran that the person saw as off | Playwright PR (own commit) |
 
 ## Open questions
 
