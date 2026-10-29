@@ -103,6 +103,9 @@ class EmployeePersonalRead(EmployeePersonal):
     person's muted announcement back on.
     """
 
+    # Read from a stored row, so the address is shown as saved rather than
+    # checked again: a stricter validator must not break the whole profile.
+    personal_email: str | None = None
     celebrate_birthday: bool = True
     celebrate_anniversary: bool = True
 
