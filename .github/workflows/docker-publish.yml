@@ -53,7 +53,7 @@ jobs:
             dockerfile: ./multiplayer/Dockerfile
             build_args: ""
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Resolve version (tag without leading v)
         id: ver
