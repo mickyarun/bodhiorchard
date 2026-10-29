@@ -22,6 +22,8 @@ list for everyone.
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import update
@@ -40,7 +42,9 @@ async def test_directory_lists_members_with_loose_stored_emails(
     org = await seed_org(pg_session_factory)
     laptop = await seed_member(pg_session_factory, org.org_id, "laptop")
     local = await seed_member(pg_session_factory, org.org_id, "local")
-    stored = {laptop: "dev@Dev-MacBook-Pro.local", local: "root@localhost"}
+    # The domains are what matter; the tag keeps the global unique email free.
+    tag = uuid.uuid4().hex[:6]
+    stored = {laptop: f"dev-{tag}@Dev-MacBook-Pro.local", local: f"root-{tag}@localhost"}
     async with pg_session_factory() as db:
         for user_id, email in stored.items():
             await db.execute(update(User).where(User.id == user_id).values(email=email))

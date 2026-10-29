@@ -30,7 +30,9 @@
     @update:model-value="emit('update:modelValue', $event)"
     @after-enter="cancel?.$el.focus()"
   >
-    <v-card color="surface" class="app-confirm">
+    <!-- Pinned flat: a confirm opened from inside a menu would otherwise
+         pick up the menu-card shadow and border from the theme defaults. -->
+    <v-card color="surface" class="app-confirm" :elevation="0" :border="false">
       <h2 class="app-confirm__title">{{ title }}</h2>
       <p class="app-confirm__body"><slot name="body">{{ body }}</slot></p>
       <slot />

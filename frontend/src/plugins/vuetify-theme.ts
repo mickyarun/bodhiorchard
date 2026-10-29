@@ -145,8 +145,10 @@ export const glideshipThemes = {
   glideshipLight,
 }
 
-// Flat, bordered surfaces — depth comes from elevation-as-lightness
-// (paper → paper-2 → paper-3), not drop shadows.
+// Page surfaces stay flat and bordered — depth comes from elevation-as-
+// lightness (paper → paper-2 → paper-3), not drop shadows. Floating overlays
+// (menus, detail panels, the notification tray) are the exception and keep
+// a shadow.
 export const vuetifyDefaults = {
   VCard: {
     rounded: 'lg',

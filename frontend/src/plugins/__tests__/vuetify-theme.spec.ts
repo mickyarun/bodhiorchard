@@ -43,13 +43,16 @@ describe('vuetifyDefaults', () => {
       attachTo: document.body,
       global: { plugins: [createVuetify({ defaults: vuetifyDefaults })] },
     })
-    await nextTick()
-    await nextTick()
+    try {
+      await nextTick()
+      await nextTick()
 
-    const menuCard = document.querySelector('.menu-card')
-    expect(menuCard?.classList.contains('elevation-8')).toBe(true)
-    expect(menuCard?.classList.contains('v-card--border')).toBe(true)
-    expect(wrapper.find('.page-card').classes()).toContain('elevation-0')
-    wrapper.unmount()
+      const menuCard = document.querySelector('.menu-card')
+      expect(menuCard?.classList.contains('elevation-8')).toBe(true)
+      expect(menuCard?.classList.contains('v-card--border')).toBe(true)
+      expect(wrapper.find('.page-card').classes()).toContain('elevation-0')
+    } finally {
+      wrapper.unmount()
+    }
   })
 })
