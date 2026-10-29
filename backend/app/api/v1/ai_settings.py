@@ -25,7 +25,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db, require_permissions
+from app.core.deps import get_current_user, get_db, get_permission_set, require_permissions
 from app.models.organization import AIProvider, Organization
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
@@ -156,7 +156,9 @@ async def get_ai_capabilities(
     """Return all providers' capabilities + the org's current provider + mode."""
     org = await OrganizationRepository(db).get_for_user(current_user)
     if base_url is not None:
-        await _require_probe_permission(current_user=current_user, db=db)
+        # The check is a dependency; resolve its permission set the way FastAPI would.
+        perms = await get_permission_set(current_user=current_user, db=db)
+        await _require_probe_permission(current_user=current_user, perms=perms)
     # An unsaved address wins: the Settings page has to show the models of the
     # host being typed, or the user saves a model the new host doesn't have.
     # Validated even though nothing is persisted — the backend still issues the

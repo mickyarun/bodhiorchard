@@ -25,12 +25,14 @@
              downstream agents (Designer / TechPlan / Tester) inherit the list. -->
         <v-tooltip location="bottom" max-width="320">
           <template #activator="{ props: tooltipProps }">
-            <v-icon
+            <!-- A button, not a focusable icon: icons are aria-hidden. -->
+            <v-btn
               v-bind="tooltipProps"
               icon="mdi-information-outline"
-              size="14"
+              size="x-small"
+              density="compact"
+              variant="text"
               class="ml-1 text-medium-emphasis"
-              tabindex="0"
               aria-label="What are linked features?"
             />
           </template>

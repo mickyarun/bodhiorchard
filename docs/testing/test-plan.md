@@ -15,6 +15,7 @@ section ends with a coverage matrix.
 | Frontend | `frontend/`: `npx vue-tsc --noEmit && npx vitest run` | `npm ci` at the repo root |
 | Multiplayer | `multiplayer/`: `npm test` | `npm ci` at the repo root |
 | CLI | `cli/`: `npm ci && npm test && npm run typecheck` | |
+| Browser e2e (Playwright) | repo root: `npm run test:e2e` | Docker, `npx --workspace glideship-e2e playwright install chromium`, backend deps (`E2E_PYTHON`); see [playwright.md](playwright.md) |
 
 On Docker Desktop for macOS the Python Docker SDK may not find the socket. Export
 `DOCKER_HOST=unix://$HOME/.docker/run/docker.sock`, `TESTCONTAINERS_RYUK_DISABLED=true` and
@@ -904,10 +905,58 @@ OrgRaceHandler / OrgBacklashHandler matchMaker paths, CLI resolve.ts prompts and
 CLI index.ts error translation (module runs parseAsync on import), race physics beyond the
 existing RacePhysics/RaceTrackFeatures suites.
 
+### Browser end-to-end (Playwright)
+
+Scope: the flows a user walks through in Chromium, against a throwaway stack the suite starts
+itself (Docker Postgres and Redis, two backends with the fakes from [fakes.md](fakes.md), one of
+them only for the setup wizard, multiplayer and Vite). It fills the gap the Vitest work left:
+full view mounts, real routing and guards, two people acting on the same data, phone layouts and
+an automated accessibility check. How it runs and stays offline: [playwright.md](playwright.md).
+Every test seeds what it needs, in an org of its own; only the login tests share the install's
+first org, which the login page signs in to. An automatic check fails a test on a request that
+left the stack, an uncaught page error, or anything the backend refused while serving that test;
+the run fails if anything was refused outside a test or the dev server reloaded the app.
+
+#### Coverage matrix
+
+All paths under `e2e/specs/`. 35 tests in 12 files, in three projects: `setup-wizard`,
+`chromium` and `mobile` (Pixel 7).
+
+| flow | positive | negative | corner | spec |
+|---|---|---|---|---|
+| Login and session | email and password to the dashboard; reload keeps the session | wrong password; signed out bounces to login | a bad access token refreshes silently; return to the page asked for; temporary password must change first | auth.spec.ts |
+| Sign out | session cleared, back to login | protected pages bounce afterwards | | auth.spec.ts |
+| Setup wizard | empty database to dashboard with a local repo, branches detected | org and admin steps hold until valid | the wizard is gone once an org exists | setup-wizard.spec.ts |
+| BUD board and create | create from the board, lands on Requirements, card on the board | a developer has no New BUD | every stage agent switched off at create, and the BUD says so | buds.spec.ts |
+| BUD stages and tabs | Design, Tech Architecture, Development each open their tab | unknown `?tab=` ignored | `?tab=testing` deep link | buds.spec.ts |
+| Leave request and decisions | request, manager approves, employee sees who approved | HR reject needs a note | employee cancels a pending request | leave.spec.ts |
+| Team calendar | approved leave on the right day of the right month | | month navigation | leave.spec.ts |
+| Employee records | HR saves bank details, masked, reveal and hide, access log | a developer has no directory (nav and URL) | | employees.spec.ts |
+| Settings and RBAC | admin reaches Integrations and Members | developer bounced from members, settings, leave policy, triage | HR lands in People, never engineering | access.spec.ts |
+| Org isolation | own BUDs on the board | another org's BUD: not on the board, "didn't load", API 404 | | access.spec.ts |
+| MCP tokens | create, use for a tool call, revoke | revoked token answers 401 | the native confirm on revoke | mcp-tokens.spec.ts |
+| Features and bugs | registry lists features, search narrows; report a bug and open it | Report bug disabled without a title | empty registry state | features-bugs.spec.ts |
+| Quiz | lock in an answer | no second answer, after a reload too | nothing shows the result before the reveal; no open quiz | quiz.spec.ts |
+| Dashboard and garden | overview loads; garden builds; both get messages from the live room | no console errors on either | | dashboard.spec.ts |
+| Phone layouts | approval opens inline in the queue; calendar becomes an agenda; sign in | | | mobile.spec.ts |
+| Accessibility (axe, WCAG 2.1 AA) | login, dashboard, board, BUD detail, bugs, features, settings, members, MCP connect, my leave, approvals, team calendar, employees, employee profile | any serious or critical finding fails | closed Vuetify overlays skipped (they present nothing) | accessibility.spec.ts |
+
+Not in the browser suite: the BUD stages past Development (code review needs a PR from the
+GitHub fake), Slack and calendar side effects (pytest covers them with the fakes), the
+remaining settings screens, reports, and the mini-games.
+
 ## Bugs found and fixed
 
 Each fix is its own pull request with the regression test that caught it. Every regression
-test fails on main and passes with its fix.
+test fails on main and passes with its fix. The fixes the browser suite found ship as separate
+commits inside the Playwright pull request:
+
+- The login and AI-probe fixes each have an integration test.
+- The New BUD switches fix has a Vitest test.
+- The accessibility fixes are caught by the specs that find those controls by name, and by the
+  axe spec.
+- The Vite fix is caught by the suite's end-of-run check for dev-server reloads, which fails on
+  main.
 
 | Area | Bug | PR |
 | --- | --- | --- |
@@ -947,6 +996,13 @@ test fails on main and passes with its fix.
 | Multiplayer | Race rooms had no join auth and inputs could drive any racer | [#400](https://github.com/mickyarun/glideship/pull/400) |
 | Multiplayer | Log sanitising missed Unicode line breaks | [#401](https://github.com/mickyarun/glideship/pull/401) |
 | Multiplayer | Org, coffee bar, cafeteria and house rooms were shared across orgs and houses | [#402](https://github.com/mickyarun/glideship/pull/402) |
+| Setup | With more than one org, the login page could sign in to the wrong one, so its people got "Invalid email or password" | Playwright PR (own commit) |
+| Frontend | Each newly visited screen made the dev server re-optimise and fully reload the page (Vuetify auto-imports the startup crawl missed) | Playwright PR (own commit) |
+| Frontend | The MCP token revoke button had no accessible name | Playwright PR (own commit) |
+| Frontend | The quiz's answer tiles didn't expose which answer was picked | Playwright PR (own commit) |
+| Frontend | New BUD's agent switches showed "off" until the skills loaded, then turned on by themselves, so an agent ran that the person saw as off | Playwright PR (own commit) |
+| AI settings | Listing the models of an Ollama host being typed always answered 500 (the probe's permission check was called with the wrong arguments) | Playwright PR (own commit) |
+| Frontend | WCAG failures across the shell and main screens: sidebar list roles, the account menu's name, the team calendar grid, a focusable aria-hidden icon, links told apart by colour only, low contrast in MCP connect | Playwright PR (own commit) |
 
 ## Open questions
 
@@ -1032,8 +1088,9 @@ Test suite:
   AI provider check success paths, Jira import internals and the design-system extractor run.
 - Role-specific SP modules beyond the lifecycle tests, the quality bonus, the 30-day streak
   milestone, and the quiz scheduler, rollup and review transitions.
-- Full view mounts of the dashboard, board, BUD detail and leave dialog, `useBudDetailChat`,
-  the socket layer and the BUD store's other network actions.
+- `useBudDetailChat`, the socket layer and the BUD store's other network actions (the full
+  view mounts of the dashboard, board, BUD detail and leave dialog are now in the browser
+  suite).
 - Coffee bar and cafeteria room logic, the race and backlash matchmaking paths, and the CLI's
   port prompts and entry point.
 - Calendar backfill and the digest and Slack status scheduler loops, the code review override

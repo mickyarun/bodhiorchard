@@ -130,3 +130,10 @@ skills-lock.json
 # runtime under FILE_STORAGE_LOCAL_DIR when FILE_STORAGE_S3 is false,
 # which is the default for a dev checkout — user uploads, never source.
 backend/data/
+
+# Playwright suite: stack logs/data and run output
+e2e/.stack/
+e2e/test-results/
+e2e/playwright-report/
+e2e/blob-report/
+e2e/.stack-state.json

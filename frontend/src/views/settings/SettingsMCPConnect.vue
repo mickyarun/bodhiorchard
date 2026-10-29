@@ -105,8 +105,10 @@
           <template #append>
             <v-tooltip text="Revoke this token" location="top">
               <template #activator="{ props: tipProps }">
+                <!-- The tooltip only describes the button; the label names it. -->
                 <v-btn
                   v-bind="tipProps"
+                  :aria-label="`Revoke ${t.name}`"
                   icon="mdi-delete-outline"
                   size="small"
                   variant="text"
@@ -899,7 +901,8 @@ onMounted(refresh)
   font-family: var(--font-mono, 'Menlo', monospace);
   font-size: 12px;
   font-weight: 600;
-  color: rgb(var(--v-theme-primary));
+  /* Body text colour: primary on this grey chip missed WCAG AA contrast. */
+  color: rgb(var(--v-theme-on-surface));
 }
 .tool-row__description {
   font-size: 13px;

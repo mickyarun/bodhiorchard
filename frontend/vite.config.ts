@@ -35,7 +35,24 @@ import { fileURLToPath, URL } from 'node:url'
 const require = createRequire(import.meta.url)
 const depsRoot = resolve(dirname(require.resolve('vuetify/package.json')), '..', '..')
 
+// Every module vite-plugin-vuetify's auto-import can add, built the way the
+// plugin builds it (vuetify/dist/json/importMap.json, `lib/` for .mjs paths).
+const vuetifyImportMap = require('vuetify/dist/json/importMap.json') as {
+  components: Record<string, { from: string }>
+}
+const vuetifyAutoImports = [
+  ...new Set(
+    Object.values(vuetifyImportMap.components).map(
+      ({ from }) => `vuetify/${from.endsWith('.mjs') ? 'lib/' : ''}${from}`,
+    ),
+  ),
+  'vuetify/directives',
+]
+
 export default defineConfig({
+  // VITE_CACHE_DIR gives a second dev server (the e2e stack's, say) its own
+  // dependency cache, so it never rewrites the one a running server uses.
+  cacheDir: process.env.VITE_CACHE_DIR || undefined,
   plugins: [
     vue(),
     vuetify({ autoImport: true }),
@@ -71,6 +88,12 @@ export default defineConfig({
       // sneaking in won't silently regress the reload-mid-handshake fix.
       'src/engine/**/*.vue',
     ],
+    // The crawl reads each SFC's own imports, but vite-plugin-vuetify adds
+    // its `vuetify/components/X` imports later, at transform time, so the
+    // crawl never sees them. Pre-bundle all of them up front instead, or
+    // each newly visited screen still triggers one more optimization pass
+    // and a full reload.
+    include: vuetifyAutoImports,
   },
   build: {
     rollupOptions: {
@@ -128,9 +151,10 @@ export default defineConfig({
       // Tailscale Serve) don't hit a mixed-content block when the client
       // tries to reach ws://localhost:2567 directly from an https:// page.
       // `rewrite` strips the /colyseus prefix since the Colyseus server
-      // expects /matchmake/... at its root.
+      // expects /matchmake/... at its root. VITE_COLYSEUS_TARGET moves it,
+      // like VITE_API_TARGET above. Defaults to :2567.
       '/colyseus': {
-        target: 'http://localhost:2567',
+        target: process.env.VITE_COLYSEUS_TARGET || 'http://localhost:2567',
         changeOrigin: true,
         ws: true,
         rewrite: (path) => path.replace(/^\/colyseus/, ''),

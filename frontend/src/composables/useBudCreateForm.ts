@@ -72,10 +72,21 @@ export function useBudCreateForm(open: Ref<boolean>) {
     return skillsStore.skills.find(s => s.agentType === agentType && s.isDefault)?.id ?? null
   }
 
-  function prefillDefaults(): void {
+  /**
+   * Every stage's agent on, unless the person already chose. Runs the moment
+   * the dialog opens, not after the skills load: a switch that shows "off"
+   * while they load and then turns itself on would run an agent the person
+   * saw as off and left alone.
+   */
+  function defaultAgentsOn(): void {
+    for (const stage of CREATE_STAGES) {
+      if (autoGenerate.value[stage.value] === undefined) autoGenerate.value[stage.value] = true
+    }
+  }
+
+  function prefillSkills(): void {
     for (const stage of CREATE_STAGES) {
       stageSkillPicks.value[stage.value] = defaultSkillId(stage.agentType)
-      if (autoGenerate.value[stage.value] === undefined) autoGenerate.value[stage.value] = true
     }
   }
 
@@ -90,13 +101,14 @@ export function useBudCreateForm(open: Ref<boolean>) {
 
   watch(open, async isOpen => {
     if (!isOpen) return
+    defaultAgentsOn()
     if (skillsStore.skills.length === 0 && !skillsStore.loading) await skillsStore.fetchSkills()
-    prefillDefaults()
+    prefillSkills()
   })
 
   // Skills that land after the dialog opened (slow network) still prefill.
   watch(() => skillsStore.skills.length, () => {
-    if (open.value) prefillDefaults()
+    if (open.value) prefillSkills()
   })
 
   async function submit(): Promise<void> {

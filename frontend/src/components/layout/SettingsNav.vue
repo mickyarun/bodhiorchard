@@ -19,8 +19,18 @@
      same list the Integrations page shows beside its cards. -->
 <template>
   <v-list-group v-if="links.length > 0" value="settings">
-    <template #activator="{ props }">
-      <v-list-item v-bind="props" prepend-icon="mdi-cog-outline" title="Settings" rounded="lg" />
+    <template #activator="{ props, isOpen }">
+      <!-- It opens and closes the group: a button that says whether it is
+           open, not a list option (so no aria-selected). -->
+      <v-list-item
+        v-bind="props"
+        role="button"
+        :aria-expanded="isOpen"
+        :aria-selected="null"
+        prepend-icon="mdi-cog-outline"
+        title="Settings"
+        rounded="lg"
+      />
     </template>
     <v-list-item
       v-for="link in links"

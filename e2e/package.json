@@ -1,0 +1,19 @@
+{
+  "name": "glideship-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Playwright browser tests for Glideship, run against a throwaway stack",
+  "scripts": {
+    "test": "playwright test",
+    "stack": "node stack/run.ts",
+    "typecheck": "tsc --noEmit",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.64.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3"
+  }
+}

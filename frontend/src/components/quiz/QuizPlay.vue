@@ -60,6 +60,7 @@ function submit(): void {
         type="button"
         class="quiz-choice"
         :class="{ 'quiz-choice--active': selectedIndex === i }"
+        :aria-pressed="selectedIndex === i"
         :disabled="submitting"
         @click="selectedIndex = i"
       >

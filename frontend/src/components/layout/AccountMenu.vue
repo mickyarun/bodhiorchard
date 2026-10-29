@@ -24,9 +24,12 @@
         icon
         variant="text"
         density="comfortable"
-        :aria-label="`Account menu for ${authStore.user?.name || 'you'}`"
       >
+        <!-- The monogram hides itself from assistive tech, so the hidden text
+             names the initials it shows: voice control can say what is on
+             screen, and screen readers hear whose menu it is. -->
         <AppMonogram :name="authStore.user?.name" :src="authStore.user?.avatar_url" :size="32" />
+        <span class="d-sr-only">Account menu for {{ authStore.user?.name || 'you' }} ({{ initialsOf(authStore.user?.name || '?') }})</span>
       </v-btn>
     </template>
 
@@ -105,6 +108,7 @@
 
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import { initialsOf } from '@/utils/avatar'
 import AppMonogram from '@/components/common/AppMonogram.vue'
 import { useAuthStore } from '@/stores/auth'
 import { usePermissions } from '@/composables/usePermissions'
