@@ -51,7 +51,8 @@ async function start(name: string, image: string, containerPort: number, env: st
   return { name, hostPort: Number(mapping.split('\n')[0].split(':').pop()) }
 }
 
-export async function startPostgres(runId: string): Promise<Container> {
+/** Postgres with POSTGRES_DB plus `extraDatabases` (trusted, fixed names). */
+export async function startPostgres(runId: string, extraDatabases: readonly string[] = []): Promise<Container> {
   const pg = await start(`glideship-e2e-pg-${runId}`, 'pgvector/pgvector:pg16', 5432, [
     `POSTGRES_USER=${PG_USER}`,
     `POSTGRES_PASSWORD=${PG_PASSWORD}`,
@@ -63,6 +64,9 @@ export async function startPostgres(runId: string): Promise<Container> {
     await docker('exec', pg.name, 'psql', '-h', '127.0.0.1', '-U', PG_USER, '-d', PG_DB, '-c', 'select 1')
     return true
   })
+  for (const database of extraDatabases) {
+    await docker('exec', pg.name, 'psql', '-h', '127.0.0.1', '-U', PG_USER, '-d', PG_DB, '-c', `CREATE DATABASE ${database}`)
+  }
   return pg
 }
 

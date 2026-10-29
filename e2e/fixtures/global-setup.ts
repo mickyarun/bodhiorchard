@@ -13,22 +13,40 @@
 // limitations under the License.
 
 /**
- * Runs once the stack answers. First it checks the stack is this
- * checkout's (a reused one could belong to another worktree, if ports were
- * moved by hand). Then it loads the app once, so a cold Vite server does
- * its first dependency pass before any test starts.
+ * Runs once the stack answers:
+ *
+ * 1. checks each backend is this checkout's (a reused stack could belong to
+ *    another worktree, if ports were moved by hand);
+ * 2. creates the main stack's first org before any test can. The login page
+ *    signs in to the oldest org, so it has to be fixed before tests seed
+ *    orgs in parallel; the login tests add their people to it;
+ * 3. loads each frontend once, so a cold Vite server does its first
+ *    dependency pass before any test starts.
  */
+import { randomBytes } from 'node:crypto'
 import { chromium, request } from '@playwright/test'
-import { BACKEND_URL, FRONTEND_URL, REPO_ROOT } from '../stack/config.ts'
-import { STACK_ORIGINS } from './browser.ts'
+import { MAIN_STACK, REPO_ROOT, STACKS, type StackTarget } from '../stack/config.ts'
+import { stackOrigins } from './browser.ts'
 
-async function checkIdentity(): Promise<void> {
-  const api = await request.newContext({ baseURL: BACKEND_URL })
+async function createLoginOrg(): Promise<void> {
+  const api = await request.newContext({ baseURL: MAIN_STACK.backendUrl })
+  try {
+    // A no-op on a reused stack, whose first org already exists.
+    const password = randomBytes(12).toString('base64url')
+    const response = await api.post('/__e2e/orgs', { data: { primary: true, members: [], password } })
+    if (!response.ok()) throw new Error(`creating the login org failed: ${response.status()} ${await response.text()}`)
+  } finally {
+    await api.dispose()
+  }
+}
+
+async function checkIdentity(target: StackTarget): Promise<void> {
+  const api = await request.newContext({ baseURL: target.backendUrl })
   try {
     const response = await api.get('/__e2e/identity')
     const root = response.ok() ? ((await response.json()) as { repoRoot: string }).repoRoot : null
     if (root !== REPO_ROOT) {
-      throw new Error(`the stack on ${BACKEND_URL} is not this checkout's (it serves ${root ?? 'no e2e routes'})`)
+      throw new Error(`the stack on ${target.backendUrl} is not this checkout's (it serves ${root ?? 'no e2e routes'})`)
     }
   } finally {
     await api.dispose()
@@ -36,17 +54,21 @@ async function checkIdentity(): Promise<void> {
 }
 
 export default async function globalSetup(): Promise<void> {
-  await checkIdentity()
+  await Promise.all(STACKS.map(checkIdentity))
+  await createLoginOrg()
   const browser = await chromium.launch()
   try {
-    const page = await browser.newPage()
-    await page.route((url) => !STACK_ORIGINS.has(url.host), (route) => route.abort())
-    await page.goto(`${FRONTEND_URL}/login`)
-    // The login page, or the wizard on an empty database.
-    await page
-      .getByRole('heading', { name: 'Sign in' })
-      .or(page.getByRole('heading', { name: 'Welcome to Glideship' }))
-      .waitFor({ timeout: 180_000 })
+    await Promise.all(STACKS.map(async (target) => {
+      const page = await browser.newPage()
+      const origins = stackOrigins(target)
+      await page.route((url) => !origins.has(url.host), (route) => route.abort())
+      await page.goto(`${target.frontendUrl}/login`)
+      // The login page, or the wizard on an empty database.
+      await page
+        .getByRole('heading', { name: 'Sign in' })
+        .or(page.getByRole('heading', { name: 'Welcome to Glideship' }))
+        .waitFor({ timeout: 180_000 })
+    }))
   } finally {
     await browser.close()
   }

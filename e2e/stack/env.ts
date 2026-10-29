@@ -21,8 +21,8 @@
 import { randomBytes } from 'node:crypto'
 import path from 'node:path'
 import {
-  BACKEND_PORT, BACKEND_URL, FRONTEND_URL, GUARD_LOG, MULTIPLAYER_PORT, MULTIPLAYER_URL,
-  REPO_ROOT, STACK_DIR, STACK_HOME,
+  MAIN_STACK, MULTIPLAYER_PORT, MULTIPLAYER_URL, REPO_ROOT, STACK_DIR, STACK_HOME,
+  type StackTarget,
 } from './config.ts'
 import { PG_DB, PG_PASSWORD, PG_USER } from './docker.ts'
 
@@ -43,61 +43,64 @@ export interface StackPorts {
   redis: number
 }
 
-export function databaseUrl(ports: StackPorts): string {
-  return `postgresql+asyncpg://${PG_USER}:${PG_PASSWORD}@127.0.0.1:${ports.postgres}/${PG_DB}`
+export function databaseUrl(ports: StackPorts, database: string = PG_DB): string {
+  return `postgresql+asyncpg://${PG_USER}:${PG_PASSWORD}@127.0.0.1:${ports.postgres}/${database}`
 }
 
 const BRIDGE_SECRET = secret()
 
-export function backendEnv(ports: StackPorts): NodeJS.ProcessEnv {
+export function backendEnv(ports: StackPorts, target: StackTarget): NodeJS.ProcessEnv {
+  const own = (dir: string): string => path.join(STACK_DIR, dir, target.name)
   return {
     ...base(),
     HOME: STACK_HOME,
     PYTHONPATH: path.join(REPO_ROOT, 'backend'),
     PYTHONUNBUFFERED: '1',
     ENV: 'dev',
-    DATABASE_URL: databaseUrl(ports),
-    REDIS_URL: `redis://127.0.0.1:${ports.redis}/0`,
+    DATABASE_URL: databaseUrl(ports, target.database),
+    // One Redis, a database number each, so the two job queues never mix.
+    REDIS_URL: `redis://127.0.0.1:${ports.redis}/${target === MAIN_STACK ? 0 : 1}`,
     SECRET_KEY: secret(),
     ENCRYPTION_KEY: secret(),
     HR_ENCRYPTION_KEYS: `e2e:${randomBytes(32).toString('base64')}`,
     COLYSEUS_URL: MULTIPLAYER_URL,
     COLYSEUS_BRIDGE_SECRET: BRIDGE_SECRET,
-    PUBLIC_URL: BACKEND_URL,
-    MCP_BACKEND_URL: BACKEND_URL,
-    FRONTEND_URL,
-    BODHIORCHARD_DATA_DIR: path.join(STACK_DIR, 'data'),
-    FILE_STORAGE_LOCAL_DIR: path.join(STACK_DIR, 'uploads'),
-    LOG_DIR: path.join(STACK_DIR, 'logs', 'backend'),
+    PUBLIC_URL: target.backendUrl,
+    MCP_BACKEND_URL: target.backendUrl,
+    FRONTEND_URL: target.frontendUrl,
+    BODHIORCHARD_DATA_DIR: own('data'),
+    FILE_STORAGE_LOCAL_DIR: own('uploads'),
+    LOG_DIR: own('logs'),
     // Blank on purpose: an empty value beats anything in a backend/.env file.
     SLACK_BOT_TOKEN: '',
     SLACK_SIGNING_SECRET: '',
     GIPHY_API_KEY: '',
     GITHUB_PAT: '',
     HF_HUB_OFFLINE: '1',
-    E2E_BACKEND_PORT: String(BACKEND_PORT),
-    E2E_GUARD_LOG: GUARD_LOG,
+    E2E_BACKEND_PORT: String(target.backendPort),
+    E2E_GUARD_LOG: target.guardLog,
   }
 }
 
-export function migrateEnv(ports: StackPorts): NodeJS.ProcessEnv {
-  return { ...base(), DATABASE_URL: databaseUrl(ports), PYTHONUNBUFFERED: '1' }
+export function migrateEnv(ports: StackPorts, target: StackTarget): NodeJS.ProcessEnv {
+  return { ...base(), DATABASE_URL: databaseUrl(ports, target.database), PYTHONUNBUFFERED: '1' }
 }
 
 export function multiplayerEnv(): NodeJS.ProcessEnv {
   return {
     ...base(),
     PORT: String(MULTIPLAYER_PORT),
-    BACKEND_URL,
+    BACKEND_URL: MAIN_STACK.backendUrl,
     COLYSEUS_BRIDGE_SECRET: BRIDGE_SECRET,
     NODE_ENV: 'development',
   }
 }
 
-export function frontendEnv(): NodeJS.ProcessEnv {
+export function frontendEnv(target: StackTarget): NodeJS.ProcessEnv {
   return {
     ...base(),
-    VITE_API_TARGET: BACKEND_URL,
+    VITE_API_TARGET: target.backendUrl,
+    VITE_CACHE_DIR: target.viteCacheDir,
     VITE_COLYSEUS_TARGET: MULTIPLAYER_URL,
     // Same-origin paths through the dev proxy, as in local development. Vite
     // lets these beat a frontend/.env that points at a developer's servers.

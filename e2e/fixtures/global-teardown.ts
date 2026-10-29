@@ -13,30 +13,52 @@
 // limitations under the License.
 
 /**
- * Fails the run if the dev server re-optimised its dependencies mid-run.
- * Vite then fully reloads every open page, which wipes forms and drops
- * websockets in front of a user. The stack starts Vite on a cold cache
- * (`--force`), so a dependency the startup pass misses always shows here.
+ * End-of-run checks, on each backend and frontend of the stack:
+ *
+ * - nothing the fakes refused at any point, including what a test's
+ *   background work caused after its own check ran, and what job workers
+ *   or scheduler loops did outside any test;
+ * - the dev server never re-optimised its dependencies mid-run. Vite then
+ *   fully reloads every open page, which wipes forms and drops websockets
+ *   in front of a user. The stack starts Vite on a cold cache (`--force`),
+ *   so a dependency the startup pass misses always shows here.
  */
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { STACK_DIR } from '../stack/config.ts'
+import { request } from '@playwright/test'
+import { STACK_DIR, STACKS, type StackTarget } from '../stack/config.ts'
+import type { GuardReport } from './types.ts'
 
 const RELOAD = /optimized dependencies changed\. reloading/
 
-export default function globalTeardown(): void {
+function viteReloads(target: StackTarget): string[] {
   let log: string
   try {
-    log = readFileSync(path.join(STACK_DIR, 'logs', 'frontend.log'), 'utf8')
+    log = readFileSync(path.join(STACK_DIR, 'logs', `frontend-${target.name}.log`), 'utf8')
   } catch {
-    return // A stack this run didn't start, from another tool: nothing to check.
+    return [] // A stack this run didn't start, from another tool: nothing to check.
   }
-  const reloads = log.split('\n').filter((line) => RELOAD.test(line))
-  if (reloads.length > 0) {
-    const found = log.split('\n').filter((line) => line.includes('new dependencies optimized'))
-    throw new Error(
-      `Vite reloaded the app ${reloads.length} time(s) mid-run. ` +
-        `Add these to optimizeDeps in frontend/vite.config.ts:\n${found.join('\n')}`,
-    )
+  if (!log.split('\n').some((line) => RELOAD.test(line))) return []
+  const missed = log.split('\n').filter((line) => line.includes('new dependencies optimized'))
+  return [`Vite (${target.name}) reloaded the app mid-run. Pre-bundle these in frontend/vite.config.ts:`, ...missed]
+}
+
+async function refusals(target: StackTarget): Promise<string[]> {
+  const api = await request.newContext({ baseURL: target.backendUrl })
+  try {
+    const response = await api.get('/__e2e/guard', { params: { all: 'true' } })
+    if (!response.ok()) return [`could not read the ${target.name} guard report (${response.status()})`]
+    const report = (await response.json()) as GuardReport
+    return [...report.violations, ...report.agentProblems].map((line) => `${target.name}: ${line}`)
+  } finally {
+    await api.dispose()
   }
+}
+
+export default async function globalTeardown(): Promise<void> {
+  const problems = [
+    ...STACKS.flatMap(viteReloads),
+    ...(await Promise.all(STACKS.map(refusals))).flat(),
+  ]
+  if (problems.length > 0) throw new Error(`The run left problems behind:\n${problems.join('\n')}`)
 }

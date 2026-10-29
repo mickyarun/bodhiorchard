@@ -14,18 +14,17 @@
 
 /**
  * A fresh install: the wizard shows on an empty database and creates the
- * first org. The `setup-wizard` project runs this file alone, before every
- * other spec, because it starts by emptying the database.
+ * first org. The `setup-wizard` project runs this against a backend and
+ * database of its own, emptied before each test.
  */
 import type { Page } from '@playwright/test'
 import { makeGitRepo } from '../fixtures/git.ts'
-import { resetDatabase } from '../fixtures/stack.ts'
 import { expect, test } from '../fixtures/test.ts'
 
 test.describe.configure({ mode: 'serial' })
 
-test.beforeAll(async () => {
-  await resetDatabase()
+test.beforeEach(async ({ stack }) => {
+  await stack.reset()
 })
 
 const next = (page: Page) => page.getByRole('button', { name: 'Continue' })

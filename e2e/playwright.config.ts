@@ -13,11 +13,12 @@
 // limitations under the License.
 
 import { defineConfig, devices } from '@playwright/test'
-import { FRONTEND_URL } from './stack/config.ts'
+import type { StackTarget } from './stack/config.ts'
+import { MAIN_STACK, WIZARD_STACK } from './stack/config.ts'
 
 const CI = Boolean(process.env.CI)
 
-export default defineConfig({
+export default defineConfig<{ stackTarget: StackTarget }>({
   testDir: './specs',
   outputDir: './test-results',
   fullyParallel: true,
@@ -33,7 +34,8 @@ export default defineConfig({
   globalSetup: './fixtures/global-setup.ts',
   globalTeardown: './fixtures/global-teardown.ts',
   use: {
-    baseURL: FRONTEND_URL,
+    baseURL: MAIN_STACK.frontendUrl,
+    stackTarget: MAIN_STACK,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     actionTimeout: 15_000,
@@ -44,7 +46,7 @@ export default defineConfig({
   // `npm run stack` is reused; CI always starts a fresh one.
   webServer: {
     command: 'node stack/run.ts',
-    url: FRONTEND_URL,
+    url: MAIN_STACK.frontendUrl,
     reuseExistingServer: !CI,
     timeout: 300_000,
     stdout: 'pipe',
@@ -52,17 +54,24 @@ export default defineConfig({
     gracefulShutdown: { signal: 'SIGTERM', timeout: 30_000 },
   },
   projects: [
-    // The wizard needs an empty database, so it runs alone, before the rest.
+    // The wizard needs an empty database, so it has a backend of its own and
+    // never makes another spec wait.
     {
       name: 'setup-wizard',
       testMatch: /setup-wizard\.spec\.ts/,
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], baseURL: WIZARD_STACK.frontendUrl, stackTarget: WIZARD_STACK },
     },
     {
       name: 'chromium',
       testIgnore: /setup-wizard\.spec\.ts/,
-      dependencies: ['setup-wizard'],
+      grepInvert: /@mobile/,
       use: { ...devices['Desktop Chrome'] },
+    },
+    // Screens that change below the tablet breakpoint, on a phone-sized touch device.
+    {
+      name: 'mobile',
+      grep: /@mobile/,
+      use: { ...devices['Pixel 7'] },
     },
   ],
 })

@@ -16,13 +16,16 @@
  * Leave from both sides: an employee asks, their manager or HR decides, and
  * the answer reaches the employee's list and the team calendar.
  */
-import type { Page } from '@playwright/test'
-import { approveLeave, requestLeave, upcomingWeekdays } from '../fixtures/leave.ts'
-import { seedOrg } from '../fixtures/stack.ts'
+import { approveLeave, requestLeave } from '../fixtures/api.ts'
+import type { StackClient } from '../fixtures/client.ts'
+import { upcomingWeekdays } from '../fixtures/dates.ts'
 import { expect, test } from '../fixtures/test.ts'
+import {
+  allCaughtUp, dayLabel, myRequests, openApproval, sendLeaveRequest, showAllRequests, showCalendarMonth,
+} from '../screens/leave.ts'
 
-function team() {
-  return seedOrg({
+function team(stack: StackClient) {
+  return stack.seedOrg({
     members: [
       { key: 'mgr', role: 'manager', name: 'Maya Manager' },
       { key: 'emp', role: 'developer', name: 'Eli Employee', manager: 'mgr' },
@@ -31,42 +34,19 @@ function team() {
   })
 }
 
-const myRequests = (page: Page) => page.getByRole('region', { name: 'My requests' })
-
-/** Decided and cancelled requests leave the default "Upcoming" view. */
-async function showAllRequests(page: Page): Promise<void> {
-  await myRequests(page).getByRole('radio', { name: 'All' }).click()
-}
-
-const monthTitle = (day: Date): string => day.toLocaleString('en-GB', { month: 'long', year: 'numeric' })
-
-async function openRequest(page: Page, employee: string): Promise<void> {
-  await page.goto('/leave/approvals')
-  await expect(page.getByRole('heading', { name: 'Approvals', level: 1 })).toBeVisible()
-  await page.getByRole('button', { name: new RegExp(employee) }).click()
-}
-
-test('an employee asks for leave and their manager approves it', async ({ signedIn }) => {
-  const org = await team()
-  const days = upcomingWeekdays()
+test('an employee asks for leave and their manager approves it', async ({ signedIn, stack }) => {
+  const org = await team(stack)
   const employee = await signedIn(org.members.emp)
   await employee.goto('/leave')
   await expect(employee.getByRole('heading', { name: 'My leave', level: 1 })).toBeVisible()
-  await employee.getByRole('button', { name: 'Request leave' }).click()
-  await expect(employee.getByRole('heading', { name: 'Request leave', level: 2 })).toBeVisible()
-  await employee.getByRole('radio', { name: /Casual leave/ }).check()
-  await employee.getByLabel('From', { exact: true }).fill(days.from)
-  await employee.getByLabel('To', { exact: true }).fill(days.to)
-  await employee.getByLabel('Reason (optional)').fill('Moving house')
-  await employee.getByRole('button', { name: 'Send request' }).click()
-  await expect(employee.getByText('Request sent')).toBeVisible()
+  await sendLeaveRequest(employee, 'Casual leave', upcomingWeekdays(), 'Moving house')
   await expect(myRequests(employee).getByText('Pending', { exact: true })).toBeVisible()
 
   const manager = await signedIn(org.members.mgr)
-  await openRequest(manager, 'Eli Employee')
+  await openApproval(manager, 'Eli Employee')
   await expect(manager.getByText('Moving house')).toBeVisible()
   await manager.getByRole('button', { name: 'Approve' }).click()
-  await expect(manager.getByText("You're all caught up")).toBeVisible()
+  await expect(allCaughtUp(manager)).toBeVisible()
 
   await employee.reload()
   await showAllRequests(employee)
@@ -74,17 +54,17 @@ test('an employee asks for leave and their manager approves it', async ({ signed
   await expect(myRequests(employee).getByText('Approved by Maya Manager')).toBeVisible()
 })
 
-test('HR rejects a request, and has to say why', async ({ signedIn }) => {
-  const org = await team()
-  await requestLeave(org.members.emp, org.leaveTypes.CL, upcomingWeekdays(), 'Long weekend')
+test('HR rejects a request, and has to say why', async ({ signedIn, stack }) => {
+  const org = await team(stack)
+  await requestLeave(await stack.api(org.members.emp), org.leaveTypes.CL, upcomingWeekdays(), 'Long weekend')
 
   const hr = await signedIn(org.members.hr)
-  await openRequest(hr, 'Eli Employee')
+  await openApproval(hr, 'Eli Employee')
   await hr.getByRole('button', { name: 'Reject' }).click()
   await expect(hr.getByText(/Add a note so Eli.* knows why\./)).toBeVisible()
   await hr.getByLabel('Reason for rejecting').fill('Release week, please pick another date')
   await hr.getByRole('button', { name: 'Reject' }).click()
-  await expect(hr.getByText("You're all caught up")).toBeVisible()
+  await expect(allCaughtUp(hr)).toBeVisible()
 
   const employee = await signedIn(org.members.emp)
   await employee.goto('/leave')
@@ -93,16 +73,17 @@ test('HR rejects a request, and has to say why', async ({ signedIn }) => {
   await expect(myRequests(employee).getByText(/Rejected by Hana People/)).toBeVisible()
 })
 
-test('an employee cancels a request that is still pending', async ({ signedIn }) => {
-  const org = await team()
-  await requestLeave(org.members.emp, org.leaveTypes.CL, upcomingWeekdays(), 'Dentist')
+test('an employee cancels a request that is still pending', async ({ signedIn, stack }) => {
+  const org = await team(stack)
+  await requestLeave(await stack.api(org.members.emp), org.leaveTypes.CL, upcomingWeekdays(), 'Dentist')
 
   const employee = await signedIn(org.members.emp)
   await employee.goto('/leave')
   await myRequests(employee).getByRole('button', { name: /^Options for / }).click()
-  await employee.getByRole('menuitem', { name: 'Cancel request' }).or(
-    employee.getByRole('listitem').filter({ hasText: 'Cancel request' }),
-  ).first().click()
+  await employee.getByRole('menuitem', { name: 'Cancel request' })
+    .or(employee.getByRole('listitem').filter({ hasText: 'Cancel request' }))
+    .first()
+    .click()
   const confirm = employee.getByRole('dialog').filter({ hasText: 'Cancel this request?' })
   await confirm.getByRole('button', { name: 'Cancel request' }).click()
   await expect(employee.getByText('Request cancelled')).toBeVisible()
@@ -111,26 +92,18 @@ test('an employee cancels a request that is still pending', async ({ signedIn })
 
   const manager = await signedIn(org.members.mgr)
   await manager.goto('/leave/approvals')
-  await expect(manager.getByText("You're all caught up")).toBeVisible()
+  await expect(allCaughtUp(manager)).toBeVisible()
 })
 
-test('approved leave shows on the team calendar', async ({ signedIn }) => {
-  const org = await team()
+test('approved leave shows on the team calendar', async ({ signedIn, stack }) => {
+  const org = await team(stack)
   const days = upcomingWeekdays()
-  const request = await requestLeave(org.members.emp, org.leaveTypes.CL, days, 'Conference')
-  await approveLeave(org.members.mgr, request.id)
+  const request = await requestLeave(await stack.api(org.members.emp), org.leaveTypes.CL, days, 'Conference')
+  await approveLeave(await stack.api(org.members.mgr), request.id)
 
   const manager = await signedIn(org.members.mgr)
   await manager.goto('/leave/team')
   await expect(manager.getByRole('heading', { name: 'Team calendar', level: 1 })).toBeVisible()
-  const today = new Date()
-  const monthsAhead = (days.start.getFullYear() - today.getFullYear()) * 12 + days.start.getMonth() - today.getMonth()
-  for (let step = 1; step <= monthsAhead; step += 1) {
-    const shown = new Date(today.getFullYear(), today.getMonth() + step, 1)
-    await manager.getByRole('button', { name: 'Next month' }).click()
-    await expect(manager.getByRole('region', { name: monthTitle(shown) })).toBeVisible()
-  }
-  const calendar = manager.getByRole('region', { name: monthTitle(days.start) })
-  const day = days.start.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
-  await expect(calendar.getByRole('button', { name: `${day}, 1 out` })).toContainText('Eli Employee')
+  const calendar = await showCalendarMonth(manager, days.start)
+  await expect(calendar.getByRole('button', { name: `${dayLabel(days.start)}, 1 out` })).toContainText('Eli Employee')
 })

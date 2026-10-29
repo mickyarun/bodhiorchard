@@ -1,9 +1,9 @@
 name: Browser e2e
 
 # Playwright against a throwaway stack the suite starts itself (Docker
-# Postgres and Redis, the backend with every external service faked,
-# multiplayer and the Vite dev server). No ``paths:`` filter, like the other
-# quality workflows, so the check always reports.
+# Postgres and Redis, two backends with every external service faked,
+# multiplayer and Vite). No ``paths:`` filter, like the other quality
+# workflows, so the check always reports.
 on:
   pull_request:
   push:
@@ -15,60 +15,91 @@ permissions:
 
 jobs:
   playwright:
-    name: playwright (chromium)
+    name: playwright (${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # One shard while the suite runs in minutes. To split it, list
+        # 1/2 and 2/2 here; each shard starts its own stack.
+        shard: ["1/1"]
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: backend/pyproject.toml
-
-      - name: Set up Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24.22.1"
-          cache: "npm"
-
-      - name: Install backend (with dev extras)
-        working-directory: backend
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Install workspace deps
-        run: npm ci
+      - uses: ./.github/actions/e2e-setup
 
       - name: Type-check the suite
         run: npm --workspace glideship-e2e run typecheck
 
-      - name: Install Chromium
-        run: npx --workspace glideship-e2e playwright install --with-deps chromium
-
-      - name: Pull stack images
-        run: |
-          docker pull -q pgvector/pgvector:pg16
-          docker pull -q redis:7-alpine
+      - name: Type-check the backend's e2e code
+        working-directory: backend
+        run: mypy --strict tests/e2e_stack
 
       - name: Run Playwright
         env:
           CI: "1"
           E2E_PYTHON: python
-        run: npm --workspace glideship-e2e test
+          SHARD: ${{ matrix.shard }}
+        run: npm --workspace glideship-e2e test -- --shard "$SHARD"
 
       - name: Upload report, traces and stack logs
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: playwright-report-${{ strategy.job-index }}
           path: |
             e2e/playwright-report/
             e2e/test-results/
             e2e/.stack/logs/
-            e2e/.stack/guard.log
+            e2e/.stack/guard-*.log
+          retention-days: 7
+          include-hidden-files: true
+
+  # New or changed specs run three times before they merge, so a flaky test
+  # is caught in its own pull request rather than in everyone else's.
+  burn-in:
+    name: playwright burn-in (changed specs x3)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Find changed specs
+        id: specs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git diff --name-only --diff-filter=AM "$BASE_SHA" HEAD -- 'e2e/specs/*.spec.ts' \
+            | sed 's#^e2e/##' > changed-specs.txt
+          echo "count=$(wc -l < changed-specs.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+          cat changed-specs.txt
+
+      - uses: ./.github/actions/e2e-setup
+        if: steps.specs.outputs.count != '0'
+
+      - name: Run changed specs three times
+        if: steps.specs.outputs.count != '0'
+        env:
+          CI: "1"
+          E2E_PYTHON: python
+        run: |
+          set -euo pipefail
+          mapfile -t specs < changed-specs.txt
+          npm --workspace glideship-e2e test -- --repeat-each=3 "${specs[@]}"
+
+      - name: Upload report, traces and stack logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-burn-in-report
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+            e2e/.stack/logs/
           retention-days: 7
           include-hidden-files: true

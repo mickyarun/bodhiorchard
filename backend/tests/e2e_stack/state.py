@@ -12,22 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The fakes installed by :mod:`tests.e2e_stack.serve`, shared with the routes."""
+"""What the fakes in :mod:`tests.e2e_stack.serve` recorded, shared with the routes."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from tests.fakes.claude_runner import FakeClaudeRunner
-from tests.fakes.guard import ExternalCallGuard
+from tests.e2e_stack.attribution import TaggedLog
 
 
 @dataclass
 class E2EState:
-    """Set once at startup; ``None`` only before :func:`serve.install_fakes`."""
+    """Filled for the server's whole run; read by ``GET /__e2e/guard``."""
 
-    guard: ExternalCallGuard | None = None
-    claude: FakeClaudeRunner | None = None
+    refusals: TaggedLog = field(default_factory=TaggedLog)
+    agent_problems: TaggedLog = field(default_factory=TaggedLog)
 
 
 STATE = E2EState()

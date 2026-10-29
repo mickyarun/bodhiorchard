@@ -14,7 +14,6 @@
 
 /** Today's company quiz, played from the dashboard. */
 import type { Page } from '@playwright/test'
-import { seedOrg } from '../fixtures/stack.ts'
 import { expect, test } from '../fixtures/test.ts'
 
 const QUIZ = {
@@ -32,8 +31,9 @@ async function openQuiz(page: Page) {
   return hub
 }
 
-test('a player locks in an answer and nothing gives the result away before the reveal', async ({ signedIn }) => {
-  const org = await seedOrg({ quiz: true, openQuiz: QUIZ, members: [{ key: 'dev', role: 'developer' }] })
+test('a player locks in an answer and nothing gives the result away before the reveal', async ({ signedIn, stack }) => {
+  const org = await stack.seedOrg({ quiz: true, members: [{ key: 'dev', role: 'developer' }] })
+  await stack.openQuiz(org, QUIZ)
   const page = await signedIn(org.members.dev)
   const hub = await openQuiz(page)
   await expect(hub.getByText(QUIZ.prompt)).toBeVisible()
@@ -58,8 +58,8 @@ test('a player locks in an answer and nothing gives the result away before the r
   await expect(again.getByRole('button', { name: 'Lock in answer' })).toHaveCount(0)
 })
 
-test('with no quiz open the hub says so', async ({ signedIn }) => {
-  const org = await seedOrg({ quiz: true, members: [{ key: 'dev', role: 'developer' }] })
+test('with no quiz open the hub says so', async ({ signedIn, stack }) => {
+  const org = await stack.seedOrg({ quiz: true, members: [{ key: 'dev', role: 'developer' }] })
   const page = await signedIn(org.members.dev)
   const hub = await openQuiz(page)
   await expect(hub.getByText('No quiz open right now')).toBeVisible()

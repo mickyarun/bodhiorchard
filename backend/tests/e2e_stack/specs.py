@@ -12,9 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Request and response bodies of the ``/__e2e`` seeding routes.
+"""Request and response bodies of the ``/__e2e`` routes.
 
-Field names are camelCase on the wire to match the TypeScript fixtures.
+An org is seeded first (members, roles, reporting lines, leave types); the
+content an area needs (registry features, an open quiz) is added to it with
+its own call, so a new area adds a route instead of growing one spec. Field
+names are camelCase on the wire to match the TypeScript fixtures.
 """
 
 from __future__ import annotations
@@ -58,6 +61,12 @@ class FeatureSpec(_Wire):
     tags: list[str] = Field(default_factory=list)
 
 
+class FeaturesSpec(_Wire):
+    """Features to add to an org's registry."""
+
+    features: list[FeatureSpec] = Field(min_length=1)
+
+
 class QuizSpec(_Wire):
     """A multiple-choice question, live as today's quiz."""
 
@@ -68,7 +77,7 @@ class QuizSpec(_Wire):
 
 
 class OrgSpec(_Wire):
-    """Everything one test needs, created in one call."""
+    """An org and its people; content is added by the per-area routes."""
 
     password: str = Field(min_length=8)
     members: list[MemberSpec]
@@ -80,17 +89,20 @@ class OrgSpec(_Wire):
     leave_types: list[LeaveTypeSpec] = Field(
         default_factory=lambda: [LeaveTypeSpec(name="Casual leave", code="CL")]
     )
-    features: list[FeatureSpec] = Field(default_factory=list)
-    # Needs ``quiz=True``: the quiz screens hide for orgs that switched it off.
-    open_quiz: QuizSpec | None = None
 
 
 class SeededMember(_Wire):
-    """A member the test can sign in as."""
+    """A member the test can sign in as.
+
+    The tokens are what the login API would hand back, so a test that isn't
+    about logging in skips a round trip and a password hash check.
+    """
 
     id: uuid.UUID
     email: str
     name: str
+    access_token: str
+    refresh_token: str
 
 
 class SeededOrg(_Wire):
@@ -104,13 +116,12 @@ class SeededOrg(_Wire):
 
 
 class GuardReport(_Wire):
-    """What the fakes refused or answered since the server started."""
+    """What the fakes refused while serving one test (or no test at all)."""
 
     violations: list[str]
     # Agent CLI runs the real ``claude`` would have rejected, or that no
     # script answered (see FakeClaudeRunner.assert_all_scripted).
     agent_problems: list[str]
-    agent_runs: int
 
 
 class Identity(_Wire):

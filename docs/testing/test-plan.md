@@ -908,18 +908,19 @@ existing RacePhysics/RaceTrackFeatures suites.
 ### Browser end-to-end (Playwright)
 
 Scope: the flows a user walks through in Chromium, against a throwaway stack the suite starts
-itself (Docker Postgres and Redis, the backend with the fakes from [fakes.md](fakes.md),
-multiplayer, Vite). It fills the gap the Vitest work left: full view mounts, real routing and
-guards, and two people acting on the same data. How it runs and stays offline:
-[playwright.md](playwright.md). Every test seeds what it needs, in an org of its own; only the
-login tests share the install's first org, which the login page signs in to. An automatic
-check fails a test on a request that left the stack, an uncaught page error, an external call
-the backend refused, or an agent run the fake CLI flagged, and the run fails if the dev server
-reloaded the app to re-optimise its dependencies.
+itself (Docker Postgres and Redis, two backends with the fakes from [fakes.md](fakes.md), one of
+them only for the setup wizard, multiplayer and Vite). It fills the gap the Vitest work left:
+full view mounts, real routing and guards, two people acting on the same data, phone layouts and
+an automated accessibility check. How it runs and stays offline: [playwright.md](playwright.md).
+Every test seeds what it needs, in an org of its own; only the login tests share the install's
+first org, which the login page signs in to. An automatic check fails a test on a request that
+left the stack, an uncaught page error, or anything the backend refused while serving that test;
+the run fails if anything was refused outside a test or the dev server reloaded the app.
 
 #### Coverage matrix
 
-All paths under `e2e/specs/`. 29 tests in 10 files.
+All paths under `e2e/specs/`. 35 tests in 12 files, in three projects: `setup-wizard`,
+`chromium` and `mobile` (Pixel 7).
 
 | flow | positive | negative | corner | spec |
 |---|---|---|---|---|
@@ -937,6 +938,8 @@ All paths under `e2e/specs/`. 29 tests in 10 files.
 | Features and bugs | registry lists features, search narrows; report a bug and open it | Report bug disabled without a title | empty registry state | features-bugs.spec.ts |
 | Quiz | lock in an answer | no second answer, after a reload too | nothing shows the result before the reveal; no open quiz | quiz.spec.ts |
 | Dashboard and garden | overview loads; garden builds; both get messages from the live room | no console errors on either | | dashboard.spec.ts |
+| Phone layouts | approval opens inline in the queue; calendar becomes an agenda; sign in | | | mobile.spec.ts |
+| Accessibility (axe, WCAG 2.1 AA) | login, dashboard, board, BUD detail, bugs, features, settings, members, MCP connect, my leave, approvals, team calendar, employees, employee profile | any serious or critical finding fails | closed Vuetify overlays skipped (they present nothing) | accessibility.spec.ts |
 
 Not in the browser suite: the BUD stages past Development (code review needs a PR from the
 GitHub fake), Slack and calendar side effects (pytest covers them with the fakes), the
@@ -945,11 +948,15 @@ remaining settings screens, reports, and the mini-games.
 ## Bugs found and fixed
 
 Each fix is its own pull request with the regression test that caught it. Every regression
-test fails on main and passes with its fix. The five fixes the browser suite found ship as
-separate commits inside the Playwright pull request. The login one has an integration test
-and the New BUD switches one a Vitest test, the two accessibility ones are caught by the
-specs that find those controls by name, and the Vite one by the suite's end-of-run check for
-dev-server reloads (it fails on main).
+test fails on main and passes with its fix. The fixes the browser suite found ship as separate
+commits inside the Playwright pull request:
+
+- The login and AI-probe fixes each have an integration test.
+- The New BUD switches fix has a Vitest test.
+- The accessibility fixes are caught by the specs that find those controls by name, and by the
+  axe spec.
+- The Vite fix is caught by the suite's end-of-run check for dev-server reloads, which fails on
+  main.
 
 | Area | Bug | PR |
 | --- | --- | --- |
@@ -994,6 +1001,8 @@ dev-server reloads (it fails on main).
 | Frontend | The MCP token revoke button had no accessible name | Playwright PR (own commit) |
 | Frontend | The quiz's answer tiles didn't expose which answer was picked | Playwright PR (own commit) |
 | Frontend | New BUD's agent switches showed "off" until the skills loaded, then turned on by themselves, so an agent ran that the person saw as off | Playwright PR (own commit) |
+| AI settings | Listing the models of an Ollama host being typed always answered 500 (the probe's permission check was called with the wrong arguments) | Playwright PR (own commit) |
+| Frontend | WCAG failures across the shell and main screens: sidebar list roles, the account menu's name, the team calendar grid, a focusable aria-hidden icon, links told apart by colour only, low contrast in MCP connect | Playwright PR (own commit) |
 
 ## Open questions
 

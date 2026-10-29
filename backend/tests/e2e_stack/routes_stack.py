@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``/__e2e`` routes: seed data for one browser test, reset, and the guard log.
+"""``/__e2e`` routes about the stack itself: reset, guard report, identity.
 
-Only :mod:`tests.e2e_stack.serve` mounts this router, on a server bound to
+Only :mod:`tests.e2e_stack.serve` mounts these, on a server bound to
 loopback and backed by a throwaway database.
 """
 
@@ -22,13 +22,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Query, Response
 from sqlalchemy import text
 
 from app.database import AsyncSessionLocal
 from app.services.permission_seeder import seed_permissions
-from tests.e2e_stack.seed_org import seed_org
-from tests.e2e_stack.specs import GuardReport, Identity, OrgSpec, SeededOrg
+from tests.e2e_stack.specs import GuardReport, Identity
 from tests.e2e_stack.state import STATE
 
 router = APIRouter(prefix="/__e2e", tags=["e2e"])
@@ -37,19 +36,11 @@ _KEEP_TABLES = ("alembic_version",)
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-@router.post("/orgs", response_model=SeededOrg, response_model_by_alias=True)
-async def create_org(spec: OrgSpec) -> SeededOrg:
-    """Seed an org (or extend the oldest one) with members and leave types."""
-    async with AsyncSessionLocal() as db:
-        return await seed_org(db, spec)
-
-
 @router.post("/reset", status_code=204, response_class=Response)
 async def reset() -> Response:
     """Empty every table, then re-seed permissions, so the setup wizard shows.
 
-    Only the setup wizard spec calls this, and Playwright runs it before any
-    other spec starts.
+    Only the setup wizard spec calls this, on the wizard's own backend.
     """
     async with AsyncSessionLocal() as db:
         rows = await db.execute(
@@ -64,16 +55,23 @@ async def reset() -> Response:
 
 
 @router.get("/guard", response_model=GuardReport, response_model_by_alias=True)
-async def guard_report() -> GuardReport:
-    """Every external call the fakes refused, and any agent run they had to fail."""
-    guard, claude = STATE.guard, STATE.claude
-    problems = list(claude.problems) if claude else []
-    if claude:
-        problems += [f"unscripted agent run: {run.prompt[:120]!r}" for run in claude.unscripted]
+async def guard_report(
+    test: str | None = Query(None), every: bool = Query(False, alias="all")
+) -> GuardReport:
+    """What the fakes refused while serving ``test``.
+
+    No ``test``: what happened outside any test (job workers, scheduler
+    loops). ``all``: everything, tagged with its test, for the end-of-run
+    check that also catches what a test caused after its own check ran.
+    """
+    if every:
+        return GuardReport(
+            violations=STATE.refusals.everything(),
+            agent_problems=STATE.agent_problems.everything(),
+        )
     return GuardReport(
-        violations=list(guard.violations) if guard else [],
-        agent_problems=problems,
-        agent_runs=len(claude.runs) if claude else 0,
+        violations=STATE.refusals.for_test(test),
+        agent_problems=STATE.agent_problems.for_test(test),
     )
 
 

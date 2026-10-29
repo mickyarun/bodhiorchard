@@ -17,7 +17,6 @@
  * cleanly: its rendering is the engine's own business, not a browser flow.
  */
 import type { Page } from '@playwright/test'
-import { seedOrg } from '../fixtures/stack.ts'
 import { expect, test } from '../fixtures/test.ts'
 
 /**
@@ -29,8 +28,8 @@ async function liveRoomAnswers(page: Page): Promise<void> {
   await socket.waitForEvent('framereceived')
 }
 
-test('the overview dashboard loads without console errors', async ({ signedIn, browserLog }) => {
-  const org = await seedOrg({ members: [{ key: 'dev', role: 'developer', name: 'Gale Overview' }] })
+test('the overview dashboard loads without console errors', async ({ signedIn, stack, browserLog }) => {
+  const org = await stack.seedOrg({ members: [{ key: 'dev', role: 'developer', name: 'Gale Overview' }] })
   const page = await signedIn(org.members.dev)
   const live = liveRoomAnswers(page)
   await page.goto('/dashboard')
@@ -41,9 +40,9 @@ test('the overview dashboard loads without console errors', async ({ signedIn, b
   expect(browserLog.consoleErrors).toEqual([])
 })
 
-test('the garden loads its scene and joins the live room without errors', async ({ signedIn, browserLog }) => {
+test('the garden loads its scene and joins the live room without errors', async ({ signedIn, stack, browserLog }) => {
   test.slow() // The scene builds on a software GPU in headless runs.
-  const org = await seedOrg({ members: [{ key: 'dev', role: 'developer' }] })
+  const org = await stack.seedOrg({ members: [{ key: 'dev', role: 'developer' }] })
   const page = await signedIn(org.members.dev)
   const live = liveRoomAnswers(page)
   await page.goto('/dashboard?view=garden')

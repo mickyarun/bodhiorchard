@@ -13,28 +13,19 @@
 // limitations under the License.
 
 /**
- * The real API as one member, for the setup steps a test isn't about
- * (creating the BUD whose stages it then moves in the browser, say).
- * Requests go through the dev server's proxy, like the app's own.
+ * The app's real API as one member (get one from `stack.api(member)`), for
+ * the setup steps a test isn't about: creating the BUD whose stages it then
+ * moves in the browser, say. Requests go through the dev server's proxy,
+ * like the app's own.
  */
-import { request, type APIRequestContext } from '@playwright/test'
-import { FRONTEND_URL } from '../stack/config.ts'
-import { apiLogin, type Member } from './stack.ts'
+import type { APIRequestContext, APIResponse } from '@playwright/test'
+import type { LeaveDays } from './dates.ts'
 
 export class Api {
   private readonly ctx: APIRequestContext
 
-  private constructor(ctx: APIRequestContext) {
+  constructor(ctx: APIRequestContext) {
     this.ctx = ctx
-  }
-
-  static async as(member: Member): Promise<Api> {
-    const tokens = await apiLogin(member)
-    const ctx = await request.newContext({
-      baseURL: `${FRONTEND_URL}/api/v1/`,
-      extraHTTPHeaders: { Authorization: `Bearer ${tokens.access}` },
-    })
-    return new Api(ctx)
   }
 
   async get<T>(path: string): Promise<T> {
@@ -43,10 +34,6 @@ export class Api {
 
   async post<T>(path: string, data: unknown): Promise<T> {
     return this.check<T>('POST', path, await this.ctx.post(path, { data }))
-  }
-
-  async patch<T>(path: string, data: unknown): Promise<T> {
-    return this.check<T>('PATCH', path, await this.ctx.patch(path, { data }))
   }
 
   /** Status of a GET, for checks that expect a refusal. */
@@ -58,7 +45,7 @@ export class Api {
     await this.ctx.dispose()
   }
 
-  private async check<T>(method: string, path: string, response: Awaited<ReturnType<APIRequestContext['get']>>): Promise<T> {
+  private async check<T>(method: string, path: string, response: APIResponse): Promise<T> {
     if (!response.ok()) {
       throw new Error(`${method} ${path}: ${response.status()} ${await response.text()}`)
     }
@@ -73,7 +60,23 @@ export interface Bud {
   status: string
 }
 
-export async function createBud(api: Api, title: string, extra: Record<string, unknown> = {}): Promise<Bud> {
+/** A BUD with every stage agent off (the API's default). */
+export function createBud(api: Api, title: string): Promise<Bud> {
   // Trailing slash: the API doesn't redirect slashes.
-  return api.post<Bud>('buds/', { title, ...extra })
+  return api.post<Bud>('buds/', { title })
+}
+
+export interface LeaveRequest {
+  id: string
+  status: string
+}
+
+export function requestLeave(api: Api, leaveTypeId: string, days: LeaveDays, reason: string): Promise<LeaveRequest> {
+  return api.post<LeaveRequest>('leave/requests', {
+    kind: 'leave', leave_type_id: leaveTypeId, start_date: days.from, end_date: days.to, reason,
+  })
+}
+
+export async function approveLeave(api: Api, requestId: string): Promise<void> {
+  await api.post(`leave/requests/${requestId}/approve`, {})
 }

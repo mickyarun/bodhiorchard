@@ -15,71 +15,94 @@
 /**
  * The `test` every spec imports. On top of Playwright's own fixtures:
  *
- * - every browser context stays inside the stack (see `browser.ts`);
- * - `signedIn(member)` opens a new window already signed in as `member`,
- *   through the real login API, so two people can act in one test;
+ * - `stackTarget` (an option, set per project) says which backend and
+ *   frontend the test runs against;
+ * - `stack` seeds data and calls the API for this test (see client.ts);
+ * - `signedIn(member)` opens a new window already signed in as `member`
+ *   (the seed route minted the tokens), so two people can act in one test;
+ * - every browser context stays inside the stack (see browser.ts) and tags
+ *   its requests with the test's id;
  * - after each test it fails on requests that left the stack, uncaught page
- *   errors, external calls the backend's guard refused, and agent runs the
- *   fake CLI flagged, meanwhile.
+ *   errors, and anything the backend's fakes refused while serving this
+ *   test: external calls, and agent runs the real CLI would have rejected.
  */
 import { test as base, expect, type BrowserContext, type Page } from '@playwright/test'
-import { FRONTEND_URL } from '../stack/config.ts'
+import { MAIN_STACK, type StackTarget } from '../stack/config.ts'
 import { keepInsideStack, newBrowserLog, type BrowserLog } from './browser.ts'
-import { apiLogin, guardReport, type Member } from './stack.ts'
+import { StackClient, TEST_HEADER } from './client.ts'
+import type { Member } from './types.ts'
 
 export const TOKEN_KEY = 'bodhiorchard_token'
 export const REFRESH_TOKEN_KEY = 'bodhiorchard_refresh_token'
 
+interface Options {
+  stackTarget: StackTarget
+}
+
 interface Fixtures {
+  testTag: string
+  stack: StackClient
   browserLog: BrowserLog
   signedIn: (member: Member) => Promise<Page>
   stackGuard: void
 }
 
-export const test = base.extend<Fixtures>({
+export const test = base.extend<Options & Fixtures>({
+  stackTarget: [MAIN_STACK, { option: true }],
+
+  // Unique per run of a test, repeats and retries included.
+  testTag: async ({}, use, testInfo) => {
+    await use(`${testInfo.testId}#${testInfo.repeatEachIndex}#${testInfo.retry}`)
+  },
+
+  stack: async ({ stackTarget, testTag }, use) => {
+    const client = await StackClient.open(stackTarget, testTag)
+    await use(client)
+    await client.dispose()
+  },
+
   browserLog: async ({}, use) => {
     await use(newBrowserLog())
   },
 
-  context: async ({ context, browserLog }, use) => {
-    await keepInsideStack(context, browserLog)
+  context: async ({ context, browserLog, stackTarget, testTag }, use) => {
+    await context.setExtraHTTPHeaders({ [TEST_HEADER]: testTag })
+    await keepInsideStack(context, browserLog, stackTarget)
     await use(context)
   },
 
-  signedIn: async ({ browser, browserLog }, use) => {
+  signedIn: async ({ browser, browserLog, stackTarget, testTag }, use) => {
     const contexts: BrowserContext[] = []
     await use(async (member) => {
-      const tokens = await apiLogin(member)
       const context = await browser.newContext({
-        baseURL: FRONTEND_URL,
+        baseURL: stackTarget.frontendUrl,
+        extraHTTPHeaders: { [TEST_HEADER]: testTag },
         storageState: {
           cookies: [],
           origins: [{
-            origin: FRONTEND_URL,
+            origin: stackTarget.frontendUrl,
             localStorage: [
-              { name: TOKEN_KEY, value: tokens.access },
-              { name: REFRESH_TOKEN_KEY, value: tokens.refresh },
+              { name: TOKEN_KEY, value: member.accessToken },
+              { name: REFRESH_TOKEN_KEY, value: member.refreshToken },
             ],
           }],
         },
       })
       contexts.push(context)
-      await keepInsideStack(context, browserLog)
+      await keepInsideStack(context, browserLog, stackTarget)
       return context.newPage()
     })
     await Promise.all(contexts.map((context) => context.close()))
   },
 
   stackGuard: [
-    async ({ browserLog }, use) => {
-      const before = await guardReport()
+    async ({ browserLog, stack }, use) => {
       await use()
       expect(browserLog.external, 'browser requests that left the stack').toEqual([])
       expect(browserLog.pageErrors, 'uncaught errors in the page').toEqual([])
-      // Both lists only grow; new entries came from this test or one beside it.
-      const after = await guardReport()
-      expect(after.violations.slice(before.violations.length), 'external calls the backend refused').toEqual([])
-      expect(after.agentProblems.slice(before.agentProblems.length), 'agent runs the fake CLI flagged').toEqual([])
+      const report = await stack.guardReport()
+      expect(report.violations, 'external calls the backend refused').toEqual([])
+      expect(report.agentProblems, 'agent runs the fake CLI flagged').toEqual([])
     },
     { auto: true },
   ],

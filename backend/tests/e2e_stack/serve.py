@@ -17,68 +17,35 @@
 Started by ``e2e/stack/run.ts`` (``python -m tests.e2e_stack.serve``), never in
 production. Before uvicorn serves a request it installs the fakes the
 integration tests use (they patch module attributes, so importing the app
-first is safe):
+first is safe), see :mod:`.fakes`:
 
-* :class:`ExternalCallGuard`: no DNS or connect outside loopback, no connect
-  to a developer's own stack on its default ports, no real ``claude``,
-  ``codex`` or ``copilot`` spawn;
-* :class:`FakeEmbedder`: hashed vectors instead of the downloaded model;
-* :class:`FakeClaudeRunner`: every agent run answers from a harmless script.
+* the network guard: no DNS or connect outside loopback, no connect to a
+  developer's own stack on its default ports, no real ``claude``, ``codex``
+  or ``copilot`` spawn;
+* a fake embedder instead of the downloaded model;
+* a fake ``claude`` CLI that answers every agent run with a short reply.
 
-Every refusal is appended to ``E2E_GUARD_LOG`` and listed by
-``GET /__e2e/guard``, which the suite checks after each test.
+It also tags each request with the browser test it serves (``x-e2e-test``)
+and mounts the ``/__e2e`` routes: seeding, reset and the guard report.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlsplit
 
-import httpx
 import pytest
 import uvicorn
 
 from app.main import app
-from tests.e2e_stack.routes import router
+from tests.e2e_stack.attribution import ContextThreadPool, TestIdMiddleware
+from tests.e2e_stack.fakes import TaggingClaudeRunner, TaggingGuard
+from tests.e2e_stack.routes_seed import router as seed_router
+from tests.e2e_stack.routes_stack import router as stack_router
 from tests.e2e_stack.state import STATE
-from tests.fakes.claude_runner import FakeClaudeRunner
-from tests.fakes.claude_script import AgentScript
 from tests.fakes.embeddings import FakeEmbedder
-from tests.fakes.guard import OLLAMA_PORT, ExternalCallBlockedError, ExternalCallGuard, is_loopback
-
-# Default ports of a developer's own stack (Postgres, Redis, backend, frontend,
-# Vite's default, multiplayer, Ollama). The e2e stack never uses them.
-DEV_STACK_PORTS = frozenset({5432, 6379, 8000, 3000, 5173, 2567, 11434})
-
-
-class LoggingGuard(ExternalCallGuard):
-    """An :class:`ExternalCallGuard` that also appends each refusal to a file.
-
-    One refusal is expected rather than a violation: the AI settings and the
-    setup wizard probe a local Ollama on its default port by design. The
-    probe is still refused (so it reads as "not installed" and never
-    reaches a developer's own Ollama), just not counted.
-    """
-
-    def __init__(self, log_path: Path) -> None:
-        super().__init__()
-        self.log_path = log_path
-        self.blocked_ports |= DEV_STACK_PORTS
-
-    def check_address(self, family: int, address: Any) -> None:
-        if isinstance(address, tuple) and len(address) >= 2:
-            host, port = str(address[0]), int(address[1])
-            if port == OLLAMA_PORT and is_loopback(host):
-                raise ExternalCallBlockedError("blocked by ExternalCallGuard: local Ollama probe")
-        super().check_address(family, address)
-
-    def _refuse(self, what: str) -> ExternalCallBlockedError:
-        error = super()._refuse(what)
-        with self.log_path.open("a", encoding="utf-8") as log:
-            log.write(what + "\n")
-        return error
 
 
 def _port(url: str) -> int:
@@ -91,32 +58,35 @@ def _port(url: str) -> int:
 def install_fakes(backend_port: int, log_path: Path) -> None:
     """Patch the process for the whole server run (never undone)."""
     patch = pytest.MonkeyPatch()
-    guard = LoggingGuard(log_path)
+    guard = TaggingGuard(STATE.refusals, log_path)
     for name in ("DATABASE_URL", "REDIS_URL", "COLYSEUS_URL"):
         guard.allow_port(_port(os.environ[name]))
     guard.allow_port(backend_port)
     guard.install(patch)
-
-    embedder = FakeEmbedder()
-    embedder.install(patch)
-
-    claude = FakeClaudeRunner(httpx.AsyncClient(base_url=f"http://127.0.0.1:{backend_port}"))
-    claude.default = AgentScript.ok("Done.")
-    claude.install(patch)
-
-    STATE.guard = guard
-    STATE.claude = claude
+    FakeEmbedder().install(patch)
+    # Installed after the guard, so every other program still goes through it.
+    TaggingClaudeRunner(f"http://127.0.0.1:{backend_port}", STATE.agent_problems).install(patch)
 
 
-def main() -> None:
-    """Install the fakes, add the seeding routes and serve on loopback."""
-    port = int(os.environ["E2E_BACKEND_PORT"])
-    install_fakes(port, Path(os.environ["E2E_GUARD_LOG"]))
-    app.include_router(router)
+async def _serve(port: int) -> None:
+    asyncio.get_running_loop().set_default_executor(ContextThreadPool())
     # loop="asyncio", never uvloop: uvloop resolves and connects in native
     # code, past the patched ``socket`` functions, which would leave the
     # guard watching nothing.
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning", workers=1, loop="asyncio")
+    config = uvicorn.Config(
+        app, host="127.0.0.1", port=port, log_level="warning", workers=1, loop="asyncio"
+    )
+    await uvicorn.Server(config).serve()
+
+
+def main() -> None:
+    """Install the fakes, add the e2e routes and serve on loopback."""
+    port = int(os.environ["E2E_BACKEND_PORT"])
+    install_fakes(port, Path(os.environ["E2E_GUARD_LOG"]))
+    app.add_middleware(TestIdMiddleware)
+    app.include_router(seed_router)
+    app.include_router(stack_router)
+    asyncio.run(_serve(port))
 
 
 if __name__ == "__main__":

@@ -50,6 +50,9 @@ const vuetifyAutoImports = [
 ]
 
 export default defineConfig({
+  // VITE_CACHE_DIR gives a second dev server (the e2e stack's, say) its own
+  // dependency cache, so it never rewrites the one a running server uses.
+  cacheDir: process.env.VITE_CACHE_DIR || undefined,
   plugins: [
     vue(),
     vuetify({ autoImport: true }),

@@ -14,13 +14,11 @@
 
 /** Personal MCP tokens: made in the browser, used by a local AI client, revoked. */
 import { request } from '@playwright/test'
-import { BACKEND_URL } from '../stack/config.ts'
-import { seedOrg } from '../fixtures/stack.ts'
 import { expect, test } from '../fixtures/test.ts'
 
 /** What a local AI client does with the token: call one read-only tool. */
-async function callTool(token: string): Promise<number> {
-  const client = await request.newContext({ baseURL: BACKEND_URL })
+async function callTool(backendUrl: string, token: string): Promise<number> {
+  const client = await request.newContext({ baseURL: backendUrl })
   try {
     const response = await client.post('/mcp/tools/list_design_systems', {
       data: { params: {} },
@@ -32,8 +30,8 @@ async function callTool(token: string): Promise<number> {
   }
 }
 
-test('a developer creates an MCP token, a client uses it, and revoking locks it out', async ({ signedIn }) => {
-  const org = await seedOrg({ members: [{ key: 'dev', role: 'developer' }] })
+test('a developer creates an MCP token, a client uses it, and revoking locks it out', async ({ signedIn, stack }) => {
+  const org = await stack.seedOrg({ members: [{ key: 'dev', role: 'developer' }] })
   const page = await signedIn(org.members.dev)
   await page.goto('/settings/mcp-connect')
   await expect(page.getByRole('heading', { name: 'Connect your local AI', level: 1 })).toBeVisible()
@@ -50,11 +48,11 @@ test('a developer creates an MCP token, a client uses it, and revoking locks it 
   await created.getByRole('button', { name: 'I have copied it' }).click()
   await expect(created).toBeHidden()
   await expect(page.getByText('Work laptop')).toBeVisible()
-  expect(await callTool(token)).toBe(200)
+  expect(await callTool(stack.target.backendUrl, token)).toBe(200)
 
   // Revoking asks the browser to confirm first.
   page.once('dialog', (confirm) => void confirm.accept())
   await page.getByRole('button', { name: 'Revoke Work laptop' }).click()
   await expect(page.getByText('No tokens yet')).toBeVisible()
-  expect(await callTool(token)).toBe(401)
+  expect(await callTool(stack.target.backendUrl, token)).toBe(401)
 })

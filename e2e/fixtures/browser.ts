@@ -22,9 +22,13 @@
  * console errors are collected for the test to check.
  */
 import type { BrowserContext, ConsoleMessage, Page } from '@playwright/test'
-import { FRONTEND_PORT } from '../stack/config.ts'
+import type { StackTarget } from '../stack/config.ts'
 
-export const STACK_ORIGINS = new Set([`127.0.0.1:${FRONTEND_PORT}`, `localhost:${FRONTEND_PORT}`])
+/** The `host:port` forms a page may load from: the target's frontend only. */
+export function stackOrigins(target: StackTarget): Set<string> {
+  return new Set([`127.0.0.1:${target.frontendPort}`, `localhost:${target.frontendPort}`])
+}
+
 const FONT_HOSTS = new Set(['fonts.googleapis.com', 'fonts.gstatic.com'])
 
 export interface BrowserLog {
@@ -45,9 +49,10 @@ function describe(message: ConsoleMessage): string {
   return where ? `${message.text()} (${where})` : message.text()
 }
 
-export async function keepInsideStack(context: BrowserContext, log: BrowserLog): Promise<void> {
+export async function keepInsideStack(context: BrowserContext, log: BrowserLog, target: StackTarget): Promise<void> {
+  const origins = stackOrigins(target)
   await context.route(
-    (url) => !STACK_ORIGINS.has(url.host),
+    (url) => !origins.has(url.host),
     async (route) => {
       const url = new URL(route.request().url())
       if (FONT_HOSTS.has(url.hostname)) {
@@ -63,7 +68,7 @@ export async function keepInsideStack(context: BrowserContext, log: BrowserLog):
     // a WebSocket shim stricter than the browser's, which breaks the app's
     // own sockets. A socket to anywhere else still fails the test.
     page.on('websocket', (ws) => {
-      if (!STACK_ORIGINS.has(new URL(ws.url()).host)) log.external.push(`WS ${ws.url()}`)
+      if (!origins.has(new URL(ws.url()).host)) log.external.push(`WS ${ws.url()}`)
     })
     page.on('pageerror', (error) => log.pageErrors.push(error.stack ?? error.message))
     page.on('console', (message) => {

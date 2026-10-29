@@ -13,28 +13,20 @@
 // limitations under the License.
 
 /** Who sees which screens, and that one org never sees another's work. */
-import type { Page } from '@playwright/test'
-import { Api, createBud } from '../fixtures/api.ts'
-import { seedOrg } from '../fixtures/stack.ts'
+import { createBud } from '../fixtures/api.ts'
 import { expect, test } from '../fixtures/test.ts'
+import { budCard } from '../screens/buds.ts'
+import { navLink, openSettingsGroup } from '../screens/shell.ts'
 
-const sidebar = (page: Page) => page.getByRole('navigation').first()
-
-async function openSettingsGroup(page: Page): Promise<void> {
-  await sidebar(page).getByRole('option', { name: 'Settings' }).or(
-    sidebar(page).getByText('Settings', { exact: true }),
-  ).first().click()
-}
-
-test('an admin reaches settings and member management', async ({ signedIn }) => {
-  const org = await seedOrg({ members: [{ key: 'admin', role: 'admin' }] })
+test('an admin reaches settings and member management', async ({ signedIn, stack }) => {
+  const org = await stack.seedOrg({ members: [{ key: 'admin', role: 'admin' }] })
   const page = await signedIn(org.members.admin)
   await page.goto('/dashboard')
-  await expect(sidebar(page).getByRole('link', { name: 'Members', exact: true })).toBeVisible()
+  await expect(navLink(page, 'Members')).toBeVisible()
   await openSettingsGroup(page)
-  await expect(sidebar(page).getByRole('link', { name: 'Integrations', exact: true })).toBeVisible()
+  await expect(navLink(page, 'Integrations')).toBeVisible()
 
-  await sidebar(page).getByRole('link', { name: 'Integrations', exact: true }).click()
+  await navLink(page, 'Integrations').click()
   await expect(page).toHaveURL(/\/settings$/)
   await expect(page.getByRole('heading', { name: 'Integrations', level: 2 })).toBeVisible()
 
@@ -46,15 +38,15 @@ test('an admin reaches settings and member management', async ({ signedIn }) => 
   }
 })
 
-test('a developer is kept out of the admin screens', async ({ signedIn }) => {
-  const org = await seedOrg({ members: [{ key: 'dev', role: 'developer' }] })
+test('a developer is kept out of the admin screens', async ({ signedIn, stack }) => {
+  const org = await stack.seedOrg({ members: [{ key: 'dev', role: 'developer' }] })
   const page = await signedIn(org.members.dev)
   await page.goto('/dashboard')
-  await expect(sidebar(page).getByRole('link', { name: 'Board', exact: true })).toBeVisible()
-  await expect(sidebar(page).getByRole('link', { name: 'Members', exact: true })).toHaveCount(0)
+  await expect(navLink(page, 'Board')).toBeVisible()
+  await expect(navLink(page, 'Members')).toHaveCount(0)
   await openSettingsGroup(page)
-  await expect(sidebar(page).getByRole('link', { name: 'MCP connect', exact: true })).toBeVisible()
-  await expect(sidebar(page).getByRole('link', { name: 'Integrations', exact: true })).toHaveCount(0)
+  await expect(navLink(page, 'MCP connect')).toBeVisible()
+  await expect(navLink(page, 'Integrations')).toHaveCount(0)
 
   for (const path of ['/members', '/settings', '/settings/leave', '/triage']) {
     await page.goto(path)
@@ -62,37 +54,34 @@ test('a developer is kept out of the admin screens', async ({ signedIn }) => {
   }
 })
 
-test('HR works in People and never lands in engineering', async ({ signedIn }) => {
-  const org = await seedOrg({ members: [{ key: 'hr', role: 'hr' }] })
+test('HR works in People and never lands in engineering', async ({ signedIn, stack }) => {
+  const org = await stack.seedOrg({ members: [{ key: 'hr', role: 'hr' }] })
   const page = await signedIn(org.members.hr)
   await page.goto('/')
   await expect(page).toHaveURL(/\/leave$/)
-  await expect(sidebar(page).getByRole('link', { name: 'Employees', exact: true })).toBeVisible()
-  await expect(sidebar(page).getByRole('link', { name: 'Board', exact: true })).toHaveCount(0)
+  await expect(navLink(page, 'Employees')).toBeVisible()
+  await expect(navLink(page, 'Board')).toHaveCount(0)
 
   await page.goto('/buds')
   await expect(page).toHaveURL(/\/leave$/)
 })
 
-test("one org never sees another org's BUDs", async ({ signedIn }) => {
+test("one org never sees another org's BUDs", async ({ signedIn, stack }) => {
   const [alpha, beta] = await Promise.all([
-    seedOrg({ members: [{ key: 'pm', role: 'pm' }] }),
-    seedOrg({ members: [{ key: 'pm', role: 'pm' }] }),
+    stack.seedOrg({ members: [{ key: 'pm', role: 'pm' }] }),
+    stack.seedOrg({ members: [{ key: 'pm', role: 'pm' }] }),
   ])
-  const alphaApi = await Api.as(alpha.members.pm)
-  const secret = await createBud(alphaApi, 'Alpha acquisition plan')
-  await alphaApi.dispose()
-  const betaApi = await Api.as(beta.members.pm)
+  const secret = await createBud(await stack.api(alpha.members.pm), 'Alpha acquisition plan')
+  const betaApi = await stack.api(beta.members.pm)
   await createBud(betaApi, 'Beta onboarding revamp')
 
   const page = await signedIn(beta.members.pm)
   await page.goto('/buds')
-  await expect(page.getByRole('link', { name: /Beta onboarding revamp/ })).toBeVisible()
+  await expect(budCard(page, 'Beta onboarding revamp')).toBeVisible()
   await expect(page.getByText('Alpha acquisition plan')).toHaveCount(0)
 
   await page.goto(`/buds/${secret.id}`)
   await expect(page.getByText("This BUD didn't load")).toBeVisible()
   await expect(page.getByText('Alpha acquisition plan')).toHaveCount(0)
   expect(await betaApi.statusOf(`buds/${secret.id}`)).toBe(404)
-  await betaApi.dispose()
 })

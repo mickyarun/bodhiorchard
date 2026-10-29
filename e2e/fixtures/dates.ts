@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/** Leave dates and requests for the People specs. */
-import { Api } from './api.ts'
-import type { Member } from './stack.ts'
+/** Dates for the People specs, picked so a run on any day stays valid. */
 
 export interface LeaveDays {
   /** `YYYY-MM-DD`, as the date inputs take it. */
@@ -41,30 +39,4 @@ export function upcomingWeekdays(weeksAhead = 3): LeaveDays {
   const tuesday = new Date(monday)
   tuesday.setDate(monday.getDate() + 1)
   return { from: iso(monday), to: iso(tuesday), start: monday }
-}
-
-interface LeaveRequest {
-  id: string
-  status: string
-}
-
-/** Files a leave request through the API, as the employee. */
-export async function requestLeave(member: Member, leaveTypeId: string, days: LeaveDays, reason: string): Promise<LeaveRequest> {
-  const api = await Api.as(member)
-  try {
-    return await api.post<LeaveRequest>('leave/requests', {
-      kind: 'leave', leave_type_id: leaveTypeId, start_date: days.from, end_date: days.to, reason,
-    })
-  } finally {
-    await api.dispose()
-  }
-}
-
-export async function approveLeave(approver: Member, requestId: string): Promise<void> {
-  const api = await Api.as(approver)
-  try {
-    await api.post(`leave/requests/${requestId}/approve`, {})
-  } finally {
-    await api.dispose()
-  }
 }

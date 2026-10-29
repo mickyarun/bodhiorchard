@@ -14,8 +14,9 @@
 
 /**
  * Start the throwaway stack and keep it running until SIGINT / SIGTERM:
- * Postgres and Redis in Docker, migrations, the fake-backed backend, the
- * multiplayer server and the Vite dev server. Playwright runs this as its
+ * Postgres and Redis in Docker, migrations, two fake-backed backends (the
+ * main one and the setup wizard's, each with its own database), the
+ * multiplayer server and a Vite dev server in front of each backend. Playwright runs this as its
  * `webServer`; `npm run stack` runs it on its own so repeated test runs can
  * reuse it. Stopping it removes the containers and `.stack/` is rebuilt on
  * the next start.
@@ -24,10 +25,10 @@ import { randomBytes } from 'node:crypto'
 import { mkdirSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import {
-  BACKEND_URL, FRONTEND_PORT, FRONTEND_URL, MULTIPLAYER_URL, PYTHON, REPO_ROOT, STACK_DIR,
+  MAIN_STACK, MULTIPLAYER_URL, PYTHON, REPO_ROOT, STACK_DIR, STACKS, WIZARD_STACK, type StackTarget,
 } from './config.ts'
 import { removeCheckoutContainers, startPostgres, startRedis } from './docker.ts'
-import { backendEnv, frontendEnv, migrateEnv, multiplayerEnv } from './env.ts'
+import { backendEnv, frontendEnv, migrateEnv, multiplayerEnv, type StackPorts } from './env.ts'
 import {
   exitedCleanly, logTail, startService, stopService, type Service, type ServiceOptions,
 } from './process.ts'
@@ -91,43 +92,60 @@ function launch(name: string, command: string, args: string[], opts: ServiceOpti
   return service
 }
 
+const BACKEND_DIR = path.join(REPO_ROOT, 'backend')
+const FRONTEND_DIR = path.join(REPO_ROOT, 'frontend')
+
+async function migrate(ports: StackPorts, target: StackTarget): Promise<void> {
+  await exitedCleanly(launch(`migrate-${target.name}`, PYTHON, ['-m', 'alembic', 'upgrade', 'head'], {
+    cwd: BACKEND_DIR, env: migrateEnv(ports, target),
+  }, false))
+}
+
+function startBackend(ports: StackPorts, target: StackTarget): Promise<void> {
+  // Runs from .stack/ so it never reads a developer's backend/.env.
+  launch(`backend-${target.name}`, PYTHON, ['-m', 'tests.e2e_stack.serve'], {
+    cwd: STACK_DIR, env: backendEnv(ports, target),
+  })
+  return waitForHttp(`backend-${target.name}`, `${target.backendUrl}/health/`)
+}
+
+function startFrontend(target: StackTarget): Promise<void> {
+  // --force: a cold dependency cache on every start, so a screen that makes
+  // Vite re-optimise mid-run shows up (see fixtures/global-teardown.ts).
+  launch(`frontend-${target.name}`, path.join(BIN, 'vite'), [
+    '--port', String(target.frontendPort), '--strictPort', '--host', '127.0.0.1', '--force',
+  ], { cwd: FRONTEND_DIR, env: frontendEnv(target) })
+  return waitForHttp(`frontend-${target.name}`, target.frontendUrl)
+}
+
 async function main(): Promise<void> {
   await removeCheckoutContainers()
   rmSync(STACK_DIR, { recursive: true, force: true })
-  for (const dir of ['logs/backend', 'data', 'uploads', 'home']) {
-    mkdirSync(path.join(STACK_DIR, dir), { recursive: true })
-  }
+  mkdirSync(path.join(STACK_DIR, 'logs'), { recursive: true })
+  mkdirSync(path.join(STACK_DIR, 'home'), { recursive: true })
   const runId = randomBytes(4).toString('hex')
-  const starting = Promise.all([startPostgres(runId), startRedis(runId)])
+  const starting = Promise.all([startPostgres(runId, [WIZARD_STACK.database]), startRedis(runId)])
   containersStarting = starting
   const [pg, redis] = await starting
   stillStarting()
   const ports = { postgres: pg.hostPort, redis: redis.hostPort }
   console.log(`[stack] postgres on :${ports.postgres}, redis on :${ports.redis}`)
 
-  const backendDir = path.join(REPO_ROOT, 'backend')
-  await exitedCleanly(launch('migrate', PYTHON, ['-m', 'alembic', 'upgrade', 'head'], {
-    cwd: backendDir, env: migrateEnv(ports),
-  }, false))
-  // The backend runs from .stack/ so it never reads a developer's backend/.env.
-  launch('backend', PYTHON, ['-m', 'tests.e2e_stack.serve'], { cwd: STACK_DIR, env: backendEnv(ports) })
-  launch('multiplayer', path.join(BIN, 'ts-node'), ['--transpile-only', 'src/main.ts'], {
+  await Promise.all(STACKS.map((target) => migrate(ports, target)))
+  const multiplayer = launch('multiplayer', path.join(BIN, 'ts-node'), ['--transpile-only', 'src/main.ts'], {
     cwd: path.join(REPO_ROOT, 'multiplayer'), env: multiplayerEnv(),
   })
   await Promise.all([
-    waitForHttp('backend', `${BACKEND_URL}/health/`),
-    waitForHttp('multiplayer', MULTIPLAYER_URL),
+    ...STACKS.map((target) => startBackend(ports, target)),
+    waitForHttp(multiplayer.name, MULTIPLAYER_URL),
   ])
-  // Vite starts last: Playwright (and a reused stack) treats "the frontend
-  // answers" as "the whole stack is up".
-  // --force: a cold dependency cache on every start, so a screen that makes
-  // Vite re-optimise mid-run shows up (see fixtures/global-teardown.ts).
-  launch('frontend', path.join(BIN, 'vite'), [
-    '--port', String(FRONTEND_PORT), '--strictPort', '--host', '127.0.0.1', '--force',
-  ], { cwd: path.join(REPO_ROOT, 'frontend'), env: frontendEnv() })
-  await waitForHttp('frontend', FRONTEND_URL)
   stillStarting()
-  console.log(`[stack] ready: ${FRONTEND_URL} (logs in ${path.relative(REPO_ROOT, STACK_DIR)}/logs)`)
+  // The main Vite starts last: Playwright (and a reused stack) treats "the
+  // main frontend answers" as "the whole stack is up".
+  await startFrontend(WIZARD_STACK)
+  await startFrontend(MAIN_STACK)
+  stillStarting()
+  console.log(`[stack] ready: ${MAIN_STACK.frontendUrl}, wizard ${WIZARD_STACK.frontendUrl} (logs in ${path.relative(REPO_ROOT, STACK_DIR)}/logs)`)
 }
 
 function fail(error: unknown): void {

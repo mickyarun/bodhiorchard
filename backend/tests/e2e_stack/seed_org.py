@@ -29,7 +29,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import hash_password
+from app.core.security import create_access_token, create_refresh_token, hash_password
 from app.models.employee_profile import EmployeeProfile
 from app.models.leave_type import LeaveType
 from app.models.organization import Organization
@@ -42,7 +42,6 @@ from app.services.bud_stage_seeder import seed_stage_mappings_for_org
 from app.services.leave.policies import ensure_default_policy
 from app.services.permission_seeder import seed_permissions
 from app.services.skill_loader import seed_skills_for_org
-from tests.e2e_stack.seed_content import add_features, add_open_quiz
 from tests.e2e_stack.specs import MemberSpec, OrgSpec, SeededMember, SeededOrg
 
 EMAIL_DOMAIN = "e2e.example.com"
@@ -114,6 +113,18 @@ async def _add_leave_types(
     return ids
 
 
+def _seeded(user: User, org_id: uuid.UUID) -> SeededMember:
+    # The same claims the login route signs.
+    claims = {"sub": str(user.id), "org_id": str(org_id)}
+    return SeededMember(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        access_token=create_access_token(data=claims),
+        refresh_token=create_refresh_token(data=claims),
+    )
+
+
 async def seed_org(db: AsyncSession, spec: OrgSpec) -> SeededOrg:
     """Create everything in ``spec`` and commit."""
     keys = [m.key for m in spec.members]
@@ -140,16 +151,11 @@ async def seed_org(db: AsyncSession, spec: OrgSpec) -> SeededOrg:
 
     # The primary org is shared by every login test; leave tests get their own.
     leave_types = {} if spec.primary else await _add_leave_types(db, org.id, spec)
-    add_features(db, org.id, spec)
-    await add_open_quiz(db, org.id, spec)
     await db.commit()
     return SeededOrg(
         id=org.id,
         slug=org.slug,
         name=org.name,
-        members={
-            key: SeededMember(id=user.id, email=user.email, name=user.name)
-            for key, (user, _) in users.items()
-        },
+        members={key: _seeded(user, org.id) for key, (user, _) in users.items()},
         leave_types=leave_types,
     )

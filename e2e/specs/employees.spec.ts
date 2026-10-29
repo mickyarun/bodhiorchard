@@ -13,11 +13,10 @@
 // limitations under the License.
 
 /** The employee directory and the encrypted bank and ID details. */
-import { seedOrg } from '../fixtures/stack.ts'
 import { expect, test } from '../fixtures/test.ts'
 
-test('HR saves bank details, sees them masked, and a reveal is logged', async ({ signedIn }) => {
-  const org = await seedOrg({
+test('HR saves bank details, sees them masked, and a reveal is logged', async ({ signedIn, stack }) => {
+  const org = await stack.seedOrg({
     members: [
       { key: 'hr', role: 'hr', name: 'Hana People' },
       { key: 'emp', role: 'developer', name: 'Iris Engineer' },
@@ -47,8 +46,8 @@ test('HR saves bank details, sees them masked, and a reveal is logged', async ({
   await expect(log.getByText(/Hana People/).first()).toBeVisible()
 })
 
-test('a developer has no employee directory', async ({ signedIn }) => {
-  const org = await seedOrg({ members: [{ key: 'dev', role: 'developer' }] })
+test('a developer has no employee directory', async ({ signedIn, stack }) => {
+  const org = await stack.seedOrg({ members: [{ key: 'dev', role: 'developer' }] })
   const page = await signedIn(org.members.dev)
   await page.goto('/dashboard')
   await expect(page.getByRole('link', { name: 'Leave', exact: true })).toBeVisible()

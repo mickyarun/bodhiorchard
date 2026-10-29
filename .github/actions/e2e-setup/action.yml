@@ -1,0 +1,55 @@
+name: Set up the browser e2e suite
+description: >-
+  Python with the backend's dev dependencies, Node with the workspace, a
+  cached Chromium for Playwright, and the stack's container images.
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.12"
+        cache: "pip"
+        cache-dependency-path: backend/pyproject.toml
+
+    - name: Set up Node
+      uses: actions/setup-node@v6
+      with:
+        node-version: "24.22.1"
+        cache: "npm"
+
+    - name: Install backend (with dev extras)
+      shell: bash
+      working-directory: backend
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+
+    - name: Install workspace deps
+      shell: bash
+      run: npm ci
+
+    # The lockfile pins the Playwright version, and so the browser build.
+    - name: Cache Playwright's Chromium
+      id: browsers
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+    - name: Install Chromium
+      if: steps.browsers.outputs.cache-hit != 'true'
+      shell: bash
+      run: npx --workspace glideship-e2e playwright install --with-deps chromium
+
+    - name: Install Chromium's system libraries
+      if: steps.browsers.outputs.cache-hit == 'true'
+      shell: bash
+      run: npx --workspace glideship-e2e playwright install-deps chromium
+
+    - name: Pull stack images
+      shell: bash
+      run: |
+        docker pull -q pgvector/pgvector:pg16
+        docker pull -q redis:7-alpine
