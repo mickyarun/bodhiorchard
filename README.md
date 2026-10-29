@@ -7,16 +7,16 @@
 **The open-source, self-hosted alternative to Jira & Scrum — AI agents run the process end-to-end, developers earn XP for what actually ships, and your data never leaves your machine.**
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Website](https://img.shields.io/badge/website-bodhiorchard.ai-2563EB.svg)](https://bodhiorchard.ai/)
+[![Website](https://img.shields.io/badge/website-glideship.ai-2563EB.svg)](https://glideship.ai/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Vue 3](https://img.shields.io/badge/Vue.js-3-4FC08D.svg)](https://vuejs.org)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED.svg)](https://www.docker.com)
 
-[Website](https://bodhiorchard.ai/) · [Quick Start](#quick-start) · [Why Glideship](#why-glideship) · [People](#people-leave-wfh-and-employee-records) · [The Twelve Agents](#the-twelve-agents) · [Docs](#documentation) · [FAQ](#faq)
+[Website](https://glideship.ai/) · [Quick Start](#quick-start) · [Why Glideship](#why-glideship) · [People](#people-leave-wfh-and-employee-records) · [The Twelve Agents](#the-twelve-agents) · [Docs](#documentation) · [FAQ](#faq)
 
-<a href="https://bodhiorchard.ai/"><img src="docs/images/board-ui.webp" width="85%" alt="The BUD board — every feature tracked from backlog to production in one view"></a>
+<a href="https://glideship.ai/"><img src="docs/images/board-ui.webp" width="85%" alt="The BUD board — every feature tracked from backlog to production in one view"></a>
 
-**[▶ Watch the demo](https://youtu.be/i8kZdcL1bME)** — a Slack message becomes a scoped, estimated BUD. No sprints, no story points, no standups.
+**[▶ Watch Glideship in 75 seconds](https://youtu.be/je-bWrkLD1w)** — agents draft, people decide. No sprints, no story points, no standups.
 
 </div>
 
@@ -26,7 +26,7 @@
 
 **Glideship** replaces sprint, scrum, and Jira ceremony with **Agent-Driven Development (ADD)** — twelve specialised AI agents handle the busywork (triage, specs, estimates, test plans, retrospectives) while humans keep the decisions that matter, and developers earn XP for the work that actually reaches production. It's a **self-hosted Jira alternative** for the full lifecycle: intake → spec → design → development → testing → deploy → retrospective. The data plane stays on your hardware; inference runs through your choice of agent — [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [GitHub Copilot](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli), [OpenAI Codex](https://developers.openai.com/codex/cli), or [Ollama](https://ollama.com) for fully-local inference — picked per organization in setup.
 
-> **Less process. More shipped.** The full methodology lives at [bodhiorchard.ai](https://bodhiorchard.ai/).
+> **Less process. More shipped.** The full methodology lives at [glideship.ai](https://glideship.ai/).
 
 ## Quick Start
 
@@ -109,15 +109,17 @@ And yes — your codebase is a living orchard. Repos as trees, features as fruit
 
 <div align="center">
 
-<a href="https://youtu.be/OxoqBI7BNxU"><img src="docs/images/livingtree.png" width="70%" alt="The Living Tree — your codebase as a living orchard"></a>
+<a href="https://youtu.be/IijjoCEpiac"><img src="docs/images/garden-video.webp" width="70%" alt="Watch the team garden — your repos as trees and your team walking the world"></a>
 
 </div>
 
-**More walkthroughs:** [Setup](https://youtu.be/ot-BmKxRgRA) · [Slack triage & MCP tools](https://youtu.be/i8kZdcL1bME) · [Requirements & estimation](https://youtu.be/YBwdTes0Fno) · [Design phase](https://youtu.be/lV71qhmfzzw) · [Development & retrospective](https://youtu.be/YjRihN_SKaw)
+**More walkthroughs:** [Setup](https://youtu.be/I9Sfb9lmcPQ) · [One BUD from idea to close](https://youtu.be/MfvfDH2RrvE) · [The agents at work](https://youtu.be/Sjx3BbLUPtI) · [Repository scans and the code graph](https://youtu.be/Y1y_CwpmnQs) · [Using Glideship from Claude Code](https://youtu.be/92ZykdGTAg4) · [Leave and employee records](https://youtu.be/ul1hbbkM94Q) · [All of them as a playlist](https://www.youtube.com/playlist?list=PLeYjQpQ6kfUo)
 
 ## People: leave, WFH and employee records
 
 The rest of the company can use Glideship too. HR and Sales staff get a People workspace with leave, the team calendar and their own details. Everything engineering is hidden from them in the UI and refused at the API, MCP, WebSocket and multiplayer layers.
+
+**[▶ Watch leave, approvals and employee records](https://youtu.be/ul1hbbkM94Q)** (1:44)
 
 - **Leave and work from home.** Balances per leave type, half days, optional holidays with a yearly quota, and backdating up to a limit HR sets. The request dialog counts working days, skipping weekends and holidays, before anything is sent.
 - **Loss of pay.** Leave past someone's balance is not refused. The extra days are marked unpaid, shown to the employee before they send the request and to the approver before they decide, and handed back if the request is cancelled or a holiday is added later.
@@ -224,7 +226,7 @@ The agent layer is engine-independent: a per-org provider selector runs the agen
 
 ### What is Agent-Driven Development?
 
-A methodology where specialised AI agents — not humans running status meetings — drive every phase of the software lifecycle, while humans review, decide, and steer. It sits in the slot Agile occupied in 2001: a reorganisation of work around new capabilities. The methodology is free to adopt with or without Glideship — see [bodhiorchard.ai](https://bodhiorchard.ai/).
+A methodology where specialised AI agents — not humans running status meetings — drive every phase of the software lifecycle, while humans review, decide, and steer. It sits in the slot Agile occupied in 2001: a reorganisation of work around new capabilities. The methodology is free to adopt with or without Glideship — see [glideship.ai](https://glideship.ai/).
 
 ### Is Glideship a self-hosted Jira alternative?
 

@@ -14,14 +14,9 @@ Vue 3 + Vuetify 3 + Pinia SPA. Hosts the in-app UI and the public landing site (
 - **Build**: Vite 5
 - **Tests**: Vitest
 
-## Two build targets, one source tree
+## The public website
 
-| Target | Entry | Command | Output |
-| --- | --- | --- | --- |
-| Main app (`localhost:3000`) | `index.html` → `src/main.ts` | `npm run dev` / `npm run build` | `frontend/dist/` |
-| Public landing (`bodhiorchard.ai`) | `landing-src/index.html` → `landing-src/main.ts` → wraps `MethodologyStep.vue` | `npm run build:landing` (uses `vite.landing.config.ts` + `vite-ssg`) | `frontend/dist-landing/` |
-
-The landing build pre-renders to true static HTML via `vite-ssg` so the page is SEO-friendly and visible without JavaScript. See [`landing-src/README.md`](landing-src/README.md) for the build internals.
+The marketing site at [glideship.ai](https://glideship.ai/) lives in its own repository and is not built from this workspace. The in-app `/methodology` route (`src/views/methodology/MethodologyView.vue`) only redirects to it.
 
 ## Common commands
 
@@ -39,12 +34,6 @@ npm --workspace bodhiorchard-frontend run build
 # Type-check only (use this as the gate — npm run lint is broken, see below)
 cd frontend && npx vue-tsc --noEmit
 
-# Build the public landing
-npm --workspace bodhiorchard-frontend run build:landing
-
-# Preview the built landing locally
-npm --workspace bodhiorchard-frontend run preview:landing
-
 # Unit tests (Vitest)
 npm --workspace bodhiorchard-frontend test
 ```
@@ -54,7 +43,6 @@ npm --workspace bodhiorchard-frontend test
 ```
 frontend/
 ├── index.html                 # Main app entry
-├── landing-src/               # Landing build (see landing-src/README.md)
 ├── public/                    # Main-app static assets (~60 MB — 3D models, etc.)
 ├── src/
 │   ├── App.vue                # Root component
@@ -102,10 +90,6 @@ Animation tracks must be referenced by **exact name** (e.g. `Sit_Chair_Idle`, no
 ## Shared world layout
 
 World zone positions, scaling, and paths live in [`shared/world/zones.ts`](../shared/world/zones.ts) and are imported by **both** the frontend engine **and** the multiplayer server. Edit one without the other and the simulations desync.
-
-## Frontend-only landing build deep-dive
-
-If you're changing the public landing page, edit `src/views/setup/steps/MethodologyStep.vue` — it's the single source of truth for both the in-app `/methodology` route and `bodhiorchard.ai`. See [`landing-src/README.md`](landing-src/README.md) for the SSR gotchas, the Vite root isolation rationale, and the deploy command.
 
 ## Environment
 
