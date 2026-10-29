@@ -26,8 +26,8 @@ This module writes, for a Codex/Copilot org:
     ``repo_setup._build_*_sh`` builders — one source of truth),
   * the provider-native hook config (``.codex/hooks.json`` /
     ``.github/hooks/copilot-cli-policy.json``),
-  * the provider MCP config (``.codex/config.toml`` /
-    ``.github/copilot/mcp-config.json``), pointing at the shared
+  * the provider MCP config (``.codex/config.toml``, or for Copilot the
+    repo-root ``.mcp.json`` it shares with Claude), pointing at the shared
     ``.glideship/mcp_bridge.py``,
   * ``AGENTS.md`` (the provider-neutral form of the CLAUDE.md section).
 
@@ -39,13 +39,18 @@ from __future__ import annotations
 
 import contextlib
 import json
-import shutil
 from pathlib import Path
 
 import structlog
 
 from app.mcp.bridge_env import BACKEND_URL_ENV
 from app.models.organization import AIProvider
+from app.services.repo_mcp_json import (
+    McpJsonMerge,
+    copilot_mcp_json,
+    copy_mcp_bridge,
+    merge_glideship_server,
+)
 from app.services.repo_setup import (
     _BG_END,
     _BG_START,
@@ -62,12 +67,7 @@ from app.services.repo_setup import (
     _build_subagent_stop_sh,
     _build_tool_error_track_sh,
 )
-from app.services.repo_setup_names import (
-    BRIDGE_PATH,
-    HOOKS_DIR,
-    MCP_SERVER_KEY,
-    mcp_server_entry,
-)
+from app.services.repo_setup_names import BRIDGE_PATH, HOOKS_DIR, MCP_SERVER_KEY
 
 logger = structlog.get_logger(__name__)
 
@@ -221,19 +221,6 @@ def _write_codex_config_toml(repo: Path, backend_url: str) -> bool:
     return True
 
 
-def _mcp_json_config(backend_url: str) -> dict[str, object]:
-    """Standard ``mcpServers`` shape shared by the copilot MCP file."""
-    return {"mcpServers": {MCP_SERVER_KEY: mcp_server_entry(backend_url)}}
-
-
-def _copy_mcp_bridge(repo: Path) -> None:
-    """Copy the STDIO bridge into the repo (shared by every provider's MCP)."""
-    source = Path(__file__).resolve().parents[2] / "mcp" / "stdio_bridge.py"
-    dest = repo / BRIDGE_PATH
-    dest.parent.mkdir(exist_ok=True)
-    shutil.copy2(source, dest)
-
-
 def _agents_md_section() -> str:
     """Provider-neutral form of the CLAUDE.md workflow section for AGENTS.md."""
     return (
@@ -263,15 +250,19 @@ def install_agent_hooks(repo_path: str, backend_url: str, provider: AIProvider) 
 
 
 def write_agent_mcp_config(repo_path: str, backend_url: str, provider: AIProvider) -> bool:
-    """Copy the bridge + write the provider's MCP config. Idempotent."""
+    """Copy the bridge + write the provider's MCP config. Idempotent.
+
+    Copilot reads the repo-root ``.mcp.json`` (the file Claude uses), or
+    ``.github/mcp.json`` when only that exists; the server is merged into
+    whichever it reads, alongside whatever the repo already lists.
+    """
     repo = Path(repo_path)
-    _copy_mcp_bridge(repo)
+    copy_mcp_bridge(repo)
     if provider == AIProvider.codex:
         changed = _write_codex_config_toml(repo, backend_url)
     elif provider == AIProvider.copilot:
-        changed = _write_json_if_changed(
-            repo / ".github" / "copilot" / "mcp-config.json", _mcp_json_config(backend_url)
-        )
+        merge = merge_glideship_server(copilot_mcp_json(repo), backend_url)
+        changed = merge is McpJsonMerge.WRITTEN
     else:
         changed = False
     logger.info("agent_mcp_written", repo=repo_path, provider=provider.value, changed=changed)
