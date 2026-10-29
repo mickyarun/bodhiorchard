@@ -17,14 +17,17 @@
 <!-- Month grid, Monday first. Each day lists who's out; holidays tint
      the cell. Clicking a day opens the day drawer. -->
 <template>
+  <!-- Rows and cells use display: contents, so they give the grid its ARIA
+       structure without changing the CSS grid's layout. -->
   <div class="grid" role="grid">
-    <div v-for="label in WEEKDAY_SHORT" :key="label" class="grid__head" role="columnheader">
-      {{ label }}
+    <div class="grid__row" role="row">
+      <div v-for="label in WEEKDAY_SHORT" :key="label" class="grid__head" role="columnheader">
+        {{ label }}
+      </div>
     </div>
-    <template v-for="week in weeks" :key="week[0].iso">
+    <div v-for="week in weeks" :key="week[0].iso" class="grid__row" role="row">
+      <div v-for="day in week" :key="day.iso" class="grid__slot" role="gridcell">
       <button
-        v-for="day in week"
-        :key="day.iso"
         type="button"
         class="grid__cell"
         :class="{
@@ -44,7 +47,8 @@
           <span v-if="hidden(day.iso)" class="grid__more">+{{ hidden(day.iso) }} more</span>
         </div>
       </button>
-    </template>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -83,6 +87,10 @@ function cellLabel(iso: string): string {
 .grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.grid__row,
+.grid__slot {
+  display: contents;
 }
 .grid__head {
   padding: 10px 12px;

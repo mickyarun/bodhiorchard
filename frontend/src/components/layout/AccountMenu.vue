@@ -24,9 +24,11 @@
         icon
         variant="text"
         density="comfortable"
-        :aria-label="`Account menu for ${authStore.user?.name || 'you'}`"
       >
+        <!-- Named by its visible initials plus hidden text, so voice control
+             can use what is on screen and screen readers hear whose menu. -->
         <AppMonogram :name="authStore.user?.name" :src="authStore.user?.avatar_url" :size="32" />
+        <span class="d-sr-only">Account menu for {{ authStore.user?.name || 'you' }}</span>
       </v-btn>
     </template>
 

@@ -152,10 +152,9 @@ const joined = computed(() => {
 }
 .summary__meta a {
   color: var(--color-accent-text);
-  text-decoration: none;
-}
-.summary__meta a:hover {
+  /* Underlined, not colour alone: it sits inside a sentence. */
   text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .summary__code {
   font-family: var(--font-mono);

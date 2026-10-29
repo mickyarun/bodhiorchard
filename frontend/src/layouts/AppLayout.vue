@@ -36,14 +36,16 @@
     >
       <SidebarHead v-if="!compact" :collapsed="collapsed" />
 
-      <v-list density="compact" nav class="px-2">
+      <!-- role="none": the drawer is already a <nav> of links, and a list
+           role would need list items around each one. -->
+      <v-list density="compact" nav class="px-2" role="none">
         <EngineeringNav v-if="canAccessEngineering" :rail="collapsed" />
         <PeopleNav :rail="collapsed" :show-heading="canAccessEngineering" />
       </v-list>
 
       <template #append>
         <v-divider class="mb-2" />
-        <v-list density="compact" nav class="px-2 pb-2">
+        <v-list density="compact" nav class="px-2 pb-2" role="none">
           <v-list-item
             v-if="canAccessEngineering && canManageMembers"
             prepend-icon="mdi-account-group-outline"

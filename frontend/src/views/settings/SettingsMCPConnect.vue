@@ -901,7 +901,8 @@ onMounted(refresh)
   font-family: var(--font-mono, 'Menlo', monospace);
   font-size: 12px;
   font-weight: 600;
-  color: rgb(var(--v-theme-primary));
+  /* Body text colour: primary on this grey chip missed WCAG AA contrast. */
+  color: rgb(var(--v-theme-on-surface));
 }
 .tool-row__description {
   font-size: 13px;

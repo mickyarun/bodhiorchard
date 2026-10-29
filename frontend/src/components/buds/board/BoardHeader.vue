@@ -145,10 +145,9 @@ const countLabel = computed(() => {
 }
 .board-header__hint a {
   color: var(--color-accent-text);
-  text-decoration: none;
-}
-.board-header__hint a:hover {
+  /* Underlined, not colour alone: it sits inside a sentence. */
   text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .board-header__filters,
 .board-header__tools {
