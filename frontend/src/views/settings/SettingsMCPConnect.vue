@@ -105,8 +105,10 @@
           <template #append>
             <v-tooltip text="Revoke this token" location="top">
               <template #activator="{ props: tipProps }">
+                <!-- The tooltip only describes the button; the label names it. -->
                 <v-btn
                   v-bind="tipProps"
+                  :aria-label="`Revoke ${t.name}`"
                   icon="mdi-delete-outline"
                   size="small"
                   variant="text"
