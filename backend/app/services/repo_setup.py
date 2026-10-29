@@ -1565,7 +1565,14 @@ _SETUP_PR_BODY = (
     "- `package.json` — prepare script sets `core.hooksPath`\n"
     f"- `{BRIDGE_PATH}` — stdio bridge spawned by `.mcp.json`\n"
     "- `CLAUDE.md` — Glideship code-intelligence MCP guidance\n"
-    "- `.claude/skills/` — Glideship agent skill definitions\n"
+    "- `.claude/skills/` — Glideship agent skill definitions\n\n"
+    "## If this repo was set up before the Glideship rename\n\n"
+    f"The MCP server in `.mcp.json` is now called `{MCP_SERVER_KEY}` instead of "
+    f"`{LEGACY_MCP_SERVER_KEY}`, and other servers already listed there are kept. "
+    "After merging, Claude Code asks each developer once to approve the renamed "
+    f"server, and its tools show up as `mcp__{MCP_SERVER_KEY}__*`. The hooks read "
+    "`GLIDESHIP_MCP_TOKEN` and still accept `BODHIORCHARD_MCP_TOKEN`, so dev "
+    "activity keeps posting either way.\n"
 )
 
 

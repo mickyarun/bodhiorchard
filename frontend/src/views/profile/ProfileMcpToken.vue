@@ -176,8 +176,8 @@
 
       <AppCallout variant="info" eyebrow="Repos set up before the rename" class="mt-3">
         Until a repo merges its latest Glideship setup PR, its hooks read
-        <code>{{ LEGACY_MCP_TOKEN_ENV }}</code> instead. Export the same token
-        under that name too, or merge the setup PR.
+        <code>{{ LEGACY_MCP_TOKEN_ENV }}</code> instead. The line above sets
+        that name too, so those repos keep working.
       </AppCallout>
     </v-card>
   </v-container>

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Phase B1 — bootstrap a tracked repo's Glideship configuration.
+"""Bootstrap a tracked repo's Glideship configuration.
 
 Per-repo setup that runs once on the first scan (and is idempotent on
 subsequent scans):
@@ -88,7 +88,7 @@ async def phase_b1_repo_setup(
     scan_id: str,
     base_pct: int,
 ) -> str | None:
-    """Phase B1: Worktrees, MCP init, hooks, commit+push+PR.
+    """Worktrees, MCP init, hooks, commit+push+PR.
 
     Reports granular progress for each sub-step.
 

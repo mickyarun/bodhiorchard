@@ -133,8 +133,8 @@
           <span class="text-caption">
             Watch out for old <code>{{ MCP_TOKEN_ENV }}</code> exports in
             <code>~/.zshrc</code> — they override new ones on every shell.
-            Repos that haven't merged their latest setup PR read
-            <code>{{ LEGACY_MCP_TOKEN_ENV }}</code> instead.
+            The line also sets <code>{{ LEGACY_MCP_TOKEN_ENV }}</code>, which
+            repos that haven't merged their latest setup PR still read.
           </span>
         </div>
       </div>

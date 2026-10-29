@@ -17,17 +17,27 @@ import { MCP_TOKEN_PLACEHOLDER, exportLine, shellSnippets } from './mcpEnvSnippe
 
 describe('exportLine', () => {
   it('uses the token, or a placeholder before one exists', () => {
-    expect(exportLine('abc')).toBe('export GLIDESHIP_MCP_TOKEN="abc"')
-    expect(exportLine('')).toBe(`export GLIDESHIP_MCP_TOKEN="${MCP_TOKEN_PLACEHOLDER}"`)
+    expect(exportLine('abc')).toBe('export GLIDESHIP_MCP_TOKEN="abc" BODHIORCHARD_MCP_TOKEN="abc"')
+    expect(exportLine('')).toBe(
+      `export GLIDESHIP_MCP_TOKEN="${MCP_TOKEN_PLACEHOLDER}" BODHIORCHARD_MCP_TOKEN="${MCP_TOKEN_PLACEHOLDER}"`,
+    )
+  })
+
+  it('also sets the old name, so hooks in repos set up before the rename keep posting', () => {
+    expect(exportLine('abc')).toContain('BODHIORCHARD_MCP_TOKEN="abc"')
   })
 })
 
 describe('shellSnippets', () => {
   it('writes the variable for each shell', () => {
     const [mac, linux, windows] = shellSnippets('tok')
-    expect(mac.code).toContain(`echo 'export GLIDESHIP_MCP_TOKEN="tok"' >> ~/.zshrc`)
+    expect(mac.code).toContain(
+      `echo 'export GLIDESHIP_MCP_TOKEN="tok" BODHIORCHARD_MCP_TOKEN="tok"' >> ~/.zshrc`,
+    )
     expect(linux.code).toContain('>> ~/.bashrc')
-    expect(windows.code).toContain('setx GLIDESHIP_MCP_TOKEN "tok"')
-    expect(windows.code).toContain('SetEnvironmentVariable("GLIDESHIP_MCP_TOKEN", "tok", "User")')
+    for (const name of ['GLIDESHIP_MCP_TOKEN', 'BODHIORCHARD_MCP_TOKEN']) {
+      expect(windows.code).toContain(`setx ${name} "tok"`)
+      expect(windows.code).toContain(`SetEnvironmentVariable("${name}", "tok", "User")`)
+    }
   })
 })

@@ -16,8 +16,9 @@
  * Shell snippets that set the workspace MCP token as an environment
  * variable. ``GLIDESHIP_MCP_TOKEN`` is the variable the repo's MCP bridge
  * and hook scripts read. Repos set up before the rename read only
- * ``LEGACY_MCP_TOKEN_ENV`` until their Glideship setup PR is merged; the
- * new scripts accept both, with the new name winning.
+ * ``LEGACY_MCP_TOKEN_ENV`` until their Glideship setup PR is merged, so
+ * every snippet sets both names to the same token; the new scripts accept
+ * either, with the new name winning.
  */
 
 export const MCP_TOKEN_ENV = 'GLIDESHIP_MCP_TOKEN'
@@ -31,8 +32,11 @@ export interface ShellSnippet {
   code: string
 }
 
+const TOKEN_ENVS = [MCP_TOKEN_ENV, LEGACY_MCP_TOKEN_ENV]
+
 export function exportLine(token: string): string {
-  return `export ${MCP_TOKEN_ENV}="${token || MCP_TOKEN_PLACEHOLDER}"`
+  const value = token || MCP_TOKEN_PLACEHOLDER
+  return `export ${TOKEN_ENVS.map((name) => `${name}="${value}"`).join(' ')}`
 }
 
 export function shellSnippets(token: string): ShellSnippet[] {
@@ -56,8 +60,9 @@ export function shellSnippets(token: string): ShellSnippet[] {
       icon: 'mdi-microsoft-windows',
       code:
         `# PowerShell, set permanently for the current user\n`
-        + `[Environment]::SetEnvironmentVariable("${MCP_TOKEN_ENV}", "${value}", "User")\n\n`
-        + `# Or from CMD\nsetx ${MCP_TOKEN_ENV} "${value}"`,
+        + TOKEN_ENVS.map((name) => `[Environment]::SetEnvironmentVariable("${name}", "${value}", "User")\n`).join('')
+        + `\n# Or from CMD\n`
+        + TOKEN_ENVS.map((name) => `setx ${name} "${value}"`).join('\n'),
     },
   ]
 }

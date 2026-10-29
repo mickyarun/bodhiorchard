@@ -26,8 +26,8 @@ This module writes, for a Codex/Copilot org:
     ``repo_setup._build_*_sh`` builders — one source of truth),
   * the provider-native hook config (``.codex/hooks.json`` /
     ``.github/hooks/copilot-cli-policy.json``),
-  * the provider MCP config (``.codex/config.toml``, or for Copilot the
-    repo-root ``.mcp.json`` it shares with Claude), pointing at the shared
+  * the provider MCP config (merged into ``.codex/config.toml``, or for
+    Copilot the repo-root ``.mcp.json`` it shares with Claude), pointing at the shared
     ``.glideship/mcp_bridge.py``,
   * ``AGENTS.md`` (the provider-neutral form of the CLAUDE.md section).
 
@@ -43,8 +43,8 @@ from pathlib import Path
 
 import structlog
 
-from app.mcp.bridge_env import BACKEND_URL_ENV
 from app.models.organization import AIProvider
+from app.services.repo_codex_toml import CODEX_CONFIG, merge_codex_server
 from app.services.repo_mcp_json import (
     McpJsonMerge,
     copilot_mcp_json,
@@ -67,7 +67,7 @@ from app.services.repo_setup import (
     _build_subagent_stop_sh,
     _build_tool_error_track_sh,
 )
-from app.services.repo_setup_names import BRIDGE_PATH, HOOKS_DIR, MCP_SERVER_KEY
+from app.services.repo_setup_names import HOOKS_DIR
 
 logger = structlog.get_logger(__name__)
 
@@ -191,36 +191,6 @@ def _write_json_if_changed(path: Path, data: dict[str, object]) -> bool:
     return True
 
 
-def _codex_config_toml(backend_url: str) -> str:
-    """``.codex/config.toml`` MCP block pointing at the shared stdio bridge.
-
-    ``default_tools_approval_mode = "approve"`` lets the Glideship tools
-    run without a per-call approval prompt (mirrors the per-invocation flag
-    the backend adapter passes), so BUD-todo claims don't stall.
-    """
-    return (
-        "# Added by Glideship — MCP server for BUD tooling + code intelligence.\n"
-        f"[mcp_servers.{MCP_SERVER_KEY}]\n"
-        'command = "python3"\n'
-        f'args = ["{BRIDGE_PATH}"]\n'
-        'default_tools_approval_mode = "approve"\n\n'
-        f"[mcp_servers.{MCP_SERVER_KEY}.env]\n"
-        f'{BACKEND_URL_ENV} = "{backend_url}"\n'
-    )
-
-
-def _write_codex_config_toml(repo: Path, backend_url: str) -> bool:
-    """Write/replace the Glideship block in ``.codex/config.toml``. Idempotent."""
-    block = _codex_config_toml(backend_url)
-    path = repo / ".codex" / "config.toml"
-    existing = path.read_text(encoding="utf-8", errors="replace") if path.exists() else None
-    if existing is not None and existing.strip() == block.strip():
-        return False
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(block, encoding="utf-8")
-    return True
-
-
 def _agents_md_section() -> str:
     """Provider-neutral form of the CLAUDE.md workflow section for AGENTS.md."""
     return (
@@ -259,7 +229,7 @@ def write_agent_mcp_config(repo_path: str, backend_url: str, provider: AIProvide
     repo = Path(repo_path)
     copy_mcp_bridge(repo)
     if provider == AIProvider.codex:
-        changed = _write_codex_config_toml(repo, backend_url)
+        changed = merge_codex_server(repo / CODEX_CONFIG, backend_url) is McpJsonMerge.WRITTEN
     elif provider == AIProvider.copilot:
         merge = merge_glideship_server(copilot_mcp_json(repo), backend_url)
         changed = merge is McpJsonMerge.WRITTEN
