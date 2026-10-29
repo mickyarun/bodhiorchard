@@ -18,7 +18,7 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
@@ -216,7 +216,9 @@ class MemberDirectoryEntry(BaseModel):
 
     id: uuid.UUID
     name: str
-    email: EmailStr
+    # Stored, not user input: git-derived members can hold addresses a
+    # strict email check refuses, and one of them must not fail the list.
+    email: str
     avatar_url: str | None = None
 
 
