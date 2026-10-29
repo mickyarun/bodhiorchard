@@ -34,6 +34,7 @@ from app.services.bud_agent_context import (
     load_bud_agent_context,
 )
 from app.services.embedding_service import embedding_service
+from app.services.managed_worktrees import DEVELOP_WORKTREE, existing_worktree
 from app.services.prompt_builder import build_prd_prompt as _build_prd
 from app.services.skill_loader import Skill
 
@@ -463,8 +464,8 @@ def _build_repo_diff_sections(
             )
         else:
             last_sha = last_shas.get(repo_path, "HEAD")
-            develop_wt = Path(repo_path) / ".bodhiorchard" / "develop"
-            diff_base = "develop" if develop_wt.exists() else "HEAD~10"
+            has_develop = existing_worktree(repo_path, DEVELOP_WORKTREE) is not None
+            diff_base = "develop" if has_develop else "HEAD~10"
             sections.append(
                 header + f"  - Last commit: `{last_sha}`\n"
                 f"  - Diff command: `git diff {diff_base}...{last_sha} --stat --patch`"

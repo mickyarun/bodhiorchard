@@ -47,6 +47,7 @@ from app.api.v1 import settings_repos_local as local_api
 from app.config import settings as app_settings
 from app.core.auth_deps import get_current_user, get_db
 from app.core.permission_deps import PermissionSet, get_permission_set
+from app.services.managed_worktrees import DEVELOP_WORKTREE, worktree_path
 
 BROWSE = "/api/v1/settings/repos/browse-directories"
 BRANCHES = "/api/v1/settings/repos/local-branches"
@@ -239,7 +240,14 @@ class TestServesThePicker:
         _git("init", "-q", "-b", "main", cwd=repo)
         _git("commit", "-q", "--allow-empty", "-m", "init", cwd=repo)
         _git("branch", "develop", cwd=repo)
-        _git("worktree", "add", "-q", str(repo / ".bodhiorchard" / "develop"), "develop", cwd=repo)
+        _git(
+            "worktree",
+            "add",
+            "-q",
+            str(worktree_path(str(repo), DEVELOP_WORKTREE)),
+            "develop",
+            cwd=repo,
+        )
 
         response = await editor.get(BRANCHES, params={"path": str(repo)})
 

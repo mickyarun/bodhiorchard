@@ -31,8 +31,8 @@ This module writes, for a Codex/Copilot org:
     ``.glideship/mcp_bridge.py``,
   * ``AGENTS.md`` (the provider-neutral form of the CLAUDE.md section).
 
-The generic files (``.githooks/``, ``.gitignore``, ``package.json`` prepare,
-the MCP bridge) are written for every provider by the existing helpers.
+The generic files (``.githooks/``, ``package.json`` prepare, the MCP
+bridge) are written for every provider by the existing helpers.
 """
 
 from __future__ import annotations
