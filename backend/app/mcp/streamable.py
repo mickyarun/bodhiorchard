@@ -326,7 +326,7 @@ async def _dispatch(
         return {
             "protocolVersion": "2025-03-26",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "bodhiorchard", "version": "0.1.0"},
+            "serverInfo": {"name": "glideship", "version": "0.1.0"},
         }
 
     if method == "tools/list":

@@ -20,17 +20,21 @@ from stdin, forwards tool calls to the Glideship backend via HTTP, and writes
 JSON-RPC responses to stdout.
 
 Register with Claude Code CLI:
-    claude mcp add bodhiorchard -s user \\
-        -e BODHIORCHARD_BACKEND_URL=http://localhost:8000 \\
-        -e BODHIORCHARD_MCP_TOKEN_FILE=~/.bodhiorchard/mcp_token \\
+    claude mcp add glideship -s user \\
+        -e GLIDESHIP_BACKEND_URL=http://localhost:8000 \\
+        -e GLIDESHIP_MCP_TOKEN_FILE=~/.glideship/mcp_token \\
         -- python /path/to/stdio_bridge.py
 
 Environment variables:
-    BODHIORCHARD_BACKEND_URL: Backend base URL (e.g. http://localhost:8000)
-    BODHIORCHARD_MCP_TOKEN: Bearer token for MCP authentication (preferred, direct)
-    BODHIORCHARD_MCP_TOKEN_FILE: Path to file containing the token (fallback for
+    GLIDESHIP_BACKEND_URL: Backend base URL (e.g. http://localhost:8000)
+    GLIDESHIP_MCP_TOKEN: Bearer token for MCP authentication (preferred, direct)
+    GLIDESHIP_MCP_TOKEN_FILE: Path to file containing the token (fallback for
         global registration)
-    BODHIORCHARD_MCP_TOOLS: Comma-separated tool names to expose (optional, all if empty)
+    GLIDESHIP_MCP_TOOLS: Comma-separated tool names to expose (optional, all if empty)
+
+Each variable is also read under its pre-rename ``BODHIORCHARD_`` prefix, so
+repos and shell profiles set up before the rename keep working. The
+``GLIDESHIP_`` name wins when both are set.
 """
 
 import contextlib
@@ -41,13 +45,30 @@ import urllib.error
 import urllib.request
 from typing import Any, cast
 
-BACKEND_URL = os.environ.get("BODHIORCHARD_BACKEND_URL", "http://localhost:8000")
-MCP_TOOLS_FILTER = os.environ.get("BODHIORCHARD_MCP_TOOLS", "")
+_ENV_PREFIXES = ("GLIDESHIP_", "BODHIORCHARD_")
+
+
+def _env(name: str, default: str = "") -> str:
+    """Read ``GLIDESHIP_<name>``, falling back to the legacy ``BODHIORCHARD_<name>``.
+
+    The first name that is *set* wins, even when blank, so an explicit
+    per-run value (e.g. ``GLIDESHIP_MCP_TOKEN_FILE=""``) can't be overridden
+    by a legacy variable inherited from the environment.
+    """
+    for prefix in _ENV_PREFIXES:
+        value = os.environ.get(f"{prefix}{name}")
+        if value is not None:
+            return value or default
+    return default
+
+
+BACKEND_URL = _env("BACKEND_URL", "http://localhost:8000")
+MCP_TOOLS_FILTER = _env("MCP_TOOLS")
 
 
 def _log(msg: str) -> None:
     """Write a diagnostic line to stderr (visible in Claude CLI logs)."""
-    print(f"[bodhiorchard-bridge] {msg}", file=sys.stderr, flush=True)
+    print(f"[glideship-bridge] {msg}", file=sys.stderr, flush=True)
 
 
 def _get_token() -> str:
@@ -57,11 +78,11 @@ def _get_token() -> str:
     it explicitly.  File-based tokens are a fallback for global
     ``claude mcp add`` registrations where the token refreshes on disk.
     """
-    direct = os.environ.get("BODHIORCHARD_MCP_TOKEN", "")
+    direct = _env("MCP_TOKEN")
     if direct:
         _log(f"token_source=env token_prefix={direct[:8]}")
         return direct
-    token_file = os.environ.get("BODHIORCHARD_MCP_TOKEN_FILE", "")
+    token_file = _env("MCP_TOKEN_FILE")
     if token_file:
         expanded = os.path.expanduser(token_file)
         if os.path.isfile(expanded):
@@ -177,7 +198,7 @@ def main() -> None:
                     {
                         "protocolVersion": "2024-11-05",
                         "capabilities": {"tools": {"listChanged": False}},
-                        "serverInfo": {"name": "bodhiorchard-mcp", "version": "1.0.0"},
+                        "serverInfo": {"name": "glideship-mcp", "version": "1.0.0"},
                     },
                 )
             elif method == "notifications/initialized":

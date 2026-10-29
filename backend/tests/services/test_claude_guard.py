@@ -53,6 +53,7 @@ class TestBuildClaudeEnv:
             "GH_TOKEN",
             "AWS_ACCESS_KEY_ID",
             "AWS_SECRET_ACCESS_KEY",
+            "GLIDESHIP_MCP_TOKEN",
             "BODHIORCHARD_MCP_TOKEN",
             "BODHIORCHARD_DB_PASSWORD",
             "OPENAI_API_KEY",
@@ -239,6 +240,7 @@ class TestClaudeRunnerIntegration:
 
         async def _fake_spawn(*args: object, **kwargs: object) -> _FakeProc:
             argv = list(args)
+            captured["strict"] = "--strict-mcp-config" in argv
             try:
                 idx = argv.index("--mcp-config")
                 captured["mcp_path"] = argv[idx + 1]
@@ -263,6 +265,8 @@ class TestClaudeRunnerIntegration:
 
         assert captured.get("mcp_path") is not None
         assert captured["mode"] == 0o600, f"got mode {oct(captured['mode'])}"  # type: ignore[arg-type, call-overload]
+        # Only the per-run server: the repo's own .mcp.json must not load.
+        assert captured["strict"] is True
 
 
 class TestValidateWorkingDir:

@@ -34,6 +34,7 @@ from typing import Any
 import structlog
 
 from app.config import settings
+from app.mcp.bridge_env import BACKEND_URL_ENV, MCP_TOKEN_ENV, MCP_TOKEN_FILE_ENV, MCP_TOOLS_ENV
 from app.services import claude_errors
 from app.services.claude_errors import ClaudeErrorCode
 from app.services.claude_guard import (
@@ -741,10 +742,10 @@ async def run_claude_code(
                     "command": sys.executable,
                     "args": [_BRIDGE_PATH],
                     "env": {
-                        "BODHIORCHARD_BACKEND_URL": config.mcp.backend_url,
-                        "BODHIORCHARD_MCP_TOKEN": config.mcp.mcp_token,
-                        "BODHIORCHARD_MCP_TOKEN_FILE": "",
-                        "BODHIORCHARD_MCP_TOOLS": ",".join(config.mcp.tool_names),
+                        BACKEND_URL_ENV: config.mcp.backend_url,
+                        MCP_TOKEN_ENV: config.mcp.mcp_token,
+                        MCP_TOKEN_FILE_ENV: "",
+                        MCP_TOOLS_ENV: ",".join(config.mcp.tool_names),
                     },
                 },
             },
@@ -769,7 +770,11 @@ async def run_claude_code(
             mcp_config_file = Path(tmp.name)
         with contextlib.suppress(OSError):
             os.chmod(mcp_config_file, 0o600)
-        cmd.extend(["--mcp-config", str(mcp_config_file)])
+        # ``--strict-mcp-config``: only this per-run server, never the
+        # repo's own ``.mcp.json``. The repo's entry is keyed ``glideship``
+        # and would otherwise start a second, tokenless bridge alongside
+        # this one — and a scanned repo must not get to spawn MCP servers.
+        cmd.extend(["--mcp-config", str(mcp_config_file), "--strict-mcp-config"])
 
     logger.info(
         "claude_run_start",

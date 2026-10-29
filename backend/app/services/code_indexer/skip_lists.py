@@ -63,7 +63,7 @@ The directory list is drawn from these ecosystems:
   Generic      — build, dist, out, coverage, .coverage, tmp, temp,
                  .idea, .vscode, .fleet, .vs, .cache, cdk.out,
                  .serverless, .terraform, _site, .jekyll-cache
-  bodhi        — .bodhiorchard, .gitnexus
+  Glideship    — .glideship, .bodhiorchard (pre-rename), .gitnexus
 
 Override hooks: ``is_vendored`` accepts an optional ``extra_skip_dirs``
 set so a per-repo config (or a unit test) can extend the list without
@@ -195,7 +195,8 @@ _VENDORED_DIRS: frozenset[str] = frozenset(
         # ── Static-site generated output ────────────────────────
         "_site",
         ".jekyll-cache",
-        # ── bodhi internals + legacy gitnexus ───────────────────
+        # ── Glideship internals + legacy gitnexus ───────────────
+        ".glideship",
         ".bodhiorchard",
         ".gitnexus",
     }

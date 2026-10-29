@@ -14,12 +14,15 @@
 
 /**
  * Shell snippets that set the workspace MCP token as an environment
- * variable. ``BODHIORCHARD_MCP_TOKEN`` is the variable name the generated
- * ``.mcp.json`` reads, so it must not change.
+ * variable. ``GLIDESHIP_MCP_TOKEN`` is the variable the repo's MCP bridge
+ * and hook scripts read. Repos set up before the rename read only
+ * ``LEGACY_MCP_TOKEN_ENV`` until their Glideship setup PR is merged; the
+ * new scripts accept both, with the new name winning.
  */
 
-export const MCP_TOKEN_ENV = 'BODHIORCHARD_MCP_TOKEN'
-export const MCP_TOKEN_PLACEHOLDER = '<your-bodhiorchard-token>'
+export const MCP_TOKEN_ENV = 'GLIDESHIP_MCP_TOKEN'
+export const LEGACY_MCP_TOKEN_ENV = 'BODHIORCHARD_MCP_TOKEN'
+export const MCP_TOKEN_PLACEHOLDER = '<your-glideship-token>'
 
 export interface ShellSnippet {
   id: 'mac' | 'linux' | 'windows'

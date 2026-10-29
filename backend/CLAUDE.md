@@ -79,7 +79,7 @@ alembic upgrade head
 
 ## Remote MCP endpoint awareness
 
-- `/mcp/sse` (POST + GET) exposes the read-only remote MCP transport for external AI clients (Claude Desktop / Cursor / Continue). Tool exposure is enforced by the `REMOTE_TOOLS` frozenset in `app/mcp/streamable.py` — adding a tool to `TOOL_HANDLERS` does NOT make it remote-callable; that requires an explicit entry there.
+- `/mcp/sse` (POST + GET) exposes the remote MCP transport for external AI clients (Claude Desktop / Cursor / Continue): reads plus the scoped BYO-AI writes (`create_bud`, `update_bud`, `create_todo`, `update_todo`). Tool exposure is enforced by the `REMOTE_TOOLS` frozenset in `app/mcp/streamable.py` — adding a tool to `TOOL_HANDLERS` does NOT make it remote-callable; that requires an explicit entry there.
 - `user_mcp_tokens` rows are multi-tenant credentials with `(user_id, org_id, name)` unique. `expires_at` and `last_used_at` are nullable; internal scan-pipeline tokens are in-memory only and bypass expiry checks.
 - `mcp_audit_log` captures every `/mcp/*` call (success + failure). Retention is 90 days via the daily async loop in `app/services/mcp_audit_cleanup.py`. Treat it as append-only; never UPDATE it from a handler. Read access is admin-gated via `org:edit_settings`.
 - `bud_documents.auto_generate_phases` (JSONB, nullable) gates stage-agent auto-spawn per phase. New BUDs default empty (= all skip); always check `(bud.auto_generate_phases or {}).get(str(stage), False)` alongside status. See AGENTS.md.

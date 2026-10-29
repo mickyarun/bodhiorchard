@@ -42,11 +42,11 @@ def test_codex_writes_native_hooks_not_claude(tmp_path: Path) -> None:
     assert "SessionStart" in cfg["hooks"]
     assert "PostToolUse" in cfg["hooks"]
     cmd = cfg["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-    assert ".bodhiorchard/hooks/session-start.sh" in cmd
+    assert ".glideship/hooks/session-start.sh" in cmd
 
-    # Shared scripts live under .bodhiorchard/hooks, NOT .claude.
-    assert (tmp_path / ".bodhiorchard" / "hooks" / "_common.sh").exists()
-    assert (tmp_path / ".bodhiorchard" / "hooks" / "session-start.sh").exists()
+    # Shared scripts live under .glideship/hooks, NOT .claude.
+    assert (tmp_path / ".glideship" / "hooks" / "_common.sh").exists()
+    assert (tmp_path / ".glideship" / "hooks" / "session-start.sh").exists()
     assert not (tmp_path / ".claude").exists()
 
     # Idempotent second run.
@@ -62,14 +62,14 @@ def test_copilot_writes_camelcase_policy(tmp_path: Path) -> None:
     assert "sessionStart" in cfg["hooks"]  # camelCase
     assert "postToolUseFailure" in cfg["hooks"]  # copilot-only event
     entry = cfg["hooks"]["sessionStart"][0]
-    assert entry["bash"].endswith(".bodhiorchard/hooks/session-start.sh")
+    assert entry["bash"].endswith(".glideship/hooks/session-start.sh")
     # No codex config for a copilot org.
     assert not (tmp_path / ".codex").exists()
 
 
 def test_shared_common_sh_reads_both_session_id_casings(tmp_path: Path) -> None:
     install_agent_hooks(str(tmp_path), "http://backend", AIProvider.codex)
-    common = (tmp_path / ".bodhiorchard" / "hooks" / "_common.sh").read_text()
+    common = (tmp_path / ".glideship" / "hooks" / "_common.sh").read_text()
     # One script set serves every provider — Claude/Codex ``session_id`` and
     # Copilot ``sessionId`` both parse.
     assert "session_id" in common
@@ -81,12 +81,13 @@ def test_codex_mcp_config_points_at_bridge(tmp_path: Path) -> None:
     assert changed is True
 
     toml = (tmp_path / ".codex" / "config.toml").read_text()
-    assert "[mcp_servers.bodhiorchard]" in toml
-    assert ".bodhiorchard/mcp_bridge.py" in toml
+    assert "[mcp_servers.glideship]" in toml
+    assert ".glideship/mcp_bridge.py" in toml
+    assert 'GLIDESHIP_BACKEND_URL = "http://backend"' in toml
     assert "http://backend" in toml
     assert 'default_tools_approval_mode = "approve"' in toml
     # The stdio bridge is copied in for the developer's CLI to spawn.
-    assert (tmp_path / ".bodhiorchard" / "mcp_bridge.py").exists()
+    assert (tmp_path / ".glideship" / "mcp_bridge.py").exists()
 
     assert write_agent_mcp_config(str(tmp_path), "http://backend", AIProvider.codex) is False
 
@@ -97,7 +98,7 @@ def test_agents_md_is_provider_neutral_and_idempotent(tmp_path: Path) -> None:
 
     md = (tmp_path / "AGENTS.md").read_text()
     assert "Glideship" in md
-    assert ".bodhiorchard/hooks/" in md  # rewritten from .claude/hooks/
+    assert ".glideship/hooks/" in md  # rewritten from .claude/hooks/
     assert "<!-- bodhiorchard:start -->" in md
     assert "<!-- bodhiorchard:end -->" in md
 

@@ -1,14 +1,14 @@
 # Connect your local AI to Glideship via MCP
 
-Glideship exposes a **read-only** Model Context Protocol (MCP) endpoint so
-your local AI assistant (Claude Desktop, Cursor, Continue, etc.) can use the
-same org context our internal agents see — recent BUDs, the active-features
-knowledge base, and your design systems — while you draft a PRD, design or
-tech spec in your own tooling.
+Glideship exposes a Model Context Protocol (MCP) endpoint so your local AI
+assistant (Claude Desktop, Cursor, Continue, etc.) can use the same org
+context our internal agents see — recent BUDs, the active-features knowledge
+base, and your design systems — while you draft a PRD, design or tech spec in
+your own tooling.
 
-When you finish, paste the result into the BUD section editor. The remote
-endpoint **cannot write** to your data; uploads happen through the in-app
-editor only.
+The endpoint can also write, within narrow limits: it can create a BUD, save
+content for the BUD's current phase, and add or edit plan TODOs. Everything
+else (testing, code review, status changes, assignment) stays in the app.
 
 ## When to use it
 
@@ -22,7 +22,7 @@ show a banner with a one-click link to this page.
 ## Endpoint
 
 ```
-https://<your-bodhiorchard-host>/mcp/sse
+https://<your-glideship-host>/mcp/sse
 ```
 
 * Transport: MCP `2025-03-26/streamable-http`
@@ -31,17 +31,35 @@ https://<your-bodhiorchard-host>/mcp/sse
 
 ## Available tools
 
+Ten tools, grouped by whether they change anything.
+
+**Read**
+
 | Tool | Purpose |
 | --- | --- |
-| `get_bud_context` | List recent BUDs in your org for context. |
-| `get_features` | Semantic knowledge search over your org's active features. |
+| `get_bud_context` | List in-progress BUDs (with an optional keyword filter) so the AI doesn't propose duplicates. |
+| `get_bud_by_id` | Fetch one BUD with the full body of every section, by UUID or by its BUD number. |
+| `get_features` | Hybrid keyword + semantic search over your org's active features. |
 | `list_design_systems` | Design-system metadata per repo. |
 | `get_design_system` | Full HTML / CSS / tokens for a repo or the org default. |
-| `get_prompt` | Return our agent's prompt for a BUD stage (`task_type` ∈ `bud` / `design` / `tech_arch` / `testing`). Feed it to your local AI so output matches the section-editor shape. |
+| `get_prompt` | Return our agent's prompt for a BUD stage (`task_type` ∈ `pm` / `design` / `tech_plan` / `testing`). Feed it to your local AI so output matches the section-editor shape. |
+
+**Write**
+
+| Tool | Purpose |
+| --- | --- |
+| `create_bud` | Create a new BUD. The token's user becomes creator and assignee. |
+| `update_bud` | Save content for the BUD's current phase: the PRD, the design, or the tech spec. Assignee only; the server picks the field from the phase, and `expected_phase` rejects the write if the BUD has moved on. |
+| `create_todo` | Add a TODO to a BUD's plan for work the tech-spec plan missed. It starts pending and unassigned, and a later regenerate keeps it. |
+| `update_todo` | Edit a TODO's title or description. Status and assignment stay in the app. |
+
+All four writes need a per-user token, and every BUD write is saved as a
+version you can see in the BUD history.
 
 That's the complete list. `write_bud`, `get_team_context`, `code_*` and
-every other internal tool are NOT reachable from this endpoint — adding a
-new tool to the internal handler registry never widens this surface.
+every other internal tool are NOT reachable from this endpoint — the
+transport keeps its own allowlist (`REMOTE_TOOLS` in `app/mcp/streamable.py`),
+so adding a tool to the internal handler registry never widens this surface.
 
 ## Manage your tokens
 
@@ -72,7 +90,7 @@ everywhere.
 // %APPDATA%\Claude\claude_desktop_config.json (Windows)
 {
   "mcpServers": {
-    "bodhiorchard": {
+    "glideship": {
       "command": "npx",
       "args": [
         "-y",
@@ -91,7 +109,7 @@ everywhere.
 ```jsonc
 {
   "mcpServers": {
-    "bodhiorchard": {
+    "glideship": {
       "type": "http",
       "url": "https://<your-host>/mcp/sse",
       "headers": { "Authorization": "Bearer YOUR_TOKEN_HERE" }
@@ -106,7 +124,7 @@ everywhere.
 // ~/.cursor/mcp.json
 {
   "mcpServers": {
-    "bodhiorchard": {
+    "glideship": {
       "command": "npx",
       "args": [
         "-y",
@@ -125,7 +143,7 @@ everywhere.
 ```jsonc
 // ~/.continue/config.json under "experimental.mcpServers"
 {
-  "name": "bodhiorchard",
+  "name": "glideship",
   "command": "npx",
   "args": [
     "-y",
@@ -141,8 +159,9 @@ everywhere.
 
 | What we do | Why |
 | --- | --- |
-| Bearer auth via your own `bodhi_token` (bcrypt-hashed). | Reuses the credential model your Claude Code CLI already uses; no parallel auth system. |
-| Read-only tool allowlist enforced at the transport layer. | Adding a tool to the internal registry cannot accidentally leak it remotely. |
+| Bearer auth via your own Glideship MCP token (bcrypt-hashed). | Reuses the credential model your Claude Code CLI already uses; no parallel auth system. |
+| Fixed tool allowlist enforced at the transport layer. | Adding a tool to the internal registry cannot accidentally leak it remotely. |
+| Writes are limited to the BUD's current creative phase (PRD, design, tech spec) and to TODO text, and BUD content writes are assignee-only. | An external AI can't move a BUD through the lifecycle, reassign work, or touch testing and code-review evidence. |
 | Rate limit per (token, IP) **and** globally per token. | Per-IP catches single-machine spam; global catches a leaked token hit from many IPs. |
 | Every call logged to `mcp_audit_log` (90-day retention). | Incident response — your admin can see which token did what. |
 | Token TTL (default 90 days, max 365) + last-used tracking. | Leaked tokens auto-expire; orphans are visible in the connect panel. |
@@ -155,10 +174,13 @@ everywhere.
   tokens from Settings → MCP Connect; an org owner can see and revoke
   every team member's tokens from the admin settings page.
 * **Prompt injection via BUD content.** When the local AI reads BUD
-  text via `get_bud_context`, a maliciously crafted BUD could try to
-  steer the LLM. The remote endpoint deliberately gives that LLM no
-  way to call `write_bud`, so the worst case is misleading output in
-  your local client — never a write back to your org.
+  text via `get_bud_context` or `get_bud_by_id`, a maliciously crafted
+  BUD could try to steer the LLM. The worst it can do is write through
+  the four write tools: new BUDs, content for the current phase of BUDs
+  you're assigned to, and TODO text. It can't change status, assignment
+  or any other phase, and every BUD write lands as a version you can
+  review and restore from the BUD history. Read what your AI proposes
+  before you let it call a write tool.
 * **Out-of-band data exfiltration.** Anything you allow your local AI
   to read via this endpoint is now subject to that AI's own data
   handling. If your client uploads context to a cloud model, that
@@ -173,6 +195,9 @@ everywhere.
 | Per-token global | 300 cost-units / min | same |
 | `get_features` cost | 5 units | (pgvector + embedding) |
 | `get_bud_context` cost | 1 unit | (single DB scan) |
+| `get_bud_by_id` / `get_design_system` cost | 2 units | |
+| `create_bud` / `update_bud` cost | 15 units | (version snapshot + embedding) |
+| `create_todo` / `update_todo` cost | 5 units | (single-row write) |
 | Audit log retention | 90 days | `app/services/mcp_audit_cleanup.py` |
 | Token TTL | 90 days (max 365) | `app/api/v1/me.py` |
 | SSE heartbeat | 30 s | `app/mcp/streamable.py` |

@@ -26,6 +26,7 @@ from httpx import ASGITransport, AsyncClient
 from starlette.applications import Starlette
 from starlette.routing import Route
 
+from app.mcp.bridge_env import BACKEND_URL_ENV, MCP_TOKEN_ENV
 from app.services.claude_errors import ClaudeErrorCode
 from app.services.claude_runner import ClaudeRunnerConfig, MCPServerConfig, run_claude_code
 from tests.fakes.claude_contract import contract_problems, parse_argv
@@ -130,8 +131,8 @@ async def test_a_crashing_mcp_route_is_a_500_and_fails_the_test(tmp_path: Path) 
 def _write_mcp_config(tmp_path: Path, config: ClaudeRunnerConfig) -> str:
     assert config.mcp is not None
     env = {
-        "BODHIORCHARD_BACKEND_URL": config.mcp.backend_url,
-        "BODHIORCHARD_MCP_TOKEN": config.mcp.mcp_token,
+        BACKEND_URL_ENV: config.mcp.backend_url,
+        MCP_TOKEN_ENV: config.mcp.mcp_token,
     }
     path = tmp_path / "mcp.json"
     server = {"command": "/bin/sh", "args": [__file__], "env": env}
