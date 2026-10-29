@@ -15,13 +15,13 @@
  -->
 
 <!-- The methodology / marketing content now lives on the public website
-     (bodhiorchard.ai). This route exists only to redirect anyone who lands on
+     (glideship.ai). This route exists only to redirect anyone who lands on
      the old in-app /methodology URL out to the live site. -->
 <template>
   <v-app theme="glideshipDark">
     <v-main class="d-flex flex-column align-center justify-center" style="min-height: 100vh;">
       <v-progress-circular indeterminate color="primary" size="40" class="mb-4" />
-      <div class="text-body-2 text-medium-emphasis">Taking you to bodhiorchard.ai…</div>
+      <div class="text-body-2 text-medium-emphasis">Taking you to glideship.ai…</div>
     </v-main>
   </v-app>
 </template>
@@ -29,7 +29,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 
-const TARGET = 'https://bodhiorchard.ai/methodology'
+const TARGET = 'https://glideship.ai/methodology/'
 
 onMounted(() => {
   // replace() so the back button doesn't bounce the user straight back here.
