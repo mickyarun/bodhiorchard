@@ -22,8 +22,15 @@ from app.models.organization import AIProvider, Organization
 from app.services.ai_runner import codex_provider as cx
 from app.services.ai_runner.codex_provider import CodexProvider
 from app.services.ai_runner.copilot_provider import CopilotProvider
+from app.services.ai_runner.mcp_config import SERVER_NAME
 from app.services.ai_runner.registry import provider_for
-from app.services.claude_runner import NO_REPO_CONTEXT, ClaudeRunnerConfig, ClaudeRunResult
+from app.services.claude_runner import (
+    NO_REPO_CONTEXT,
+    ClaudeRunnerConfig,
+    ClaudeRunResult,
+    MCPServerConfig,
+)
+from app.services.repo_setup_names import LEGACY_MCP_SERVER_KEY, MCP_SERVER_KEY
 
 _SAMPLE_JSONL = "\n".join(
     [
@@ -69,6 +76,26 @@ async def test_codex_run_reports_failure() -> None:
         result = await CodexProvider().run("hi", NO_REPO_CONTEXT, config)
     assert result.success is False
     assert "kaboom" in (result.error or "")
+
+
+@pytest.mark.parametrize("with_bridge", [False, True])
+async def test_codex_run_disables_repo_mcp_server(with_bridge: bool) -> None:
+    """Every run keeps the repo's tokenless servers off; the bridge still loads."""
+    mcp = MCPServerConfig(backend_url="http://x", mcp_token="tok") if with_bridge else None
+    config = ClaudeRunnerConfig(timeout_seconds=30, mcp=mcp)
+    run_cli = AsyncMock(return_value=(0, _SAMPLE_JSONL, ""))
+    with patch.object(cx, "run_cli", new=run_cli):
+        await CodexProvider().run("hi", NO_REPO_CONTEXT, config)
+    cmd: list[str] = run_cli.call_args.args[0]
+    overrides = [b for a, b in zip(cmd, cmd[1:], strict=False) if a == "-c"]
+    assert f"mcp_servers.{MCP_SERVER_KEY}.enabled=false" in overrides
+    assert any(o.startswith(f"mcp_servers.{MCP_SERVER_KEY}.command=") for o in overrides)
+    # The pre-rename key is the bridge's name: off without it, the bridge with it.
+    legacy_off = f"mcp_servers.{LEGACY_MCP_SERVER_KEY}.enabled=false" in overrides
+    assert legacy_off is not with_bridge
+    bridge = any(o.startswith(f"mcp_servers.{SERVER_NAME}.args=") for o in overrides)
+    assert bridge is with_bridge
+    assert cmd[-1] == "hi"
 
 
 def test_tool_label_maps_action_items_and_skips_thinking() -> None:
