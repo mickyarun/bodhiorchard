@@ -191,7 +191,11 @@ class OrganizationRepository(BaseRepository[Organization]):
         """Check if any organization exists (for first-time setup detection).
 
         Returns:
-            The first Organization found, or None if none exist.
+            The oldest Organization (the one the setup wizard made), or None.
+            Ordered, because the login page signs in to this org's slug and an
+            unordered ``LIMIT 1`` can return a different row after an update.
         """
-        result = await self._db.execute(select(Organization).limit(1))
+        result = await self._db.execute(
+            select(Organization).order_by(Organization.created_at, Organization.id).limit(1)
+        )
         return result.scalar_one_or_none()
