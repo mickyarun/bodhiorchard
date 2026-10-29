@@ -25,8 +25,11 @@ the hook scripts read the new env var first and fall back to the legacy one,
 and nothing here deletes a legacy folder. A re-run of setup switches the
 config over to the new names in the setup PR.
 
-The server-managed git worktrees (``.bodhiorchard/<branch>``, ``scan-wt``,
-``setup-work``) are a separate, gitignored concern and stay where they are.
+The server-managed git worktrees live under ``WORKTREES_DIR``, a subfolder
+of ``REPO_DIR`` that is ignored through the clone's own ``.git/info/exclude``
+rather than the tracked ``.gitignore`` (see ``app.services.managed_worktrees``).
+Clones set up before the rename keep them under ``LEGACY_WORKTREES_DIR``
+until the next scan of the repo moves them.
 """
 
 from __future__ import annotations
@@ -40,6 +43,9 @@ LEGACY_MCP_SERVER_KEY = "bodhiorchard"
 
 BRIDGE_PATH = f"{REPO_DIR}/mcp_bridge.py"
 HOOKS_DIR = f"{REPO_DIR}/hooks"
+
+WORKTREES_DIR = f"{REPO_DIR}/worktrees"
+LEGACY_WORKTREES_DIR = ".bodhiorchard"
 
 
 def mcp_server_entry(backend_url: str) -> dict[str, object]:

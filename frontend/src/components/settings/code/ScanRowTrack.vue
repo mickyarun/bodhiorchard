@@ -44,7 +44,7 @@ import ScanChipPopover from './ScanChipPopover.vue'
 import type { RepoRunRow, ScanPhase, StepRow } from '@/stores/reposcanv2Scans'
 
 // When adding a new phase, classify it here and in ScanFinalizationRow.vue.
-// `repo_setup` runs first so the .bodhiorchard worktrees + MCP/hooks land
+// `repo_setup` runs first so the managed worktrees + MCP/hooks land
 // before code analysis touches the repo, matching the ordering in
 // `app/reposcanv2/scan_runner.py::_DEFAULT_PER_REPO_STAGES`.
 const PER_REPO_PHASES: ScanPhase[] = [

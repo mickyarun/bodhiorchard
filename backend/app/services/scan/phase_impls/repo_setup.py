@@ -28,8 +28,9 @@ subsequent scans):
    agent-CLI hooks (Claude → ``.claude/``; Codex → ``.codex/hooks.json``;
    Copilot → ``.github/hooks/``), all wired to the shared dev-activity
    scripts — see :mod:`app.services.scan.agent_repo_config`.
-5. ``.gitignore`` carve-out for ``.bodhiorchard/``, package-script
-   prep, and the workflow paragraph appended to ``CLAUDE.md``.
+5. Package-script prep and the workflow paragraph appended to
+   ``CLAUDE.md``. The managed worktrees are ignored through the clone's
+   own ``.git/info/exclude``, so nothing is added to ``.gitignore``.
 6. If any file actually changed, branch + commit + push + PR.
 
 Failures are caught and logged but never propagated — Glideship
@@ -56,7 +57,6 @@ from app.services.git_operations import (
 )
 from app.services.repo_setup import (
     SetupPrStatus,
-    add_bodhiorchard_gitignore,
     add_prepare_script,
     append_bodhiorchard_claude_instructions,
     commit_and_push_setup_worktree,
@@ -88,7 +88,7 @@ async def phase_b1_repo_setup(
     scan_id: str,
     base_pct: int,
 ) -> str | None:
-    """Phase B1: Worktrees, MCP init, hooks, .gitignore, commit+push+PR.
+    """Phase B1: Worktrees, MCP init, hooks, commit+push+PR.
 
     Reports granular progress for each sub-step.
 
@@ -150,7 +150,7 @@ async def phase_b1_repo_setup(
                     )
 
         # All setup-file writes target a clean worktree at
-        # ``<repo>/.bodhiorchard/setup-work`` checked out from
+        # ``<repo>/.glideship/worktrees/setup-work`` checked out from
         # ``origin/<base>`` and switched onto ``bodhiorchard/init-setup``.
         # Doing the work here (rather than the cloned repo's main
         # checkout) keeps the user's working tree untouched and avoids
@@ -171,7 +171,7 @@ async def phase_b1_repo_setup(
         # Provider chosen by the org drives which agent-CLI config we write:
         # Claude → .claude/ + .mcp.json + CLAUDE.md; Codex/Copilot → their
         # native hook config + AGENTS.md + provider MCP (see agent_repo_config).
-        # The MCP bridge, git hooks, .gitignore, and prepare script are
+        # The MCP bridge, git hooks, and prepare script are
         # generic and written for every provider.
         provider = org.ai_provider if org is not None else AIProvider.claude
 
@@ -202,9 +202,6 @@ async def phase_b1_repo_setup(
         # Ensure hooks are active regardless of commit/push status
         await run_git(["config", "core.hooksPath", ".githooks"], cwd=work_path)
 
-        # Add .bodhiorchard/ to .gitignore
-        gitignore_changed = add_bodhiorchard_gitignore(work_path)
-
         # Add prepare script to package.json
         prepare_changed = add_prepare_script(work_path)
 
@@ -213,7 +210,6 @@ async def phase_b1_repo_setup(
             mcp_changed
             or hooks_changed
             or agent_hooks_changed
-            or gitignore_changed
             or prepare_changed
             or instructions_changed
         )

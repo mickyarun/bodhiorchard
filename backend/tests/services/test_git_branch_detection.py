@@ -13,7 +13,7 @@
 # limitations under the License.
 """Branch detection on local checkouts, including onboarded ones.
 
-Onboarding checks ``develop`` out in a worktree under ``.bodhiorchard/``,
+Onboarding checks ``develop`` out in a managed worktree inside the repo,
 and ``git branch`` then prints it as ``+ develop``. Detection must read the
 branch names themselves, not that decorated text.
 """
@@ -29,6 +29,7 @@ from app.services.git_operations import (
     list_local_branches,
     list_remote_branches,
 )
+from app.services.managed_worktrees import DEVELOP_WORKTREE, worktree_path
 
 
 def _git(*args: str, cwd: Path) -> None:
@@ -51,7 +52,14 @@ def _repo_with_develop(tmp_path: Path) -> Path:
 
 async def test_finds_develop_checked_out_in_another_worktree(tmp_path: Path) -> None:
     repo = _repo_with_develop(tmp_path)
-    _git("worktree", "add", "-q", str(repo / ".bodhiorchard" / "develop"), "develop", cwd=repo)
+    _git(
+        "worktree",
+        "add",
+        "-q",
+        str(worktree_path(str(repo), DEVELOP_WORKTREE)),
+        "develop",
+        cwd=repo,
+    )
 
     assert await _detect_main_branch(str(repo)) == "main"
     assert await _detect_develop_branch(str(repo)) == "develop"
