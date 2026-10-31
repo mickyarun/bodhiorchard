@@ -50,6 +50,9 @@ export function useAiProviderSettings() {
   const model = ref('')
   const thinkingChoice = ref<'on' | 'off'>('off')
   const saving = ref(false)
+  // False until load() has the saved choice: a pick made before then would be
+  // replaced by it, and Save would send the stored mode instead.
+  const loaded = ref(false)
   // The last saved choice, to tell edits apart and to describe the card.
   const saved = ref<SavedSettings | null>(null)
 
@@ -146,6 +149,7 @@ export function useAiProviderSettings() {
     if (caps.value && !tiles.value.some(t => t.value === authMode.value)) {
       authMode.value = recommendedMode(caps.value, deploymentMode.value)
     }
+    loaded.value = true
   }
 
   async function save(): Promise<void> {
@@ -168,7 +172,7 @@ export function useAiProviderSettings() {
 
   return {
     providers, deploymentMode, provider, authMode, credential, hasStoredCredential, baseUrl, model, thinkingChoice,
-    saving, test, testError, testVersion, showInstallHint,
+    loaded, saving, test, testError, testVersion, showInstallHint,
     caps, tiles, mode, requiresSecret, canSave, dirty, savedCaps, savedMode,
     selectProvider, load, save, runTest,
   }

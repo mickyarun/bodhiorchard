@@ -15,7 +15,8 @@
 /**
  * AI provider settings: Save and Test connection need integrations:configure,
  * the permission both backend routes require. The settings composable and
- * child inputs are stubbed, so this tests the panel's own gating decision.
+ * child inputs are stubbed, so this tests the panel's own gating decisions,
+ * including holding every choice back until the saved one has loaded.
  * `.spec.ts` for jsdom.
  */
 
@@ -24,8 +25,11 @@ import { defineComponent, h, ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
+const settings = vi.hoisted(() => ({ loaded: true }))
+
 vi.mock('@/composables/useAiProviderSettings', () => ({
   useAiProviderSettings: () => ({
+    loaded: ref(settings.loaded),
     deploymentMode: ref(null),
     provider: ref('claude'),
     providers: ref([]),
@@ -81,6 +85,7 @@ function mountAs(permissions: string[]) {
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  settings.loaded = true
 })
 
 describe('SettingsClaudeCode', () => {
@@ -95,5 +100,14 @@ describe('SettingsClaudeCode', () => {
     const wrapper = mountAs(['integrations:view', 'integrations:configure'])
 
     expect(wrapper.findAll('button').map(b => b.text())).toEqual(['Save', 'Test connection'])
+  })
+
+  it('offers no choice until the saved settings have loaded', () => {
+    settings.loaded = false
+    const wrapper = mountAs(['integrations:view', 'integrations:configure'])
+
+    expect(wrapper.findComponent({ name: 'ChoiceTiles' }).exists()).toBe(false)
+    expect(wrapper.findAll('button')).toHaveLength(0)
+    expect(wrapper.find('[aria-label="Loading the AI settings"]').exists()).toBe(true)
   })
 })
