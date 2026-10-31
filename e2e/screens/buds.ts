@@ -51,6 +51,44 @@ export async function expectSection(page: Page, tab: string): Promise<void> {
   await expect(budSections(page).getByRole('tab', { name: tab })).toHaveAttribute('aria-selected', 'true')
 }
 
+/** Opens the BUD's More actions menu and returns it. */
+export async function openBudMenu(page: Page): Promise<Locator> {
+  await page.getByRole('button', { name: 'More actions' }).click()
+  const menu = page.getByRole('menu', { name: 'More actions' })
+  await expect(menu).toBeVisible()
+  return menu
+}
+
+/** Picks a stage from More actions → Change stage. */
+export async function chooseStage(page: Page, stage: string): Promise<void> {
+  const menu = await openBudMenu(page)
+  await menu.getByRole('group', { name: 'Change stage' }).getByRole('menuitemradio', { name: stage, exact: true }).click()
+}
+
+/** Opens the Testing tab's manual cases panel, if it is closed. */
+async function openManualCases(page: Page): Promise<void> {
+  const panel = page.getByRole('button', { name: /^Manual Test Cases \(\d+\)/ })
+  if ((await panel.getAttribute('aria-expanded')) !== 'true') await panel.click()
+}
+
+/** One manual test case in the Testing tab: expand it and record a result. */
+export async function recordCaseResult(page: Page, caseId: string, result: 'Pass' | 'Fail' | 'Blocked' | 'Skip'): Promise<void> {
+  await openManualCases(page)
+  // Named "<priority> MTC-001: <title> <category>".
+  const header = page.getByRole('button', { name: new RegExp(`\\b${caseId}:`) })
+  if ((await header.getAttribute('aria-expanded')) !== 'true') await header.click()
+  await page.getByRole('button', { name: new RegExp(`^${result}\\b`) }).click()
+}
+
+/** The Testing tab's bulk action: every case still pending gets one result. */
+export async function markRemainingCases(page: Page, result: 'Pass' | 'Skipped'): Promise<void> {
+  await openManualCases(page)
+  await page.getByRole('button', { name: 'Mark the remaining cases' }).click()
+  await page.getByRole('menu', { name: 'Mark the remaining cases' })
+    .getByRole('menuitem', { name: new RegExp(`as ${result}$`) })
+    .click()
+}
+
 /** "Move to <stage>" in the header, then the stage's own tab opens. */
 export async function moveBudTo(page: Page, stage: string, tab: string): Promise<void> {
   await page.getByRole('button', { name: `Move to ${stage}` }).click()

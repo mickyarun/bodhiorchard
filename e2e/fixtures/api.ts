@@ -36,6 +36,15 @@ export class Api {
     return this.check<T>('POST', path, await this.ctx.post(path, { data }))
   }
 
+  async patch<T>(path: string, data: unknown): Promise<T> {
+    return this.check<T>('PATCH', path, await this.ctx.patch(path, { data }))
+  }
+
+  /** Status of a PATCH, for checks that expect a refusal. */
+  async patchStatusOf(path: string, data: unknown): Promise<number> {
+    return (await this.ctx.patch(path, { data })).status()
+  }
+
   /** Status of a GET, for checks that expect a refusal. */
   async statusOf(path: string): Promise<number> {
     return (await this.ctx.get(path)).status()
@@ -66,6 +75,35 @@ export function createBud(api: Api, title: string): Promise<Bud> {
   return api.post<Bud>('buds/', { title })
 }
 
+export interface Bug {
+  id: string
+  title: string
+}
+
+export function createBug(api: Api, title: string, description: string): Promise<Bug> {
+  return api.post<Bug>('bugs', { title, description })
+}
+
+/** Ids of the BUD's manual test cases still waiting for a result. */
+export async function pendingManualCases(api: Api, budId: string): Promise<string[]> {
+  const bud = await api.get<{ qa_manual_cases: { id: string; result: string }[] | null }>(`buds/${budId}`)
+  return (bud.qa_manual_cases ?? []).filter((c) => c.result === 'pending').map((c) => c.id)
+}
+
+export type BudStatus =
+  | 'bud' | 'design' | 'tech_arch' | 'development' | 'code_review' | 'testing' | 'uat' | 'prod'
+  | 'closed' | 'discarded'
+
+/** Moves a BUD straight to `status` (the API checks gates, not order). */
+export function moveBud(api: Api, budId: string, status: BudStatus, reason?: string): Promise<Bud> {
+  return api.patch<Bud>(`buds/${budId}`, reason ? { status, status_override_reason: reason } : { status })
+}
+
+/** Turns the org's UAT stage on or off (Settings → BUD stages). */
+export async function setUatEnabled(api: Api, enabled: boolean): Promise<void> {
+  await api.patch('settings/connections', { budStages: { uatEnabled: enabled } })
+}
+
 export interface LeaveRequest {
   id: string
   status: string
@@ -75,6 +113,10 @@ export function requestLeave(api: Api, leaveTypeId: string, days: LeaveDays, rea
   return api.post<LeaveRequest>('leave/requests', {
     kind: 'leave', leave_type_id: leaveTypeId, start_date: days.from, end_date: days.to, reason,
   })
+}
+
+export function requestWfh(api: Api, days: LeaveDays, reason: string): Promise<LeaveRequest> {
+  return api.post<LeaveRequest>('leave/requests', { kind: 'wfh', start_date: days.from, end_date: days.to, reason })
 }
 
 export async function approveLeave(api: Api, requestId: string): Promise<void> {

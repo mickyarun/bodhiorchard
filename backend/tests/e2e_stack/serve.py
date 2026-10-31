@@ -42,6 +42,7 @@ import uvicorn
 from app.main import app
 from tests.e2e_stack.attribution import ContextThreadPool, TestIdMiddleware
 from tests.e2e_stack.fakes import TaggingClaudeRunner, TaggingGuard
+from tests.e2e_stack.routes_delivery import router as delivery_router
 from tests.e2e_stack.routes_seed import router as seed_router
 from tests.e2e_stack.routes_stack import router as stack_router
 from tests.e2e_stack.state import STATE
@@ -86,6 +87,7 @@ def main() -> None:
     install_fakes(port, Path(os.environ["E2E_GUARD_LOG"]))
     app.add_middleware(TestIdMiddleware)
     app.include_router(seed_router)
+    app.include_router(delivery_router)
     app.include_router(stack_router)
     asyncio.run(_serve(port))
 
