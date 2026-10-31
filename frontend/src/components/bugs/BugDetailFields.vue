@@ -67,8 +67,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import AppConfirmDialog from '@/components/common/AppConfirmDialog.vue'
+import { useMemberDirectory } from '@/composables/useMemberDirectory'
 import { usePermissions } from '@/composables/usePermissions'
-import { useMembersStore } from '@/stores/members'
 import { BUG_BOARD_COLUMNS, BUG_STATUS_LABELS, type BugRead, type BugStatusValue } from '@/types'
 import { statusConfirm } from '@/utils/bugList'
 import BugFeaturePicker from './BugFeaturePicker.vue'
@@ -76,12 +76,14 @@ import BugFeaturePicker from './BugFeaturePicker.vue'
 // ``save`` patches the bug and resolves true once it's saved.
 const props = defineProps<{ bug: BugRead; save: (body: Record<string, unknown>) => Promise<boolean> }>()
 
-const membersStore = useMembersStore()
+// The directory, not the admin members list: assigning a bug needs
+// bugs:assign, not team:manage, so most who can assign could not read it.
+const directory = useMemberDirectory()
 const { canEditBugs, canAssignBugs } = usePermissions()
 
 const STATUS_OPTIONS = BUG_BOARD_COLUMNS.map(value => ({ title: BUG_STATUS_LABELS[value], value }))
 
-const assigneeOptions = computed(() => membersStore.members.map(m => ({ title: m.name || m.email, value: m.id })))
+const assigneeOptions = computed(() => directory.entries.value.map(m => ({ title: m.name || m.email, value: m.id })))
 
 function save(body: Record<string, unknown>): void {
   void props.save(body)
@@ -106,7 +108,7 @@ async function confirmStatus(): Promise<void> {
 }
 
 onMounted(() => {
-  if (canAssignBugs.value && membersStore.members.length === 0) void membersStore.fetchMembers()
+  if (canAssignBugs.value) void directory.ensureLoaded()
 })
 </script>
 
