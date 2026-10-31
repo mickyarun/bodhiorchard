@@ -49,38 +49,49 @@ export const useBugsStore = defineStore('bugs', () => {
   const { comments, commentsLoading, fetchComments, addComment, editComment, deleteComment } =
     createBugComments(error, _bumpCommentCount)
 
+  // Latest list and board loads. Switching filters while one is in flight
+  // must not let the older, slower reply replace the newer list.
+  let listSeq = 0
+  let boardSeq = 0
+
   async function fetchBugs(filters?: BugListFilters): Promise<void> {
+    const seq = ++listSeq
+    const latest = (): boolean => seq === listSeq
     loading.value = true
     loadError.value = null
     try {
       const params = bugListParams(filters, page.value, pageSize.value)
       const { data } = await api.get<BugListResponse>('/v1/bugs', { params })
+      if (!latest()) return
       bugs.value = data.items
       total.value = data.total
       page.value = data.page
       pageSize.value = data.pageSize
     } catch (err) {
-      loadError.value = extractApiError(err, 'Failed to load bugs.')
+      if (latest()) loadError.value = extractApiError(err, 'Failed to load bugs.')
     } finally {
-      loading.value = false
+      if (latest()) loading.value = false
     }
   }
 
   async function fetchBoard(filters?: BugBoardFilters): Promise<void> {
+    const seq = ++boardSeq
+    const latest = (): boolean => seq === boardSeq
     boardLoading.value = true
     loadError.value = null
     try {
       const params = bugBoardParams(filters)
       const { data } = await api.get<BugBoardResponse>('/v1/bugs/board', { params })
+      if (!latest()) return
       const merged = emptyBoard()
       for (const col of BUG_BOARD_COLUMNS) {
         merged[col] = data.columns[col] ?? []
       }
       board.value = merged
     } catch (err) {
-      loadError.value = extractApiError(err, 'Failed to load bugs.')
+      if (latest()) loadError.value = extractApiError(err, 'Failed to load bugs.')
     } finally {
-      boardLoading.value = false
+      if (latest()) boardLoading.value = false
     }
   }
 
