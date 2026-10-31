@@ -16,6 +16,7 @@
 
 from collections.abc import AsyncGenerator
 
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -41,11 +42,8 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency that yields an async database session.
-
-    The session is automatically closed when the request completes.
-    """
+async def _request_session() -> AsyncGenerator[AsyncSession, None]:
+    """Open a session, commit it if the route succeeds, roll it back if not."""
     async with AsyncSessionLocal() as session:
         try:
             yield session
@@ -53,5 +51,21 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
-        finally:
-            await session.close()
+
+
+async def get_db(
+    session: AsyncSession = Depends(_request_session, scope="function"),
+) -> AsyncSession:
+    """FastAPI dependency for the request's database session.
+
+    The commit must land before the client sees the response, or a client
+    that reads straight after a write can miss it, and a failed commit is
+    reported as success. A plain ``yield`` dependency no longer guarantees
+    that: since FastAPI 0.118 its exit code runs after the response is sent.
+    ``scope="function"`` (FastAPI 0.121+) runs the commit as soon as the
+    route returns, before the response goes out.
+
+    The session lives in ``_request_session`` so every ``Depends(get_db)``
+    gets the function scope without having to ask for it.
+    """
+    return session

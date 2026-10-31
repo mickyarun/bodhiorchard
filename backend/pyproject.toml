@@ -18,7 +18,9 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi[standard]>=0.104.0",
+    # 0.121 is the first release with Depends(scope="function"), which get_db
+    # needs so a request commits before its response is sent (app/database.py).
+    "fastapi[standard]>=0.121.0",
     "uvicorn[standard]>=0.24.0",
     "sqlalchemy[asyncio]>=2.0.23,<2.1",
     "asyncpg>=0.29.0",

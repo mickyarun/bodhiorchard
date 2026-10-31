@@ -1,4 +1,6 @@
-fastapi[standard]>=0.104.0
+# 0.121 is the first release with Depends(scope="function"), which get_db
+# needs so a request commits before its response is sent (app/database.py).
+fastapi[standard]>=0.121.0
 uvicorn[standard]>=0.24.0
 # Upper bound is deliberate. SQLAlchemy 2.1 reworked Select's generics
 # (PEP 646 variadic), which does not type-check against how this
