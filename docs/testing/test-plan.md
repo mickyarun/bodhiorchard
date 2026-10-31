@@ -919,7 +919,7 @@ the run fails if anything was refused outside a test or the dev server reloaded 
 
 #### Coverage matrix
 
-All paths under `e2e/specs/`. 35 tests in 12 files, in three projects: `setup-wizard`,
+All paths under `e2e/specs/`. 75 tests in 26 files, in three projects: `setup-wizard`,
 `chromium` and `mobile` (Pixel 7).
 
 | flow | positive | negative | corner | spec |
@@ -939,11 +939,28 @@ All paths under `e2e/specs/`. 35 tests in 12 files, in three projects: `setup-wi
 | Quiz | lock in an answer | no second answer, after a reload too | nothing shows the result before the reveal; no open quiz | quiz.spec.ts |
 | Dashboard and garden | overview loads; garden builds; both get messages from the live room | no console errors on either | | dashboard.spec.ts |
 | Phone layouts | approval opens inline in the queue; calendar becomes an agenda; sign in | | | mobile.spec.ts |
+| BUD header | priority, assignee and the AI-skills switch, kept after a reload | | delete from the More actions menu | bud-header.spec.ts |
+| BUD code review | an open PR (seeded through the e2e routes, no GitHub) shows on Code Review; override to testing with a reason | a reason under 10 characters can't be sent | no PR asks before moving on; unmerged PRs need a reason, kept in History; all merged goes straight to testing | bud-review.spec.ts |
+| BUD testing to closed | pass and skip manual cases, UAT, a recorded UAT merge, prod, a recorded prod merge, close | pending manual cases hold the move; a QA role can't edit the title or close | UAT turned off skips it; discard and restore; a closed BUD's stage menu is disabled | bud-release.spec.ts |
+| Bug detail | owner, comment, edit, resolve after a confirm | | a deleted comment leaves "[deleted]"; a PM can assign without the members permission | bug-detail.spec.ts |
+| Members and roles | add a member with a role, change it, deactivate | a manager has no Add member and can't grant org owner | a custom role grants only what it lists | members.spec.ts |
+| Settings by role | admin, manager, HR, tech lead and quiz master each reach their screens | each is kept out of the rest | | settings-access.spec.ts |
+| Repositories | add a local repo through the folder picker, then remove it | a developer is bounced | add without the first scan | settings-code.spec.ts |
+| Integrations | AI sign-in switched to an API key and kept; workspace MCP token generated | the token is shown once, then can only be replaced | | settings-integrations.spec.ts |
+| People settings | offices added, edited and removed; a leave policy created | | the quiz master turns the daily quiz on | settings-people.spec.ts |
+| Leave, more flows | WFH approved and on the calendar; half day; HR adjusts a balance | | the calendar shows the leave type to the manager and only "Leave" to a peer; the bell lists requests to review | leave-more.spec.ts |
+| Leave reports | HR summary, requests and CSV export for a custom range | a manager sees only direct reports | nobody reporting to you | leave-reports.spec.ts |
+| New hires | invite a new hire, add the employee record, they sign in with the temporary password | | | people-admin.spec.ts |
+| Profile | phone number saved; a notification switch kept; password changed | the old password stops working | | profile.spec.ts |
+| Mini-games and leaderboard | a Firefly Follow game reaches its board | the game pays no XP (API and the XP board) | a game nobody played says so | games.spec.ts |
 | Accessibility (axe, WCAG 2.1 AA) | login, dashboard, board, BUD detail, bugs, features, settings, members, MCP connect, my leave, approvals, team calendar, employees, employee profile | any serious or critical finding fails | closed Vuetify overlays skipped (they present nothing) | accessibility.spec.ts |
 
-Not in the browser suite: the BUD stages past Development (code review needs a PR from the
-GitHub fake), Slack and calendar side effects (pytest covers them with the fakes), the
-remaining settings screens, reports, and the mini-games.
+PRs, manual test cases and release merges are seeded through the e2e stack's own routes
+(`backend/tests/e2e_stack/routes_delivery.py`), so the later BUD stages run without GitHub.
+
+Not in the browser suite: Slack and calendar side effects (pytest covers them with the fakes),
+the GitHub, Slack and Jira connect screens (saving them calls those services), the 3D garden's
+game rendering beyond Firefly Follow, and the boards feature, which is still being built.
 
 ## Bugs found and fixed
 
@@ -957,6 +974,12 @@ commits inside the Playwright pull request:
   axe spec.
 - The Vite fix is caught by the suite's end-of-run check for dev-server reloads, which fails on
   main.
+
+The follow-up pull request that covers the later BUD stages, settings, reports and mini-games
+does the same. The bugs board and AI settings fixes have Vitest tests. The custom role, Add
+member and bug owner fixes are caught by `members.spec.ts` and `bug-detail.spec.ts`, which
+found them. The menu, picker and naming fixes are caught by the specs that find those controls
+by role.
 
 | Area | Bug | PR |
 | --- | --- | --- |
@@ -1003,6 +1026,16 @@ commits inside the Playwright pull request:
 | Frontend | New BUD's agent switches showed "off" until the skills loaded, then turned on by themselves, so an agent ran that the person saw as off | Playwright PR (own commit) |
 | AI settings | Listing the models of an Ollama host being typed always answered 500 (the probe's permission check was called with the wrong arguments) | Playwright PR (own commit) |
 | Frontend | WCAG failures across the shell and main screens: sidebar list roles, the account menu's name, the team calendar grid, a focusable aria-hidden icon, links told apart by colour only, low contrast in MCP connect | Playwright PR (own commit) |
+| Frontend | The account menu wasn't a menu: "Sign out" wasn't a menu item | More-flows PR (own commit) |
+| Frontend | The BUD title's screen-reader name had a stray space | More-flows PR (own commit) |
+| Frontend | The BUD More actions, priority and QA bulk menus weren't menus, and a disabled stage didn't say so | More-flows PR (own commit) |
+| Frontend | Unnamed controls: the QA bulk button, the repo row menu, design-system delete, the folder picker checkboxes, notification switches, the comment editor | More-flows PR (own commit) |
+| Frontend | A new custom role failed with a UUID error when the roles hadn't loaded yet (empty base role) | More-flows PR (own commit) |
+| Frontend | Managers saw Add member, and the members page fetched connections they can't read (403) | More-flows PR (own commit) |
+| Frontend | The bug owner picker was empty for anyone without the members permission | More-flows PR (own commit) |
+| Frontend | Switching the Bugs page's environment while it loaded could leave the older board on screen | More-flows PR (own commit) |
+| AI settings | A sign-in choice made before the saved settings loaded was replaced by them, so Save sent the old mode | More-flows PR (own commit) |
+| Frontend | The members row menu wasn't a menu, and the BUD assignee picker's people weren't options | More-flows PR (own commit) |
 
 ## Open questions
 

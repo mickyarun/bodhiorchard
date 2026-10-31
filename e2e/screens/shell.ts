@@ -34,10 +34,17 @@ export async function openSettingsGroup(page: Page): Promise<void> {
   await expect(opener).toHaveAttribute('aria-expanded', 'true')
 }
 
-export async function signOut(page: Page, name: string): Promise<void> {
+/** Opens the account menu (top right) and returns it. */
+export async function openAccountMenu(page: Page, name: string): Promise<Locator> {
   await page.getByRole('button', { name: `Account menu for ${name}` }).click()
-  // The menu's items render as list items, not menu items.
-  await page.getByRole('listitem').filter({ hasText: 'Sign out' }).click()
+  const menu = page.getByRole('menu', { name: 'Account' })
+  await expect(menu).toBeVisible()
+  return menu
+}
+
+export async function signOut(page: Page, name: string): Promise<void> {
+  const menu = await openAccountMenu(page, name)
+  await menu.getByRole('menuitem', { name: 'Sign out' }).click()
 }
 
 /**

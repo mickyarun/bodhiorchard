@@ -97,7 +97,10 @@ const submitError = ref('')
 const form = ref({ name: '', description: '', baseRoleId: '', permissionIds: [] as string[] })
 
 const isSystem = computed(() => props.role?.scopeType === 'SYSTEM')
-const canSubmit = computed(() => !!form.value.name.trim() && form.value.permissionIds.length > 0)
+// A custom role needs its base role too; without one the save is refused.
+const canSubmit = computed(() =>
+  !!form.value.name.trim() && form.value.permissionIds.length > 0 && (isSystem.value || !!form.value.baseRoleId),
+)
 
 // New roles start from the Developer system role so the picker is never empty.
 function defaultBaseRoleId(): string {
@@ -115,6 +118,13 @@ watch(open, isOpen => {
   }
   submitError.value = ''
   if (store.permissionCategories.length === 0) void store.fetchPermissions()
+  if (store.roles.length === 0) void store.fetchRoles()
+})
+
+// Opened before the roles had loaded: take the default once they arrive,
+// instead of leaving the base role empty.
+watch(() => store.roles.length, () => {
+  if (open.value && !props.role && !form.value.baseRoleId) form.value.baseRoleId = defaultBaseRoleId()
 })
 
 function countSelected(cat: PermissionCategory): number {

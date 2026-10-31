@@ -33,11 +33,13 @@
       </v-btn>
     </template>
 
-    <v-list density="compact" min-width="260">
+    <!-- A menu (the button says it opens one): every action is a menuitem,
+         and the theme choices are menuitemradio in their own group. -->
+    <v-list density="compact" min-width="260" role="menu" aria-label="Account">
       <!-- Who you are; your photo is changed on My details, so the
            header goes there. -->
-      <div v-if="authStore.user" role="listitem">
-        <router-link :to="{ name: 'my-details' }" class="account-menu__who">
+      <div v-if="authStore.user" role="none">
+        <router-link :to="{ name: 'my-details' }" class="account-menu__who" role="menuitem">
           <AppMonogram :name="authStore.user.name" :src="authStore.user.avatar_url" :size="44" />
           <span class="account-menu__id">
             <span class="account-menu__name">{{ authStore.user.name }}</span>
@@ -55,11 +57,13 @@
         <v-list-item
           prepend-icon="mdi-account-circle-outline"
           title="My Profile"
+          role="menuitem"
           to="/profile"
         />
         <v-list-item
           prepend-icon="mdi-account-edit-outline"
           title="Customize Character"
+          role="menuitem"
           to="/character-select"
         />
         <!-- Self-service MCP token: gives Claude Code a personal
@@ -67,6 +71,7 @@
         <v-list-item
           prepend-icon="mdi-key-variant"
           title="MCP Token"
+          role="menuitem"
           to="/profile/mcp-token"
         />
       </template>
@@ -75,16 +80,17 @@
       <v-list-item
         prepend-icon="mdi-bell-cog-outline"
         title="Notification Settings"
+        role="menuitem"
         to="/profile/notifications"
       />
-      <div class="theme-pref px-3 pt-2 pb-1" role="listitem">
-        <div class="text-caption text-medium-emphasis px-1 mb-1">Theme</div>
-        <div class="theme-seg" role="radiogroup" aria-label="Theme">
+      <div class="theme-pref px-3 pt-2 pb-1" role="none">
+        <div class="text-caption text-medium-emphasis px-1 mb-1" aria-hidden="true">Theme</div>
+        <div class="theme-seg" role="group" aria-label="Theme">
           <button
             v-for="opt in THEME_OPTIONS"
             :key="opt.value"
             type="button"
-            role="radio"
+            role="menuitemradio"
             :aria-checked="themePref === opt.value"
             class="theme-seg__btn"
             :class="{ 'theme-seg__btn--active': themePref === opt.value }"
@@ -100,6 +106,7 @@
       <v-list-item
         prepend-icon="mdi-logout"
         title="Sign out"
+        role="menuitem"
         @click="handleLogout"
       />
     </v-list>

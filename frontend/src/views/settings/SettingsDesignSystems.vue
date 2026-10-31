@@ -168,6 +168,7 @@
               color="error"
               icon="mdi-delete-outline"
               density="comfortable"
+              :aria-label="`Delete the design system for ${ds.repo_name || 'this repository'}`"
               @click="deleteTarget = ds; confirmDelete = true"
             />
           </div>

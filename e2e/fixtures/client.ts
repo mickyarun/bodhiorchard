@@ -21,7 +21,9 @@ import { randomBytes } from 'node:crypto'
 import { request, type APIRequestContext, type APIResponse } from '@playwright/test'
 import type { StackTarget } from '../stack/config.ts'
 import { Api } from './api.ts'
-import type { FeatureSpec, GuardReport, Member, OrgSpec, QuizSpec, SeededOrg } from './types.ts'
+import type {
+  DeliverySpec, FeatureSpec, GuardReport, Member, OrgSpec, QuizSpec, ReleaseSpec, SeededOrg, SeededRepo,
+} from './types.ts'
 
 export const TEST_HEADER = 'x-e2e-test'
 
@@ -71,6 +73,28 @@ export class StackClient {
   /** Opens today's quiz; the org must have been seeded with `quiz: true`. */
   async openQuiz(org: SeededOrg, quiz: QuizSpec): Promise<void> {
     await body('opening a quiz', await this.backend.post(`/__e2e/orgs/${org.id}/quiz`, { data: quiz }))
+  }
+
+  /** A tracked repository (no checkout needed). */
+  async addRepo(org: SeededOrg, name: string): Promise<SeededRepo> {
+    return body('adding a repo', await this.backend.post(`/__e2e/orgs/${org.id}/repos`, { data: { name } }))
+  }
+
+  /**
+   * What GitHub would have told the app about a BUD's code: the repos it
+   * touches and their PRs. Its manual test cases and release merges below
+   * stand in for the QA agent and release detection the same way.
+   */
+  async setDelivery(org: SeededOrg, budId: string, delivery: DeliverySpec): Promise<void> {
+    await body('setting delivery', await this.backend.post(`/__e2e/orgs/${org.id}/buds/${budId}/delivery`, { data: delivery }))
+  }
+
+  async setManualCases(org: SeededOrg, budId: string, cases: { id: string, title: string }[]): Promise<void> {
+    await body('setting manual cases', await this.backend.post(`/__e2e/orgs/${org.id}/buds/${budId}/manual-cases`, { data: { cases } }))
+  }
+
+  async recordRelease(org: SeededOrg, budId: string, release: ReleaseSpec): Promise<void> {
+    await body('recording a release', await this.backend.post(`/__e2e/orgs/${org.id}/buds/${budId}/releases`, { data: release }))
   }
 
   /** Empties the database (only the wizard's stack is ever reset). */

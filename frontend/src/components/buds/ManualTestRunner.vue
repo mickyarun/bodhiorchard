@@ -88,21 +88,25 @@
 
           <v-menu location="bottom end">
             <template #activator="{ props: menuProps }">
+              <!-- Icon-only, so it needs a name; its popup is a menu. -->
               <v-btn
                 v-bind="menuProps"
                 icon="mdi-dots-vertical"
                 variant="text"
                 size="small"
+                aria-label="Mark the remaining cases"
                 :disabled="counts.pending === 0"
               />
             </template>
-            <v-list density="compact">
+            <v-list density="compact" role="menu" aria-label="Mark the remaining cases">
               <v-list-item
+                role="menuitem"
                 prepend-icon="mdi-check-all"
                 :title="`Mark remaining ${counts.pending} as Pass`"
                 @click="bulkMarkRemaining('pass')"
               />
               <v-list-item
+                role="menuitem"
                 prepend-icon="mdi-skip-next"
                 :title="`Mark remaining ${counts.pending} as Skipped`"
                 @click="bulkMarkRemaining('skipped')"

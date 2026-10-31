@@ -30,7 +30,17 @@
         Import from GitHub
       </v-btn>
       <v-btn v-if="store.members.length >= 2" variant="text" @click="mergeOpen = true">Merge duplicates</v-btn>
-      <v-btn color="primary" variant="flat" prepend-icon="mdi-account-plus-outline" @click="addOpen = true">Add member</v-btn>
+      <!-- Only for those who may invite: a manager can see members but not
+           add them, and the refusal used to land behind the open dialog. -->
+      <v-btn
+        v-if="canInviteMembers"
+        color="primary"
+        variant="flat"
+        prepend-icon="mdi-account-plus-outline"
+        @click="addOpen = true"
+      >
+        Add member
+      </v-btn>
     </template>
 
     <v-tabs v-model="tab" color="primary" density="compact" class="members-tabs" aria-label="Members sections">
@@ -59,6 +69,7 @@ import MembersPeopleTab from '@/components/members/MembersPeopleTab.vue'
 import MembersRolesTab from '@/components/members/MembersRolesTab.vue'
 import MembersTeamsTab from '@/components/members/MembersTeamsTab.vue'
 import MergeMembersDialog from '@/components/members/MergeMembersDialog.vue'
+import { usePermissions } from '@/composables/usePermissions'
 import { useMembersStore } from '@/stores/members'
 import { useSettingsStore } from '@/stores/settings'
 import { membersSubtitle } from '@/utils/members'
@@ -70,6 +81,7 @@ const route = useRoute()
 const router = useRouter()
 const store = useMembersStore()
 const settingsStore = useSettingsStore()
+const { canInviteMembers, canViewConnections } = usePermissions()
 
 const queryTab = route.query.tab as MembersTab
 const tab = ref<MembersTab>(TABS.includes(queryTab) ? queryTab : 'people')
@@ -88,7 +100,8 @@ const githubOrgConfigured = computed(() => !!settingsStore.connections.github?.o
 onMounted(() => {
   void store.fetchMembers()
   void store.fetchRoles()
-  void settingsStore.fetchConnections()
+  // Only for GitHub import; a manager can't read the integrations settings.
+  if (canViewConnections.value) void settingsStore.fetchConnections()
 })
 </script>
 

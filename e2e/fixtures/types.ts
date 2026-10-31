@@ -77,3 +77,28 @@ export interface GuardReport {
   /** How many entries each log holds now. */
   cursor: { violations: number, agentProblems: number }
 }
+
+export interface SeededRepo {
+  id: string
+  name: string
+}
+
+export interface PullRequestSpec {
+  repoId: string
+  number: number
+  title: string
+  state?: 'open' | 'merged' | 'closed'
+}
+
+/** The repos a BUD touches (confirmed for review) and their PRs. */
+export interface DeliverySpec {
+  repoIds: string[]
+  pullRequests?: PullRequestSpec[]
+}
+
+export interface ReleaseSpec {
+  stage: 'uat' | 'prod'
+  repoId: string
+  prNumber: number
+  title: string
+}

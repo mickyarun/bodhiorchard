@@ -20,76 +20,80 @@
      one-line summary of the saved choice and whether there are edits. -->
 <template>
   <div class="ai-panel">
-    <p v-if="ai.deploymentMode.value" class="ai-panel__mode">
-      Deployment: {{ ai.deploymentMode.value === 'docker' ? 'Full Docker' : 'Hybrid (host login available)' }}
-    </p>
-
-    <ChoiceTiles
-      :model-value="ai.provider.value"
-      :options="providerTiles(ai.providers.value)"
-      label="AI provider"
-      @update:model-value="ai.selectProvider"
-    />
-
-    <!-- Said before the settings, not after a failed run: a provider without
-         file access answers confidently about files it never read. -->
-    <AppCallout
-      v-if="limitations.length"
-      variant="warning"
-      eyebrow="Feature limits"
-      :title="`Not available with ${providerTitle(ai.provider.value)}`"
-    >
-      This provider reaches your code through the indexed call graph rather than the files, so features that
-      need a working copy stay off:
-      <ul class="ps-4 my-1"><li v-for="item in limitations" :key="item">{{ item }}</li></ul>
-      Everything else runs, including requirements, tech plans, repository scans, feature mapping and design
-      system extraction.
-    </AppCallout>
-
-    <AiHostFields
-      v-if="ai.caps.value && (ai.caps.value.requires_base_url || ai.caps.value.dynamic_models || ai.caps.value.supports_thinking)"
-      v-model:base-url="ai.baseUrl.value"
-      v-model:model="ai.model.value"
-      v-model:thinking="ai.thinkingChoice.value"
-      :caps="ai.caps.value"
-      :deployment-mode="ai.deploymentMode.value"
-    />
-
-    <ChoiceTiles v-model="ai.authMode.value" :options="ai.tiles.value" label="Sign-in" />
-
-    <div v-if="ai.requiresSecret.value">
-      <PasswordField
-        v-model="ai.credential.value"
-        :label="ai.mode.value?.label ?? 'Credential'"
-        :placeholder="ai.hasStoredCredential.value ? 'Saved. Leave blank to keep it.' : credentialPlaceholder(ai.provider.value, ai.authMode.value)"
-        persistent-placeholder
-        variant="outlined"
-        density="compact"
-        autocomplete="off"
-        hide-details
-      />
-      <p v-if="ai.caps.value?.docs_url" class="ai-panel__hint">
-        Where to get one: <a :href="ai.caps.value.docs_url" target="_blank" rel="noopener">{{ ai.caps.value.docs_url }}</a>
+    <!-- Nothing to pick until the saved choice is in, or it would undo the pick. -->
+    <v-progress-linear v-if="!ai.loaded.value" indeterminate color="primary" aria-label="Loading the AI settings" />
+    <template v-else>
+      <p v-if="ai.deploymentMode.value" class="ai-panel__mode">
+        Deployment: {{ ai.deploymentMode.value === 'docker' ? 'Full Docker' : 'Hybrid (host login available)' }}
       </p>
-    </div>
 
-    <!-- Saving and testing both need integrations:configure on the backend;
-         the test calls the provider host with the org's stored credential. -->
-    <p v-if="!canConfigure" class="ai-panel__hint">
-      Changing or testing the AI provider needs the Configure Integrations permission.
-    </p>
-    <div v-else class="ai-panel__actions">
-      <v-btn color="primary" variant="flat" :loading="ai.saving.value" :disabled="!ai.canSave.value" @click="ai.save()">Save</v-btn>
-      <v-btn variant="outlined" prepend-icon="mdi-connection" :loading="ai.test.value === 'checking'" @click="ai.runTest()">
-        {{ ai.test.value === 'idle' ? 'Test connection' : 'Test again' }}
-      </v-btn>
-    </div>
+      <ChoiceTiles
+        :model-value="ai.provider.value"
+        :options="providerTiles(ai.providers.value)"
+        label="AI provider"
+        @update:model-value="ai.selectProvider"
+      />
 
-    <AppCallout v-if="ai.test.value === 'failed'" variant="error">
-      {{ ai.testError.value }}
-      <div v-if="ai.showInstallHint.value && ai.caps.value?.install_hint" class="mt-1"><code>{{ ai.caps.value.install_hint }}</code></div>
-    </AppCallout>
-    <p v-if="ai.test.value === 'passed' && ai.testVersion.value" class="ai-panel__hint">{{ ai.testVersion.value }}</p>
+      <!-- Said before the settings, not after a failed run: a provider without
+           file access answers confidently about files it never read. -->
+      <AppCallout
+        v-if="limitations.length"
+        variant="warning"
+        eyebrow="Feature limits"
+        :title="`Not available with ${providerTitle(ai.provider.value)}`"
+      >
+        This provider reaches your code through the indexed call graph rather than the files, so features that
+        need a working copy stay off:
+        <ul class="ps-4 my-1"><li v-for="item in limitations" :key="item">{{ item }}</li></ul>
+        Everything else runs, including requirements, tech plans, repository scans, feature mapping and design
+        system extraction.
+      </AppCallout>
+
+      <AiHostFields
+        v-if="ai.caps.value && (ai.caps.value.requires_base_url || ai.caps.value.dynamic_models || ai.caps.value.supports_thinking)"
+        v-model:base-url="ai.baseUrl.value"
+        v-model:model="ai.model.value"
+        v-model:thinking="ai.thinkingChoice.value"
+        :caps="ai.caps.value"
+        :deployment-mode="ai.deploymentMode.value"
+      />
+
+      <ChoiceTiles v-model="ai.authMode.value" :options="ai.tiles.value" label="Sign-in" />
+
+      <div v-if="ai.requiresSecret.value">
+        <PasswordField
+          v-model="ai.credential.value"
+          :label="ai.mode.value?.label ?? 'Credential'"
+          :placeholder="ai.hasStoredCredential.value ? 'Saved. Leave blank to keep it.' : credentialPlaceholder(ai.provider.value, ai.authMode.value)"
+          persistent-placeholder
+          variant="outlined"
+          density="compact"
+          autocomplete="off"
+          hide-details
+        />
+        <p v-if="ai.caps.value?.docs_url" class="ai-panel__hint">
+          Where to get one: <a :href="ai.caps.value.docs_url" target="_blank" rel="noopener">{{ ai.caps.value.docs_url }}</a>
+        </p>
+      </div>
+
+      <!-- Saving and testing both need integrations:configure on the backend;
+           the test calls the provider host with the org's stored credential. -->
+      <p v-if="!canConfigure" class="ai-panel__hint">
+        Changing or testing the AI provider needs the Configure Integrations permission.
+      </p>
+      <div v-else class="ai-panel__actions">
+        <v-btn color="primary" variant="flat" :loading="ai.saving.value" :disabled="!ai.canSave.value" @click="ai.save()">Save</v-btn>
+        <v-btn variant="outlined" prepend-icon="mdi-connection" :loading="ai.test.value === 'checking'" @click="ai.runTest()">
+          {{ ai.test.value === 'idle' ? 'Test connection' : 'Test again' }}
+        </v-btn>
+      </div>
+
+      <AppCallout v-if="ai.test.value === 'failed'" variant="error">
+        {{ ai.testError.value }}
+        <div v-if="ai.showInstallHint.value && ai.caps.value?.install_hint" class="mt-1"><code>{{ ai.caps.value.install_hint }}</code></div>
+      </AppCallout>
+      <p v-if="ai.test.value === 'passed' && ai.testVersion.value" class="ai-panel__hint">{{ ai.testVersion.value }}</p>
+    </template>
   </div>
 </template>
 

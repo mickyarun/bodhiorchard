@@ -146,7 +146,10 @@ test('a BUD moves to design', async ({ signedIn, stack }) => {
 - **Fixtures.** Import `test` and `expect` from `fixtures/test.ts`.
 - **Data.** `stack` (`fixtures/client.ts`) seeds data for this test only:
   - `seedOrg()` creates an org with members, system roles, managers and leave types;
-  - `addFeatures()` and `openQuiz()` add content to that org.
+  - `addFeatures()` and `openQuiz()` add content to that org;
+  - `addRepo()`, `setDelivery()`, `setManualCases()` and `recordRelease()` give a BUD its
+    repos, pull requests, pending manual test cases and UAT or prod merges, so the stages after
+    Development run without GitHub (`backend/tests/e2e_stack/routes_delivery.py`).
 
   A new area adds a small seed route (`backend/tests/e2e_stack/routes_seed.py`) rather than
   more fields on the org. Every test seeds its own org, so specs run in parallel without sharing
@@ -155,9 +158,17 @@ test('a BUD moves to design', async ({ signedIn, stack }) => {
 - **Signing in.** `signedIn(member)` opens a page in its own browser context, already signed in
   with tokens the seed route minted. Two members means two windows in one test.
 - **The API.** `stack.api(member)` is the app's real API, for setup steps the test isn't about.
-  The helpers in `fixtures/api.ts` (`createBud`, `requestLeave`, `approveLeave`) take it.
-- **Screens.** Shared steps and locators live in `screens/`: the shell, login, BUDs, leave and
-  the accessibility check. Put a step there once a second spec needs it.
+  The helpers in `fixtures/api.ts` (`createBud`, `moveBud`, `createBug`, `requestLeave`,
+  `approveLeave` and others) take it.
+- **Screens.** Shared steps and locators live in `screens/`: the shell, login, BUDs, leave,
+  forms, the garden games and the accessibility check. Put a step there once a second spec
+  needs it.
+- **Selects.** A Vuetify select's input is transparent to clicks. `pickOption()`
+  (`screens/forms.ts`) focuses it and opens the list with the arrow key. Check the chosen value
+  with `toHaveValue`, since the input holds no text.
+- **Work that finishes later.** When a result reaches the backend after the step that caused
+  it, such as a game score sent by the multiplayer server, wait for it with `expect.poll` on the
+  API before opening the screen that shows it.
 - **Locators.** Find elements by role and label (`getByRole`, `getByLabel`), with `exact: true`
   when a name could match a longer one. Nothing in the app has a `data-testid`; add one only
   when no accessible name fits. A control a test can't find by role is usually an accessibility

@@ -134,6 +134,7 @@
       <RepoRowMenu
         v-if="editable"
         :status="repo.status"
+        :repo-name="repo.name"
         :disabled="busy"
         @select="onMenuSelect"
       />

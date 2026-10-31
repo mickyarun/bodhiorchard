@@ -27,6 +27,8 @@ test('a PM creates a BUD from the board and lands on its requirements', async ({
   await createBudFromBoard(page, 'Export invoices as CSV', 'P1')
   await expect(page).toHaveURL(/\/buds\/[0-9a-f-]{36}/)
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(/Export invoices as CSV/)
+  // Exact: the screen-reader name once read "Export invoices as CSV , rename".
+  await expect(page.getByRole('button', { name: 'Export invoices as CSV, rename', exact: true })).toBeVisible()
   await expect(page.getByText("Stage agents are off. You're driving this BUD.")).toBeVisible()
   await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('BUD-001')
   await expectSection(page, 'Requirements')

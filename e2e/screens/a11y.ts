@@ -20,6 +20,9 @@
  * Closed Vuetify overlays are skipped: a tooltip can leave its root in the
  * page while closed (inside an eager tab, say), with its content hidden, so
  * it presents nothing to a user or a screen reader. Open ones are checked.
+ *
+ * The check waits for running transitions first: a menu caught mid fade-in
+ * is part transparent, and axe reads that as low contrast everywhere in it.
  */
 import AxeBuilder from '@axe-core/playwright'
 import { expect, type Page } from '@playwright/test'
@@ -29,6 +32,9 @@ const FAILING = new Set(['serious', 'critical'])
 const CLOSED_OVERLAYS = '.v-overlay:not(.v-overlay--active)'
 
 export async function expectAccessible(page: Page, screen: string): Promise<void> {
+  // Endless ones (spinners, the garden) never settle, so only finite ones count.
+  await page.waitForFunction(() => document.getAnimations().every((a) =>
+    a.playState !== 'running' || a.effect?.getComputedTiming().endTime === Infinity))
   const results = await new AxeBuilder({ page }).withTags(WCAG_21_AA).exclude(CLOSED_OVERLAYS).analyze()
   const found = results.violations
     .filter((violation) => FAILING.has(violation.impact ?? ''))

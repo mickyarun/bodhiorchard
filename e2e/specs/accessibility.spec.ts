@@ -21,6 +21,7 @@ import type { Page } from '@playwright/test'
 import { createBud } from '../fixtures/api.ts'
 import { expect, test } from '../fixtures/test.ts'
 import { expectAccessible } from '../screens/a11y.ts'
+import { openAccountMenu } from '../screens/shell.ts'
 
 async function check(page: Page, path: string, heading: string | RegExp): Promise<void> {
   await page.goto(path)
@@ -38,6 +39,12 @@ test('the engineering screens', async ({ signedIn, stack }) => {
   const bud = await createBud(await stack.api(org.members.owner), 'Accessible BUD')
   const page = await signedIn(org.members.owner)
   await check(page, '/dashboard', /^Good/)
+  // The account menu, open: its actions are menu items, its theme choice a radio group.
+  const menu = await openAccountMenu(page, 'Olu Owner')
+  await expect(menu.getByRole('menuitem', { name: 'Sign out' })).toBeVisible()
+  await expect(menu.getByRole('group', { name: 'Theme' }).getByRole('menuitemradio')).toHaveCount(3)
+  await expectAccessible(page, 'the account menu')
+  await page.keyboard.press('Escape')
   await check(page, '/buds', 'Board')
   await check(page, `/buds/${bud.id}`, /Accessible BUD/)
   await check(page, '/bugs', 'Bugs')

@@ -29,8 +29,17 @@
         <v-icon icon="mdi-chevron-down" size="14" />
       </button>
     </template>
-    <v-list density="compact" min-width="120">
-      <v-list-item v-for="p in BUD_PRIORITIES" :key="p" :active="priority === p" @click="emit('change', p)">
+    <!-- A menu of radio items: the button says it opens a menu, and the
+         current priority is the checked one. -->
+    <v-list density="compact" min-width="120" role="menu" aria-label="Priority">
+      <v-list-item
+        v-for="p in BUD_PRIORITIES"
+        :key="p"
+        role="menuitemradio"
+        :aria-checked="priority === p"
+        :active="priority === p"
+        @click="emit('change', p)"
+      >
         <v-list-item-title>{{ p }}</v-list-item-title>
       </v-list-item>
     </v-list>
