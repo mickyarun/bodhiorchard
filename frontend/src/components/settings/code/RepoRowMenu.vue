@@ -32,6 +32,7 @@
         size="small"
         variant="text"
         density="compact"
+        :aria-label="`Actions for ${props.repoName}`"
         :disabled="disabled"
       />
     </template>
@@ -67,6 +68,8 @@ interface MenuItem {
 
 const props = defineProps<{
   status: string
+  /** Names the icon-only button ("Actions for <repo>"). */
+  repoName: string
   disabled?: boolean
 }>()
 

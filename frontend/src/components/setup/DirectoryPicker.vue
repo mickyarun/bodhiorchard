@@ -121,6 +121,7 @@
               <!-- Checkbox for git repos, folder icon for regular dirs -->
               <v-checkbox-btn
                 v-if="dir.is_git_repo"
+                :aria-label="`Select ${dir.name}`"
                 :model-value="selectedPaths.has(dir.path)"
                 color="primary"
                 density="compact"

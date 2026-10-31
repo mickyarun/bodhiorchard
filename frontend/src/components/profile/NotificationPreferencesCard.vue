@@ -56,8 +56,10 @@
             <div class="text-body-2 font-weight-medium">{{ item.label }}</div>
             <div class="text-caption text-medium-emphasis">{{ item.description }}</div>
           </div>
+          <!-- Named after its row: the switch has no visible label of its own. -->
           <v-switch
             :model-value="item.enabled"
+            :aria-label="item.label"
             color="primary"
             hide-details
             density="compact"

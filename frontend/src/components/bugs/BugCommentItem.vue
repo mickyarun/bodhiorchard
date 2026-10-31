@@ -53,8 +53,10 @@
       [deleted]
     </div>
     <div v-else-if="editing" class="d-flex flex-column ga-2">
+      <!-- No visible label, so it is named for assistive tech. -->
       <v-textarea
         v-model="draft"
+        aria-label="Comment"
         variant="outlined"
         density="compact"
         rows="2"
