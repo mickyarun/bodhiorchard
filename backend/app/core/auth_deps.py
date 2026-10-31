@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Request-scoped DB session and authenticated-user dependencies.
+"""Authenticated-user dependencies, plus the request DB session from app.database.
 
 Import these through :mod:`app.core.deps`, which is the stable public
 surface; this module exists so identity resolution and permission checks
@@ -20,34 +20,17 @@ surface; this module exists so identity resolution and permission checks
 """
 
 import uuid
-from collections.abc import AsyncGenerator
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import verify_token
-from app.database import AsyncSessionLocal
+from app.database import get_db as get_db  # re-exported; one session lifecycle, in app.database
 from app.models.user import User, UserRole
 from app.repositories.user import UserRepository
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
-
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Yield an async database session scoped to a single request.
-
-    Commits on success, rolls back on exception, and always closes.
-    """
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
 
 
 def _credentials_exception() -> HTTPException:
