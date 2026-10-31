@@ -36,12 +36,19 @@
         prepend-inner-icon="mdi-magnify"
         autofocus
       />
-      <v-list max-height="280" density="compact" class="mt-2">
-        <v-list-item v-if="assigneeId" @click="pick(null)">
+      <v-list max-height="280" density="compact" class="mt-2" role="listbox" aria-label="Members">
+        <v-list-item v-if="assigneeId" role="option" :aria-selected="false" @click="pick(null)">
           <template #prepend><v-icon size="20" color="error">mdi-account-remove-outline</v-icon></template>
           <v-list-item-title>Unassign</v-list-item-title>
         </v-list-item>
-        <v-list-item v-for="m in matches" :key="m.id" :active="assigneeId === m.id" @click="pick(m.id)">
+        <v-list-item
+          v-for="m in matches"
+          :key="m.id"
+          role="option"
+          :active="assigneeId === m.id"
+          :aria-selected="assigneeId === m.id"
+          @click="pick(m.id)"
+        >
           <template #prepend>
             <AppMonogram class="assignee-menu__avatar" :name="m.name" :src="m.avatar_url" :size="28" />
           </template>

@@ -57,10 +57,18 @@
                 <template #activator="{ props: menu }">
                   <v-btn v-bind="menu" icon="mdi-dots-horizontal" variant="text" size="small" :aria-label="`More for ${member.name}`" />
                 </template>
-                <v-list density="compact">
-                  <v-list-item :disabled="!member.isActive" prepend-icon="mdi-key-outline" title="Set password" @click="emit('set-password', member)" />
-                  <v-list-item prepend-icon="mdi-account-arrow-right-outline" title="Merge into another member" @click="emit('merge', member)" />
+                <v-list density="compact" role="menu" :aria-label="`More for ${member.name}`">
                   <v-list-item
+                    role="menuitem"
+                    :disabled="!member.isActive"
+                    :aria-disabled="!member.isActive"
+                    prepend-icon="mdi-key-outline"
+                    title="Set password"
+                    @click="emit('set-password', member)"
+                  />
+                  <v-list-item role="menuitem" prepend-icon="mdi-account-arrow-right-outline" title="Merge into another member" @click="emit('merge', member)" />
+                  <v-list-item
+                    role="menuitem"
                     :prepend-icon="member.isActive ? 'mdi-account-off-outline' : 'mdi-account-check-outline'"
                     :title="member.isActive ? 'Deactivate' : 'Reactivate'"
                     @click="store.toggleMemberStatus(member.id)"
