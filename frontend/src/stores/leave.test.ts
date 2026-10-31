@@ -54,8 +54,8 @@ describe('fetchSummary', () => {
 describe('fetchRequests', () => {
   it('keeps the newest scope when an older fetch answers last', async () => {
     const answers: Record<string, (v: unknown) => void> = {}
-    get.mockImplementation((_url: string, config?: { params?: { scope?: string } }) =>
-      new Promise(resolve => { answers[config!.params!.scope!] = resolve }))
+    get.mockImplementation((_url, config) =>
+      new Promise(resolve => { answers[(config!.params as { scope: string }).scope] = resolve }))
     const store = useLeaveStore()
     const older = store.fetchRequests('upcoming')
     const newer = store.fetchRequests('past')
